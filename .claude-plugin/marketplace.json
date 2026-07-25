@@ -1,0 +1,22 @@
+{
+  "name": "tyran",
+  "metadata": {
+    "description": "Marketplace for the Tyran task conductor plugin"
+  },
+  "owner": {
+    "name": "Jacek Janczura",
+    "url": "https://github.com/jjanczur"
+  },
+  "plugins": [
+    {
+      "name": "tyran",
+      "description": "A task conductor for Claude Code: multi-agent orchestration with an enforced evidence contract, repo-specific learning, and update-safe local evolution.",
+      "version": "0.1.0",
+      "source": "./",
+      "author": {
+        "name": "Jacek Janczura",
+        "url": "https://github.com/jjanczur"
+      }
+    }
+  ]
+}

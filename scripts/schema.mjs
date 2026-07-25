@@ -252,7 +252,19 @@ export function validatePolicy(doc) {
   for (const rule of doc.rules) {
     if (!isPlainObject(rule) || !isNonEmptyString(rule.path) || rule.class === 'KERNEL') continue;
     for (const required of MANDATORY_KERNEL_PATHS) {
-      if (globMatches(required, concretize(rule.path))) {
+      // Intersection, not string containment: a rule matching ANY concrete
+      // path under the protected glob is a downgrade attempt, however it is
+      // spelled (review E2S2-R10).
+      // Intersect in both directions: concretize the rule INTO the protected
+      // namespace (`**/x.mjs` → `hooks/x.mjs`) and probe the protected glob
+      // against the rule. Either hit means the rule can claim a kernel file.
+      const base = required.replace(/\/?\*\*$/, '');
+      const intoNamespace = [rule.path.replace(/\*\*/g, base), rule.path.replace(/\*\*/g, `${base}/a`)];
+      if (
+        globMatches(required, concretize(rule.path)) ||
+        intoNamespace.some((candidate) => globMatches(required, candidate.replace(/\*/g, 'x'))) ||
+        probesFor(required).some((probe) => globMatches(rule.path, probe))
+      ) {
         errors.push(
           `rules: "${rule.path}" (class ${rule.class}) falls under the protected path "${required}" — ` +
             'kernel paths may only be tightened, never downgraded by a more specific rule',
@@ -264,13 +276,19 @@ export function validatePolicy(doc) {
   // Belt and braces: probe the resolver itself, so any future change to
   // precedence that reopens this hole fails here.
   if (errors.length === 0) {
-    for (const probe of ['hooks/x.mjs', 'hooks/a/b/c.mjs', '.tyran/policies/autonomy.yaml']) {
+    for (const probe of MANDATORY_KERNEL_PATHS.flatMap(probesFor)) {
       if (classifyPath(doc, probe) !== 'KERNEL') {
         errors.push(`rules: "${probe}" resolves to ${classifyPath(doc, probe)}, but protected paths must resolve to KERNEL`);
       }
     }
   }
   return errors;
+}
+
+/** Concrete sample paths under a protected glob, at several depths. */
+function probesFor(protectedGlob) {
+  const base = protectedGlob.replace(/\/?\*\*$/, '');
+  return [`${base}/probe.mjs`, `${base}/a/probe.mjs`, `${base}/a/b/probe.yaml`, `${base}/autonomy.yaml`];
 }
 
 /** Replace wildcards with concrete segments so a glob can be tested for containment. */
@@ -288,6 +306,12 @@ export function classifyPath(policy, filePath) {
   const strictness = { AUTO: 0, GATED: 1, KERNEL: 2 };
   const normalized = normalizePath(filePath);
   if (normalized === null) return 'KERNEL'; // outside the repo → never autonomous
+  // Protected paths win unconditionally, BEFORE any rule is consulted: no
+  // glob spelling (`**/policy-gate.mjs`, casing, nesting) can outrank them
+  // (review E2S2-R10). validatePolicy still reports such rules as findings.
+  for (const protectedGlob of MANDATORY_KERNEL_PATHS) {
+    if (globMatches(protectedGlob, normalized)) return 'KERNEL';
+  }
   let best = null;
   for (const rule of policy.rules ?? []) {
     if (!isNonEmptyString(rule.path) || !globMatches(rule.path, normalized)) continue;
@@ -313,7 +337,7 @@ export function normalizePath(filePath, repoRoot = process.env.CLAUDE_PROJECT_DI
   let p = String(filePath).replace(/\\/g, '/');
   const root = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
   if (p.startsWith(root + '/')) p = p.slice(root.length + 1);
-  else if (p.startsWith('/')) return null; // absolute, outside the repo
+  else if (p.startsWith('/') || /^[A-Za-z]:\//.test(p)) return null; // absolute, outside the repo
   const segments = [];
   for (const segment of p.split('/')) {
     if (segment === '' || segment === '.') continue;

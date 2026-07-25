@@ -124,3 +124,11 @@ test('stringify quotes values that would otherwise change type', () => {
   assert.match(out, /d: ''/);
   assert.match(out, /e: plain/);
 });
+
+test('round-trips values containing quotes (regression: E2S2-R11)', () => {
+  // stringify must never emit a file its own parser rejects. The parser now
+  // treats an unbalanced quote as an error, so apostrophes must be quoted.
+  for (const value of ["it's fine", "K-1's rule", 'say "hi', "don't touch the repo's gates", '"', "'"]) {
+    assert.deepEqual(parse(stringify({ t: value })), { t: value }, `failed for ${JSON.stringify(value)}`);
+  }
+});

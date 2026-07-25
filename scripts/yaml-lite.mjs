@@ -315,6 +315,8 @@ function formatScalar(value) {
     /^[-?:,[\]{}#&*!|>'"%@`]/.test(s) ||
     /:\s/.test(s) ||
     /\s#/.test(s) || // ` #` would be read back as a comment (review E2S2-R1)
+    s.includes("'") ||
+    s.includes('"') || // an unquoted apostrophe now fails to parse (review E2S2-R11)
     Object.hasOwn(BOOL, s.toLowerCase()) ||
     s === 'null' ||
     s === '~' ||

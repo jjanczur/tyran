@@ -270,3 +270,15 @@ test('CLI exits 0 for valid files and 1 with findings for invalid ones', () => {
   assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'validate', 'config', bad], { stdio: 'pipe' }), /Command failed|status 1/);
   assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'validate'], { stdio: 'pipe' }), /Command failed|status 2/);
 });
+
+test('protected paths cannot be outranked by any glob spelling (E2S2-R10)', () => {
+  const evil = { default: 'GATED', rules: [
+    { path: 'hooks/**', class: 'KERNEL', reason: 'gates' },
+    { path: '.tyran/policies/**', class: 'KERNEL', reason: 'self' },
+    { path: '**/policy-gate.mjs', class: 'AUTO', reason: 'every gate file, anywhere' },
+  ] };
+  assert.equal(classifyPath(evil, 'hooks/policy-gate.mjs'), 'KERNEL');
+  assert.ok(validatePolicy(evil).some((e) => e.includes('**/policy-gate.mjs')));
+  // Even a policy that never mentions hooks cannot make them autonomous.
+  assert.equal(classifyPath({ default: 'AUTO', rules: [{ path: '**', class: 'AUTO', reason: 'all' }] }, 'hooks/x.mjs'), 'KERNEL');
+});

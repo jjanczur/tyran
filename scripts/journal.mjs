@@ -89,6 +89,12 @@ export function validateEvent(event) {
 /**
  * Cross-process mutex via atomic mkdir. Steals locks older than 10s
  * (crashed holder); times out loudly after 5s of contention.
+ *
+ * Trade-off (review E2S1 note 3): a LIVE holder that keeps the lock >10s
+ * can have it stolen, and its `finally` would then remove the new holder's
+ * lock. Acceptable while the critical section is a single read+append
+ * (milliseconds); if the section ever grows, switch to an owner-token file
+ * inside the lock dir before extending it.
  */
 function withLock(file, fn) {
   const lockDir = resolve(file) + '.lock';
@@ -249,7 +255,11 @@ function parseFlags(args, allowed) {
     if (args[i].startsWith('--')) {
       const name = args[i].slice(2);
       if (!allowed.includes(name)) throw new Error(`unknown flag --${name}`);
-      flags[name] = args[++i];
+      const value = args[++i];
+      if (value === undefined || value.startsWith('--')) {
+        throw new Error(`flag --${name} requires a value`);
+      }
+      flags[name] = value;
     } else rest.push(args[i]);
   }
   return { flags, rest };

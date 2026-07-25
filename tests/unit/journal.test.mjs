@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   EVENT_TYPES,
   validateEvent,
@@ -132,6 +132,15 @@ test('nextId starts at 1 on empty journal and never reuses numbers', () => {
   assert.equal(nextId(f, 'T'), 'T-1'); // prefixes are independent
 });
 
+test('nextId rejects regex-hostile prefixes; non-string data.id is rejected at append', () => {
+  const f = tmp();
+  assert.throws(() => nextId(f, '('), /invalid id prefix/);
+  assert.throws(
+    () => append(f, ev({ ev: 'decision', data: { id: 42, text: 'numeric id' } })),
+    /data\.id must be a string/,
+  );
+});
+
 // --- tail --------------------------------------------------------------
 
 test('tail returns latest checkpoint and open (unreleased) leases', () => {
@@ -146,35 +155,65 @@ test('tail returns latest checkpoint and open (unreleased) leases', () => {
   assert.deepEqual(t.openLeases, [{ resource: 'worktree-a', holder: 'impl-2' }]);
 });
 
-// --- concurrency -------------------------------------------------------
-
-test('50 concurrent same-process appends produce 50 intact lines', async () => {
+test('tail: a release by a non-holder does NOT free the lease and is reported', () => {
   const f = tmp();
-  await Promise.all(
-    Array.from({ length: 50 }, (_, i) =>
-      Promise.resolve().then(() =>
-        append(f, ev({ ts: new Date(Date.parse('2026-07-26T11:00:00Z') + i * 1000).toISOString(), ev: 'decision', data: { id: `D-${i + 1}`, text: 'c' } })),
-      ),
-    ),
-  );
-  const { events, badLines, truncatedTail } = readJournal(f);
-  assert.equal(events.length, 50);
-  assert.deepEqual(badLines, []);
-  assert.equal(truncatedTail, false);
-  assert.equal(validateJournal(f).ok, true);
+  append(f, ev({ ev: 'lease.acquired', data: { resource: 'dev-server', holder: 'impl-1' } }));
+  append(f, ev({ ts: '2026-07-26T10:12:00.000Z', ev: 'lease.released', data: { resource: 'dev-server', holder: 'intruder' } }));
+  const t = tail(f);
+  assert.deepEqual(t.openLeases, [{ resource: 'dev-server', holder: 'impl-1' }]);
+  assert.deepEqual(t.mismatchedReleases, [{ resource: 'dev-server', by: 'intruder', holder: 'impl-1' }]);
 });
 
-test('parallel multi-process appends interleave at line granularity', () => {
+test('CLI: unknown flags and non-integer --limit fail loudly', () => {
   const f = tmp();
-  const procs = Array.from({ length: 10 }, (_, i) =>
-    execFileSync(process.execPath, [
-      SCRIPT, 'append', f, 'decision', 'demo', '--actor', `p${i}`, '--data', JSON.stringify({ id: `P-${i + 1}`, text: 'multi' }),
-    ]),
+  execFileSync(process.execPath, [SCRIPT, 'append', f, 'init.created', 'demo']);
+  assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'validate', f, '--data', '{}'], { stdio: 'pipe' }), /Command failed|status 1/);
+  assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'query', f, '--limit', 'abc'], { stdio: 'pipe' }), /Command failed|status 1/);
+});
+
+// --- concurrency -------------------------------------------------------
+// Review finding E2S1-R2: earlier versions of these tests were tautologies
+// (sequential execFileSync / microtasks). This one spawns 20 processes
+// SIMULTANEOUSLY, with auto-stamped ts, so it exercises the real race that
+// R1 demonstrated: without the lock+clamp, validate failed in 5/5 runs.
+
+test('20 truly concurrent processes: intact lines AND monotonic timestamps', async () => {
+  const f = tmp();
+  const procs = Array.from({ length: 20 }, (_, i) =>
+    new Promise((resolveP, rejectP) => {
+      const p = spawn(process.execPath, [
+        SCRIPT, 'append', f, 'decision', 'demo', '--actor', `p${i}`, '--data', JSON.stringify({ id: `P-${i + 1}`, text: 'race' }),
+      ]);
+      let err = '';
+      p.stderr.on('data', (d) => (err += d));
+      p.on('close', (code) => (code === 0 ? resolveP() : rejectP(new Error(`p${i} exit ${code}: ${err}`))));
+    }),
   );
-  assert.equal(procs.length, 10);
-  const { events, badLines } = readJournal(f);
-  assert.equal(events.length, 10);
+  await Promise.all(procs);
+  const { events, badLines, truncatedTail } = readJournal(f);
+  assert.equal(events.length, 20);
   assert.deepEqual(badLines, []);
+  assert.equal(truncatedTail, false);
+  const result = validateJournal(f);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true); // ts monotonic BY CONSTRUCTION under the lock
+});
+
+test('stamped ts is clamped to last event; explicit past ts is caller-owned', () => {
+  const f = tmp();
+  const future = new Date(Date.now() + 60_000).toISOString();
+  append(f, ev({ ts: future }));
+  const stamped = append(f, { ev: 'checkpoint', init: 'demo', actor: 'c', data: { phase: 'x', next_steps: [] } });
+  assert.equal(stamped.ts, future); // clamped up, no regression
+  assert.equal(validateJournal(f).ok, true);
+  append(f, ev({ ts: '2020-01-01T00:00:00.000Z' })); // explicit past ts
+  assert.equal(validateJournal(f).ok, false); // validate flags it — caller owns it
+});
+
+test('ts: undefined is stamped, not rejected (spread-order regression guard)', () => {
+  const f = tmp();
+  const written = append(f, { ts: undefined, ev: 'init.created', init: 'demo', actor: 'c', data: {} });
+  assert.ok(!Number.isNaN(Date.parse(written.ts)));
 });
 
 // --- CLI ---------------------------------------------------------------

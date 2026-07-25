@@ -17,7 +17,7 @@
  *   node journal.mjs tail     <file>               # last checkpoint + open items
  * Exit: 0 ok · 1 validation/finding error · 2 usage/IO error
  */
-import { appendFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, readFileSync, existsSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,26 +78,72 @@ export function validateEvent(event) {
   } else if (DATA_REQUIRED[event.ev]) {
     for (const key of DATA_REQUIRED[event.ev]) {
       if (!(key in event.data)) errors.push(`data.${key} is required for ev "${event.ev}"`);
+      else if (key === 'id' && typeof event.data.id !== 'string') {
+        errors.push(`data.id must be a string for ev "${event.ev}" (got ${typeof event.data.id})`);
+      }
     }
   }
   return errors;
 }
 
 /**
- * Append one event. Validates first; stamps ts when absent.
- * Uses a single appendFileSync (O_APPEND) so concurrent appenders from
- * separate processes interleave at line granularity, not byte granularity,
- * for writes far below PIPE_BUF-scale sizes.
+ * Cross-process mutex via atomic mkdir. Steals locks older than 10s
+ * (crashed holder); times out loudly after 5s of contention.
+ */
+function withLock(file, fn) {
+  const lockDir = resolve(file) + '.lock';
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      mkdirSync(lockDir, { recursive: false });
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > 10_000) {
+          rmdirSync(lockDir);
+          continue;
+        }
+      } catch {
+        continue; // lock vanished between checks — retry immediately
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`journal lock timeout (held by a live writer?): ${lockDir}`);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmdirSync(lockDir);
+  }
+}
+
+/**
+ * Append one event under a cross-process lock. Validates first; stamps ts
+ * when absent, CLAMPED to be >= the journal's last timestamp — concurrent
+ * writers therefore can never produce a ts regression (validateJournal
+ * stays a hard error, and it holds by construction). An EXPLICIT ts is
+ * written as given: the caller owns it and validate will flag regressions.
  */
 export function append(file, event) {
-  const stamped = { ts: event.ts ?? new Date().toISOString(), ...event };
-  const errors = validateEvent(stamped);
-  if (errors.length > 0) {
-    throw new Error('invalid event: ' + errors.join('; '));
-  }
   mkdirSync(dirname(resolve(file)), { recursive: true });
-  appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
-  return stamped;
+  return withLock(file, () => {
+    let ts = event.ts;
+    if (ts == null) {
+      ts = new Date().toISOString();
+      const lastTs = readJournal(file).events.at(-1)?.ts;
+      if (lastTs && Date.parse(ts) < Date.parse(lastTs)) ts = lastTs;
+    }
+    const stamped = { ...event, ts };
+    const errors = validateEvent(stamped);
+    if (errors.length > 0) {
+      throw new Error('invalid event: ' + errors.join('; '));
+    }
+    appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
+    return stamped;
+  });
 }
 
 /**
@@ -107,7 +153,8 @@ export function append(file, event) {
  */
 export function readJournal(file) {
   if (!existsSync(file)) return { events: [], truncatedTail: false, badLines: [] };
-  const raw = readFileSync(file, 'utf8');
+  let raw = readFileSync(file, 'utf8');
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1); // strip BOM
   const lines = raw.split('\n');
   if (lines.at(-1) === '') lines.pop();
   const events = [];
@@ -158,6 +205,9 @@ export function validateJournal(file) {
  * Scans data.id fields shaped `<PREFIX>-<number>` and returns max+1.
  */
 export function nextId(file, prefix) {
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(prefix)) {
+    throw new Error(`invalid id prefix "${prefix}" — use letters/digits, starting with a letter`);
+  }
   const { events } = readJournal(file);
   let max = 0;
   const re = new RegExp(`^${prefix}-(\\d+)$`);
@@ -173,29 +223,54 @@ export function tail(file) {
   const { events } = readJournal(file);
   const checkpoint = [...events].reverse().find((e) => e.ev === 'checkpoint') ?? null;
   const open = new Map();
+  const mismatchedReleases = [];
   for (const e of events) {
     if (e.ev === 'lease.acquired') open.set(e.data.resource, e.data.holder);
-    if (e.ev === 'lease.released') open.delete(e.data.resource);
+    if (e.ev === 'lease.released') {
+      // A release only counts when it comes from the current holder —
+      // anything else is a protocol violation and must stay visible.
+      if (open.get(e.data.resource) === e.data.holder) open.delete(e.data.resource);
+      else mismatchedReleases.push({ resource: e.data.resource, by: e.data.holder, holder: open.get(e.data.resource) ?? null });
+    }
   }
-  return { checkpoint, openLeases: [...open.entries()].map(([resource, holder]) => ({ resource, holder })) };
+  return {
+    checkpoint,
+    openLeases: [...open.entries()].map(([resource, holder]) => ({ resource, holder })),
+    mismatchedReleases,
+  };
 }
 
 // ---------------------------------------------------------------- CLI
 
-function parseFlags(args) {
+function parseFlags(args, allowed) {
   const flags = {};
   const rest = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith('--')) flags[args[i].slice(2)] = args[++i];
-    else rest.push(args[i]);
+    if (args[i].startsWith('--')) {
+      const name = args[i].slice(2);
+      if (!allowed.includes(name)) throw new Error(`unknown flag --${name}`);
+      flags[name] = args[++i];
+    } else rest.push(args[i]);
   }
   return { flags, rest };
 }
 
+const CMD_FLAGS = {
+  append: ['actor', 'data'],
+  query: ['ev', 'init', 'ticket', 'limit'],
+  validate: [],
+  'next-id': [],
+  tail: [],
+};
+
 function main() {
   const [cmd, ...args] = process.argv.slice(2);
-  const { flags, rest } = parseFlags(args);
   try {
+    if (!(cmd in CMD_FLAGS)) throw new UsageError();
+    const { flags, rest } = parseFlags(args, CMD_FLAGS[cmd]);
+    if (flags.limit !== undefined && !Number.isInteger(Number(flags.limit))) {
+      throw new Error(`--limit must be an integer (got "${flags.limit}")`);
+    }
     switch (cmd) {
       case 'append': {
         const [file, ev, init] = rest;
@@ -233,8 +308,6 @@ function main() {
         console.log(JSON.stringify(tail(file), null, 2));
         return;
       }
-      default:
-        throw new UsageError();
     }
   } catch (err) {
     if (err instanceof UsageError) {

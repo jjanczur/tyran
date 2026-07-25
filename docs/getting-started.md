@@ -16,8 +16,8 @@
 under `/tyran:*`, and `${CLAUDE_PLUGIN_ROOT}` resolves to the installed copy.
 
 Requirements: Claude Code ≥ 2.1. No Node dependencies, no build step —
-Tyran's scripts are plain Node ≥ 22 (bundled with the plugin, executed via
-hooks; you don't run npm at any point).
+Tyran's scripts are plain Node ≥ 22, bundled with the plugin; you don't run
+npm at any point.
 
 ## First run (coming with the setup epic)
 

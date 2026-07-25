@@ -1,5 +1,10 @@
 # Architecture
 
+> **Status:** this page is the design contract for v2 — schemas and hook
+> behavior are final, but the state layer, hooks, and agents land with their
+> epics (see the [roadmap](../README.md#roadmap)). Today the repo ships the
+> plugin skeleton and CI. Present tense below describes the target design.
+
 ## The three layers
 
 ```text

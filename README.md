@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Tyran — a pharaoh conductor overseeing agent workers building a pyramid of code" width="100%">
+  <img src="assets/banner.jpg" alt="Tyran — a pharaoh conductor overseeing agent workers building a pyramid of code" width="100%">
 </p>
 
 <p align="center">
@@ -13,11 +13,12 @@
 <h3 align="center">The more you use it, the better it gets.</h3>
 
 <p align="center">
-Tyran is a task conductor for Claude Code: it interviews you, plans, drives a team of
-fresh-context agents through your work — and <b>refuses to believe any agent that can't
-show raw command output as proof</b>. Then it runs a retrospective on itself, learns
-<i>your</i> repo's rules and <i>your</i> style, and autonomously sharpens its own
-playbook and skills. You bring the harness; it does the improving.
+Tyran is a task conductor for Claude Code <i>(v2 — under construction, in public)</i>:
+it interviews you, plans, drives a team of fresh-context agents through your work — and
+<b>refuses to believe any agent that can't show raw command output as proof</b>. Then it
+runs a retrospective on itself, learns <i>your</i> repo's rules and <i>your</i> style,
+and autonomously sharpens its own playbook and skills. You bring the harness; it does
+the improving.
 </p>
 
 ---
@@ -118,20 +119,20 @@ only what it couldn't infer.
 
 Verified against competitors' **code and public issue trackers** (July 2026),
 not their READMEs. ✅ shipped/enforced · ⚠️ partial or prompt-only · ❌ absent
-or broken · — not applicable. The Tyran column states **v2 design
-commitments** — each row ships with tests before we claim it as done.
+or broken · — not applicable · 🎯 **committed in the v2 design, ships
+test-gated** (flips to ✅ only when the tests exist and pass).
 
 | Capability | **Tyran v2** | oh-my-claudecode | metaswarm | pilotfish | pro-workflow |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Evidence contract that **blocks**: no raw command output → report rejected | ✅ | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
-| Learns **your repo's** rules, with an anti-bloat curator + decision ledger | ✅ | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
-| Execution state survives restart & compaction (journal + re-inject) | ✅ | ⚠️ | ❌² | ❌ | ⚠️ |
-| Plugin update **never** destroys local learning (3 layers + delta agent) | ✅ | ❌³ | — | — | ⚠️ |
-| Cost modes enforced per repo (`eco`/`balanced`/`full`, role-based routing) | ✅ | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
-| Secret-leak firewall for autonomous commits (gitleaks gate, no `--no-verify` escape) | ✅ | ❌ | ❌ | ❌ | ⚠️ |
-| Independent reviewer that never grades its own homework — **enforced** | ✅ | ⚠️ | ⚠️ prompt | ⚠️ | ❌ |
-| Small curated core — no context tax | ✅ | ❌⁴ | ⚠️ | ✅ | ❌ |
-| Safe parallelism: worktree per agent, leases, sequential merge | ✅ | ⚠️ | ❌ | — | ❌⁵ |
+| Evidence contract that **blocks**: no raw command output → report rejected | 🎯 | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
+| Learns **your repo's** rules, with an anti-bloat curator + decision ledger | 🎯 | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
+| Execution state survives restart & compaction (journal + re-inject) | 🎯 | ⚠️ | ❌² | ❌ | ⚠️ |
+| Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
+| Cost modes enforced per repo (`eco`/`balanced`/`full`, role-based routing) | 🎯 | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
+| Secret-leak firewall for autonomous commits (gitleaks gate, no `--no-verify` escape) | 🎯 | ❌ | ❌ | ❌ | ⚠️ |
+| Independent reviewer that never grades its own homework — **enforced** | 🎯 | ⚠️ | ⚠️ prompt | ⚠️ | ❌ |
+| Small curated core — no context tax | 🎯 | ❌⁴ | ⚠️ | ✅ | ❌ |
+| Safe parallelism: worktree per agent, leases, sequential merge | 🎯 | ⚠️ | ❌ | — | ❌⁵ |
 | Clean install: 2 commands, **never writes into your `~/.claude`** | ✅ | ❌³ | ⚠️ | ❌ | ⚠️ |
 | OSS hygiene: license, changelog, CI validation, pressure tests | ✅ | ⚠️ | ⚠️ | ✅ | ❌⁶ |
 

@@ -1,5 +1,9 @@
 # Self-improvement — how Tyran learns your repo
 
+> **Status:** design contract — the retro agent and its guardrails land with
+> the self-improvement epic (after the state layer and enforcement hooks
+> exist, deliberately in that order). Present tense describes the target.
+
 This is Tyran's centerpiece: **you bring the harness, it does the
 improving.** The more initiatives you run, the better it fits your repo and
 your style.
@@ -39,7 +43,7 @@ debugging?* Generic programming knowledge is never extracted.
 A retro that changes **nothing** is a correct, common outcome. Rejected
 candidates are logged — they protect future retros from re-litigating.
 
-## Guardrails (enforced, not promised)
+## Guardrails (designed to be enforced, not promised)
 
 | Class | Examples | Who decides |
 |---|---|---|

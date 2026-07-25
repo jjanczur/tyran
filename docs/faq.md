@@ -7,10 +7,12 @@ conductor, state layer, and enforcement hooks are landing epic by epic — the
 
 **Why should I trust an autonomous agent with commits?**
 You configure how much it may do (`P1` branch-only is the default, detected
-conservatively), and the risky parts are **hooks, not promises**: gitleaks on
-every commit/push, `--no-verify` blocked, evidence required before anything
-is called done, and the self-improvement loop physically can't touch its own
-enforcement (KERNEL class).
+conservatively), and the risky parts are designed as **hooks, not promises**
+(landing with the enforcement epic): gitleaks on every commit/push,
+`--no-verify` blocked, evidence required before anything is called done, and
+a self-improvement loop that is physically unable to touch its own
+enforcement (KERNEL class). Until those hooks ship, don't grant more
+autonomy than you'd grant a bare Claude Code session.
 
 **Does Tyran phone home / need accounts / install anything globally?**
 No. Zero runtime dependencies, no build step, no external services. It never

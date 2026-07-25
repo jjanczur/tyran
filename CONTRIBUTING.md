@@ -2,7 +2,8 @@
 
 ## Development loop
 
-No build step, no npm dependencies. Core scripts are plain Node ≥ 18.
+No build step, no npm dependencies. Core scripts are plain Node ≥ 22
+(the test-runner glob form below requires it; CI pins Node 22).
 
 ```bash
 git clone https://github.com/jjanczur/tyran.git

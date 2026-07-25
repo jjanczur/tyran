@@ -1,6 +1,6 @@
 # Journal reference
 
-> **Status:** shipped — `scripts/journal.mjs` with 18 unit tests. This file
+> **Status:** shipped — `scripts/journal.mjs` with 22 unit tests. This file
 > is the schema contract; extending the event set is a reviewed core change.
 
 The journal is the append-only source of truth for an initiative:

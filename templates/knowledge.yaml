@@ -15,7 +15,7 @@ entries:
     confidence: 0.5
     provenance:
       - source: template
-        reference: 'this is an example entry — delete it after your first retro'
+        reference: 'delete this example entry after your first retro'
     used: 0
     helpful: 0
     outdated_reports: 0

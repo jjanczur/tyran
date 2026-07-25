@@ -19,11 +19,21 @@
  *   key: [a, b]                     inline flow sequences of scalars
  *   'single' / "double" quoted strings · # comments · --- document start
  *
- * Rejected loudly: anchors/aliases (& *), tags (!!), multi-line scalars
- * (| >), flow mappings ({}), tabs for indentation, duplicate keys.
+ * Rejected loudly (with a line number): anchors/aliases (& *), tags (! !!),
+ * multi-line scalars (| >), flow mappings ({}), nested flow sequences,
+ * tabs for indentation, duplicate keys, multiple documents.
  */
 
-const BOOL = { true: true, false: false, yes: true, no: false, on: true, off: false };
+// Prototype-free lookup: `constructor`/`__proto__` must be data, not
+// inherited members (review E2S2-R2).
+const BOOL = Object.assign(Object.create(null), {
+  true: true,
+  false: false,
+  yes: true,
+  no: false,
+  on: true,
+  off: false,
+});
 
 export class YamlLiteError extends Error {
   constructor(message, line) {
@@ -32,28 +42,66 @@ export class YamlLiteError extends Error {
   }
 }
 
-function parseScalar(raw, lineNo) {
+/** Guards shared by keys and values — the subset boundary in one place. */
+function rejectUnsupported(value, lineNo, what) {
+  if (value[0] === '&' || value[0] === '*') {
+    throw new YamlLiteError(`anchors and aliases are not supported (in ${what})`, lineNo);
+  }
+  if (value[0] === '!') throw new YamlLiteError(`tags are not supported (in ${what})`, lineNo);
+  if (value[0] === '|' || value[0] === '>') {
+    throw new YamlLiteError(`multi-line block scalars are not supported (in ${what})`, lineNo);
+  }
+  if (value[0] === '{') throw new YamlLiteError(`flow mappings are not supported (in ${what})`, lineNo);
+}
+
+/** Split a flow sequence body on commas that sit outside quotes. */
+function splitFlow(inner, lineNo) {
+  const parts = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  for (const c of inner) {
+    if (c === "'" && !inDouble) inSingle = !inSingle;
+    else if (c === '"' && !inSingle) inDouble = !inDouble;
+    if (c === ',' && !inSingle && !inDouble) {
+      parts.push(current);
+      current = '';
+    } else current += c;
+  }
+  if (inSingle || inDouble) throw new YamlLiteError('unterminated quoted string in flow sequence', lineNo);
+  parts.push(current);
+  return parts;
+}
+
+function unquote(value) {
+  // Single-quoted YAML escapes a quote by doubling it — undo that, so
+  // stringify→parse is symmetric (review E2S2-R3).
+  if (value[0] === "'" && value.at(-1) === "'") return value.slice(1, -1).replace(/''/g, "'");
+  return value.slice(1, -1);
+}
+
+function parseScalar(raw, lineNo, { allowFlow = true } = {}) {
   const value = raw.trim();
   if (value === '') return '';
-  if (value[0] === '&' || value[0] === '*') {
-    throw new YamlLiteError('anchors and aliases are not supported', lineNo);
-  }
-  if (value.startsWith('!!')) throw new YamlLiteError('tags are not supported', lineNo);
-  if (value === '|' || value === '>' || value.startsWith('|') || value.startsWith('>')) {
-    throw new YamlLiteError('multi-line block scalars are not supported', lineNo);
-  }
-  if (value.startsWith('{')) throw new YamlLiteError('flow mappings are not supported', lineNo);
+  rejectUnsupported(value, lineNo, 'value');
   if (value.startsWith('[')) {
-    const inner = value.slice(1, value.lastIndexOf(']')).trim();
-    if (!value.includes(']')) throw new YamlLiteError('unterminated flow sequence', lineNo);
+    if (!allowFlow) throw new YamlLiteError('nested flow sequences are not supported', lineNo);
+    const close = value.lastIndexOf(']');
+    if (close === -1) throw new YamlLiteError('unterminated flow sequence', lineNo);
+    if (value.slice(close + 1).trim() !== '') {
+      throw new YamlLiteError('unexpected content after flow sequence', lineNo);
+    }
+    const inner = value.slice(1, close).trim();
     if (inner === '') return [];
-    return inner.split(',').map((part) => parseScalar(part, lineNo));
+    return splitFlow(inner, lineNo).map((part) => parseScalar(part, lineNo, { allowFlow: false }));
   }
-  if ((value[0] === '"' && value.at(-1) === '"') || (value[0] === "'" && value.at(-1) === "'")) {
-    return value.slice(1, -1);
+  if ((value[0] === '"' && value.at(-1) === '"' && value.length > 1) ||
+      (value[0] === "'" && value.at(-1) === "'" && value.length > 1)) {
+    return unquote(value);
   }
   if (value === 'null' || value === '~') return null;
-  if (value.toLowerCase() in BOOL) return BOOL[value.toLowerCase()];
+  const lower = value.toLowerCase();
+  if (Object.hasOwn(BOOL, lower)) return BOOL[lower];
   if (/^-?\d+$/.test(value)) return Number(value);
   if (/^-?\d*\.\d+$/.test(value)) return Number(value);
   return value;
@@ -78,14 +126,25 @@ function stripComment(line) {
 export function parse(text) {
   const rawLines = text.split('\n');
   const lines = [];
+  let sawDocStart = false;
   rawLines.forEach((raw, i) => {
     const lineNo = i + 1;
-    if (raw.includes('\t')) {
-      const beforeContent = raw.slice(0, raw.search(/\S|$/));
-      if (beforeContent.includes('\t')) throw new YamlLiteError('tabs are not allowed for indentation', lineNo);
+    const beforeContent = raw.slice(0, raw.search(/\S|$/));
+    if (beforeContent.includes('\t')) {
+      throw new YamlLiteError('tabs are not allowed for indentation', lineNo);
     }
     const line = stripComment(raw).replace(/\s+$/, '');
-    if (line.trim() === '' || line.trim() === '---') return;
+    if (line.trim() === '') return;
+    if (line.trim() === '---' || line.trim() === '...') {
+      // Only a leading document marker is allowed: a second one would mean
+      // a multi-document stream, where a real YAML loader takes only the
+      // first document (review E2S2-R4).
+      if (sawDocStart || lines.length > 0) {
+        throw new YamlLiteError('multiple documents are not supported', lineNo);
+      }
+      sawDocStart = true;
+      return;
+    }
     const indent = line.length - line.trimStart().length;
     if (indent % 2 !== 0) throw new YamlLiteError('indentation must be a multiple of 2 spaces', lineNo);
     lines.push({ indent, text: line.trim(), lineNo });
@@ -106,38 +165,43 @@ export function parse(text) {
           pos++;
         } else {
           // Mapping item: first pair sits on the dash line, siblings follow indented.
-          const map = {};
+          const map = Object.create(null);
           const key = unquoteKey(rest.slice(0, colon), lineNo);
           const inlineValue = rest.slice(colon + 1).trim();
           pos++;
-          if (inlineValue === '') map[key] = parseBlock(indent + 4);
-          else map[key] = parseScalar(inlineValue, lineNo);
+          if (inlineValue === '') {
+            const next = lines[pos];
+            map[key] = next && next.indent > indent + 2 ? parseBlock(next.indent) : null;
+          } else map[key] = parseScalar(inlineValue, lineNo);
           const childIndent = indent + 2;
           while (pos < lines.length && lines[pos].indent === childIndent && !lines[pos].text.startsWith('- ')) {
             const child = lines[pos];
             const c = keyColonIndex(child.text);
             if (c === -1) throw new YamlLiteError('expected "key: value" inside sequence item', child.lineNo);
             const k = unquoteKey(child.text.slice(0, c), child.lineNo);
-            if (k in map) throw new YamlLiteError(`duplicate key "${k}"`, child.lineNo);
+            if (Object.hasOwn(map, k)) throw new YamlLiteError(`duplicate key "${k}"`, child.lineNo);
             const v = child.text.slice(c + 1).trim();
             pos++;
-            map[k] = v === '' ? parseBlock(childIndent + 2) : parseScalar(v, child.lineNo);
+            if (v === '') {
+              const next = lines[pos];
+              map[k] = next && next.indent > childIndent ? parseBlock(next.indent) : null;
+            } else map[k] = parseScalar(v, child.lineNo);
           }
-          items.push(map);
+          items.push({ ...map });
         }
       }
       return items;
     }
 
     // Mapping
-    const map = {};
+    const map = Object.create(null);
     while (pos < lines.length && lines[pos].indent === indent) {
       const { text, lineNo } = lines[pos];
       if (text.startsWith('- ')) break;
       const colon = keyColonIndex(text);
       if (colon === -1) throw new YamlLiteError(`expected "key: value", got "${text}"`, lineNo);
       const key = unquoteKey(text.slice(0, colon), lineNo);
-      if (key in map) throw new YamlLiteError(`duplicate key "${key}"`, lineNo);
+      if (Object.hasOwn(map, key)) throw new YamlLiteError(`duplicate key "${key}"`, lineNo);
       const value = text.slice(colon + 1).trim();
       pos++;
       if (value === '') {
@@ -148,7 +212,7 @@ export function parse(text) {
         map[key] = parseScalar(value, lineNo);
       }
     }
-    return map;
+    return { ...map }; // hand back an ordinary object, prototype-free during construction
   }
 
   const result = lines.length === 0 ? {} : parseBlock(lines[0].indent);
@@ -175,9 +239,13 @@ function keyColonIndex(text) {
 function unquoteKey(raw, lineNo) {
   const key = raw.trim();
   if (key === '') throw new YamlLiteError('empty key', lineNo);
-  if ((key[0] === '"' && key.at(-1) === '"') || (key[0] === "'" && key.at(-1) === "'")) {
-    return key.slice(1, -1);
+  if ((key[0] === '"' && key.at(-1) === '"' && key.length > 1) ||
+      (key[0] === "'" && key.at(-1) === "'" && key.length > 1)) {
+    return unquote(key);
   }
+  // Keys go through the same subset guards as values (review E2S2-R4):
+  // `&anchor key:` and `!!tag key:` must not be swallowed into the key name.
+  rejectUnsupported(key, lineNo, 'key');
   return key;
 }
 
@@ -200,26 +268,39 @@ export function stringify(value, indent = 0) {
     return Object.entries(value)
       .map(([k, v]) => {
         if (v !== null && typeof v === 'object' && (Array.isArray(v) ? v.length > 0 : Object.keys(v).length > 0)) {
-          return `${pad}${k}:\n${stringify(v, indent + 2)}`;
+          return `${pad}${formatKey(k)}:\n${stringify(v, indent + 2)}`;
         }
-        if (v !== null && typeof v === 'object') return `${pad}${k}: ${Array.isArray(v) ? '[]' : 'null'}\n`;
-        return `${pad}${k}: ${formatScalar(v)}\n`;
+        if (v !== null && typeof v === 'object') return `${pad}${formatKey(k)}: ${Array.isArray(v) ? '[]' : 'null'}\n`;
+        return `${pad}${formatKey(k)}: ${formatScalar(v)}\n`;
       })
       .join('');
   }
   return `${pad}${formatScalar(value)}\n`;
 }
 
+function formatKey(key) {
+  const s = String(key);
+  if (s === '' || /[\s:#'"&*!|>[\]{},]/.test(s)) return `'${s.replace(/'/g, "''")}'`;
+  return s;
+}
+
 function formatScalar(value) {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'boolean' || typeof value === 'number') return String(value);
   const s = String(value);
+  if (s.includes('\n')) {
+    // The subset has no block scalars, so a newline cannot be represented.
+    // Failing loudly beats writing a file that reads back as different data
+    // (review E2S2-R1).
+    throw new YamlLiteError('cannot serialize a string containing a newline (no block scalars in this subset)');
+  }
   const needsQuotes =
     s === '' ||
-    /^[\s]|[\s]$/.test(s) ||
+    /^\s|\s$/.test(s) ||
     /^[-?:,[\]{}#&*!|>'"%@`]/.test(s) ||
     /:\s/.test(s) ||
-    s.toLowerCase() in BOOL ||
+    /\s#/.test(s) || // ` #` would be read back as a comment (review E2S2-R1)
+    Object.hasOwn(BOOL, s.toLowerCase()) ||
     s === 'null' ||
     s === '~' ||
     /^-?\d+(\.\d+)?$/.test(s);

@@ -160,6 +160,8 @@ export function validateKnowledge(doc) {
       entry.provenance.forEach((p, j) => {
         if (!isPlainObject(p) || !isNonEmptyString(p.source)) {
           errors.push(`${at}.provenance[${j}].source: required (where this was learned)`);
+        } else if (!isNonEmptyString(p.reference)) {
+          errors.push(`${at}.provenance[${j}].reference: required (which run/file/commit proved it)`);
         }
       });
     }
@@ -179,18 +181,38 @@ export function validateKnowledge(doc) {
 }
 
 /**
+ * Paths that MUST be classified KERNEL. A policy that downgrades any of
+ * these would let the self-improvement loop disable its own enforcement,
+ * so the validator rejects it — the boundary cannot be edited away, only
+ * tightened (review E2S2-R6).
+ */
+export const MANDATORY_KERNEL_PATHS = Object.freeze(['hooks/**', '.tyran/policies/**']);
+
+/**
  * Validate `policies/autonomy.yaml`: which paths the retro agent may write
  * autonomously (AUTO), which need approval (GATED), which are untouchable
  * (KERNEL). Enforced later by a PreToolUse hook — this validator makes sure
- * the file itself can never be ambiguous.
+ * the file itself can never be ambiguous:
+ *  - the mandatory KERNEL paths are present and classified KERNEL;
+ *  - a `default` class exists, so an unmatched path has a defined answer;
+ *  - precedence is explicit (most specific rule wins — longest path glob).
  */
 export function validatePolicy(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['policy must be a mapping'];
   if (!Array.isArray(doc.rules)) return ['rules: required, must be a list'];
 
+  if (!('default' in doc)) {
+    errors.push("default: required — the class applied to paths no rule matches (use 'GATED' when unsure)");
+  } else if (!ARTIFACT_CLASSES.includes(doc.default)) {
+    errors.push(`default: must be one of ${ARTIFACT_CLASSES.join(' | ')}`);
+  }
+  for (const key of Object.keys(doc)) {
+    if (!['rules', 'default'].includes(key)) errors.push(`${key}: unknown top-level key`);
+  }
+
   const seenPaths = new Set();
-  let hasKernel = false;
+  const classByPath = new Map();
   doc.rules.forEach((rule, i) => {
     const at = `rules[${i}]`;
     if (!isPlainObject(rule)) {
@@ -199,22 +221,65 @@ export function validatePolicy(doc) {
     }
     if (!isNonEmptyString(rule.path)) errors.push(`${at}.path: required path glob`);
     else if (seenPaths.has(rule.path)) errors.push(`${at}.path: duplicate rule for "${rule.path}"`);
-    else seenPaths.add(rule.path);
+    else {
+      seenPaths.add(rule.path);
+      classByPath.set(rule.path, rule.class);
+    }
 
     if (!ARTIFACT_CLASSES.includes(rule.class)) {
       errors.push(`${at}.class: must be one of ${ARTIFACT_CLASSES.join(' | ')}`);
     }
-    if (rule.class === 'KERNEL') hasKernel = true;
     if (!isNonEmptyString(rule.reason)) {
       errors.push(`${at}.reason: required — every boundary must say why it exists`);
     }
   });
 
-  // The classification file protecting the kernel must protect itself.
-  if (!hasKernel) {
-    errors.push('rules: at least one KERNEL rule is required (the policy file must protect itself)');
+  for (const required of MANDATORY_KERNEL_PATHS) {
+    if (!classByPath.has(required)) {
+      errors.push(`rules: a rule for "${required}" is required and must be class KERNEL`);
+    } else if (classByPath.get(required) !== 'KERNEL') {
+      errors.push(
+        `rules: "${required}" is classified ${classByPath.get(required)} — it must be KERNEL ` +
+          '(a system that can disable its own gates has none)',
+      );
+    }
   }
   return errors;
+}
+
+/**
+ * Resolve which class applies to a path. Precedence: the most specific
+ * matching rule wins, measured by glob length; ties go to the stricter
+ * class. Unmatched paths fall back to `default`. Exported so the future
+ * PreToolUse hook and `doctor` share exactly one implementation.
+ */
+export function classifyPath(policy, filePath) {
+  const strictness = { AUTO: 0, GATED: 1, KERNEL: 2 };
+  let best = null;
+  for (const rule of policy.rules ?? []) {
+    if (!isNonEmptyString(rule.path) || !globMatches(rule.path, filePath)) continue;
+    if (
+      best === null ||
+      rule.path.length > best.path.length ||
+      (rule.path.length === best.path.length && strictness[rule.class] > strictness[best.class])
+    ) {
+      best = rule;
+    }
+  }
+  return best ? best.class : (policy.default ?? 'GATED');
+}
+
+/** Minimal glob: `**` spans separators, `*` does not. */
+function globMatches(glob, filePath) {
+  const pattern = glob
+    .split('**')
+    .map((part) => part.split('*').map(escapeRegExp).join('[^/]*'))
+    .join('.*');
+  return new RegExp(`^${pattern}$`).test(filePath);
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 const VALIDATORS = { config: validateConfig, knowledge: validateKnowledge, policy: validatePolicy };
@@ -228,8 +293,11 @@ export function validateFile(kind, file) {
   try {
     doc = parse(readFileSync(file, 'utf8'));
   } catch (err) {
+    // Any parse failure is a finding, never a crash — pathological input
+    // (e.g. deep nesting → RangeError) must not escape as a stack trace
+    // (review E2S2-R8).
     if (err instanceof YamlLiteError) return { ok: false, errors: [`YAML: ${err.message}`] };
-    throw err;
+    return { ok: false, errors: [`YAML: unparseable (${err.name}: ${err.message})`] };
   }
   const errors = validator(doc);
   return { ok: errors.length === 0, errors, doc };

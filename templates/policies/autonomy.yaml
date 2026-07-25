@@ -7,10 +7,17 @@
 #   GATED   retro proposes, you approve
 #   KERNEL  humans only, by hand — never autonomously
 #
-# Tighten or loosen this per repo. At least one KERNEL rule is required:
-# the file that defines the boundary must protect itself.
+# Tighten this per repo freely — but `hooks/**` and `.tyran/policies/**`
+# MUST stay KERNEL: the validator rejects a policy that downgrades them,
+# so the boundary can never be edited away by the loop it constrains.
+#
+# Precedence: the most specific matching rule wins (longest path glob);
+# ties go to the stricter class. Paths no rule matches get `default`.
 #
 # Validate:  node scripts/schema.mjs validate policy .tyran/policies/autonomy.yaml
+
+# Applied when no rule matches. GATED means "ask me" — the safe answer.
+default: GATED
 
 rules:
   - path: .tyran/knowledge/**
@@ -20,6 +27,10 @@ rules:
   - path: .claude/skills/tyran-local/**
     class: AUTO
     reason: repo-specific skills, gated by a passing activation test
+
+  - path: .tyran/state/**
+    class: AUTO
+    reason: the execution journal is append-only and written by the conductor itself
 
   - path: .tyran/config.yaml
     class: GATED

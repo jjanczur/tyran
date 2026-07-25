@@ -45,6 +45,13 @@ The journal is the append-only source of truth for an initiative:
 - **Crash-safe reads:** a truncated final line (crash mid-write) is discarded
   and flagged (`truncatedTail`); corruption anywhere else is a loud
   validation error, never silent loss.
+- **Concurrency-safe stamping:** appends take a cross-process lock (atomic
+  `mkdir`; stale locks stolen after 10 s) and auto-stamped timestamps are
+  clamped to the journal's last event — concurrent writers cannot produce a
+  timestamp regression *by construction*. An explicitly provided `ts` is
+  caller-owned; `validate` flags regressions after the fact.
+- **Lease protocol honesty:** a `lease.released` by a non-holder does not
+  free the lease — it is surfaced in `tail().mismatchedReleases`.
 - **IDs never from memory:** `journal.mjs next-id <file> D` scans the file
   and returns `D-<max+1>` — duplicate ledger numbers after a compaction
   become impossible.

@@ -15,6 +15,11 @@ jobs:
           node-version: 22
       - name: Unit tests
         run: node --test "tests/**/*.test.mjs"
+      - name: Validate shipped templates against their schemas
+        run: |
+          node scripts/schema.mjs validate config templates/config.yaml
+          node scripts/schema.mjs validate knowledge templates/knowledge.yaml
+          node scripts/schema.mjs validate policy templates/policies/autonomy.yaml
       - name: Skill description budget
         run: node scripts/desc-budget.mjs --budget 4000 .
 

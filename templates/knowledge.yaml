@@ -1,0 +1,23 @@
+# What Tyran has learned about THIS repository.
+#
+# Written by /tyran:retro under the AUTO class (see policies/autonomy.yaml).
+# Entries carry confidence and usage counters so ones that stop earning
+# their keep get degraded or retired by a later retrospective.
+#
+# kind: fact | convention | gotcha | command | decision
+#
+# Validate:  node scripts/schema.mjs validate knowledge .tyran/knowledge/*.yaml
+
+entries:
+  - id: K-1
+    kind: convention
+    text: 'Example: commits must be authored by the repo owner identity, or CI deploys are blocked.'
+    confidence: 0.5
+    provenance:
+      - source: template
+        reference: 'this is an example entry — delete it after your first retro'
+    used: 0
+    helpful: 0
+    outdated_reports: 0
+    applies_to:
+      - '**'

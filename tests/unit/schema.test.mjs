@@ -4,19 +4,23 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   validateConfig,
   validateKnowledge,
   validatePolicy,
   validateFile,
+  classifyPath,
+  MANDATORY_KERNEL_PATHS,
   PROFILES,
   AUTONOMY_CLASSES,
   ARTIFACT_CLASSES,
 } from '../../scripts/schema.mjs';
 import { parse } from '../../scripts/yaml-lite.mjs';
 
-const SCRIPT = new URL('../../scripts/schema.mjs', import.meta.url).pathname;
-const TEMPLATES = new URL('../../templates/', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../../scripts/schema.mjs', import.meta.url));
+const TEMPLATES = fileURLToPath(new URL('../../templates/', import.meta.url));
 
 const minimalConfig = () => ({
   profile: 'balanced',
@@ -120,24 +124,67 @@ test('requires entries to be a list', () => {
 
 // --- policy ------------------------------------------------------------
 
-const kernelRule = { path: '.tyran/policies/**', class: 'KERNEL', reason: 'the boundary must protect itself' };
+const kernelRules = [
+  { path: 'hooks/**', class: 'KERNEL', reason: 'enforcement' },
+  { path: '.tyran/policies/**', class: 'KERNEL', reason: 'the boundary must protect itself' },
+];
+const policyDoc = (rules) => ({ default: 'GATED', rules: [...rules, ...kernelRules] });
 
-test('accepts a policy with a KERNEL rule', () => {
+test('accepts a policy that classifies the mandatory kernel paths', () => {
   assert.deepEqual(
-    validatePolicy({ rules: [{ path: '.tyran/knowledge/**', class: 'AUTO', reason: 'learned facts' }, kernelRule] }),
+    validatePolicy(policyDoc([{ path: '.tyran/knowledge/**', class: 'AUTO', reason: 'learned facts' }])),
     [],
   );
 });
 
-test('a policy without any KERNEL rule is rejected (self-protection)', () => {
-  const errors = validatePolicy({ rules: [{ path: 'x/**', class: 'AUTO', reason: 'r' }] });
-  assert.ok(errors.some((e) => e.includes('at least one KERNEL rule')));
+test('self-protection: mandatory kernel paths must exist AND be KERNEL', () => {
+  // Review finding E2S2-R6: "at least one KERNEL rule anywhere" protected
+  // nothing — a policy could KERNEL-classify a changelog and hand its own
+  // enforcement to AUTO.
+  const missing = validatePolicy({ default: 'GATED', rules: [{ path: 'docs/fluff.md', class: 'KERNEL', reason: 'nobody cares' }] });
+  for (const required of MANDATORY_KERNEL_PATHS) {
+    assert.ok(missing.some((e) => e.includes(required)), `no finding for missing ${required}`);
+  }
+  const downgraded = validatePolicy({
+    default: 'GATED',
+    rules: [
+      { path: 'hooks/**', class: 'AUTO', reason: 'let me disable my own gates' },
+      { path: '.tyran/policies/**', class: 'KERNEL', reason: 'r' },
+    ],
+  });
+  assert.ok(downgraded.some((e) => e.includes('must be KERNEL')));
 });
 
-test('rejects unknown classes, duplicate paths and missing reasons', () => {
-  assert.ok(validatePolicy({ rules: [{ path: 'a', class: 'MAYBE', reason: 'r' }, kernelRule] }).some((e) => e.includes(ARTIFACT_CLASSES.join(' | '))));
-  assert.ok(validatePolicy({ rules: [{ path: 'a', class: 'AUTO', reason: 'r' }, { path: 'a', class: 'GATED', reason: 'r' }, kernelRule] }).some((e) => e.includes('duplicate rule')));
-  assert.ok(validatePolicy({ rules: [{ path: 'a', class: 'AUTO' }, kernelRule] }).some((e) => e.includes('reason')));
+test('requires an explicit default class for unmatched paths', () => {
+  const noDefault = validatePolicy({ rules: kernelRules });
+  assert.ok(noDefault.some((e) => e.startsWith('default:')));
+  assert.ok(validatePolicy({ default: 'MAYBE', rules: kernelRules }).some((e) => e.includes(ARTIFACT_CLASSES.join(' | '))));
+});
+
+test('rejects unknown classes, duplicate paths, missing reasons and unknown keys', () => {
+  assert.ok(validatePolicy(policyDoc([{ path: 'a', class: 'MAYBE', reason: 'r' }])).some((e) => e.includes(ARTIFACT_CLASSES.join(' | '))));
+  assert.ok(validatePolicy(policyDoc([{ path: 'a', class: 'AUTO', reason: 'r' }, { path: 'a', class: 'GATED', reason: 'r' }])).some((e) => e.includes('duplicate rule')));
+  assert.ok(validatePolicy(policyDoc([{ path: 'a', class: 'AUTO' }])).some((e) => e.includes('reason')));
+  assert.ok(validatePolicy({ ...policyDoc([]), stray: 1 }).some((e) => e.includes('unknown top-level key')));
+});
+
+test('classifyPath: most specific wins, ties go stricter, default is the fallback', () => {
+  const policy = policyDoc([
+    { path: '**', class: 'AUTO', reason: 'broad' },
+    { path: '.tyran/knowledge/**', class: 'AUTO', reason: 'facts' },
+  ]);
+  assert.equal(classifyPath(policy, '.tyran/knowledge/repo.yaml'), 'AUTO');
+  assert.equal(classifyPath(policy, 'hooks/scripts/evidence-gate.mjs'), 'KERNEL');
+  assert.equal(classifyPath(policy, '.tyran/policies/autonomy.yaml'), 'KERNEL');
+  assert.equal(classifyPath(policy, 'src/index.ts'), 'AUTO'); // matched by '**'
+  assert.equal(classifyPath({ default: 'GATED', rules: [] }, 'anything.txt'), 'GATED');
+  assert.equal(classifyPath({ rules: [] }, 'anything.txt'), 'GATED'); // safe fallback
+});
+
+test('classifyPath: single * does not span separators', () => {
+  const policy = { default: 'GATED', rules: [{ path: '.tyran/*.yaml', class: 'AUTO', reason: 'r' }] };
+  assert.equal(classifyPath(policy, '.tyran/config.yaml'), 'AUTO');
+  assert.equal(classifyPath(policy, '.tyran/nested/config.yaml'), 'GATED');
 });
 
 // --- file-level + shipped templates ------------------------------------
@@ -169,10 +216,13 @@ test('shipped templates are valid against their own schemas', () => {
 });
 
 test('the shipped policy template classifies the kernel paths it must', () => {
-  const doc = parse(execFileSync('cat', [join(TEMPLATES, 'policies/autonomy.yaml')], { encoding: 'utf8' }));
-  const kernel = doc.rules.filter((r) => r.class === 'KERNEL').map((r) => r.path);
-  assert.ok(kernel.some((p) => p.includes('policies')), 'policy file must protect itself');
-  assert.ok(kernel.some((p) => p.includes('hooks')), 'enforcement hooks must be KERNEL');
+  const doc = parse(readFileSync(join(TEMPLATES, 'policies/autonomy.yaml'), 'utf8'));
+  for (const required of MANDATORY_KERNEL_PATHS) {
+    const rule = doc.rules.find((r) => r.path === required);
+    assert.ok(rule, `template must classify ${required}`);
+    assert.equal(rule.class, 'KERNEL');
+  }
+  assert.equal(doc.default, 'GATED');
 });
 
 // --- CLI ---------------------------------------------------------------

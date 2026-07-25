@@ -12,6 +12,7 @@ import {
   validatePolicy,
   validateFile,
   classifyPath,
+  normalizePath,
   MANDATORY_KERNEL_PATHS,
   PROFILES,
   AUTONOMY_CLASSES,
@@ -179,6 +180,36 @@ test('classifyPath: most specific wins, ties go stricter, default is the fallbac
   assert.equal(classifyPath(policy, 'src/index.ts'), 'AUTO'); // matched by '**'
   assert.equal(classifyPath({ default: 'GATED', rules: [] }, 'anything.txt'), 'GATED');
   assert.equal(classifyPath({ rules: [] }, 'anything.txt'), 'GATED'); // safe fallback
+});
+
+test('classifyPath: protected paths survive path-form and casing tricks', () => {
+  // Review E2S2-R9b: a hook receives whatever form the tool used.
+  const policy = { default: 'AUTO', rules: [
+    { path: 'hooks/**', class: 'KERNEL', reason: 'gates' },
+    { path: '.tyran/policies/**', class: 'KERNEL', reason: 'self' },
+  ] };
+  for (const form of ['hooks/x.mjs', './hooks/x.mjs', 'hooks/./a/../x.mjs', 'HOOKS/x.mjs', 'hooks\\\\x.mjs']) {
+    assert.equal(classifyPath(policy, form), 'KERNEL', `${form} must stay KERNEL`);
+  }
+  // Paths escaping the repo are never autonomous.
+  assert.equal(classifyPath(policy, '../outside.mjs'), 'KERNEL');
+  assert.equal(classifyPath(policy, '/etc/passwd'), 'KERNEL');
+  assert.equal(normalizePath('./a/../b'), 'b');
+  assert.equal(normalizePath('../up'), null);
+});
+
+test('validatePolicy rejects a more specific rule that downgrades a kernel path', () => {
+  // The exact counterexample from review E2S2-R9: literal kernel rules
+  // present, but out-ranked by a more specific AUTO rule.
+  const evil = { default: 'GATED', rules: [
+    { path: 'hooks/**', class: 'KERNEL', reason: 'gates' },
+    { path: '.tyran/policies/**', class: 'KERNEL', reason: 'self' },
+    { path: 'hooks/policy-gate.mjs', class: 'AUTO', reason: 'let retro tune its own gate' },
+    { path: '.tyran/policies/autonomy.yaml', class: 'AUTO', reason: 'let retro edit the boundary' },
+  ] };
+  const errors = validatePolicy(evil);
+  assert.ok(errors.some((e) => e.includes('hooks/policy-gate.mjs') && e.includes('may only be tightened')));
+  assert.ok(errors.some((e) => e.includes('.tyran/policies/autonomy.yaml')));
 });
 
 test('classifyPath: single * does not span separators', () => {

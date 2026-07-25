@@ -73,11 +73,18 @@ function splitFlow(inner, lineNo) {
   return parts;
 }
 
-function unquote(value) {
+function unquote(value, lineNo) {
   // Single-quoted YAML escapes a quote by doubling it — undo that, so
   // stringify→parse is symmetric (review E2S2-R3).
   if (value[0] === "'" && value.at(-1) === "'") return value.slice(1, -1).replace(/''/g, "'");
-  return value.slice(1, -1);
+  const inner = value.slice(1, -1);
+  // Backslash escapes inside double quotes are real YAML but not part of
+  // this subset — decoding them half-way would mean something different
+  // than a real loader (review E2S2 note 2).
+  if (inner.includes('\\')) {
+    throw new YamlLiteError('backslash escapes inside double quotes are not supported — use single quotes', lineNo);
+  }
+  return inner;
 }
 
 function parseScalar(raw, lineNo, { allowFlow = true } = {}) {
@@ -97,7 +104,7 @@ function parseScalar(raw, lineNo, { allowFlow = true } = {}) {
   }
   if ((value[0] === '"' && value.at(-1) === '"' && value.length > 1) ||
       (value[0] === "'" && value.at(-1) === "'" && value.length > 1)) {
-    return unquote(value);
+    return unquote(value, lineNo);
   }
   if (value === 'null' || value === '~') return null;
   const lower = value.toLowerCase();
@@ -107,19 +114,27 @@ function parseScalar(raw, lineNo, { allowFlow = true } = {}) {
   return value;
 }
 
-function stripComment(line) {
+function stripComment(line, lineNo) {
   // Comments start at ` #` outside quotes; a leading `#` is a full-line comment.
   let inSingle = false;
   let inDouble = false;
+  let cut = -1;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (c === "'" && !inDouble) inSingle = !inSingle;
     else if (c === '"' && !inSingle) inDouble = !inDouble;
     else if (c === '#' && !inSingle && !inDouble && (i === 0 || /\s/.test(line[i - 1]))) {
-      return line.slice(0, i);
+      cut = i;
+      break; // the comment body is not YAML — stop tracking quotes there
     }
   }
-  return line;
+  // An unbalanced quote means our comment detection disagreed with a real
+  // YAML loader (`a: don't ask # why`) — refuse rather than guess
+  // (review E2S2 note 1).
+  if (inSingle || inDouble) {
+    throw new YamlLiteError('unbalanced quote — quote the whole value if it contains an apostrophe', lineNo);
+  }
+  return cut === -1 ? line : line.slice(0, cut);
 }
 
 /** Parse a YAML-subset document into a plain JS object. */
@@ -133,7 +148,7 @@ export function parse(text) {
     if (beforeContent.includes('\t')) {
       throw new YamlLiteError('tabs are not allowed for indentation', lineNo);
     }
-    const line = stripComment(raw).replace(/\s+$/, '');
+    const line = stripComment(raw, lineNo).replace(/\s+$/, '');
     if (line.trim() === '') return;
     if (line.trim() === '---' || line.trim() === '...') {
       // Only a leading document marker is allowed: a second one would mean
@@ -241,7 +256,7 @@ function unquoteKey(raw, lineNo) {
   if (key === '') throw new YamlLiteError('empty key', lineNo);
   if ((key[0] === '"' && key.at(-1) === '"' && key.length > 1) ||
       (key[0] === "'" && key.at(-1) === "'" && key.length > 1)) {
-    return unquote(key);
+    return unquote(key, lineNo);
   }
   // Keys go through the same subset guards as values (review E2S2-R4):
   // `&anchor key:` and `!!tag key:` must not be swallowed into the key name.

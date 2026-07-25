@@ -244,7 +244,38 @@ export function validatePolicy(doc) {
       );
     }
   }
+
+  // Presence of the literal rule is not enough: a MORE SPECIFIC non-KERNEL
+  // rule would out-rank it under classifyPath's precedence and hand the
+  // enforcement mechanism to AUTO with a green CI (review E2S2-R9).
+  // Validate the EFFECT, not the spelling.
+  for (const rule of doc.rules) {
+    if (!isPlainObject(rule) || !isNonEmptyString(rule.path) || rule.class === 'KERNEL') continue;
+    for (const required of MANDATORY_KERNEL_PATHS) {
+      if (globMatches(required, concretize(rule.path))) {
+        errors.push(
+          `rules: "${rule.path}" (class ${rule.class}) falls under the protected path "${required}" — ` +
+            'kernel paths may only be tightened, never downgraded by a more specific rule',
+        );
+      }
+    }
+  }
+
+  // Belt and braces: probe the resolver itself, so any future change to
+  // precedence that reopens this hole fails here.
+  if (errors.length === 0) {
+    for (const probe of ['hooks/x.mjs', 'hooks/a/b/c.mjs', '.tyran/policies/autonomy.yaml']) {
+      if (classifyPath(doc, probe) !== 'KERNEL') {
+        errors.push(`rules: "${probe}" resolves to ${classifyPath(doc, probe)}, but protected paths must resolve to KERNEL`);
+      }
+    }
+  }
   return errors;
+}
+
+/** Replace wildcards with concrete segments so a glob can be tested for containment. */
+function concretize(glob) {
+  return glob.replace(/\*\*/g, '__any__/__any__').replace(/(?<!_)\*(?!_)/g, '__any__').replace(/__any__/g, 'x');
 }
 
 /**
@@ -255,9 +286,11 @@ export function validatePolicy(doc) {
  */
 export function classifyPath(policy, filePath) {
   const strictness = { AUTO: 0, GATED: 1, KERNEL: 2 };
+  const normalized = normalizePath(filePath);
+  if (normalized === null) return 'KERNEL'; // outside the repo → never autonomous
   let best = null;
   for (const rule of policy.rules ?? []) {
-    if (!isNonEmptyString(rule.path) || !globMatches(rule.path, filePath)) continue;
+    if (!isNonEmptyString(rule.path) || !globMatches(rule.path, normalized)) continue;
     if (
       best === null ||
       rule.path.length > best.path.length ||
@@ -269,13 +302,41 @@ export function classifyPath(policy, filePath) {
   return best ? best.class : (policy.default ?? 'GATED');
 }
 
+/**
+ * Normalize to a repo-relative POSIX path before matching. A hook receives
+ * whatever form the tool used (`./hooks/x`, an absolute path, Windows
+ * separators); without this, the same file could resolve to two different
+ * classes and the gate would fail open (review E2S2-R9b).
+ * Returns null when the path escapes the repo root.
+ */
+export function normalizePath(filePath, repoRoot = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()) {
+  let p = String(filePath).replace(/\\/g, '/');
+  const root = String(repoRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+  if (p.startsWith(root + '/')) p = p.slice(root.length + 1);
+  else if (p.startsWith('/')) return null; // absolute, outside the repo
+  const segments = [];
+  for (const segment of p.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join('/');
+}
+
 /** Minimal glob: `**` spans separators, `*` does not. */
 function globMatches(glob, filePath) {
   const pattern = glob
     .split('**')
     .map((part) => part.split('*').map(escapeRegExp).join('[^/]*'))
     .join('.*');
-  return new RegExp(`^${pattern}$`).test(filePath);
+  // Case-insensitive on purpose: on case-insensitive filesystems (macOS,
+  // Windows) `HOOKS/x` and `hooks/x` are the same file, and a security
+  // classifier must fail closed rather than let casing pick a weaker class.
+  return new RegExp(`^${pattern}$`, 'i').test(filePath);
 }
 
 function escapeRegExp(s) {

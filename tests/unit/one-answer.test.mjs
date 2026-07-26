@@ -4,12 +4,14 @@ import {
   invisibleProblem,
   whitespaceProblem,
   identifierProblem,
+  formatCodePoint,
   FORBIDDEN,
   DELIBERATELY_ALLOWED,
+  jsonEscapeInvisible,
 } from '../../scripts/invisible.mjs';
 import { scanText, scanPath } from '../../scripts/scan-control-chars.mjs';
 import { agentNameProblem, pairSpawns } from '../../scripts/journal.mjs';
-import { inline, fold, warnings, renderProjections, STATE_FILE } from '../../scripts/project.mjs';
+import { inline, fold, warnings, progressLine, renderProjections, STATE_FILE } from '../../scripts/project.mjs';
 
 /**
  * The control this story exists to satisfy: do all three layers give the SAME
@@ -111,10 +113,12 @@ test('ALL THREE layers give the same answer for every codepoint in Unicode', () 
     const journal = agentNameProblem(`a${ch}b`) === INVISIBLE_VERDICT;
 
     // Layer 3 — the projection sanitizer that guards STATE.md. Measured by
-    // whether the character is REMOVED, not by whether the output changed:
-    // HTML-escaping a visible "<" is a different act from deleting something
-    // nobody can see, and conflating them would let escaping pose as defence.
-    const projection = exception.has(point) ? truth : inline(`a${ch}b`) === 'a b';
+    // whether the character was replaced with its VISIBLE escape notation —
+    // the exact output, not merely "the string changed". HTML-escaping an
+    // ordinary "<" also changes the string, and conflating the two would let
+    // Markdown escaping pose as a defence against invisibility.
+    const escaped = `a&lt;${formatCodePoint(point)}&gt;b`;
+    const projection = exception.has(point) ? truth : inline(`a${ch}b`) === escaped;
 
     if (scanner !== truth || journal !== truth || projection !== truth) {
       disagreements.push(
@@ -203,7 +207,11 @@ test('the TAG block: the case that made the layering visible', () => {
     assert.ok(invisibleProblem(point) !== null, `U+${point.toString(16)} must be invisible`);
     assert.equal(scanText(ch).length, 1, 'the scanner must catch it');
     assert.ok(agentNameProblem(`impl${ch}worker`) !== null, 'the journal must refuse it in a name');
-    assert.equal(inline(`a${ch}b`), 'a b', 'inline() must remove it from the projection');
+    assert.equal(
+      inline(`a${ch}b`),
+      `a&lt;${formatCodePoint(point)}&gt;b`,
+      'inline() must show it in the projection, not delete it',
+    );
   }
   // End to end: a TAG character in journal data must not reach STATE.md.
   const { files } = renderProjections({
@@ -239,7 +247,11 @@ test('the gaps the hand-written list missed are now closed by the property rule'
   for (const [point, name] of previouslyMissed) {
     assert.ok(invisibleProblem(point) !== null, `${name} (U+${point.toString(16)}) still passes`);
     assert.equal(scanText(cp(point)).length, 1, `${name} still passes the scanner`);
-    assert.equal(inline(`a${cp(point)}b`), 'a b', `${name} still reaches a projection`);
+    assert.equal(
+      inline(`a${cp(point)}b`),
+      `a&lt;${formatCodePoint(point)}&gt;b`,
+      `${name} still reaches a projection unannounced`,
+    );
   }
 });
 
@@ -307,5 +319,115 @@ test('an unusable agent name gets ONE answer from both artefacts doctor produces
     // And no invisible byte reaches the document either way.
     const { files } = renderProjections({ events });
     assert.equal(scanText(files[STATE_FILE]).length, 0, 'a raw invisible codepoint reached STATE.md');
+  }
+});
+
+// --- every OUTPUT CHANNEL, not two documents ---------------------------------
+
+/**
+ * The blocker a security review found, pinned.
+ *
+ * The previous fuzz swept `STATE.md` and `PROGRESS.md`. The channel it did not
+ * sweep is the one that leaked: `warnings()` interpolated `ev` and `init` raw,
+ * so a journal carrying a right-to-left override and 18 TAG characters put 37
+ * invisible codepoints on the operator's terminal — spelling "DELETE THE
+ * JOURNAL" where nothing was visible, with the override mirroring the rest of
+ * the line. Twenty-eight lines below, the same `state.initiatives` was going
+ * through `inline()` on its way into the document.
+ *
+ * The lesson is not "sanitize warnings too". It is that a sweep is only worth
+ * the channels it enumerates, so this enumerates them.
+ */
+const tagged = (s) => [...s].map((c) => cp(0xe0000 + c.codePointAt(0))).join('');
+
+function hostileJournal() {
+  const RLO = cp(0x202e);
+  const HIDDEN = tagged('DELETE THE JOURNAL');
+  return [
+    { ts: '2026-07-26T10:00:00.000Z', ev: 'checkpoint', init: 'demo', actor: 'c', data: { phase: 'p', next_steps: [] } },
+    {
+      ts: '2026-07-26T10:00:01.000Z',
+      ev: 'checkpoint',
+      init: `foreign${RLO}${HIDDEN}repo`,
+      actor: `actor${cp(0x200b)}x`,
+      data: { phase: `p${cp(0xfeff)}`, next_steps: [`step${HIDDEN}`] },
+    },
+    { ts: '2026-07-26T10:00:02.000Z', ev: `weird${HIDDEN}type`, init: 'demo', actor: 'c', data: {} },
+    {
+      ts: '2026-07-26T10:00:03.000Z',
+      ev: 'spawn',
+      init: 'demo',
+      actor: 'c',
+      data: { agent: `impl${cp(0x200d)}worker`, role: `role${RLO}` },
+    },
+    {
+      ts: '2026-07-26T10:00:04.000Z',
+      ev: 'lease.released',
+      init: 'demo',
+      actor: 'c',
+      data: { resource: `r${HIDDEN}`, holder: `h${RLO}` },
+    },
+  ];
+}
+
+test('EVERY output channel of project.mjs is swept, not just the two documents', () => {
+  const events = hostileJournal();
+  const { files } = renderProjections({ events });
+  const state = fold({ events });
+
+  const channels = {
+    ...files,
+    'warnings()': warnings(state).join('\n'),
+    'progressLine()': progressLine(state),
+  };
+  // The enumeration is the point, so it is asserted rather than assumed: if a
+  // new document or a new operator-facing string appears, this count changes
+  // and someone has to decide whether the sweep still covers everything.
+  assert.deepEqual(
+    Object.keys(channels).sort(),
+    ['PROGRESS.md', 'STATE.md', 'progressLine()', 'warnings()'],
+    'project.mjs grew an output channel — add it here or prove it is not operator-facing',
+  );
+
+  for (const [name, text] of Object.entries(channels)) {
+    assert.deepEqual(
+      scanText(text).map((f) => `${f.line}:${f.column} ${formatCodePoint(f.codePoint)}`),
+      [],
+      `invisible codepoint reached ${name}`,
+    );
+  }
+
+  // And the hidden text is not merely absent — it is REPORTED, because a
+  // silent exclusion is the failure ADR-19 correction 1 forbids.
+  assert.match(channels['warnings()'], /U\+E0044/, 'the removed characters must be named');
+});
+
+test('the journal CLI escapes invisibles without losing them', () => {
+  // JSON.stringify escapes C0 controls and nothing else, so bidi and TAG came
+  // out raw on the terminal of anyone running `journal.mjs query`.
+  const value = { init: `x${cp(0x202e)}${cp(0xe0041)}y`, nested: [`z${cp(0x200b)}`] };
+  const escaped = jsonEscapeInvisible(JSON.stringify(value));
+  assert.equal(scanText(escaped).length, 0, 'the CLI would still print invisible bytes');
+  assert.deepEqual(JSON.parse(escaped), value, 'escaping must be LOSSLESS — this output is parsed back');
+  assert.match(escaped, /u202E/i);
+});
+
+test('the astral memo stays bounded, and answers the same after it is cleared', () => {
+  // A memo in a security predicate is a place where a wrong answer can be
+  // cached and an unbounded one is a place where memory grows without limit.
+  // Walking every astral codepoint exercises the clear path many times over.
+  const before = invisibleProblem(0xe0041);
+  for (let point = 0x10000; point <= 0x10ffff; point += 1) {
+    if (invisibleProblem(point) !== null && point >= 0xf0000 && point < 0xf0002) break;
+  }
+  assert.equal(invisibleProblem(0xe0041), before, 'the answer changed after the memo was recycled');
+  assert.ok(before !== null, 'premise: U+E0041 is invisible');
+});
+
+test('invisibleProblem REFUSES a value that is not a code point', () => {
+  // Fail-open in a security predicate: `null` is its word for "clean", so
+  // answering it for garbage would say garbage is fine.
+  for (const bad of [NaN, 1.5, -1, 0x110000, undefined, null, '0x41', {}]) {
+    assert.throws(() => invisibleProblem(bad), /expects a Unicode code point/, `accepted ${String(bad)}`);
   }
 });

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
@@ -120,12 +121,44 @@ test('the banned set covers ADR-19 in full and can only ever grow', () => {
     'a measured gap in the old denylist is open again',
   );
 
-  // A floor, not a pin: Unicode only ever adds default-ignorable characters,
-  // so this number can rise on a Node upgrade and must never fall. Measured at
-  // the commit that introduced the shared rule.
-  assert.ok(
-    banned.size >= 4319,
-    `the rule got NARROWER: ${banned.size} codepoints banned, floor is 4319`,
+  // A FLOOR, expressed as ranges rather than as a count.
+  //
+  // `banned.size >= 4319` was the right guarantee and a useless failure
+  // message: a future red would have said "4318, floor is 4319" and left the
+  // reader to find the missing codepoint themselves — the same defect the file
+  // canary had, one file down. Ranges name what went missing.
+  //
+  // It stays a floor, not an equality, because the boundary is a Unicode
+  // property and follows the version bundled with Node. Measured identical
+  // (4 319) on Node 20, 22 and 24 — Unicode 15, 16 and 17 — so the drift this
+  // tolerates is theoretical today and the tolerance costs nothing. What must
+  // never happen is the rule getting NARROWER.
+  const REQUIRED_RANGES = [
+    [0x0, 0x8], [0xb, 0x1f], [0x7f, 0x9f], [0xad, 0xad], [0x34f, 0x34f],
+    [0x600, 0x605], [0x61c, 0x61c], [0x6dd, 0x6dd], [0x70f, 0x70f],
+    [0x890, 0x891], [0x8e2, 0x8e2], [0x115f, 0x1160], [0x17b4, 0x17b5],
+    [0x180b, 0x180f], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x206f],
+    [0x3164, 0x3164], [0xfdd0, 0xfdef], [0xfeff, 0xfeff], [0xffa0, 0xffa0],
+    [0xfff0, 0xfffb], [0xfffe, 0xffff], [0x110bd, 0x110bd], [0x110cd, 0x110cd],
+    [0x13430, 0x1343f], [0x1bca0, 0x1bca3], [0x1d173, 0x1d17a],
+    [0x1fffe, 0x1ffff], [0x2fffe, 0x2ffff], [0x3fffe, 0x3ffff],
+    [0x4fffe, 0x4ffff], [0x5fffe, 0x5ffff], [0x6fffe, 0x6ffff],
+    [0x7fffe, 0x7ffff], [0x8fffe, 0x8ffff], [0x9fffe, 0x9ffff],
+    [0xafffe, 0xaffff], [0xbfffe, 0xbffff], [0xcfffe, 0xcffff],
+    [0xdfffe, 0xe0fff], [0xefffe, 0xeffff], [0xffffe, 0xfffff],
+    [0x10fffe, 0x10ffff],
+  ];
+  const missing = [];
+  for (const [lo, hi] of REQUIRED_RANGES) {
+    for (let point = lo; point <= hi; point++) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      if (!banned.has(point)) missing.push(formatCodePoint(point));
+    }
+  }
+  assert.deepEqual(
+    missing.slice(0, 30),
+    [],
+    `the rule got NARROWER: ${missing.length} codepoint(s) are no longer banned`,
   );
 
   // TAB and LF are legal text and must never join the set.
@@ -867,4 +900,42 @@ test('THIS repository scans clean end to end', () => {
   // the list check and lie in the summary line operators actually read.
   assert.equal(scanned, scannedPaths.length, 'reported count disagrees with the files scanned');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
+});
+
+test('a declared gap WINS over a forbidden range that covers it', () => {
+  // M-W from the review: the module documents that DELIBERATELY_ALLOWED is
+  // consulted BEFORE FORBIDDEN, and today the two lists are disjoint, so
+  // swapping the order changes nothing and the documented precedence has no
+  // killed mutant behind it. That is a guarantee a reader relies on with
+  // nothing enforcing it — the exact shape ADR-20 refuses.
+  //
+  // The probe makes the lists OVERLAP in a copy of the module and asks which
+  // one wins, the same technique the "announcement is DERIVED" probe uses.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-gap-precedence-'));
+  const source = readFileSync(RULE, 'utf8');
+  const anchor = 'export const FORBIDDEN = Object.freeze([\n';
+  assert.ok(source.includes(anchor), 'the export moved — this probe patches source text');
+  writeFileSync(
+    join(base, 'invisible.mjs'),
+    source.replace(
+      anchor,
+      anchor + "  Object.freeze({ lo: 0xfe00, hi: 0xfe0f, what: 'probe: overlaps the declared gap' }),\n",
+    ),
+  );
+
+  return import(pathToFileURL(join(base, 'invisible.mjs')).href).then((patched) => {
+    // U+FE0F is now in BOTH lists. The gap must still win, or the README's 24
+    // emoji presentation selectors would turn CI red on a file nobody touched.
+    assert.equal(
+      patched.invisibleProblem(0xfe0f),
+      null,
+      'a forbidden range overrode the declared gap — the documented precedence is backwards',
+    );
+    // ...and the probe really did overlap, so a green result cannot come from
+    // the patch having missed.
+    assert.ok(
+      patched.FORBIDDEN.some((r) => r.lo === 0xfe00 && r.hi === 0xfe0f),
+      'the probe did not take: this test proves nothing',
+    );
+  });
 });

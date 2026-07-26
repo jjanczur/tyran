@@ -1359,3 +1359,57 @@ test('a journal written through append() reads clean', () => {
   assert.deepEqual(codes(result), [], JSON.stringify(result.findings, null, 2));
   assert.equal(result.ok, true);
 });
+
+// --- hostile journals reaching the operator's report -------------------------
+
+/**
+ * Reviewer item #6, and the one he called the most valuable thing in his own
+ * review: doctor had never been fuzzed. It is the same SHAPE as the blocker he
+ * found in `project.warnings()` — an operator-facing channel whose content
+ * comes from a journal — so it got a measurement rather than an argument.
+ *
+ * The measurement found it leaking: 137 of 400 hostile trees put invisible
+ * codepoints in `renderText`, 118 in `renderJson`. The cause was not doctor's
+ * own sanitizer but the MESSAGES it renders, built in journal.mjs with a raw
+ * `ev` interpolated into them. Fixed at the source; guarded here.
+ */
+const HOSTILE_CP = [0x202e, 0x200b, 0x2066, 0xfeff, 0x00ad, 0x0600, 0xe0041, 0xe0100, 0x13430, 0x001b];
+const invisibleIn = (text) =>
+  [...text].filter((c) => {
+    const n = c.codePointAt(0);
+    if (n === 0x0a || n === 0x09) return false;
+    return /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u.test(c);
+  });
+
+test('a hostile journal cannot put invisible characters in the doctor report', () => {
+  const poison = (i) => String.fromCodePoint(HOSTILE_CP[i % HOSTILE_CP.length]);
+  const root = repo();
+  const dir = scaffold(root);
+  const events = [];
+  for (let i = 0; i < HOSTILE_CP.length; i++) {
+    events.push({
+      ts: `2026-07-26T10:00:0${i % 10}.000Z`,
+      // an `ev` outside the closed set is what validateEvent quotes back
+      ev: i % 2 === 0 ? `weird${poison(i)}type` : 'spawn',
+      init: i % 3 === 0 ? `other${poison(i)}` : 'demo',
+      actor: `actor${poison(i)}`,
+      data: { agent: `agent${poison(i)}`, role: `role${poison(i)}`, ticket: `T${poison(i)}` },
+    });
+  }
+  writeJournal(journalPathFor(dir), events);
+
+  const result = runStateChecks({ dir, now: '2026-07-27T10:00:00.000Z' });
+  for (const [channel, text] of [
+    ['renderText', renderText(result)],
+    ['renderJson', renderJson(result)],
+  ]) {
+    assert.deepEqual(
+      invisibleIn(text).map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`),
+      [],
+      `invisible codepoint reached doctor's ${channel}`,
+    );
+  }
+  // The findings must still SAY something — a report that is clean because it
+  // is empty would pass the assertion above and protect nobody.
+  assert.ok(result.findings.length > 0, 'premise: this journal produces findings');
+});

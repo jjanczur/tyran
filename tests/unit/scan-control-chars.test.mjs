@@ -744,6 +744,14 @@ test('THIS repository scans clean end to end', () => {
   // 54 -> 55: docs/hooks.md (review round 2 — the gate-vs-probe rule needed a
   // page a contributor can find). The trial merge with S-E3-0 was measured at
   // 54, and S-E3-0 adds no files, so this +1 is entirely this branch's.
-  assert.equal(scanned, 55, 'file count changed — confirm nothing left the scan by accident');
+  // 55 -> 57: hooks/scripts/secrets-gate.mjs and its test file (S-E3-3). The
+  // other four files that branch touches were already tracked.
+  //
+  // Worth recording how this tripwire earned its keep rather than just
+  // bumping the number: it went red on CI and not locally, because the local
+  // full run happened BEFORE `git add` and the scanner only sees TRACKED
+  // files. So the two new files were invisible to the very check meant to
+  // notice them. The lesson is about the run order, not about the pin.
+  assert.equal(scanned, 57, 'file count changed — confirm nothing left the scan by accident');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });

@@ -1,0 +1,35 @@
+# Tyran configuration for this repository.
+#
+# Written by /tyran:setup, edited freely by you. Inferred fields carry
+# provenance so you can audit where a value came from:
+#
+#   autonomy:
+#     value: P1
+#     source: 'git log: last 50 merges are PRs, main is protected'
+#     confidence: 0.9
+#     needs_confirmation: false
+#
+# Validate after editing:  node scripts/schema.mjs validate config .tyran/config.yaml
+
+# Cost mode: eco | balanced | full  (see docs/configuration.md)
+profile: balanced
+
+# Deployment autonomy: P1 branch-only · P2 staging · P3 merge to main.
+# Never self-escalated. When in doubt, setup picks P1.
+autonomy: P1
+
+# The ONLY place model names appear. Policy elsewhere is written in role
+# names, so a model deprecation is a one-line change here.
+tiers:
+  top: fable
+  work: opus
+  cheap: haiku
+
+# Repo validation commands, run before anything is called done.
+validation:
+  - npm run lint
+  - npm run typecheck
+  - npm test
+
+# Files multiple agents may touch: append-only, serialized by the conductor.
+shared_zones: []

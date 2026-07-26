@@ -66,3 +66,62 @@ Three artifact classes, enforced by a `PreToolUse` hook on file paths:
   this very list: never touched autonomously.
 
 You can tighten (or loosen) the classification per repo by editing the file.
+
+## Validating your files
+
+The schemas are executable — every file family has a validator that CI and
+`/tyran:doctor` run:
+
+```bash
+node scripts/schema.mjs validate config    .tyran/config.yaml
+node scripts/schema.mjs validate knowledge .tyran/knowledge/*.yaml
+node scripts/schema.mjs validate policy    .tyran/policies/autonomy.yaml
+```
+
+Exit 0 means valid; exit 1 prints one finding per line with the exact path
+(`entries[2].confidence: must be a number in [0, 1]`).
+
+### YAML subset
+
+Tyran parses a deliberately small YAML subset (zero dependencies) and
+**rejects the rest loudly** rather than risk a file meaning something
+different here than under a full YAML engine. Supported: mappings, block
+sequences, inline flow sequences of scalars, quoted strings, comments,
+`---`. Rejected with a line number: anchors/aliases, tags (`!`, `!!`) — in
+keys as well as values — block scalars (`|`, `>`), flow mappings (`{}`),
+nested flow sequences, tabs for indentation, duplicate keys, and multiple
+documents in one file.
+
+Numbers are parsed as decimal integers/floats only: `0x10` and `+5` stay
+strings. Serializing a string containing a newline is a hard error (the
+subset has no block scalars), and values containing ` #` are quoted — a
+round-trip can never change what a file means.
+
+### Knowledge entry schema
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | stable identifier (`K-1`) |
+| `kind` | yes | `fact` · `convention` · `gotcha` · `command` · `decision` |
+| `text` | yes | the rule, in one sentence |
+| `confidence` | yes | 0–1; later retros raise or lower it |
+| `provenance[]` | yes | `{source, reference}` — where it was learned |
+| `used` / `helpful` / `outdated_reports` | no | counters; entries that stop earning their keep get retired |
+| `applies_to[]` | no | path globs this entry is scoped to |
+| `supersedes` | no | id of the entry this one replaces |
+
+`provenance[]` entries need both `source` (where it was learned) and
+`reference` (which run, file or commit proves it).
+
+### Policy precedence
+
+`policies/autonomy.yaml` needs an explicit `default:` class for paths no
+rule matches (`GATED` is the safe answer), and the **most specific matching
+rule wins** — measured by glob length, ties resolved toward the stricter
+class. `**` spans path separators, `*` does not.
+
+Two paths **must** be classified `KERNEL` and the validator rejects any
+policy that downgrades or omits them: `hooks/**` and `.tyran/policies/**`.
+A system that can hand its own enforcement to the AUTO class has no
+enforcement at all — so this boundary can only be tightened, never edited
+away by the loop it constrains.

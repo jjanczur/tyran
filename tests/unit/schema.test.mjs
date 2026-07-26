@@ -360,3 +360,48 @@ test('CLI: a validation message cannot carry invisible characters to the termina
   assert.match(r.stdout, /FAIL/, 'premise: this file must fail validation');
   assert.match(r.stdout, /bad<U\+202E><U\+E0041>key: unknown top-level key/, 'the key must be SHOWN escaped');
 });
+
+test('CLI: a poisoned FILE NAME cannot reach the terminal either', () => {
+  // The second half of the same guarantee, and it had no killed mutant.
+  //
+  // The test above aims at a poisoned KEY inside the file. This module quotes
+  // the FILE NAME two lines away from it, on both the `ok` and the `FAIL`
+  // branch — and a systematic single-site mutation run found both of those
+  // sites SURVIVING at 342/0. That is the round-4 lesson arriving a second
+  // time: the sink was real, the code was already correct, and the test simply
+  // pointed at one of the two halves. A guarantee is only as tested as its
+  // least-covered branch.
+  //
+  // The vector is not hypothetical: a file name is attacker-controlled exactly
+  // like the skill directory name that desc-budget prints, and `schema.mjs
+  // validate` is run over paths a repo supplies.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-schema-name-'));
+  const RLO = String.fromCodePoint(0x202e);
+  const TAG = String.fromCodePoint(0xe0041);
+  const invisibleIn = (text) =>
+    [...text].filter((c) => {
+      const n = c.codePointAt(0);
+      if (n === 0x0a || n === 0x09) return false;
+      return /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u.test(c);
+    });
+
+  // BOTH branches: a valid file takes the `ok` path, an invalid one the `FAIL`
+  // path, and each prints the name through a separate call site.
+  const valid = join(dir, `good${RLO}${TAG}.yaml`);
+  writeFileSync(valid, readFileSync(join(TEMPLATES, 'config.yaml')));
+  const invalid = join(dir, `bad${RLO}${TAG}.yaml`);
+  writeFileSync(invalid, 'profile: turbo\n', 'utf8');
+
+  for (const [label, file, expectMatch] of [
+    ['ok branch', valid, /ok\s+.*good<U\+202E><U\+E0041>\.yaml/],
+    ['FAIL branch', invalid, /FAIL\s+.*bad<U\+202E><U\+E0041>\.yaml/],
+  ]) {
+    const r = spawnSync(process.execPath, [SCRIPT, 'validate', 'config', file], { encoding: 'utf8' });
+    assert.deepEqual(
+      invisibleIn(r.stdout + r.stderr).map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`),
+      [],
+      `an invisible codepoint from the FILE NAME reached the terminal on the ${label}`,
+    );
+    assert.match(r.stdout, expectMatch, `the name must be SHOWN escaped on the ${label}`);
+  }
+});

@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".+|^$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/evidence-gate.mjs\"",
+            "timeout": 20
+          }
+        ]
+      }
     ]
   }
 }

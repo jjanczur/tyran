@@ -782,7 +782,28 @@ export async function pushRange(repo, remote, refs, { runner, timeoutMs }) {
   // `push.default` may well send the current branch and we cannot read that
   // config cheaply. When refspecs ARE named, only those are scanned — which is
   // what makes "push a smaller range" a remedy rather than a slogan.
-  const sources = refs !== undefined && refs.length > 0 ? refs : ['--all'];
+  // A refspec source is whatever the user typed, and git does not have to be
+  // able to resolve it here: `git push origin main` is legal while `main` is
+  // only a remote-tracking name, and the local branch may be called something
+  // else entirely. Handing such a name to `rev-list` makes git exit 128
+  // ("ambiguous argument"), which this gate turns into a refusal whose reason
+  // talks about git rather than about a secret — a refusal that is both wrong
+  // and unactionable. Measured: the private-upstream case refused with
+  // "listing the objects this push would publish failed (git exited 128)".
+  //
+  // So each source is checked, and the ones that do not resolve are dropped.
+  // If that leaves nothing, the range widens back to `--all`. This is the same
+  // rule as the one above for unreadable refspecs: failing to NARROW is safe,
+  // failing to scan is not.
+  const named = refs !== undefined ? refs : [];
+  const usable = [];
+  for (const ref of named) {
+    const r = await runner('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+      timeoutMs,
+    });
+    if (r.spawned === true && r.timedOut !== true && r.code === 0) usable.push(ref);
+  }
+  const sources = usable.length > 0 ? usable : ['--all'];
   return target === null ? sources : [...sources, '--not', `--remotes=${target}`];
 }
 

@@ -876,10 +876,21 @@ test('splitSegments folds a line continuation before splitting', () => {
 
 test('git plumbing is parsed the way git actually frames it', () => {
   const rawDiff = ':100644 100644 aaa bbb M\0src/a.ts\0:000000 100644 0000000 ccc A\0new.ts\0';
-  assert.deepEqual(parseRawDiff(rawDiff), [
-    { sha: 'bbb', path: 'src/a.ts' },
-    { sha: 'ccc', path: 'new.ts' },
-  ]);
+  assert.deepEqual(parseRawDiff(rawDiff), {
+    entries: [
+      { sha: 'bbb', path: 'src/a.ts' },
+      { sha: 'ccc', path: 'new.ts' },
+    ],
+    malformed: 0,
+  });
+  // The count is the whole point of the shape change: a record this parser
+  // cannot frame used to be skipped silently, and a skipped record is a file
+  // that never reaches the scanner while the coverage check still agrees with
+  // itself. `malformed` is what lets the caller refuse instead.
+  assert.deepEqual(parseRawDiff(':100644 100644 aaa bbb M\0src/a.ts\0garbage\0'), {
+    entries: [{ sha: 'bbb', path: 'src/a.ts' }],
+    malformed: 1,
+  });
   const batch = Buffer.concat([Buffer.from('abc blob 5\nhello\n'), Buffer.from('def blob 2\nhi\n')]);
   assert.deepEqual(
     parseCatFileBatch(batch).map((r) => [r.sha, r.type, r.body.toString()]),

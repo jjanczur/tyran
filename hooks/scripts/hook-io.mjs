@@ -378,6 +378,12 @@ export function writeFully(text, sink) {
       // A momentarily full pipe is not a failure, it is back-pressure. Retry
       // a bounded number of times rather than spinning forever or reporting
       // a decision we only half wrote.
+      // Retried with NO delay, deliberately. Everything written here fits in
+      // the platform's 10 000-character budget, which is a handful of
+      // syscalls on any real pipe, so sustained back-pressure cannot occur —
+      // and a sleep would spend part of a gate's deadline waiting for a
+      // condition that is not there. If this ever guards a larger payload,
+      // that reasoning stops holding and the retry needs a backoff.
       if ((err?.code === 'EAGAIN' || err?.code === 'EWOULDBLOCK') && spins++ < WRITE_SPIN_LIMIT) {
         continue;
       }
@@ -390,6 +396,10 @@ export function writeFully(text, sink) {
       continue;
     }
     offset += written;
+    // Patience is per stall, not per write. Without this reset the counter
+    // accumulates across a whole payload, so a long write interleaved with
+    // legitimate back-pressure eventually reports a healthy pipe as dead.
+    spins = 0;
   }
   return offset;
 }
@@ -467,15 +477,23 @@ function refusalText({ errorClass, message, fix }) {
  *    catch it: the timer callback is a macrotask and the handler's return
  *    settles in a microtask, so the verdict wins the race.
  *  - **NOT enforced.** A handler that blocks the thread and never returns.
- *    Node is single-threaded; nothing on this thread runs while it spins, the
- *    platform eventually SIGKILLs the process, and a killed hook produces no
- *    output — the action proceeds. There is no in-process fix. The mitigation
- *    is a rule for gate authors, in `docs/hooks.md`: a gate does no unbounded
- *    synchronous work, and every file it reads is size-checked first. If that
- *    is ever not enough, the fix is a hard-killed child process or a
- *    worker-thread watchdog claiming the write through `Atomics`, both of
- *    which cost real latency on every tool call and neither of which is
- *    justified by anything measured so far.
+ *    Node is single-threaded, so nothing on this thread runs while it spins
+ *    and the platform eventually kills the process.
+ *
+ *    Do not reach for the obvious workaround. Measured on a live run: a hook
+ *    that wrote a complete, valid refusal to stdout and only THEN blocked
+ *    past its timeout was ignored, and the tool ran. The kill and the abort
+ *    are the same event, and the consumer returns on `aborted` BEFORE it
+ *    parses stdout — the bytes are collected, even logged, and never read.
+ *    **Emitting earlier buys nothing.** Only making the process actually
+ *    EXIT before the platform's timeout closes this case, which is why every
+ *    ending in this file writes and then exits.
+ *
+ *    So the mitigation is a rule for gate authors, in `docs/hooks.md`: a gate
+ *    does no unbounded synchronous work, and every file it reads is
+ *    size-checked first. The remaining escape hatch is a hard-killed child
+ *    process — real latency on every tool call, and nothing measured so far
+ *    justifies it.
  */
 export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) {
   if (!isKnownEvent(event)) throw new GateOnProbeEventError(String(event));
@@ -697,10 +715,33 @@ export async function runProbe({ event, handler, deadlineMs, io = defaultIo() })
   }
 
   let done = false;
+  /**
+   * Symmetric with `runGate.emit`, for one specific reason rather than for
+   * tidiness: this is also called from the deadline timer's callback, and an
+   * unguarded `io.write` that throws there escapes as an UNHANDLED exception.
+   * The user would get a Node stack trace at session start where a one-line
+   * note belonged. A probe may fail quietly; it may not fail loudly.
+   *
+   * Unlike the gate, a failed write here still ends in exit 0. There is no
+   * decision to preserve — only context that will not arrive — and a probe
+   * must never be the reason a session does not start.
+   */
   const emit = (payload) => {
     if (done) return;
+    const text = JSON.stringify(payload) + '\n';
+    try {
+      io.write(text);
+    } catch (err) {
+      done = true;
+      try {
+        io.warn(`tyran ${event}: could not write its context (${err?.code ?? err?.message ?? String(err)})\n`);
+      } catch {
+        /* nothing left to complain with */
+      }
+      io.exit(0);
+      return;
+    }
     done = true;
-    io.write(JSON.stringify(payload) + '\n');
     io.exit(0);
   };
   const note = (text) => {

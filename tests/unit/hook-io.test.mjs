@@ -406,9 +406,13 @@ test('the deadline discards a LATE verdict, whichever way the handler was late',
   // The async twin of MUST-PASS 1: a handler that yields but finishes past
   // the budget must not have its answer used either.
   const io = fakeIo(inputFor('SubagentStop'));
+  // The budget here is deliberately generous. The elapsed clock starts before
+  // stdin is read, so a tight number would make this test a load detector
+  // rather than a deadline test — and a gate suite that goes red on a busy
+  // machine is a gate suite somebody switches off.
   await runGate({
     event: 'SubagentStop',
-    deadlineMs: 25,
+    deadlineMs: 2000,
     io,
     handler: () => new Promise((r) => setTimeout(() => r(PASS), 5)),
   });
@@ -468,6 +472,27 @@ test('writeFully retries back-pressure but refuses to spin forever on a dead sin
     /stalled/,
     'a sink that never makes progress must throw, not hang the session',
   );
+});
+
+test('writeFully counts patience per stall, not per payload', () => {
+  // Review round 3. The spin counter used to accumulate across the whole
+  // write, so a long payload interleaved with LEGITIMATE back-pressure
+  // eventually reported a perfectly healthy pipe as dead. Every byte here is
+  // preceded by one EAGAIN, which is normal behaviour, and the total exceeds
+  // the spin limit — so only a counter that resets on progress survives.
+  const size = 11000;
+  let pending = false;
+  const out = [];
+  writeFully('z'.repeat(size), (buf, off) => {
+    if (!pending) {
+      pending = true;
+      throw Object.assign(new Error('EAGAIN'), { code: 'EAGAIN' });
+    }
+    pending = false;
+    out.push(buf[off]);
+    return 1;
+  });
+  assert.equal(out.length, size, 'a healthy pipe that pauses often must not be declared dead');
 });
 
 // --------------------------------------------------------------- truncation
@@ -641,6 +666,27 @@ test('a probe that overruns its deadline yields an empty context, not an error',
   });
   assert.deepEqual(soleOutput(io), {});
   assert.match(io.err.join(''), /gave up after 15 ms/);
+});
+
+test('a probe whose stdout write fails degrades quietly, even from the timer', async () => {
+  // Review round 3. `runProbe.emit` kept the round-1 shape, so a throwing
+  // write inside the DEADLINE CALLBACK escaped as an unhandled exception and
+  // the user got a Node stack trace at session start where a note belonged.
+  // The handler here settles after the deadline, so the timer emits first —
+  // which is exactly the path that used to throw.
+  const io = fakeIo(inputFor('SessionStart'));
+  io.write = () => {
+    throw Object.assign(new Error('EPIPE: broken pipe, write'), { code: 'EPIPE' });
+  };
+  await runProbe({
+    event: 'SessionStart',
+    deadlineMs: 10,
+    io,
+    handler: () => new Promise((r) => setTimeout(() => r('context that never arrives'), 60)),
+  });
+  await new Promise((r) => setTimeout(r, 90));
+  assert.deepEqual(io.codes, [0], 'a probe never costs the user their session');
+  assert.match(io.err.join(''), /could not write its context \(EPIPE\)/);
 });
 
 test('a probe clamps its injection to the platform limit and reports the cut', async () => {

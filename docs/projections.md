@@ -160,6 +160,20 @@ Two details worth knowing:
     projection is a *summary* rather than a faithful reproduction of source
     text. It costs **zero** false findings on ordinary content — measured on
     66 MB of multilingual text, 392 766 non-ASCII characters, no new hits.
+  - **Escaping is a content-suppression lever, and a cheap one.** One
+    invisible codepoint becomes eight visible characters, so a prefix of a
+    dozen hostile characters expands ~17x and pushes the rest of a cell past
+    the 160-codepoint cap and behind the ellipsis. A journal value can
+    therefore hide *legitimate* text from a reader without hiding anything
+    invisibly. This is a real trade against the blanking it replaced, taken
+    because the failure is now **visible** — the reader sees escapes and an
+    ellipsis and knows the value was tampered with — where silent deletion
+    left a value that looked ordinary and complete.
+  - **The session-start budget is measured AFTER escaping.** Expansion used to
+    happen downstream of `fitBudget`, so a hostile journal shipped 9 880
+    characters of injected context against a 2 000-character budget. The
+    escaping now happens in `renderContext`, before the budget is applied, so
+    the length the budget sees is the length that ships.
   - `journal.mjs`'s own CLI escapes the same characters as JSON `\uXXXX`
     instead, because that output is machine-readable and this repo parses it
     back; `JSON.parse` of the escaped form is deep-equal to the original.

@@ -610,6 +610,13 @@ const CMD_FLAGS = {
  * MACHINE-READABLE and this repo parses it back. `JSON.parse` of the result is
  * deep-equal to the input, so safety costs no fidelity here — a test asserts
  * the round trip rather than trusting the claim.
+ *
+ * The round-trip guarantee is about the JSON subcommands, and `next-id` is not
+ * one of them: it prints a bare identifier, so there is nothing to parse back.
+ * It still goes through here rather than being the one sink that does not,
+ * because "this one is safe by construction" is how a sink gets forgotten when
+ * the construction changes. Its own safety is separately guaranteed: `nextId`
+ * rejects any prefix outside `[A-Za-z][A-Za-z0-9]*` before it builds a value.
  */
 function emit(value, indent) {
   return jsonEscapeInvisible(typeof value === 'string' ? value : JSON.stringify(value, null, indent));

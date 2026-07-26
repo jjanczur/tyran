@@ -173,6 +173,20 @@ const bmp = new Uint8Array(0x10000);
 const astral = new Map();
 const ASTRAL_CACHE_LIMIT = 1 << 16;
 
+/**
+ * How many entries the astral memo currently holds, and its ceiling.
+ *
+ * Exported ONLY so the boundedness guarantee can be tested. Without it the
+ * test could assert that answers survive a recycle but not that a recycle ever
+ * happens — and a test whose NAME promises boundedness while its body checks
+ * only correctness is the "documented guarantee with no guard" shape this
+ * story exists to remove. Removing the `clear()` used to leave the whole suite
+ * green; now it does not.
+ */
+export function astralMemoStats() {
+  return { size: astral.size, limit: ASTRAL_CACHE_LIMIT };
+}
+
 /** The label a codepoint gets when only the property rule caught it. */
 const PROPERTY_LABEL = 'invisible or non-printing character (Unicode default-ignorable / control / format)';
 

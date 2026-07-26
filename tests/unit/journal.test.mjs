@@ -1,8 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  appendFileSync,
+  symlinkSync,
+  realpathSync,
+  mkdirSync,
+  rmdirSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   EVENT_TYPES,
@@ -520,4 +530,155 @@ test('ADR-18 under a real race: 12 concurrent processes, exactly one spawn survi
   const result = validateJournal(f);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.warnings, []);
+});
+
+// --- review round 2: the five mutants that survived the first suite -----
+
+// B1. A guard degraded to "look at the previous event only" passed all 36
+// tests, because every duplicate in them sat next to its original. This is
+// exactly the difference between a guarantee and a heuristic.
+test('ADR-18: a duplicate separated from its original is still rejected', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  append(f, spawnEv('impl-2'));
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+  append(f, reportEv('impl-2')); // a report for ANOTHER name closes nothing here
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+  append(f, ev({ ev: 'error', data: { class: 'noise' } })); // unrelated events either
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['impl-1']);
+  assert.equal(query(f, { ev: 'spawn' }).length, 2);
+});
+
+// B2. "warnings never change the exit code" is a documented promise and the
+// backward-compatibility rule for pre-guard journals — pin it at the CLI.
+test('CLI: validate on a legacy duplicate exits 0 and still lists the warning', () => {
+  const f = tmp();
+  const line = (ts) => JSON.stringify({ ...spawnEv('impl-1'), ts });
+  writeFileSync(f, `${line('2026-07-26T10:00:00.000Z')}\n${line('2026-07-26T10:05:00.000Z')}\n`);
+  // execFileSync throws on a non-zero exit — this call IS the exit-0 assertion
+  const parsed = JSON.parse(execFileSync(process.execPath, [SCRIPT, 'validate', f], { encoding: 'utf8' }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.errors, []);
+  assert.equal(parsed.warnings.length, 1);
+  assert.match(parsed.warnings[0], /"impl-1" has 2 open spawns/);
+});
+
+// B3. The hint is what an autonomous caller executes. Names may legally
+// contain spaces, apostrophes or a leading dash — run what we print.
+test('the printed recovery commands actually run, for hostile agent names', () => {
+  for (const agent of ['my agent', "o'brien", '--reason']) {
+    const label = JSON.stringify(agent);
+    const f = tmp();
+    append(f, spawnEv(agent));
+    let msg = '';
+    try {
+      append(f, spawnEv(agent));
+    } catch (e) {
+      msg = e.message;
+    }
+    assert.match(msg, /already has an open spawn/, label);
+    const lines = msg.split('\n');
+    const asShell = (cmd) => cmd.replace('node scripts/journal.mjs', `node '${SCRIPT}'`);
+
+    // 1. the "record its report" hint (two lines, backslash continuation)
+    const ai = lines.findIndex((l) => l.includes('journal.mjs append'));
+    const appendCmd = asShell(`${lines[ai]}\n${lines[ai + 1]}`).replace('<verdict>', 'done');
+    execFileSync('/bin/sh', ['-c', appendCmd], { stdio: 'pipe' });
+    assert.deepEqual(openSpawns(f), [], `append hint did not close ${label}`);
+
+    // 2. the "close it explicitly" hint, on a fresh open spawn
+    const g = tmp();
+    append(g, spawnEv(agent));
+    let msg2 = '';
+    try {
+      append(g, spawnEv(agent));
+    } catch (e) {
+      msg2 = e.message;
+    }
+    const closeCmd = asShell(
+      msg2.split('\n').find((l) => l.includes('close-spawn')).trim(),
+    ).replace('<why>', 'died in a fire');
+    execFileSync('/bin/sh', ['-c', closeCmd], { stdio: 'pipe' });
+    assert.deepEqual(openSpawns(g), [], `close-spawn hint did not close ${label}`);
+    assert.equal(query(g, { ev: 'report' }).at(-1).data.reason, 'died in a fire');
+    assert.equal(query(g, { ev: 'report' }).at(-1).init, 'demo'); // real init, not "<init>"
+  }
+});
+
+test('CLI: an agent named like a flag is closable via the POSIX -- separator', () => {
+  const f = tmp();
+  const run = (...args) => execFileSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+  run('append', f, 'spawn', 'demo', '--data', JSON.stringify({ agent: '--reason', role: 'r' }));
+  assert.equal(JSON.parse(run('open-spawns', f))[0].agent, '--reason');
+  run('close-spawn', f, '--reason', 'stuck otherwise', 'demo', '--', '--reason');
+  assert.deepEqual(JSON.parse(run('open-spawns', f)), []);
+  run('append', f, 'spawn', 'demo', '--data', JSON.stringify({ agent: '--reason', role: 'r' }));
+  assert.equal(JSON.parse(run('open-spawns', f)).length, 1); // the name is usable again
+});
+
+// B4. The "unusable agent name" warning branch had no coverage at all.
+test('validate warns about agent names that cannot serve as a correlator', () => {
+  const f = tmp();
+  const bad = { ts: '2026-07-26T10:00:00.000Z', ev: 'spawn', init: 'demo', actor: 'c', data: { agent: ' worker', role: 'r' } };
+  writeFileSync(f, JSON.stringify(bad) + '\n');
+  const result = validateJournal(f);
+  assert.equal(result.ok, true); // still not an error: reads never break
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /unusable data\.agent/);
+  assert.match(result.warnings[0], /leading\/trailing whitespace/);
+  assert.deepEqual(openSpawns(f), []); // excluded from pairing, never half-trusted
+});
+
+// B5. close-spawn is the way OUT of a deadlock; nothing pinned that it goes
+// through the ordinary append path (a direct appendFileSync passed 36 tests).
+test('close-spawn writes through the ordinary append path (validated, clamped, healed)', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1', { ts: '2099-01-01T00:00:00.000Z' }));
+  // crash remnant: no trailing newline
+  appendFileSync(f, '{"ts":"2099-01-02T00:00:00.000Z","ev":"report","init":"demo","actor":"c","data":{"agent":"impl-1","verd');
+  const written = closeSpawn(f, { init: 'demo', agent: 'impl-1', reason: 'died' });
+  assert.equal(written.ts, '2099-01-01T00:00:00.000Z'); // ts CLAMPED, not "now"
+  const { events } = readJournal(f);
+  assert.equal(events.at(-1).data.closed_by, 'close-spawn'); // survived: newline HEALED
+  assert.deepEqual(validateEvent(events.at(-1)), []);
+  assert.ok(!validateJournal(f).errors.some((e) => /earlier than previous/.test(e)));
+  // and it is VALIDATED like every other event, writing nothing when invalid
+  append(f, spawnEv('impl-2', { ts: '2099-01-03T00:00:00.000Z' }));
+  const bytes = readFileSync(f);
+  assert.throws(() => closeSpawn(f, { init: '', agent: 'impl-2', reason: 'y' }), /invalid event: init/);
+  assert.deepEqual(readFileSync(f), bytes);
+});
+
+// B6. The lock is keyed by the canonical path, so an alias cannot buy a
+// second lock. Asserted on the lock itself, not on a race outcome: a race
+// only *sometimes* exposes the second lock, and evidence that only sometimes
+// appears is not evidence. (Hard links still alias — documented, not fixed.)
+test('the lock is keyed by the canonical path: a symlink alias cannot buy a second lock', async () => {
+  const f = tmp();
+  append(f, ev({ ev: 'init.created', data: {} }));
+  const link = `${f}.link`;
+  symlinkSync(f, link);
+  const heldLock = `${realpathSync(f)}.lock`;
+  mkdirSync(heldLock); // a live writer holds the lock through the REAL path
+  try {
+    const child = spawn(process.execPath, [
+      SCRIPT, 'append', link, 'spawn', 'demo', '--data', '{"agent":"racer","role":"r"}',
+    ]);
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    await sleep(900); // node starts in ~130ms (see the race test): far more than enough
+    assert.equal(
+      child.exitCode,
+      null,
+      `append through the symlink ignored the lock held on the real path (exit ${child.exitCode}, stdout: ${out})`,
+    );
+    child.kill('SIGKILL');
+    await new Promise((res) => child.on('close', res));
+  } finally {
+    rmdirSync(heldLock);
+  }
+  assert.equal(query(f, { ev: 'spawn' }).length, 0); // nothing slipped past the lock
+  append(link, spawnEv('racer')); // and the alias writes into the very same file
+  assert.equal(query(f, { ev: 'spawn' }).length, 1);
 });

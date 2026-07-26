@@ -1,6 +1,6 @@
 # Journal reference
 
-> **Status:** shipped — `scripts/journal.mjs` with 36 unit tests. This file
+> **Status:** shipped — `scripts/journal.mjs` with 43 unit tests. This file
 > is the schema contract; extending the event set is a reviewed core change.
 
 The journal is the append-only source of truth for an initiative:
@@ -45,11 +45,20 @@ The journal is the append-only source of truth for an initiative:
 - **Crash-safe reads:** a truncated final line (crash mid-write) is discarded
   and flagged (`truncatedTail`); corruption anywhere else is a loud
   validation error, never silent loss.
+- **Append-safe writes:** an append onto a file whose last line lost its
+  newline (a crash mid-write) starts a new line instead of fusing onto the
+  remnant — the new event is never silently swallowed, and the remnant stays
+  visible as corruption. *Edge case:* a file containing **only** a BOM and no
+  newline gains a leading empty line on the next append, which `validate`
+  then reports as corruption on line 1. A journal is only ever created by
+  `append`, which never produces that file.
 - **Concurrency-safe stamping:** appends take a cross-process lock (atomic
-  `mkdir`; stale locks stolen after 10 s) and auto-stamped timestamps are
-  clamped to the journal's last event — concurrent writers cannot produce a
-  timestamp regression *by construction*. An explicitly provided `ts` is
-  caller-owned; `validate` flags regressions after the fact.
+  `mkdir`, keyed by the canonical path; stale locks stolen after 10 s) and
+  auto-stamped timestamps are clamped to the journal's last event —
+  concurrent writers cannot produce a timestamp regression *by construction*.
+  An explicitly provided `ts` is caller-owned; `validate` flags regressions
+  after the fact. The lock's limits are spelled out under "Exactly how far
+  that reaches" below; they apply to this guarantee too.
 - **One open spawn per agent name** (ADR-18): `append` refuses a `spawn`
   whose agent already has a `spawn` with no `report` — see below.
 - **Lease protocol honesty:** a `lease.released` by a non-holder does not
@@ -70,9 +79,32 @@ exist in the first place (ADR-18):
 
 **`append` rejects a `spawn` whose agent name already has an open spawn in
 that journal** (open = a `spawn` with no matching `report` yet). The check
-runs under the same lock and on the same read as the write, so two
-simultaneous writers cannot both pass it — 12 concurrent processes appending
-the same name produce exactly one event and 11 loud failures.
+runs under the same lock and on the same read as the write, so two writers
+racing through `append` cannot both pass it: 12 concurrent processes
+appending the same name produce exactly one event and 11 loud failures.
+
+**Exactly how far that reaches.** The guarantee holds for writes that go
+through `append`, while the lock does its job. It is not absolute, and the
+gaps are known rather than hypothetical:
+
+- **Hand-editing `journal.jsonl` bypasses everything.** `validate` warnings
+  are how you find out (below).
+- **A writer suspended inside the critical section can have its lock stolen**
+  (`SIGSTOP`, laptop sleep, heavy swap: the holder freezes while the lock's
+  mtime ages past the 10 s staleness threshold). Two writers then proceed and
+  both can append — measured, two open spawns for one name. The same window
+  can make `append` *write the event and still throw*, because the stolen
+  lock directory is gone by the time it is released; a caller that retries
+  on that error can produce a second event. The fix is an owner token inside
+  the lock directory, verified before the write and before the release —
+  deliberately **not** part of this change: `withLock` is used by every
+  script in the core and the change deserves its own review.
+- **A hard link to the journal still buys a second lock.** The lock is keyed
+  by the file's canonical path, so symlinks (to the file or to a parent
+  directory) are collapsed and share one lock. Hard links have no shared
+  canonical path — keying by `(dev, ino)` would be needed. Reaching one
+  journal through two hard links is not something the tooling does; it is
+  listed because the guarantee would otherwise read as stronger than it is.
 
 Consequences you will meet in practice:
 
@@ -103,7 +135,18 @@ node scripts/journal.mjs close-spawn .tyran/state/demo/journal.jsonl demo impl-1
 ```
 
 There is no `--force` and no flag that skips the guard: the only way to open
-a name again is to record what happened to the previous spawn.
+a name again is to record what happened to the previous spawn. The message
+you get when a duplicate is rejected prints both commands with the real
+initiative slug and shell-quoted arguments, ready to paste.
+
+A name may legally start with `-` (it is only refused for the reasons listed
+above). Pass it after the POSIX end-of-options separator, with the flags
+first — otherwise the CLI would read the name as a flag and the agent could
+be spawned but never closed:
+
+```bash
+node scripts/journal.mjs close-spawn journal.jsonl --reason "why" demo -- --reason
+```
 
 ### Journals written before the guard
 

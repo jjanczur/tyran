@@ -739,6 +739,8 @@ test('THIS repository scans clean end to end', () => {
   // while a file quietly left the scan. Any change to either number now has
   // to be made on purpose, in this file, where a reviewer will see it.
   // 45 -> 48: scripts/doctor.mjs, tests/unit/doctor.test.mjs, docs/doctor.md.
-  assert.equal(scanned, 48, 'file count changed — confirm nothing left the scan by accident');
+  // 48 -> 54: hooks/hooks.json, hooks/HOOK-CONTRACT-MEASURED.md,
+  // hooks/scripts/{hook-io,session-start}.mjs and their two test files.
+  assert.equal(scanned, 54, 'file count changed — confirm nothing left the scan by accident');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });

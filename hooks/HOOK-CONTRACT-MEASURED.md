@@ -17,16 +17,24 @@ when any of these happen:
 
 | what happens | result |
 |---|---|
-| the hook file is missing or not executable | spawn throws, caught, **action proceeds** |
+| the hook file is missing or not executable | the command runs under `shell: true`, so **the shell** exits 127 / 126 with empty stdout; that lands in the "non-blocking status code" branch and the **action proceeds** |
 | stdout is not JSON at all (does not start with `{`) | treated as plain text, **proceeds** |
 | stdout is JSON but fails the output schema | validation error, **proceeds** |
-| `hookSpecificOutput.hookEventName` differs from the fired event | the platform **throws while reading our output**, caught, **proceeds** |
-| the hook is killed at its `timeout` | output discarded, **proceeds** |
-| an exception is thrown while *selecting* which hooks to run | selection returns `[]`, so **every hook silently disappears** |
+| `hookSpecificOutput.hookEventName` differs from the fired event | the platform **throws while reading our output**, caught, **proceeds** (only when `hookSpecificOutput` is present at all — see §3) |
+| the hook is killed at its `timeout` | killed with `SIGKILL`; measured `rc=137`, **stdout empty**, **proceeds** |
+| an exception escapes hook *selection* | the selector is wrapped in `try { … } catch { return [] }`, so **every hook for that event disappears** with no transcript entry |
 
-The last row answers one of ADR-22's open questions: yes, a missing hook file
-disables that gate silently. It is a real attack surface on the plugin
-itself, and the answer is not inside a hook.
+Two corrections to how this was first written, both worth stating because the
+wrong mechanism leads to the wrong fix:
+
+- a missing hook file does **not** make `spawn` throw. There is no
+  pre-existence check; `shell: true` means the shell reports it. The
+  conclusion for ADR-22's open question is unchanged — a deleted hook file
+  disables that gate silently, and the answer cannot live inside a hook.
+- an **invalid regex in a matcher is not** one of the exceptions that empties
+  the selector. It is caught locally inside the matcher predicate, which
+  returns `false` and logs at debug level. The gate still disappears, but
+  only that one, and for a different reason (§5).
 
 ## 2. Exit codes: the documented rule is incomplete
 
@@ -53,6 +61,16 @@ There is **no variant for `Stop`, `SubagentStop`, `PreCompact` or
 discarded. Those events refuse through top-level `decision: "block"` +
 `reason`. This is why `deny()` has to know the event.
 
+Two refinements measured after the first draft:
+
+- the "wrong `hookEventName` throws" check runs **only if `hookSpecificOutput`
+  is present at all**. Top-level `decision` + `reason` is not subject to it,
+  so the decision-shaped events are safe from that failure *by construction*,
+  not by our carefulness.
+- `decision: "block"` on **`SubagentStop` is confirmed live**, not inferred:
+  the subagent was stopped and the parent turn resumed with the reason in
+  context. This is the event the evidence gate will stand on.
+
 ## 4. `permissionDecision: "allow"` is not "no objection"
 
 It sets the permission behaviour to *allow*, i.e. it **auto-approves the tool
@@ -65,23 +83,62 @@ This runtime has no way to emit it. "No objection" is `{}`.
 
 ## 5. Matcher syntax — one predicate for every event
 
+Transcribed in full, including the alias normalisation an earlier draft of
+this file dropped. `normalise` is a lookup in the tool-alias table (identity
+for anything that is not an aliased tool name), and `aliasesOf` is its
+reverse, so a regex matcher is tried against the query *and* against every
+name that aliases to it:
+
 ```
 if (!matcher || matcher === "*") return true;
 if (/^[a-zA-Z0-9_|]+$/.test(matcher))
-    return matcher.includes("|") ? matcher.split("|").includes(query)
-                                 : query === matcher;
-try { return new RegExp(matcher).test(query) } catch { return false }
+    return matcher.includes("|")
+        ? matcher.split("|").map(k => normalise(k.trim())).includes(query)
+        : query === normalise(matcher);
+try {
+    const re = new RegExp(matcher);                 // NOT anchored
+    if (re.test(query)) return true;
+    for (const alias of aliasesOf(query)) if (re.test(alias)) return true;
+    return false;
+} catch { return false }
 ```
 
-Three consequences the documented table does not state:
+Consequences the documented table does not state:
 
 1. **`SessionStart` accepts alternation.** `startup|resume|compact` is a
    single valid entry; three separate entries are unnecessary.
 2. The exact-list character class is `[a-zA-Z0-9_|]` — **no spaces, hyphens
-   or commas.** `Edit, Write` or `my-tool` fall through to the *regex*
-   branch, which is unanchored and matches far more than it looks like.
-3. An invalid regex matches **nothing** and only writes a debug line. A typo
-   in a matcher removes the gate without any visible failure.
+   or commas.** Anything containing them silently becomes a *regex*, and that
+   produces **two opposite failure modes**, not one. Measured:
+
+   | matcher | query | result | |
+   |---|---|---|---|
+   | `tyran-implementer` | `evil-tyran-implementer-nope` | `true` | matches **too much** — regexes are unanchored |
+   | `Edit, Write` | `Write` | `false` | matches **nothing at all** |
+   | `Edit, Write` | `Edit` | `false` | matches **nothing at all** |
+   | `Edit\|Write` | `Write` | `true` | the list syntax, which is what was meant |
+   | `[unclosed` | anything | `false` | invalid regex, caught locally |
+
+   The second mode is the dangerous one and it is the one that looks
+   harmless: a comma-and-space list is valid JSON, reads like a list, appears
+   in the manifest, validates — and **never fires**. A gate that silently
+   matches nothing is indistinguishable from a gate that is installed.
+3. An invalid regex matches **nothing** and only writes a debug line. It does
+   not disable other hooks; the failure is local to that matcher. A typo
+   removes exactly one gate, invisibly.
+
+## 5a. Which events actually fire, and when
+
+- **`TaskCompleted` fires only in TEAM mode.** The platform raises it for the
+  in-progress tasks of the current teammate. Under plain subagent
+  orchestration it never fires, so a check placed only there is an **absent**
+  control, not a weak one. `hook-io.mjs` marks it `teamModeOnly: true` in
+  `EVENTS` and a test pins the flag; it stays available because it does
+  refuse when it does fire.
+- **`SubagentStop` with an empty `agent_type` bypasses matcher filtering
+  entirely** and runs every hook registered for the event. A matcher there is
+  a narrowing that cannot be relied on — treat it as a hint, and re-check the
+  agent identity inside the gate.
 
 ## 6. Sizes, timeouts, execution
 

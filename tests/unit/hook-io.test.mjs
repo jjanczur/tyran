@@ -27,6 +27,7 @@ import {
   runGate,
   runProbe,
   sanitizeForOutput,
+  writeFully,
 } from '../../hooks/scripts/hook-io.mjs';
 
 /** A recording stand-in for stdin/stdout/stderr/exit. */
@@ -149,6 +150,23 @@ test('an unknown event is refused as a registration, not answered', async () => 
     () => runGate({ event: 'NoSuchEvent', handler: () => PASS, deadlineMs: 100, io: fakeIo('{}') }),
     GateOnProbeEventError,
   );
+});
+
+test('TaskCompleted is marked as firing only in team mode', () => {
+  // Measured in v2.1.116: the event is raised for the in-progress tasks of
+  // the current teammate. In subagent mode it never fires, so a check placed
+  // only there is an ABSENT control — the same class as a matcher that
+  // silently matches nothing. It stays in the table because it can refuse
+  // when it does fire; the caveat has to live in the type, not in a comment.
+  assert.equal(EVENTS.TaskCompleted.canBlock, true);
+  assert.equal(EVENTS.TaskCompleted.teamModeOnly, true);
+  for (const event of ['PreToolUse', 'SubagentStop', 'Stop', 'PreCompact', 'UserPromptSubmit']) {
+    assert.notEqual(
+      EVENTS[event].teamModeOnly,
+      true,
+      `${event} must not be marked team-only; a gate needs somewhere that always fires`,
+    );
+  }
 });
 
 test('canBlock agrees with the ADR-22 table', () => {
@@ -302,6 +320,51 @@ test('failure mode: the process ends before a verdict -> refusal, not empty stdo
   assert.equal(io.out.length, 1, 'the deadline must not write a second decision after the guard');
 });
 
+test('MUST-PASS 1: synchronous work past the deadline must refuse, not approve', async () => {
+  // Review round 2, blocker 1. A timer callback is a MACROtask; a handler
+  // that returns after blocking the thread resolves its promise in a
+  // MICROtask, so `emit(PASS)` wins the race and the deadline callback finds
+  // the decision already made. The gate overran its budget fifteenfold and
+  // approved. Whatever the deadline promises, it cannot promise less than
+  // "a verdict produced after the budget is not a verdict".
+  const io = fakeIo(inputFor('PreToolUse'));
+  await runGate({
+    event: 'PreToolUse',
+    deadlineMs: 20,
+    io,
+    handler: () => {
+      const t = Date.now();
+      while (Date.now() - t < 300) {
+        /* CPU-bound, yields nothing */
+      }
+      return PASS;
+    },
+  });
+  const payload = soleOutput(io);
+  assert.equal(payload.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(payload.hookSpecificOutput.permissionDecisionReason, /deadline-exceeded/);
+});
+
+test('MUST-PASS 2: a failed stdout write must end loudly, not with a silent exit 0', async () => {
+  // Review round 2, blocker 2. `done = true` used to be set BEFORE the write.
+  // A throwing write then left the catch clause calling a refusal that
+  // returned immediately, the exit guard likewise — and the process ended
+  // with exit 0, no stdout and no stderr. That is the quietest possible
+  // approval, produced by the ordering of two statements.
+  const io = fakeIo(inputFor('PreToolUse'));
+  io.write = () => {
+    throw Object.assign(new Error('EBADF: bad file descriptor, write'), { code: 'EBADF' });
+  };
+  await runGate({
+    event: 'PreToolUse',
+    deadlineMs: 500,
+    io,
+    handler: () => ({ decision: 'deny', reason: 'secret in the command' }),
+  });
+  assert.deepEqual(io.codes, [2], 'exit 2 is the only ending left that still blocks');
+  assert.match(io.err.join(''), /secret in the command/, 'stderr becomes the blocking reason');
+});
+
 test('a gate never exits non-zero: only exit 0 carries a decision', async () => {
   const cases = ['', 'not json', '[]', inputFor('PreToolUse')];
   for (const raw of cases) {
@@ -339,7 +402,85 @@ test('nothing this runtime can emit ever auto-approves a tool call', async () =>
   for (const raw of seen) assert.doesNotMatch(raw, /"allow"/);
 });
 
+test('the deadline discards a LATE verdict, whichever way the handler was late', async () => {
+  // The async twin of MUST-PASS 1: a handler that yields but finishes past
+  // the budget must not have its answer used either.
+  const io = fakeIo(inputFor('SubagentStop'));
+  await runGate({
+    event: 'SubagentStop',
+    deadlineMs: 25,
+    io,
+    handler: () => new Promise((r) => setTimeout(() => r(PASS), 5)),
+  });
+  assert.deepEqual(soleOutput(io), {}, 'a handler inside its budget still passes');
+
+  const late = fakeIo(inputFor('SubagentStop'));
+  await runGate({
+    event: 'SubagentStop',
+    deadlineMs: 5000,
+    io: late,
+    handler: async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      const t = Date.now();
+      while (Date.now() - t < 60) {
+        /* blocks past a budget the timer cannot enforce */
+      }
+      return PASS;
+    },
+  });
+  assert.deepEqual(soleOutput(late), {}, 'inside a generous budget the same handler passes');
+});
+
+test('an event this runtime does not model ends loudly rather than in a shape the platform rejects', async () => {
+  const io = fakeIo(inputFor('SomeFutureEvent'));
+  await runGate({ event: 'PreToolUse', deadlineMs: 500, io, handler: () => PASS });
+  assert.deepEqual(io.codes, [2]);
+  assert.equal(io.out.length, 0, 'guessing a hookEventName is what fails open');
+  assert.match(io.err.join(''), /does not model/);
+});
+
+test('writeFully keeps writing until the whole decision is out', () => {
+  // writeSync may take fewer bytes than it is given. Ignoring its return
+  // value produces truncated JSON, which fails the platform's schema, which
+  // discards the output — a refusal cut in half is an approval.
+  const chunks = [];
+  const written = writeFully('{"decision":"block"}\n', (buf, off) => {
+    chunks.push(buf[off]);
+    return 1; // one byte at a time, the worst honest sink
+  });
+  assert.equal(written, 21);
+  assert.equal(Buffer.from(chunks).toString('utf8'), '{"decision":"block"}\n');
+});
+
+test('writeFully retries back-pressure but refuses to spin forever on a dead sink', () => {
+  let calls = 0;
+  const out = [];
+  writeFully('abc', (buf, off, len) => {
+    calls++;
+    if (calls <= 2) throw Object.assign(new Error('EAGAIN'), { code: 'EAGAIN' });
+    out.push(buf.subarray(off, off + len).toString('utf8'));
+    return len;
+  });
+  assert.equal(out.join(''), 'abc', 'a momentarily full pipe is back-pressure, not failure');
+
+  assert.throws(
+    () => writeFully('abc', () => 0),
+    /stalled/,
+    'a sink that never makes progress must throw, not hang the session',
+  );
+});
+
 // --------------------------------------------------------------- truncation
+
+test('the platform limit is pinned to the number the platform actually uses', () => {
+  // Measured as `text.length <= 10000` (UTF-16 code units). Pinned as a
+  // literal because every truncation test uses samples far from the bound,
+  // so a limit ten times too large would otherwise survive them all.
+  assert.equal(OUTPUT_LIMIT, 10000);
+  const justOver = 'q'.repeat(OUTPUT_LIMIT + 40);
+  const { omitted } = clampPayload((r) => refusalPayload('Stop', r), justOver);
+  assert.ok(omitted > 0, 'a payload just past the limit must still be cut');
+});
 
 test('output over the platform limit is cut deterministically and says so', () => {
   const long = 'x'.repeat(40000);

@@ -26,10 +26,11 @@ a repo that has Tyran installed without uninstalling it.
 ```bash
 node --test "tests/**/*.test.mjs"       # unit + hook tests
 node scripts/desc-budget.mjs .          # skill description context budget
+node scripts/scan-control-chars.mjs .   # raw control / bidi characters (ADR-19)
 claude plugin validate .                # manifest validation
 ```
 
-CI runs all three on every PR. A PR that grows the total skill-description
+CI runs all four on every PR. A PR that grows the total skill-description
 budget past the limit fails — trim descriptions or remove a skill; the
 always-loaded context surface is a guarded resource.
 
@@ -42,6 +43,46 @@ always-loaded context surface is a guarded resource.
 - **Evidence over claims.** Changes to policies or economy profiles come
   with benchmark receipts (`benchmarks/*/results.json`).
 - **English everywhere** in code, skills, agents, and docs.
+- **No raw control or bidi characters in tracked files** (ADR-19). Write
+  the escape notation, or build the character with `String.fromCodePoint()`.
+  `scripts/scan-control-chars.mjs` enforces this in CI and names the file,
+  line, column, byte offset and codepoint of every hit. A binary asset must
+  be declared `binary` in `.gitattributes`; the scanner refuses a tracked
+  file it cannot decode and has not been told about, and prints every
+  exemption on every run. Both rules exist because the alternatives —
+  inferring "this is binary" from a file's own contents — can be defeated by
+  editing those contents, which is how a poisoned file bought its way out of
+  this gate twice during development.
+- **A test for a guarantee is finished only once you have watched it fail**
+  (ADR-20) — see below.
+
+### ADR-20: show the dead mutant
+
+A test that defends a non-trivial guarantee is not done when it passes. It is
+done when the author has deliberately broken the mechanism it guards, watched
+the test go red, restored the mechanism, and watched it go green again — and
+has put that sequence in the PR or the work report.
+
+This is "evidence over claims" pointed at our tests instead of at our prose. A
+passing test is a claim: *this code is protected*. The dead mutant is the
+evidence. Without it we have only established that the test passes against the
+code as written, which is also true of a test that asserts nothing.
+
+The empirical case is local, not borrowed. In one story, six of nine review
+blockers were tests that passed over broken code. In another, five separate
+mutations survived a full green suite of 36 tests — one of them downgrading a
+security gate to a heuristic while every test stayed green.
+
+**Scope: guarantees, not assertions.** Apply it where the documentation makes
+a promise to a reader — atomicity, mutual exclusion, corruption tolerance, a
+gate that cannot be forged, a rule that must survive concurrency. Do not apply
+it to ordinary assertions about ordinary behaviour; a rule that covers
+everything is a ritual, and rituals get performed rather than thought about.
+The question that settles it: *does something we wrote promise this?*
+
+Mutation is manual and one-off — a mutation-testing runner would mean a
+dependency and a much slower CI, so it stays a candidate for later rather than
+a condition now.
 
 ## Commits and versioning
 

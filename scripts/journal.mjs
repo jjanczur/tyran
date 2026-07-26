@@ -621,4 +621,42 @@ function main() {
 
 class UsageError extends Error {}
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+/**
+ * Canonical absolute path, falling back to the merely-resolved one when the
+ * path cannot be canonicalized.
+ *
+ * The fallback is load-bearing, and NOT for `node --eval`: there argv[1] is
+ * undefined and the caller returns before ever reaching this. It is for the
+ * cases where argv[1] names something realpath cannot follow — the script
+ * directory was renamed or deleted after launch, a parent component is an
+ * unreadable directory (EACCES), or a launcher/shim rewrote argv[1] to a
+ * logical name that was never a real file. Without the fallback the guard
+ * throws ENOENT out of module scope and the tool dies at startup, which is a
+ * different bug, not a fix.
+ */
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * True when this module is the program's entry point.
+ *
+ * BOTH sides must be canonicalized. `import.meta.url` already names the real
+ * file — Node resolves module specifiers through symlinks — while
+ * `process.argv[1]` is whatever the caller typed. Comparing them raw turned
+ * every invocation through a symlinked path into a SILENT no-op under exit 0:
+ * `main()` never ran, nothing was written, nothing said so. That is not
+ * theoretical — `/tmp` and `/var` are symlinks on macOS, and plugin installs
+ * routinely reach `scripts/` through one.
+ */
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

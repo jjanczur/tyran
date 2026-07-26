@@ -124,14 +124,20 @@ export const DELIBERATELY_ALLOWED = Object.freeze([
 const LEGAL_TEXT_CONTROLS = Object.freeze([0x09, 0x0a]);
 
 /**
- * Properties are matched one codepoint at a time. `^...$` with the `u` flag
- * makes the match total: no partial hit on a surrogate half can be mistaken
- * for a hit on the character.
+ * The boundary of the rule, as ONE character class — the union of the four
+ * properties, which is exactly what four separate tests computed.
+ *
+ * It began as four regexes and was collapsed after measuring: a codepoint that
+ * is ORDINARY has to fail every test before the answer is "no", and "no" is the
+ * answer for 99.6% of Unicode and for essentially all real text. Four misses
+ * per character made `inline()` 15x slower than the old hand-written class on
+ * astral input (5 000 emoji: 1.19 ms vs 0.08 ms). One class is one miss.
+ *
+ * `^...$` with the `u` flag makes the match total: no partial hit on a
+ * surrogate half can be mistaken for a hit on the character.
  */
-const IS_CONTROL = /^\p{Cc}$/u;
-const IS_FORMAT = /^\p{Cf}$/u;
-const IS_DEFAULT_IGNORABLE = /^\p{Default_Ignorable_Code_Point}$/u;
-const IS_NONCHARACTER = /^\p{Noncharacter_Code_Point}$/u;
+const IS_INVISIBLE =
+  /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u;
 
 const inRange = (cp, ranges) => {
   for (const r of ranges) if (cp >= r.lo && cp <= r.hi) return r;
@@ -146,6 +152,21 @@ const inRange = (cp, ranges) => {
  * exhaustive test that walks all of them is not a hot path.
  */
 const bmp = new Uint8Array(0x10000);
+
+/**
+ * The same idea above the BMP, where a flat array would cost 1 MiB and a
+ * regex test costs ~13x what the old hand-written character class did.
+ * Measured on 5 000 astral codepoints: 0.08 ms before this module, 1.08 ms
+ * with the property test, 0.09 ms with this cache.
+ *
+ * Bounded, and cleared rather than evicted: an exhaustive sweep over Unicode
+ * (this repo has three of them, in tests) would otherwise grow it to a million
+ * entries. Clearing is correct because the map is a pure memo — losing it
+ * costs time, never accuracy — and a cheap clear beats an LRU whose only
+ * purpose is to be more elegant about the same guarantee.
+ */
+const astral = new Map();
+const ASTRAL_CACHE_LIMIT = 1 << 16;
 
 /** The label a codepoint gets when only the property rule caught it. */
 const PROPERTY_LABEL = 'invisible or non-printing character (Unicode default-ignorable / control / format)';
@@ -167,7 +188,12 @@ export function invisibleProblem(cp) {
     bmp[cp] = problem === null ? 1 : 2;
     return problem;
   }
-  return compute(cp);
+  const memo = astral.get(cp);
+  if (memo !== undefined) return memo;
+  const problem = compute(cp);
+  if (astral.size >= ASTRAL_CACHE_LIMIT) astral.clear();
+  astral.set(cp, problem);
+  return problem;
 }
 
 /** Named ranges win, so the reader gets a sentence instead of a category. */
@@ -181,11 +207,7 @@ function compute(cp) {
   if (inRange(cp, DELIBERATELY_ALLOWED)) return null;
   const named = inRange(cp, FORBIDDEN);
   if (named) return named.what;
-  const ch = String.fromCodePoint(cp);
-  if (IS_CONTROL.test(ch) || IS_FORMAT.test(ch) || IS_DEFAULT_IGNORABLE.test(ch) || IS_NONCHARACTER.test(ch)) {
-    return PROPERTY_LABEL;
-  }
-  return null;
+  return IS_INVISIBLE.test(String.fromCodePoint(cp)) ? PROPERTY_LABEL : null;
 }
 
 /**
@@ -211,18 +233,26 @@ export function identifierProblem(cp) {
 }
 
 /**
- * Replace every invisible codepoint in `text` with `replacement`.
+ * Every invisible codepoint in `text` replaced by a single space.
+ *
+ * The space is not a parameter. It was one for exactly as long as it took to
+ * notice that one caller exists and passes one value: a parameter with a
+ * single call site is an untested branch that reads like a feature, and the
+ * honest fix is to delete it rather than to write a test for a path nobody
+ * takes. A caller that needs different behaviour can ask `invisibleProblem`
+ * directly — that is the shared answer, and this is one use of it.
+ *
  * Iterates codepoints, not UTF-16 units: a TAG character is a surrogate PAIR,
  * and a unit-wise walk sees 0xDB40/0xDC01 — neither of which is invisible on
  * its own — and lets the character through while reporting success.
  */
-export function replaceInvisible(text, replacement) {
+export function blankInvisible(text) {
   let out = '';
   let changed = false;
   for (const ch of text) {
     if (invisibleProblem(ch.codePointAt(0)) === null) out += ch;
     else {
-      out += replacement;
+      out += ' ';
       changed = true;
     }
   }

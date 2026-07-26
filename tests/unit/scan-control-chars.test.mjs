@@ -776,20 +776,95 @@ test('THIS repository scans clean end to end', () => {
   // exclusion regresses, CI goes red on files nobody touched and someone turns
   // the gate off. That failure mode is the reason this test exists.
   const { scanned, results, exempt, refused } = scanRepo(REPO_ROOT);
+  const { scan, links } = partitionTrackedFiles(REPO_ROOT);
   assert.deepEqual(
     results.map((r) => `${r.file}: ${formatFinding(r.file, r.findings[0])}`),
     [],
   );
   assert.deepEqual(refused.map((r) => r.file), [], 'every binary here must be declared');
-  // Pinned, not a floor. A loose `scanned > 20` let the count drop 45 -> 44
-  // while a file quietly left the scan. Any change to either number now has
-  // to be made on purpose, in this file, where a reviewer will see it.
-  // 45 -> 48: scripts/doctor.mjs, tests/unit/doctor.test.mjs, docs/doctor.md.
-  // 48 -> 54: hooks/hooks.json, hooks/HOOK-CONTRACT-MEASURED.md,
-  // hooks/scripts/{hook-io,session-start}.mjs and their two test files.
-  // 54 -> 55: docs/hooks.md (review round 2 — the gate-vs-probe rule needed a
-  // page a contributor can find). The trial merge with S-E3-0 was measured at
-  // 54, and S-E3-0 adds no files, so this +1 is entirely this branch's.
-  assert.equal(scanned, 55, 'file count changed — confirm nothing left the scan by accident');
+
+  // Pinned, not a floor. A loose `scanned > 20` once let the count drop 45 ->
+  // 44 while a file quietly left the scan, so what is covered has to be stated
+  // on purpose, in this file, where a reviewer will see it.
+  //
+  // The PATHS are pinned, not the count (U-62). A bare number was the right
+  // tripwire and the wrong data structure, for two measured reasons:
+  //
+  //  - It generates conflicts it cannot help resolve. Two branches adding
+  //    different files both edit the same single line to different values, and
+  //    git cannot merge that — while two branches adding different PATHS touch
+  //    different lines and merge cleanly. This branch and the hook runtime hit
+  //    exactly that: the conductor had to forbid touching the line and take it
+  //    on himself at merge, which left a story branch that could not be green.
+  //  - `50 !== 48` does not say WHICH file. The whole purpose of the canary is
+  //    "confirm nothing left the scan by accident", and a bare count answers
+  //    "something changed" when the question is "what". A deepEqual on sorted
+  //    paths prints the added and the missing entry by name.
+  const scannedPaths = [...scan, ...links.map((l) => l.file)].sort();
+  assert.deepEqual(scannedPaths, [
+    '.claude-plugin/marketplace.json',
+    '.claude-plugin/plugin.json',
+    '.env.example',
+    '.gitattributes',
+    '.github/workflows/ci.yml',
+    '.github/workflows/security.yml',
+    '.gitignore',
+    'CHANGELOG.md',
+    'CONTRIBUTING.md',
+    'LICENSE',
+    'README.md',
+    'agents/.gitkeep',
+    'benchmarks/.gitkeep',
+    'docs/architecture.md',
+    'docs/configuration.md',
+    'docs/doctor.md',
+    'docs/faq.md',
+    'docs/getting-started.md',
+    'docs/hooks.md',
+    'docs/journal.md',
+    'docs/projections.md',
+    'docs/self-improvement.md',
+    'hooks/HOOK-CONTRACT-MEASURED.md',
+    'hooks/hooks.json',
+    'hooks/scripts/.gitkeep',
+    'hooks/scripts/hook-io.mjs',
+    'hooks/scripts/session-start.mjs',
+    'scripts/desc-budget.mjs',
+    'scripts/doctor.mjs',
+    'scripts/invisible.mjs',
+    'scripts/journal.mjs',
+    'scripts/project.mjs',
+    'scripts/scan-control-chars.mjs',
+    'scripts/schema.mjs',
+    'scripts/yaml-lite.mjs',
+    'skills/hello/SKILL.md',
+    'templates/.gitkeep',
+    'templates/config.yaml',
+    'templates/knowledge.yaml',
+    'templates/policies/autonomy.yaml',
+    'tests/fixtures/golden/PROGRESS.md',
+    'tests/fixtures/golden/STATE.md',
+    'tests/fixtures/journal-demo.jsonl',
+    'tests/fixtures/repo-mini/.gitkeep',
+    'tests/hooks/.gitkeep',
+    'tests/pressure/.gitkeep',
+    'tests/unit/desc-budget.test.mjs',
+    'tests/unit/doctor.test.mjs',
+    'tests/unit/hook-io.test.mjs',
+    'tests/unit/hook-session-start.test.mjs',
+    'tests/unit/journal.test.mjs',
+    'tests/unit/one-answer.test.mjs',
+    'tests/unit/project.test.mjs',
+    'tests/unit/projection-fuzz.test.mjs',
+    'tests/unit/scan-control-chars.test.mjs',
+    'tests/unit/schema.test.mjs',
+    'tests/unit/yaml-lite.test.mjs',
+  ], 'the set of scanned files changed — confirm nothing left the scan by accident');
+
+  // The count stays asserted too, derived from the list rather than typed
+  // beside it: `scanned` is what the scanner REPORTS, and a partition that
+  // dropped a file from `scan` while still counting it would otherwise pass
+  // the list check and lie in the summary line operators actually read.
+  assert.equal(scanned, scannedPaths.length, 'reported count disagrees with the files scanned');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });

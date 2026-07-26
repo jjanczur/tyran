@@ -29,8 +29,9 @@ import {
   openSync,
   readSync,
   closeSync,
+  realpathSync,
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Closed set of event types. Extending it is a reviewed core change. */
@@ -169,10 +170,25 @@ export function openSpawns(file) {
   }));
 }
 
+/**
+ * POSIX single-quoting. Agent names and journal paths may legally contain
+ * spaces and apostrophes; a hint that has to be edited before it runs is a
+ * hint an autonomous caller will run anyway and then fight the fallout.
+ */
+function sq(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 /** The rejection message is the user interface of this guard — spell it out. */
-function duplicateSpawnMessage(file, agent, previous) {
+function duplicateSpawnMessage(file, init, agent, previous) {
   const p = previous[0];
   const where = p.data.ticket ? ` on ticket ${p.data.ticket}` : '';
+  const reportData = JSON.stringify({ agent, verdict: '<verdict>' });
+  // A name starting with "-" would be eaten as a flag; put it after the
+  // POSIX end-of-options separator, which means flags must come first.
+  const closeCmd = agent.startsWith('-')
+    ? `close-spawn ${sq(file)} --reason "<why>" ${sq(init)} -- ${sq(agent)}`
+    : `close-spawn ${sq(file)} ${sq(init)} ${sq(agent)} --reason "<why>"`;
   return (
     `spawn rejected: agent "${agent}" already has an open spawn in this journal.\n` +
     `  previous spawn: ${p.ts} by ${p.actor}${where} (role: ${p.data.role ?? '?'})\n` +
@@ -180,13 +196,13 @@ function duplicateSpawnMessage(file, agent, previous) {
     '  (ADR-18), so the state is refused at write time rather than guessed later.\n' +
     '  Fix it with ONE of:\n' +
     '   - the agent finished: record its report\n' +
-    `       node scripts/journal.mjs append ${file} report <init> \\\n` +
-    `         --data '{"agent":"${agent}","verdict":"<verdict>"}'\n` +
+    `       node scripts/journal.mjs append ${sq(file)} report ${sq(init)} \\\n` +
+    `         --data ${sq(reportData)}\n` +
     '   - the agent died without reporting: close it explicitly\n' +
-    `       node scripts/journal.mjs close-spawn ${file} <init> ${agent} --reason "<why>"\n` +
+    `       node scripts/journal.mjs ${closeCmd}\n` +
     '   - both agents are meant to run at once: give each a distinct name\n' +
     `       — "${agent}" can address only ONE live agent at a time.\n` +
-    `  See what is open: node scripts/journal.mjs open-spawns ${file}`
+    `  See what is open: node scripts/journal.mjs open-spawns ${sq(file)}`
   );
 }
 
@@ -198,10 +214,30 @@ function duplicateSpawnMessage(file, agent, previous) {
  * can have it stolen, and its `finally` would then remove the new holder's
  * lock. Acceptable while the critical section is a single read+append
  * (milliseconds); if the section ever grows, switch to an owner-token file
- * inside the lock dir before extending it.
+ * inside the lock dir before extending it. A process suspended inside the
+ * section (SIGSTOP, laptop sleep) breaks that assumption — known gap,
+ * documented in docs/journal.md, fixed by the owner-token change, not here.
+ *
+ * The lock is keyed by the CANONICAL path, so two callers reaching one
+ * journal through different symlinks share one lock. Hard links still alias
+ * (same inode, different canonical paths) — that needs (dev, ino) keying.
  */
+function lockDirFor(file) {
+  const abs = resolve(file);
+  try {
+    return realpathSync(abs) + '.lock';
+  } catch {
+    // journal not created yet: canonicalize the directory it will live in
+    try {
+      return join(realpathSync(dirname(abs)), basename(abs)) + '.lock';
+    } catch {
+      return abs + '.lock';
+    }
+  }
+}
+
 function withLock(file, fn) {
-  const lockDir = resolve(file) + '.lock';
+  const lockDir = lockDirFor(file);
   const deadline = Date.now() + 5000;
   for (;;) {
     try {
@@ -292,7 +328,7 @@ function appendUnderLock(file, event, preread = null) {
     // concurrent writers both pass it and both append.
     const previous = pairSpawns(read().events).open.get(stamped.data.agent);
     if (previous?.length) {
-      throw new Error(duplicateSpawnMessage(file, stamped.data.agent, previous));
+      throw new Error(duplicateSpawnMessage(file, stamped.init, stamped.data.agent, previous));
     }
   }
   const heal = endsWithNewline(file) ? '' : '\n';
@@ -472,6 +508,12 @@ function parseFlags(args, allowed) {
   const flags = {};
   const rest = [];
   for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--') {
+      // POSIX end of options: the rest is positional, verbatim. Without it
+      // an agent named "--reason" could be spawned but never closed.
+      rest.push(...args.slice(i + 1));
+      break;
+    }
     if (args[i].startsWith('--')) {
       const name = args[i].slice(2);
       if (!allowed.includes(name)) throw new Error(`unknown flag --${name}`);

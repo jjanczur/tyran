@@ -83,9 +83,17 @@ function fakeSecret() {
   return `${'-----BEGIN '}${label}-----\n${body}\n${'-----END '}${label}-----\n`;
 }
 
-/** An AWS-shaped id, for the tests that are about NAMES rather than detection. */
+/**
+ * An AWS-shaped id, for the tests that are about NAMES rather than detection.
+ *
+ * The alphabet is the FULL `A-Z0-9` one AWS actually uses. An earlier version
+ * dropped vowels and ambiguous characters, which took digit density from 26.4%
+ * to 17.8% — and digit density moves gitleaks' AWS rule across its threshold,
+ * so the documented miss rate came out roughly half of the real one for two
+ * rounds. A fixture has to be the thing it stands for.
+ */
 function fakeKeyId() {
-  const alphabet = 'BCDFGHJKLMNPQRSTVWXYZ34679';
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let body = '';
   for (const b of randomBytes(16)) body += alphabet[b % alphabet.length];
   return ['A', 'K', 'I', 'A'].join('') + body;

@@ -238,26 +238,33 @@ ceiling.
   the working tree, and the working tree is not what gets published.
 - **Exfiltration that never touches git.** `curl -d @.env`, printing a key
   into the transcript. A different control's job.
-- **The scanner's own false negatives, which are large — and shape-dependent.**
-  Measured on gitleaks 8.30.1, on the path this gate actually uses (`gitleaks
-  stdin` over bytes the gate assembled), 60 runs per shape, key ids generated
-  from a CSPRNG:
+- **The scanner's own false negatives, which are large.** Measured on gitleaks
+  8.30.1 on the path this gate actually uses (`gitleaks stdin` over bytes the
+  gate assembled), n=60 per cell, ids generated from a CSPRNG over the **full
+  `A-Z0-9` alphabet AWS actually uses** (mean digit density 26.4%):
 
-  | what the payload looks like | reported clean |
+  | payload | reported clean |
   |---|---|
-  | `AWS_ACCESS_KEY_ID=<id>` (bare assignment) | **25/60 — 41.7%** |
-  | `aws_key = "<id>"` (quoted assignment) | 4/60 — 6.7% |
-  | a realistic `~/.aws/credentials` (id **and** secret) | 3/60 — 5.0% |
-  | ...but the **access key ID line itself** in that file | **29/60 — 48.3%** |
-  | a private-key block | **0/60** |
+  | `AWS_ACCESS_KEY_ID=<id>` | **80.0%** |
+  | the ID line inside a realistic `~/.aws/credentials` | **80.0%** |
+  | that credentials file taken as a whole | 0.0% |
+  | `aws_key = "<id>"` | 3.3% |
+  | a private-key block | 0.0% |
 
-  The last two rows are the ones that matter and they say different things:
-  the file is usually flagged, but usually because of the SECRET line — the ID
-  line is missed about half the time. So a repository that commits an access
-  key id **on its own** is close to a coin flip. Entropy is not the
-  discriminator; two ids with identical Shannon entropy land on opposite
-  sides, and the cause was not pursued further because it is inside a
-  third-party rule set rather than in this code.
+  Read the rows together, because taken singly they mislead. The
+  `aws-access-token` rule fires on about **13%** of well-formed ids whatever
+  the surrounding shape; the two low numbers come from a *different*, generic
+  rule that reacts to the shape of an assignment or to the secret-key line
+  sitting beside the id. So a repository committing an access key id **on its
+  own**, in a shape the generic rule does not recognise, is close to unprotected.
+
+  The number was wrong here for two rounds and the reason is worth recording:
+  the fixture's alphabet excluded vowels and ambiguous characters, giving 17.8%
+  digits against the real 26.4%, and digit density moves the result across the
+  rule's threshold. The measured miss rate roughly **doubled** once the
+  generator matched reality. A fixture that is not the thing it stands for
+  produces a documented number that is quietly optimistic.
+
 - **A short secret inside a filename** still prints in a refusal; see below.
 
 So: **this gate is not a guarantee that a secret cannot be published.** It is a

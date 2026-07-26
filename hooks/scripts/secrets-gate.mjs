@@ -85,12 +85,17 @@ export const GIT_BUDGET_MS = 2000;
 /**
  * The most content this gate will assemble and scan.
  *
- * Measured: `gitleaks stdin` reads 8 MB in 1.07 s, which fits the budget. Past
- * this the gate REFUSES rather than scanning a prefix — a partial scan that
- * reports nothing is indistinguishable from a clean one, which is the whole
- * defect this rewrite exists to remove.
+ * 4 MB, not 8. The 8 MB figure came from timing `gitleaks stdin` in isolation
+ * (1.07 s) and ignored everything the gate spends BEFORE the scan — listing
+ * objects, reading them, and the git calls in front of both. Review measured
+ * the real ceiling inside the budget at roughly 4.5 MB, so the constant is set
+ * below it rather than at the number that made the prose sound better.
+ *
+ * Past it the gate REFUSES rather than scanning a prefix: a partial scan that
+ * reports nothing is indistinguishable from a clean one, which is the defect
+ * this whole file exists to remove.
  */
-export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
+export const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 
 /** Bytes of a command we are willing to hand to the scanner as data. */
 export const MAX_COMMAND_BYTES = 128 * 1024;
@@ -192,7 +197,15 @@ export function stripHeredocBodies(command) {
     // `(?<!<)` and `(?!<)` together exclude a here-STRING (`<<<"msg"`), which
     // has no body. Without the lookbehind the regex matched the last two `<`
     // of `<<<` and swallowed the rest of the command as a body.
-    const delimiters = [...line.matchAll(/(?<!<)<<-?(?!<)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/g)].map((m) => m[2]);
+    // A here-doc body is DATA only when the command reading it is not a shell.
+    // `bash <<EOF … git push … EOF` and `cat <<EOF | bash` carry a PROGRAM,
+    // entirely inside the command line — round 1 caught both and the round-2
+    // false-alarm fix lost them. That is not the declared "a script whose
+    // contents the gate never reads" gap: here the contents are right there.
+    const feedsAShell = /(^|[\s|;&(])(ba|z|k|da)?sh\b/.test(line);
+    const delimiters = feedsAShell
+      ? []
+      : [...line.matchAll(/(?<!<)<<-?(?!<)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/g)].map((m) => m[2]);
     while (i < lines.length && delimiters.length > 0) {
       if (lines[i].trim() === delimiters[0]) delimiters.shift();
       i++;
@@ -319,6 +332,7 @@ export function planCommand(command, startDir) {
       scanPush: false,
       includeWorktree: false,
       includeUntracked: false,
+      includePaths: [],
       pushRemote: null,
     };
     targets.set(dir, { ...existing, ...patch, dir });
@@ -362,7 +376,10 @@ export function planCommand(command, startDir) {
     // ---- directory movement ------------------------------------------------
     const move = basename(program);
     if (move === 'cd' || move === 'pushd') {
-      const arg = tokens.slice(1).find((t) => !t.startsWith('-'));
+      // `-` has to be admitted here: filtering every token that starts with a
+      // dash made the `cd -` branch below unreachable, so a guard that reads
+      // as load-bearing was decoration (found by review, ADR-20's own lesson).
+      const arg = tokens.slice(1).find((t) => t === '-' || !t.startsWith('-'));
       if (arg === undefined) {
         // Bare `cd` goes home; bare `pushd` swaps the top two entries. Saying
         // so is cheaper than being subtly wrong about either.
@@ -424,7 +441,28 @@ export function planCommand(command, startDir) {
       words.has('create') &&
       (words.has('pr') || words.has('repo') || words.has('release') || words.has('gist'));
 
-    if (gitAdd) pendingAdd = { dir, all: tokens.some((t) => t === '-A' || t === '--all' || t === '.') };
+    if (gitAdd) {
+      const after = tokens.slice(tokens.indexOf('add') + 1);
+      const all = after.some((t) => t === '-A' || t === '--all' || t === '.' || t === '-u');
+      const named = [];
+      let widen = false;
+      for (const t of after) {
+        if (t.startsWith('-') || t === '.') continue;
+        if (!isLiteralPath(t)) {
+          // A glob or a variable here does not change WHICH repository is
+          // written to, only which files — so the honest answer is to widen
+          // the scan to everything the working tree could contribute, not to
+          // refuse. Refusing cost 10 of 351 triggering commands in the corpus
+          // and bought nothing: the wider scan is a superset of the answer.
+          widen = true;
+          continue;
+        }
+        named.push(t);
+      }
+      // Naming files one by one is the commonest form an agent uses, and it
+      // was the form round 2 left open: only `-A`/`.` folded anything in.
+      pendingAdd = { dir, all: all || widen, paths: named };
+    }
 
     if (gitCommit) {
       const commitAll = tokens.some((t) => t === '--all' || (isShortCluster(t) && t.includes('a')));
@@ -438,6 +476,7 @@ export function planCommand(command, startDir) {
         // cheaper than describing it.
         includeWorktree: commitAll || (pendingAdd !== null && pendingAdd.dir === dir),
         includeUntracked: pendingAdd !== null && pendingAdd.dir === dir && pendingAdd.all,
+        includePaths: pendingAdd !== null && pendingAdd.dir === dir ? pendingAdd.paths : [],
       });
       triggers.push('a git commit (everything the commit would add is scanned)');
     }
@@ -449,12 +488,24 @@ export function planCommand(command, startDir) {
       // reproduced on the first attempt.
       const after = tokens
         .slice(tokens.indexOf('push') + 1)
-        .filter((t) => !t.startsWith('-') && !t.startsWith('+'));
+        .filter((t) => !t.startsWith('-'))
+        .map((t) => (t.startsWith('+') ? t.slice(1) : t));
       const remote = after[0] ?? null;
       if (remote !== null && !isLiteralPath(remote)) {
         unmodellable.push({ what: 'the push target needs shell expansion' });
       }
-      note(dir, { scanPush: true, pushRemote: remote });
+      // The REFSPECS decide how much this push publishes, and ignoring them
+      // made the range identical for every command. Measured on a real
+      // repository: `git push origin main` and `git push origin HEAD:tiny`
+      // produced the same 8.9 MB and the same refusal, whose remedy — "push in
+      // smaller steps" — was therefore impossible to act on. A refusal with no
+      // reachable way forward produces an agent that looks for a way around.
+      // Same reasoning as `git add` above: an unreadable refspec means the
+      // gate cannot NARROW the range, so it keeps the wide one. Widening is
+      // always safe; refusing here would block work for no coverage gain.
+      const readable = after.slice(1).every(isLiteralPath);
+      const refs = readable ? after.slice(1).map((spec) => spec.split(':')[0]).filter((r) => r !== '') : [];
+      note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs });
       triggers.push('a git push (every commit not already on the target remote is scanned)');
     }
     if (ghPublishes) {
@@ -711,7 +762,7 @@ export async function isTracked(repo, path, { runner, timeoutMs }) {
  * unexamined. Reproduced on the first attempt: the range counted 0 commits
  * while origin held none of them.
  */
-export async function pushRange(repo, remote, { runner, timeoutMs }) {
+export async function pushRange(repo, remote, refs, { runner, timeoutMs }) {
   const listed = await git(['-C', repo, 'remote'], { runner, timeoutMs, what: 'listing remotes' });
   const remotes = String(listed).trim().split('\n').filter((r) => r !== '');
   let target = remote;
@@ -727,27 +778,60 @@ export async function pushRange(repo, remote, { runner, timeoutMs }) {
       );
     }
   }
-  return target === null ? ['--all'] : ['--all', '--not', `--remotes=${target}`];
+  // `--all` is the fallback for a push that names no refspec, because
+  // `push.default` may well send the current branch and we cannot read that
+  // config cheaply. When refspecs ARE named, only those are scanned — which is
+  // what makes "push a smaller range" a remedy rather than a slogan.
+  const sources = refs !== undefined && refs.length > 0 ? refs : ['--all'];
+  return target === null ? sources : [...sources, '--not', `--remotes=${target}`];
 }
 
-/** Parse the NUL-separated output of `git diff --raw -z` into blob entries. */
+/**
+ * Parse the NUL-separated output of `git diff --raw -z`.
+ *
+ * Returns the entries AND a count of records it could not read, because a
+ * `continue` that quietly drops a line is how a payload loses a file. Callers
+ * must refuse on a non-zero `malformed`; there is no correct number of
+ * silently skipped entries in something whose whole job is completeness.
+ */
 export function parseRawDiff(text) {
-  const out = [];
-  const parts = String(text).split('\0');
+  const entries = [];
+  let malformed = 0;
+  const parts = String(text).split('\0').filter((p, i, a) => !(p === '' && i === a.length - 1));
   for (let i = 0; i < parts.length; i++) {
     const meta = parts[i];
-    if (!meta.startsWith(':')) continue;
+    if (!meta.startsWith(':')) {
+      malformed++;
+      continue;
+    }
     // :<mode1> <mode2> <sha1> <sha2> <status>\0<path>
     const fields = meta.slice(1).split(' ');
-    if (fields.length < 5) continue;
-    const sha = fields[3];
-    const path = parts[++i] ?? '';
-    out.push({ sha, path });
+    if (fields.length < 5) {
+      malformed++;
+      continue;
+    }
+    entries.push({ sha: fields[3], path: parts[++i] ?? '' });
   }
-  return out;
+  return { entries, malformed };
 }
 
-/** Parse `git cat-file --batch` framing into `{sha, type, body}` records. */
+/**
+ * Parse `git cat-file --batch` framing into `{sha, type, body}` records.
+ *
+ * The two-field form matters and is not exotic. **A submodule is a gitlink**,
+ * whose commit object does not exist in the parent repository, so git answers
+ * `<sha> missing` — two fields, no body. The first version of this function
+ * saw a short header and `break`, which threw away **every remaining record**
+ * and shifted the path mapping for anything before it. Measured: a private key
+ * committed alongside an ordinary submodule was refused when its filename
+ * sorted before the gitlink and PASSED when it sorted after. No attacker
+ * required — just `git submodule add`.
+ *
+ * The coverage invariant did not catch it, and the reason is worth writing
+ * down: it compares the bytes SENT to the scanner with the bytes the scanner
+ * READ. Both agreed. Nothing compared the payload with what the payload was
+ * supposed to contain. `assertComplete` below is that missing comparison.
+ */
 export function parseCatFileBatch(buffer) {
   const out = [];
   let offset = 0;
@@ -756,11 +840,14 @@ export function parseCatFileBatch(buffer) {
     if (nl === -1) break;
     const header = buffer.subarray(offset, nl).toString('utf8');
     const parts = header.split(' ');
-    if (parts.length < 3) {
-      // "<sha> missing" and anything else unexpected: stop rather than
-      // resynchronize on data we do not understand.
-      break;
+    if (parts.length === 2) {
+      // `<sha> missing` / `<sha> ambiguous`: a real, well-formed answer with
+      // no body. Consume it and keep going, so the stream stays in sync.
+      out.push({ sha: parts[0], type: parts[1], body: Buffer.alloc(0) });
+      offset = nl + 1;
+      continue;
     }
+    if (parts.length < 3) break;
     const size = Number.parseInt(parts[2], 10);
     if (!Number.isFinite(size)) break;
     const start = nl + 1;
@@ -770,12 +857,39 @@ export function parseCatFileBatch(buffer) {
   return out;
 }
 
+/**
+ * Refuse unless git answered for everything that was asked about.
+ *
+ * This is the check the coverage invariant could not make. One assertion, and
+ * it is the difference between "the scanner read my payload" and "my payload
+ * is what I meant to build".
+ */
+function assertComplete(got, wanted, what) {
+  if (got !== wanted) {
+    throw new ScanFailure(
+      `git answered for ${got} of the ${wanted} objects this command would publish (${what})`,
+      'the gate refuses rather than scanning a payload it knows is incomplete. A submodule, a ' +
+        'corrupt object or a truncated stream all land here; run the same git command by hand.',
+    );
+  }
+}
+
 // ----------------------------------------------------------------- payload
 
-function countLines(buffer) {
+/**
+ * How many newline characters a chunk contributes, and whether it ends on one.
+ *
+ * The first version returned `newlines + 1` unconditionally, which overstates
+ * every chunk that ends in a newline — i.e. almost every text file — by one
+ * line. Compounded across a payload the map drifted, and a refusal pointed at
+ * the file BEFORE the one that actually held the key, at a line that does not
+ * exist in it. An agent follows that, finds nothing, and reaches for
+ * suppression: a wrong location is worse than none.
+ */
+function newlineCount(buffer) {
   let n = 0;
   for (const b of buffer) if (b === 0x0a) n++;
-  return n + 1;
+  return n;
 }
 
 /** Read a file for scanning, size-checked first (`docs/hooks.md`). */
@@ -812,7 +926,11 @@ async function addBlobs(repo, entries, add, { runner, budget }) {
     what: 'reading the objects this command would publish',
   });
   const paths = [...unique.values()];
-  parseCatFileBatch(out).forEach((rec, i) => {
+  const records = parseCatFileBatch(out);
+  assertComplete(records.length, unique.size, 'reading object contents');
+  records.forEach((rec, i) => {
+    // Trees and gitlinks carry a path too (a directory name, a submodule
+    // name). Only a blob is file content.
     if (rec.type === 'blob') add(paths[i] ?? rec.sha, rec.body);
   });
 }
@@ -840,15 +958,22 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
         runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'reading the staged index',
       }),
     );
-    const wanted = [...staged];
+    assertComplete(0, staged.malformed, 'reading the staged index');
+    const wanted = [...staged.entries];
     if (target.includeWorktree) {
-      wanted.push(
-        ...parseRawDiff(
-          await git(['-C', target.dir, 'diff', '--raw', '-z', '--no-renames', '--diff-filter=ACMR'], {
-            runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'reading unstaged modifications',
-          }),
-        ),
+      const unstaged = parseRawDiff(
+        await git(['-C', target.dir, 'diff', '--raw', '-z', '--no-renames', '--diff-filter=ACMR'], {
+          runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'reading unstaged modifications',
+        }),
       );
+      assertComplete(0, unstaged.malformed, 'reading unstaged modifications');
+      wanted.push(...unstaged.entries);
+    }
+    // Files named on a `git add <path>` earlier in the same command line. They
+    // are not in the index yet and may not be modifications of a tracked file
+    // at all, so neither diff above can see them.
+    for (const rel of target.includePaths ?? []) {
+      add(rel, await readFileBounded(join(target.dir, rel)));
     }
     if (target.includeUntracked) {
       const listed = await git(['-C', target.dir, 'ls-files', '-z', '--others', '--exclude-standard'], {
@@ -867,7 +992,9 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
   }
 
   if (target !== null && target.scanPush) {
-    const range = await pushRange(target.dir, target.pushRemote, { runner, timeoutMs: budget(GIT_BUDGET_MS) });
+    const range = await pushRange(target.dir, target.pushRemote, target.pushRefs, {
+      runner, timeoutMs: budget(GIT_BUDGET_MS),
+    });
     const listed = await git(['-C', target.dir, 'rev-list', '--objects', ...range], {
       runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'listing the objects this push would publish',
     });
@@ -890,12 +1017,16 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
   const map = [];
   let line = 1;
   for (const chunk of chunks) {
-    const lines = countLines(chunk.body);
-    map.push({ label: chunk.label, from: line, to: line + lines });
+    const newlines = newlineCount(chunk.body);
+    const endsOnNewline = chunk.body.length > 0 && chunk.body[chunk.body.length - 1] === 0x0a;
+    // A chunk occupies `newlines` lines when it ends on one, and one more when
+    // it does not. The stream then advances by exactly the newlines it
+    // contains, plus the two of the separator.
+    map.push({ label: chunk.label, from: line, to: line + newlines - (endsOnNewline ? 1 : 0) });
     // A blank-line separator, so one file cannot lend keyword context to the
     // next and manufacture a finding that belongs to neither.
     parts.push(chunk.body, Buffer.from('\n\n'));
-    line += lines + 2;
+    line += newlines + 2;
   }
   const bytes = Buffer.concat(parts);
   if (bytes.length > MAX_PAYLOAD_BYTES) {
@@ -1279,11 +1410,17 @@ export async function decide({ input, cwd, runner = runChild, startedAt = Date.n
       const payload = await buildPayload(resolved, index === 0 ? plan.extraFiles : [], { runner, budget });
       totalBytes += payload.bytes.length;
       if (payload.bytes.length > 0) {
+        // The map and the FINDINGS have to move by the SAME amount, and by the
+        // offset as it stood BEFORE this payload was added. Capturing it after
+        // the increment shifted every finding by a whole payload and produced
+        // "somewhere in the scanned payload" — a refusal that names nothing.
+        const base = lineOffset;
         for (const entry of payload.map) {
-          map.push({ ...entry, from: entry.from + lineOffset, to: entry.to + lineOffset });
+          map.push({ ...entry, from: entry.from + base, to: entry.to + base });
         }
-        lineOffset += countLines(payload.bytes);
-        findings.push(...(await scanBytes(payload.bytes, { runner, budget, workDir, suppressionArgs: supp.args })));
+        const found = await scanBytes(payload.bytes, { runner, budget, workDir, suppressionArgs: supp.args });
+        findings.push(...found.map((f) => ({ ...f, line: f.line === null ? null : f.line + base })));
+        lineOffset += newlineCount(payload.bytes) + 2;
       }
       scanned.push(
         resolved === null

@@ -59,6 +59,13 @@ The journal is the append-only source of truth for an initiative:
   `checkpoint` and all unreleased leases — exactly what the `SessionStart`
   hook re-injects.
 
+## Projections
+
+Humans read `STATE.md` and `PROGRESS.md`, not this file. Both are generated
+from the journal by `scripts/project.mjs` and carry a `GENERATED — do not
+edit` header; `--check` verifies they are still in sync. See
+[projections.md](./projections.md).
+
 ## CLI
 
 ```bash

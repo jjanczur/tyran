@@ -1,0 +1,6 @@
+# Normalize line endings in the repo...
+* text=auto eol=lf
+
+# ...but never touch test fixtures: the golden projections are compared
+# byte for byte, so a CRLF rewrite on checkout would fail the suite.
+tests/fixtures/** -text

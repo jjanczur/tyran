@@ -120,9 +120,14 @@ only what it couldn't infer.
 - 💸 **Enforced cost modes.** `eco` / `balanced` / `full` route each role to
   a model *and* effort level via agent frontmatter — policy written in role
   names, never model names.
-- 🔒 **Autonomy with a firewall.** gitleaks gate on every commit/push,
-  `--no-verify` and force-push blocked, deployment autonomy classes detected
-  from your repo and never self-escalated.
+- 🔒 **Autonomy with a gate on the irreversible step.** Every commit and push
+  is scanned for secrets before it happens — the gate assembles the payload
+  itself and verifies the scanner covered all of it, so a `.gitattributes`
+  line cannot hide anything from it. `--no-verify` (and its abbreviations) and
+  force-pushes are refused; deployment autonomy classes are detected from your
+  repo and never self-escalated. Not a firewall, and
+  [docs/hooks.md](docs/hooks.md) says exactly where it stops — including the
+  scanner's own measured false-negative rate.
 
 ## How it compares
 
@@ -138,7 +143,7 @@ test-gated** (flips to ✅ only when the tests exist and pass).
 | Execution state survives restart & compaction (journal + re-inject) | 🎯 | ⚠️ | ❌² | ❌ | ⚠️ |
 | Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
 | Cost modes enforced per repo (`eco`/`balanced`/`full`, role-based routing) | 🎯 | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
-| Secret-leak firewall for autonomous commits (gitleaks gate, no `--no-verify` escape) | 🎯 | ❌ | ❌ | ❌ | ⚠️ |
+| Secret gate on commit/push with verified scan coverage, no `--no-verify` escape | 🎯 | ❌ | ❌ | ❌ | ⚠️ |
 | Independent reviewer that never grades its own homework — **enforced** | 🎯 | ⚠️ | ⚠️ prompt | ⚠️ | ❌ |
 | Small curated core — no context tax | 🎯 | ❌⁴ | ⚠️ | ✅ | ❌ |
 | Safe parallelism: worktree per agent, leases, sequential merge | 🎯 | ⚠️ | ❌ | — | ❌⁵ |

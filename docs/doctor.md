@@ -1,0 +1,248 @@
+# Doctor reference
+
+> **Status:** shipped — `scripts/doctor.mjs --state` with 54 unit tests.
+> It **diagnoses, it never repairs.** Every finding carries a severity, a
+> location and a command you can paste.
+
+The journal is append-only and the projections are generated, so most of
+Tyran's state is self-consistent by construction. The gaps are the places
+where a human, a crash or a second process can get in between: a hand-edited
+journal, an agent that died without reporting, a `STATE.md` somebody
+"fixed", a policy rule with a typo that silently protects nothing.
+
+```bash
+node scripts/doctor.mjs --state [--dir <.tyran>] [--json]
+                                [--now <iso>] [--stale-hours <n>]
+```
+
+| Exit | Meaning |
+|---|---|
+| `0` | healthy — `info` findings are allowed and expected |
+| `1` | findings: at least one `error` or `warning` |
+| `2` | usage or I/O error (unknown flag, flag given twice, an explicitly named `--dir` that does not exist) |
+
+- `--state` is **required**. It is the only mode today; `--env` and
+  `--config` land with the setup epic, and a bare `doctor.mjs` that silently
+  meant one of them now would silently mean something else then.
+- `--dir` defaults to `.tyran`. A **missing default** is a healthy repo that
+  has not run `/tyran:setup` yet (exit `0`). A **missing explicit** `--dir`
+  is a typo, and a clean bill of health for a path nobody looked at is the
+  one output a diagnostic must never produce (exit `2`).
+- `--json` prints the same result as a machine-readable object — the shape
+  the future `SessionStart` hook and the dashboard consume.
+- A flag given twice is refused rather than silently resolved.
+
+## What it checks
+
+**Severity is a property of the code, not of the call site.** It is declared
+once, in `SEVERITY_BY_CODE` in `scripts/doctor.mjs`, and a unit test pins
+this table against it — including the rows that are hard to reach at
+runtime. A severity is a promise about the exit code, so it must not be
+possible to change one and keep the suite green.
+
+| Code | Severity | Finding |
+|---|---|---|
+| `journal-invalid` | error | per-event schema failure, timestamp regression, unknown event type, corruption **mid-file** |
+| `journal-truncated` | warning | the final line is truncated — a crash mid-write; readers discard it |
+| `journal-warning` | warning | a `validateJournal` warning doctor does not have a more specific code for |
+| `journal-init-mismatch` | error | events carry an `init` that is not the directory name |
+| `journal-cross-init-pairing` | error | a `report` from one initiative closed a `spawn` from another |
+| `journal-mixed-initiatives` | warning | more than one `init` in one file (the contract is one initiative, one file) |
+| `journal-missing` | warning | the initiative directory exists (ENOENT on the journal), but nothing records what happened |
+| `journal-not-a-file` | error | `journal.jsonl` is a directory |
+| `journal-unreadable` | error | the journal could not be stat'ed or read — the errno is printed, and **nothing** about this initiative was checked |
+| `journal-lock-present` | warning | a leftover write-lock directory: a writer is running, or died inside its critical section |
+| `check-failed` | error | one check threw on this journal — the other checks still ran |
+| `spawn-open` | info | the journal still believes this agent is working |
+| `spawn-stale` | warning | ...and the initiative moved on without it (see the clock below) |
+| `spawn-duplicate` | warning | two open spawns for one agent name — pairing is ambiguous (ADR-18) |
+| `spawn-orphan-report` | warning | a `report` that closes nothing |
+| `agent-name-unusable` | warning | an agent name that cannot act as a correlator; those events are excluded from pairing |
+| `lease-open` | info | an open lease whose holder is still working |
+| `lease-orphan` | warning | an open lease whose holder already reported — the resource is blocked by nobody |
+| `lease-expired` | warning | the acquiring event carried `expires` / `expires_at` / `until`, and it has passed |
+| `lease-release-by-non-holder` | warning | a release that did not free the lease |
+| `projection-drift` | warning | `STATE.md` / `PROGRESS.md` no longer match the journal, byte for byte |
+| `projection-absent` | info | neither projection generated yet — a repo that has not run the projector |
+| `projection-missing` | warning | one of the pair is gone while the other is there: a run stopped half way |
+| `projection-blocked` | warning | the journal cannot be projected at all, so drift is not a meaningful question |
+| `projection-unreadable` | error | a projection exists but could not be read (errno printed) |
+| `projection-failed` | error | rendering the projection threw |
+| `config-missing` · `policy-missing` | info | the repo has not been set up (yet) |
+| `config-invalid` · `knowledge-invalid` · `policy-invalid` | error | a schema validator rejected the file, with its exact field path |
+| `config-unreadable` · `knowledge-unreadable` · `policy-unreadable` | error | the file could not be read at all (errno printed) |
+| `policies-unreadable` | error | `policies/` could not be listed (errno printed) — **not** "zero policies" |
+| `knowledge-not-a-directory` · `policies-not-a-directory` | warning | the path exists but is not a directory, so nothing in it was checked |
+| `policy-kernel-downgrade` | error | a rule that tries to lower a protected kernel path |
+| `policy-rule-dead` | warning | a rule glob that can never match any path |
+| `policy-rule-overruled` | warning | a rule that quietly fails to cover part of what it looks like it covers |
+| `no-state-dir` | info | no `.tyran/` here — a repo that has not run `/tyran:setup` |
+| `state-not-a-directory` | error | `state/` exists but is not a directory |
+| `state-unreadable` | error | `state/` could not be listed (errno printed) |
+| `state-stray-file` | warning | something under `state/` is not an initiative directory |
+
+## Guarantees
+
+- **Deterministic.** The same state renders the same bytes. Nothing reads
+  the wall clock, findings are sorted explicitly (severity, then code, then
+  location, then message, ties keeping the order the checks produced), and
+  the report contains no timestamp that is not copied from an event.
+- **One implementation per rule.** Spawn/report pairing is
+  `journal.pairSpawns()`, lease ownership is `journal.tail()`, projection
+  freshness is `project.checkFile()`, path classification is
+  `schema.classifyPath()`, file schemas are `schema.validateFile()`. Doctor
+  asks those modules; it never re-derives their answers. Two implementations
+  of one rule diverge at the first "optimization" — this repo has the scar
+  (ADR-18).
+- **No false alarm on a healthy repo.** No `.tyran/`, an empty journal, no
+  projections yet, no config: all exit `0`. A tool that cries wolf on a
+  fresh checkout is uninstalled before it ever finds anything.
+- **Nothing passes silently.** An unreadable file, a directory where a file
+  belongs, a `knowledge/` that is not a directory, a journal shape that
+  throws inside a reader — each becomes a finding naming the errno. A check
+  that cannot run says so; it never reports "clean" for something it skipped.
+- **Every fix command runs, and none of them destroys anything.** Doctor
+  diagnoses; it is allowed to be wrong, so it never prints `rm`, `mv` or a
+  redirection. Arguments are shell-quoted, and anything outside printable
+  ASCII falls back to ANSI-C quoting (`$'demo\x1b[2K'`): the value stays
+  byte-exact and runnable, but a control or bidi codepoint can no longer
+  reach the terminal. That matters because `data.agent` is guarded by
+  `agentNameProblem` while **`init` is not** — `validateEvent` only requires
+  a non-empty string — and neither are lease resource names. Values that
+  travel as JSON (`--data`) are additionally written with every non-ASCII
+  codepoint as `\uXXXX`; both are escapes, not sanitizations, so
+  `JSON.parse` and the shell both return the exact original. Two values
+  cannot be byte-exact and are called out here rather than left implied: a
+  **NUL** cannot survive at all (`argv` does not carry it, so no quoting
+  fixes it), and a **lone surrogate** becomes U+FFFD on the way to UTF-8 —
+  the command stays safe, but it quietly looks for a different string than
+  the journal holds. Both need the journal repaired, not the command
+  pasted. One more limit, for the same reason of stating it rather than
+  implying it: `$'...'` is a bash/zsh construct. Pasted into a POSIX `sh`
+  (dash on Debian, Ubuntu and most containers) it does **not** expand —
+  `dash` reads it as `$` followed by an ordinary quoted string, so the
+  command runs and looks for the literal text `$'demo\x1b[2K'`. Safe, and
+  wrong, which is the failure mode this section exists to prevent. Run
+  printed commands in bash or zsh.
+- **Untrusted journal values cannot rewrite the report.** Every value read
+  out of a journal is passed through `project.inline()` before it is
+  printed, in the text report and in `--json` alike. In a plugin, `data` is
+  written by agents processing someone else's repository; without this an
+  agent name carrying an unterminated right-to-left override would mirror
+  every following line of the diagnosis a human is reading.
+
+## The clock
+
+Staleness needs a "now", and a wall clock would make the output
+non-deterministic. Doctor uses **the journal's own last event** as the
+reference time, so `spawn-stale` means:
+
+> this agent has been open for N hours **of journal time** — the initiative
+> kept moving and left it behind.
+
+That is the signal worth acting on, and it has a useful property: when the
+spawn *is* the last event, its age is zero, so an agent that is simply
+working long never trips the check. It also means a completely idle journal
+cannot report staleness — pass the real clock when you want that:
+
+```bash
+node scripts/doctor.mjs --state --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+`--stale-hours` moves the threshold (default 4).
+
+## Dead policy rules
+
+A rule that matches nothing is worse than a missing rule: the file *looks*
+like the boundary is defined, `schema.mjs validate policy` passes, and
+nobody is protected.
+
+Doctor does not enumerate possible repo paths — that set is unbounded and
+would only ever prove a rule *live*, never dead. It uses the one thing that
+is decidable: **every path a rule ever meets has been normalized first**
+(repo-relative, POSIX separators, no `.` or `..` segments, no leading
+slash). Each glob is instantiated into witness paths (`**` becomes real
+segments, `*` becomes one segment) and each witness is pushed through
+`normalizePath`. If normalization rejects or rewrites *every* witness, the
+literal parts of the glob contain exactly the characters normalization
+removes — and those parts must appear verbatim in any match. The rule is
+dead, and the corrected glob is printed:
+
+| Rule | Verdict |
+|---|---|
+| `./hooks/**`, `/hooks/**`, `hooks\x`, `a/./b`, `foo/../bar`, `.`, `..` | **dead** — the report suggests the normalized spelling |
+| `*`, `**`, `.*`, `src/**`, `(hooks)/**`, `*/policy-gate.mjs` | live — they do match real paths |
+
+One witness surviving unchanged is enough to call a rule live, so the check
+is conservative by construction: a false "dead" alarm on a working security
+rule would be worse than the miss it exists to prevent.
+
+`policy-rule-overruled` narrows a gap from the other side. `validatePolicy`
+already rejects rules that downgrade `hooks/**` or `.tyran/policies/**`, but
+its heuristic fills the rule's wildcards with filler segments, so a rule
+like `*/policy-gate.mjs` validates clean while quietly failing to cover
+`hooks/policy-gate.mjs` — `classifyPath` returns `KERNEL` there before any
+rule is consulted. Doctor instantiates the rule's wildcards with segments of
+the *protected* path instead, which means the rule matches the candidate by
+construction and no second glob matcher is involved.
+
+It covers the **whole-segment** wildcard shapes only, and that limit is real
+rather than theoretical — see Known limits below.
+
+Rule analysis runs **only on a policy that validates**. Findings derived
+from a document the schema already rejected are noise stacked on top of the
+real problem.
+
+## Module API
+
+```js
+import { runStateChecks, renderText, renderJson } from './scripts/doctor.mjs';
+
+const result = runStateChecks({ dir: '.tyran', now: null, staleHours: 4 });
+// { ok, dir, checked: string[], counts: {error, warning, info}, findings }
+// finding: { severity, code, where, message, fix }
+process.stdout.write(renderText(result));
+```
+
+`severityFor(code)` and `SEVERITY_BY_CODE` are exported for the same reason:
+the `SessionStart` hook and any dashboard need to know a finding's weight
+without re-deriving it from the report. `severityFor` **throws** on an
+unregistered code rather than defaulting — that is part of the contract, not
+an implementation detail, because a finding with no severity is how a check
+silently stops failing.
+
+`deadRules(policy, repoRoot)` and `overruledRules(policy, repoRoot)` are
+exported separately so the future policy gate can reuse them without
+scanning a state directory.
+
+## Known limits
+
+Each of these is measured, not suspected. They are written down because a
+diagnostic that overstates its coverage is how a repo ends up believing it
+is protected.
+
+- **`policy-rule-overruled` misses a wildcard *inside* a segment.** The
+  candidate paths give `*` a whole segment, so a rule spelled
+  `h*/x.mjs` or `hooks*/x` passes `validatePolicy` clean, really
+  does reach `hooks/x.mjs`, and doctor stays silent. Closing it needs the
+  real matcher — `globMatches` in `schema.mjs`, which is private. Writing a
+  second copy is exactly what ADR-18 forbids, so the fix is to export the
+  first one, which belongs with a change to that module.
+- **`globMatches` implements only `*` and `**`.** `?`, `[abc]` and `{a,b}`
+  are matched literally, so a rule like `hook?/x` is dead in practice while
+  `policy-rule-dead` reports nothing — its witness `hook?/x` survives
+  normalization unchanged, so the rule looks live. The dead-rule method is
+  declaratively conservative; this is one of the shapes it declines to
+  judge.
+- **The clock has a dead zone.** With no `--now`, an agent that hangs while
+  the journal goes completely idle reports `info` and exit `0`; passing the
+  real clock makes the same state a `warning` and exit `1`. That trade-off
+  is right for a CLI, where determinism is worth more, but a `SessionStart`
+  hook **must** pass `--now` or the staleness check never fires in
+  production.
+- **`lease-expired` only sees an expiry the acquiring event recorded.**
+  `lease.acquired` requires `resource` and `holder`; an expiry field is a
+  convention, not a schema rule.
+- **Doctor reads; it does not take the journal write lock.** On a journal
+  being appended to right now, a finding can describe a state one event old.
+  `journal-lock-present` is how you find out that this happened.

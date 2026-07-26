@@ -50,8 +50,13 @@ await main(() =>
     deadlineMs: DEADLINE_MS,
     handler: ({ input }) => {
       const command = input.tool_input?.command ?? '';
+      // Note what the reason does NOT contain. A refusal is written into the
+      // transcript and into the model's context, so `reason: ${command}`
+      // would republish whatever it objected to — which for a secrets check
+      // means leaking the key in the act of refusing to leak it. Name the
+      // location and the rule, never the finding.
       return looksLikeASecret(command)
-        ? { decision: 'deny', reason: `refusing: ${command}` }
+        ? { decision: 'deny', reason: 'refusing: the command matched rule X at position N' }
         : PASS;
     },
   }),
@@ -157,6 +162,185 @@ section boundary, always saying how much it dropped.
   CI scanner enforces and the set a gate escapes cannot drift apart. When the
   scanner's list grows — as it did with the TAG block in ADR-19's first
   correction — the runtime inherits it with no edit.
+
+## The secrets gate, and exactly where it stops
+
+`hooks/scripts/secrets-gate.mjs` is registered on `PreToolUse` / `Bash`. It is
+the one control here whose failure is irreversible: a key pushed to a public
+repository is burned when it is published, and deleting the commit afterwards
+does not unburn it.
+
+### The invariant, and why it is the invariant
+
+The first version of this gate asked **"did the scan break?"** — scanner
+missing, killed, crashed, report unreadable — and answered all four correctly.
+It never asked **"did the scan cover what is about to be published?"**, and
+review found three separate ways to answer no while every check stayed green:
+one ordinary `.gitattributes` line, one untracked `.gitleaksignore`, and a
+chained `cd`. Each of them passed a real private key in silence.
+
+So:
+
+> **The gate determines the payload and the target itself and hands the bytes
+> to the scanner. The scanner never chooses what it looks at, and coverage is
+> verified by arithmetic rather than inferred from an exit code.**
+
+Object names come from `git diff --raw` and `git rev-list --objects`, contents
+from `git cat-file --batch`. **None of those consult `.gitattributes`** —
+attributes govern how git renders content, not what a blob holds — so "an
+attribute hid the payload" is now impossible rather than patched. The bytes go
+to `gitleaks stdin`, and the scanner reports how many it read; if that is not
+exactly the number sent, the gate refuses. A zero is only accepted when the
+gate itself computed that there is nothing to publish.
+
+Target determination is a **sibling** invariant, not the same one: the command
+line is walked segment by segment carrying a working directory and a `pushd`
+stack, and anything that could move the shell in a way that model cannot
+follow — `eval`, `source`, `. FILE`, `cd -`, a path needing expansion — is a
+refusal rather than an assumption.
+
+### What is scanned
+
+| the command | what is scanned |
+|---|---|
+| `git commit` | every object the commit would add |
+| `git commit -a`, `git add … && git commit` | the same, plus the working-tree changes those commands stage as they run |
+| `git push`, `gh pr create` | every commit not already on **the remote being pushed to** |
+| `gh release create`, `gh gist create` | the uploaded files, read from disk — they may be in no commit at all |
+| any of the above | the command line itself, so `git commit -m "<key>"` is not a hole |
+
+Excluding commits present on *any* remote (rather than the target one) let a
+key held on a private `upstream` be published to a public `origin` unscanned.
+A push that does not say which of several remotes it targets is refused.
+
+### What it refuses without scanning
+
+`--no-verify` **and any unambiguous abbreviation of it** (`--no-verif` skipped
+a live pre-commit hook while an equality check saw nothing), `-n` on `commit`,
+a `core.hooksPath` override, `--force` on a push (`--force-with-lease` and
+`--force-if-includes` are fine, and the refusal explains why the difference is
+not stylistic), and `kill -9` in every spelling including `kill -n 9`.
+
+### Suppression is honoured only when git tracks it
+
+`.gitleaksignore`, `.gitleaks-baseline.json` and `.gitleaks.toml` are read
+**only if they are tracked**, and `GITLEAKS_CONFIG` / `GITLEAKS_CONFIG_TOML`
+are stripped from the scanner's environment. An untracked suppression file
+switched the whole gate off with two commands and left nothing in any diff.
+Tracking does not make suppression safe; it makes it **visible** — a line in a
+diff, scanned by the repo's own CI.
+
+Note the asymmetry with `.gitattributes`, because "tracked is fine" would be
+the wrong lesson: `*.pem binary` is a line people add for diff rendering with
+no idea a secrets gate reads it, an **accidental** hole — which is why that
+class is closed by not consulting attributes at all. A `.gitleaksignore` has
+no purpose other than suppressing findings.
+
+### What it does NOT catch — the declared boundary
+
+Pinned by tests (`DECLARED_MISSES`) so code and documentation cannot drift.
+Recognising "this is a commit" from a shell command is a denylist on hostile
+input and **cannot be complete**: review found six bypasses in roughly forty
+attempts and could not bound what remains. Read this list as a floor, not a
+ceiling.
+
+- **Aliases, wrappers, other languages.** `gc -m x`, `bash ./release.sh`,
+  `make deploy`, a push from inside a Python script. The gate never sees an
+  alias table or a script's contents.
+- **Any tool that is not `Bash`.** A git MCP server exposing `git_commit` is
+  not covered. `Write`/`Edit` are deliberately not gated — they put content in
+  the working tree, and the working tree is not what gets published.
+- **Exfiltration that never touches git.** `curl -d @.env`, printing a key
+  into the transcript. A different control's job.
+- **The scanner's own false negatives, which are large.** Measured on gitleaks
+  8.30.1 on the path this gate actually uses (`gitleaks stdin` over bytes the
+  gate assembled), n=60 per cell, ids generated from a CSPRNG over the **full
+  `A-Z0-9` alphabet AWS actually uses** (mean digit density 26.4%):
+
+  | payload | reported clean |
+  |---|---|
+  | `AWS_ACCESS_KEY_ID=<id>` | **80.0%** |
+  | the ID line inside a realistic `~/.aws/credentials` | **80.0%** |
+  | that credentials file taken as a whole | 0.0% |
+  | `aws_key = "<id>"` | 3.3% |
+  | a private-key block | 0.0% |
+
+  Read the rows together, because taken singly they mislead. The
+  `aws-access-token` rule fires on about **13%** of well-formed ids whatever
+  the surrounding shape; the two low numbers come from a *different*, generic
+  rule that reacts to the shape of an assignment or to the secret-key line
+  sitting beside the id. So a repository committing an access key id **on its
+  own**, in a shape the generic rule does not recognise, is close to unprotected.
+
+  The number was wrong here for two rounds and the reason is worth recording:
+  the fixture's alphabet excluded vowels and ambiguous characters, giving 17.8%
+  digits against the real 26.4%, and digit density moves the result across the
+  rule's threshold. The measured miss rate roughly **doubled** once the
+  generator matched reality. A fixture that is not the thing it stands for
+  produces a documented number that is quietly optimistic.
+
+- **A short secret inside a filename** still prints in a refusal; see below.
+
+So: **this gate is not a guarantee that a secret cannot be published.** It is a
+mechanical check that catches the ordinary case at the point where the damage
+becomes permanent. A control advertised as unbypassable would be a false
+guarantee, and people stop looking at those.
+
+### What a refusal may say
+
+A refusal is republished into the transcript and the model's context, so it is
+treated as output, not as logging:
+
+- the scanner's `Match`/`Secret`/`Line` fields are never read;
+- a **file name can itself be a key**, so any unbroken run of 16+ characters
+  in a path is elided. Scanning the refusal with gitleaks was tried first and
+  measured not to work — it inherits the false-negative rate above — so the
+  elision is a deterministic shape rule instead, and consults no pattern list.
+  Swept over two real repositories: 0 of 58 paths here and 6 of 4857 in a
+  large application are affected;
+- a **rule id** is attacker-controlled text that arrived from a repo config,
+  and an imperative sentence in one was printed into the model's context
+  verbatim. Rule ids are now filtered through an allowlist of identifier
+  characters, so a sentence stops reading as an instruction;
+- the message states what it withholds rather than claiming the secret is
+  never quoted. The round-1 wording made that claim and it was false.
+
+### False alarms, measured rather than asserted
+
+A gate that blocks legitimate work gets switched off, and then it protects
+nothing. Measured on 7168 real `Bash` commands from this project's own
+transcripts:
+
+| outcome | count | share |
+|---|---|---|
+| no scan, no cost | 6815 | 95.1% |
+| a scan is triggered | 351 | 4.9% |
+| refused by an unconditional rule | 2 | 0.03% — both **true** positives |
+| refused because the target repository could not be resolved | 13 | 0.18% of all, **3.7% of triggering** |
+
+The stricter target doctrine therefore costs *less* than the round-1 rule it
+replaced (4.0%), because two lexer artefacts were fixed along the way: here-doc
+bodies are no longer lexed as commands (they were producing 343 refusals, 45%
+of all triggering commands, from words inside commit messages), and a full stop
+is no longer read as the `source` builtin.
+
+The remedy for a genuine false positive is the scanner's own: record the
+fingerprint in a **tracked** `.gitleaksignore`, or agree a **tracked**
+`.gitleaks-baseline.json`.
+
+### Costs that are deliberate
+
+- **No gitleaks means no commit.** A check that passes when its dependency is
+  gone is a check you disable by uninstalling a package.
+- **The payload is capped at 8 MB** and a larger one refuses rather than being
+  scanned in part. A partial scan that reports nothing looks exactly like a
+  clean one.
+- **A scan that overruns refuses and does not read its partial report.**
+- **Every child runs in its own process group** and the group is killed on
+  overrun. The earlier version killed only the direct child, and a surviving
+  grandchild held the pipes open past the gate's own timeout — leaving an
+  orphan, which is the outcome this gate refuses `kill -9` to avoid.
+
 
 ## Testing a hook
 

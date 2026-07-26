@@ -42,6 +42,7 @@ import {
   isAbbreviationOf,
   isLiteralPath,
   locate,
+  buildPayload,
   makeBudget,
   parseCatFileBatch,
   parseRawDiff,
@@ -327,6 +328,23 @@ test('B3: a movement this gate cannot follow is a REFUSAL, not an assumption', (
   assert.equal(planCommand('cd "$WT" && npm test', '/a').unmodellable.length, 0);
 });
 
+test('B3: an unmodellable target is refused by the GATE, not merely noted in the plan', async () => {
+  // Asserting on `planCommand` alone left the refusal itself unguarded: a
+  // mutant that computed `unmodellable` and then ignored it passed the whole
+  // suite. The plan is an observation; this is the control.
+  const dir = repo();
+  writeFileSync(join(dir, 'a.txt'), 'x\n');
+  git(dir, 'add', '-A');
+  const verdict = await handle({
+    input: bashInput('cd "$WT" && git push origin main', dir),
+    cwd: dir,
+    runner: fakeScanner(clean),
+  });
+  assert.equal(verdict.decision, 'deny');
+  assert.match(verdict.reason, /decide WHERE in a way/);
+  assert.match(verdict.reason, /never expands variables/);
+});
+
 test(
   'H1: a commit that lives on a private remote is still scanned before it goes to a public one',
   { skip: NEEDS_SCANNER },
@@ -414,6 +432,29 @@ test(
     assert.equal(verdictOf(runGateScript('git add -A && git commit -m x', untracked)), 'deny', 'add -A then commit');
   },
 );
+
+test('only BLOBS are scanned — a tree object is not content', { skip: NEEDS_SCANNER }, async () => {
+  // `git rev-list --objects` lists trees alongside blobs, and a tree carries a
+  // path too (the directory name). Feeding one to the scanner as if it were a
+  // file both mis-labels every finding after it and scans binary noise. A
+  // mutant that dropped the type check passed the whole suite before this.
+  const dir = repo();
+  mkdirSync(join(dir, 'sub'));
+  writeFileSync(join(dir, 'sub', 'a.txt'), 'hello from a file\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '-m', 'seed');
+  git(dir, 'remote', 'add', 'origin', tempDir('bare-'));
+  const payload = await buildPayload(
+    { dir, scanCommit: false, scanPush: true, includeWorktree: false, includeUntracked: false, pushRemote: 'origin' },
+    [],
+    { runner: runChild, budget: makeBudget(Date.now()) },
+  );
+  assert.deepEqual(
+    payload.map.map((m) => m.label),
+    ['sub/a.txt'],
+    'the directory `sub` is a TREE and must not appear as scanned content',
+  );
+});
 
 test('an oversized payload REFUSES rather than being scanned in part', { skip: NEEDS_SCANNER }, () => {
   const dir = repo();
@@ -772,10 +813,18 @@ test('here-doc BODIES are not lexed as commands', () => {
   // commands in a 7168-command corpus were refused because a WORD OF A COMMIT
   // MESSAGE landed in a program slot. A gate that blocks 45% of real work is a
   // gate that gets uninstalled.
-  const command = "git commit -F - <<'EOF'\ncd /elsewhere\n. Something. And more.\nEOF\ngit status";
-  assert.equal(stripHeredocBodies(command).includes('cd /elsewhere'), false);
+  // The body deliberately contains a construct that WOULD be refused if it
+  // were lexed — `cd "$WT"` is unmodellable — so this assertion fails the
+  // moment the stripping stops happening. An earlier version used inert prose
+  // in the body and a mutant that removed the stripping survived it.
+  const command = "git commit -F - <<'EOF'\ncd \"$WT\"\n. Something. And more.\nEOF\ngit status";
+  assert.equal(stripHeredocBodies(command).includes('cd "$WT"'), false);
   assert.ok(stripHeredocBodies(command).includes('git status'), 'text after the delimiter survives');
-  assert.equal(planCommand(command, '/repo').unmodellable.length, 0);
+  assert.equal(
+    planCommand(command, '/repo').unmodellable.length,
+    0,
+    'a commit message that mentions a shell construct is prose, not a command',
+  );
   // A here-STRING has no body and must not swallow the rest of the line.
   assert.ok(stripHeredocBodies('git commit -F - <<<"msg"\ngit push origin main').includes('git push'));
 });

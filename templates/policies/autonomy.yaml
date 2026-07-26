@@ -1,0 +1,49 @@
+# What Tyran's retrospective agent may change on its own.
+#
+# Enforced by a PreToolUse hook on write paths — the boundary does not
+# depend on the model behaving. Three classes:
+#
+#   AUTO    retro commits it itself (rollback = git revert)
+#   GATED   retro proposes, you approve
+#   KERNEL  humans only, by hand — never autonomously
+#
+# Tighten this per repo freely — but `hooks/**` and `.tyran/policies/**`
+# MUST stay KERNEL: the validator rejects a policy that downgrades them,
+# so the boundary can never be edited away by the loop it constrains.
+#
+# Precedence: the most specific matching rule wins (longest path glob);
+# ties go to the stricter class. Paths no rule matches get `default`.
+#
+# Validate:  node scripts/schema.mjs validate policy .tyran/policies/autonomy.yaml
+
+# Applied when no rule matches. GATED means "ask me" — the safe answer.
+default: GATED
+
+rules:
+  - path: .tyran/knowledge/**
+    class: AUTO
+    reason: learned facts about this repo; cheap to revert, high value to accumulate
+
+  - path: .claude/skills/tyran-local/**
+    class: AUTO
+    reason: repo-specific skills, gated by a passing activation test
+
+  - path: .tyran/state/**
+    class: AUTO
+    reason: the execution journal is append-only and written by the conductor itself
+
+  - path: .tyran/config.yaml
+    class: GATED
+    reason: cost profile and autonomy class change what Tyran is allowed to spend and do
+
+  - path: .claude/agents/**
+    class: GATED
+    reason: overriding a core agent freezes it at the version it was copied from
+
+  - path: hooks/**
+    class: KERNEL
+    reason: enforcement hooks are the mechanism; a system that can disable its own gates has none
+
+  - path: .tyran/policies/**
+    class: KERNEL
+    reason: the boundary must protect itself, including this rule

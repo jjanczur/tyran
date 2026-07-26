@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
@@ -281,4 +281,52 @@ test('protected paths cannot be outranked by any glob spelling (E2S2-R10)', () =
   assert.ok(validatePolicy(evil).some((e) => e.includes('**/policy-gate.mjs')));
   // Even a policy that never mentions hooks cannot make them autonomous.
   assert.equal(classifyPath({ default: 'AUTO', rules: [{ path: '**', class: 'AUTO', reason: 'all' }] }, 'hooks/x.mjs'), 'KERNEL');
+});
+
+test('CLI: invoked through a symlinked path, validation still runs (ADR-19 debt)', () => {
+  // The self-run guard compared resolve(argv[1]) — which keeps symlinks — with
+  // import.meta.url, which Node has already canonicalized. Reaching the script
+  // through a link therefore made main() never run: no output, no findings,
+  // and EXIT 0 over a file that does not validate. This script is a CI step,
+  // so a silent no-op reads as "the templates are valid" when nothing looked
+  // at them. Not exotic either: /tmp and /var are symlinks on macOS and plugin
+  // installs reach scripts/ through a link routinely.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-schema-symlink-'));
+  const realScripts = join(base, 'real-scripts');
+  mkdirSync(realScripts);
+  writeFileSync(join(realScripts, 'schema.mjs'), readFileSync(SCRIPT));
+  writeFileSync(
+    join(realScripts, 'yaml-lite.mjs'),
+    readFileSync(fileURLToPath(new URL('../../scripts/yaml-lite.mjs', import.meta.url))),
+  );
+  const linked = join(base, 'linked-scripts');
+  symlinkSync(realScripts, linked);
+
+  const bad = join(base, 'bad.yaml');
+  writeFileSync(bad, 'profile: turbo\n');
+  const r = spawnSync(process.execPath, [join(linked, 'schema.mjs'), 'validate', 'config', bad], {
+    encoding: 'utf8',
+  });
+  assert.notEqual(r.stdout, '', 'the CLI produced no output at all through the symlink');
+  assert.match(r.stdout, /^FAIL /m, 'the invalid file was not reported through the symlink');
+  assert.equal(r.status, 1, 'an invalid file exited 0 through the symlink');
+});
+
+test('the self-run guard survives an argv[1] that cannot be canonicalized', () => {
+  // The guard canonicalizes argv[1] with realpathSync, which THROWS when the
+  // path cannot be followed. Without the fallback that throw escapes module
+  // scope and importing schema.mjs fails outright — taking down every consumer,
+  // including the hook that classifies paths.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-schema-argv-'));
+  const harness = join(base, 'harness.mjs');
+  writeFileSync(
+    harness,
+    "process.argv[1] = '/nonexistent-dir-" +
+      "e30/entry.mjs';\n" +
+      `await import(${JSON.stringify(SCRIPT)});\n` +
+      "console.log('SURVIVED');\n",
+  );
+  const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'SURVIVED');
 });

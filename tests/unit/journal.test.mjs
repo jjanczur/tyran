@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  appendFileSync,
+  symlinkSync,
+  realpathSync,
+  mkdirSync,
+  rmdirSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawn } from 'node:child_process';
@@ -13,6 +22,10 @@ import {
   validateJournal,
   nextId,
   tail,
+  openSpawns,
+  closeSpawn,
+  pairSpawns,
+  agentNameProblem,
 } from '../../scripts/journal.mjs';
 
 const SCRIPT = new URL('../../scripts/journal.mjs', import.meta.url).pathname;
@@ -118,7 +131,13 @@ test('valid journal validates ok with count', () => {
   const f = tmp();
   append(f, ev());
   append(f, ev({ ts: '2026-07-26T10:06:00.000Z' }));
-  assert.deepEqual(validateJournal(f), { ok: true, errors: [], count: 2, truncatedTail: false });
+  assert.deepEqual(validateJournal(f), {
+    ok: true,
+    errors: [],
+    warnings: [],
+    count: 2,
+    truncatedTail: false,
+  });
 });
 
 // --- nextId ------------------------------------------------------------
@@ -239,4 +258,438 @@ test('CLI: validate exits 1 on a broken journal; bad usage exits 2', () => {
 test('EVENT_TYPES is frozen and matches the documented closed set size', () => {
   assert.ok(Object.isFrozen(EVENT_TYPES));
   assert.equal(EVENT_TYPES.length, 14);
+});
+
+// --- ADR-18: one open spawn per agent name -----------------------------
+
+const spawnEv = (agent, { data = {}, ...over } = {}) => ({
+  ev: 'spawn',
+  init: 'demo',
+  actor: 'conductor',
+  ...over,
+  data: { agent, role: 'implementer', ...data },
+});
+const reportEv = (agent, { data = {}, ...over } = {}) => ({
+  ev: 'report',
+  init: 'demo',
+  actor: 'conductor',
+  ...over,
+  data: { agent, verdict: 'done', ...data },
+});
+
+test('ADR-18: a second spawn for an agent that is still open is rejected', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1', { data: { ticket: 'T-3' } }));
+  const before = readFileSync(f); // Buffer — compare bytes, not events
+  assert.throws(
+    () => append(f, spawnEv('impl-1')),
+    /already has an open spawn/,
+  );
+  assert.deepEqual(readFileSync(f), before, 'a rejected spawn must write NOTHING');
+  assert.equal(query(f, { ev: 'spawn' }).length, 1);
+});
+
+test('ADR-18: spawn -> report -> spawn of the same name is allowed', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  append(f, reportEv('impl-1'));
+  append(f, spawnEv('impl-1')); // previous one is closed — legal
+  assert.equal(query(f, { ev: 'spawn' }).length, 2);
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['impl-1']);
+  // ...and the reopened one is itself protected again
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+});
+
+test('ADR-18: distinct agent names stay open in parallel', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  append(f, spawnEv('impl-2'));
+  append(f, spawnEv('reviewer'));
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['impl-1', 'impl-2', 'reviewer']);
+  append(f, reportEv('impl-2'));
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['impl-1', 'reviewer']);
+  assert.equal(validateJournal(f).ok, true);
+  // agent names are untrusted strings: the open set is a Map, so a name like
+  // __proto__ is an ordinary key and still guarded
+  append(f, spawnEv('__proto__'));
+  assert.throws(() => append(f, spawnEv('__proto__')), /already has an open spawn/);
+});
+
+test('ADR-18: the rejection message names the agent, the previous spawn and the fix', () => {
+  const f = tmp();
+  append(f, spawnEv('tyran-implementer', { ts: '2026-07-26T09:00:00.000Z', data: { ticket: 'T-7' } }));
+  let err;
+  try {
+    append(f, spawnEv('tyran-implementer'));
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err, 'the duplicate spawn must throw');
+  const m = err.message;
+  assert.match(m, /"tyran-implementer"/); // which name
+  assert.match(m, /2026-07-26T09:00:00\.000Z/); // when it was opened
+  assert.match(m, /T-7/); // what it is working on
+  assert.match(m, /close-spawn/); // how to get unstuck
+  assert.match(m, /distinct name/); // how to run two agents at once
+  assert.match(m, /ADR-18/); // why
+});
+
+test('ADR-18: the guard keys on file order, not on ts (future / duplicate ts cannot fool it)', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1', { ts: '2099-01-01T00:00:00.000Z' })); // far future
+  assert.throws(() => append(f, spawnEv('impl-1', { ts: '2026-07-26T10:00:00.000Z' })), /open spawn/);
+  assert.throws(() => append(f, spawnEv('impl-1', { ts: '2099-01-01T00:00:00.000Z' })), /open spawn/);
+  const g = tmp();
+  const same = '2026-07-26T10:00:00.000Z';
+  append(g, spawnEv('impl-1', { ts: same }));
+  append(g, reportEv('impl-1', { ts: same })); // identical ts still closes it
+  append(g, spawnEv('impl-1', { ts: same }));
+  assert.equal(query(g, { ev: 'spawn' }).length, 2);
+});
+
+test('ADR-18: a truncated final line cannot pose as a closing report', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  // crash mid-write of the report that WOULD have closed it: no trailing newline
+  appendFileSync(f, '{"ts":"2026-07-26T10:30:00.000Z","ev":"report","init":"demo","actor":"c","data":{"agent":"impl-1","verd');
+  assert.equal(readJournal(f).truncatedTail, true);
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+});
+
+test('append heals a missing final newline instead of fusing onto a truncated line', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  appendFileSync(f, '{"ts":"2026-07-26T10:30:00.000Z","ev":"report","init":"demo","actor":"c","data":{"agent":"impl-1","verd');
+  append(f, ev({ ts: '2026-07-26T10:31:00.000Z', ev: 'error', data: { class: 'crash' } }));
+  const { events, badLines, truncatedTail } = readJournal(f);
+  // the new event survives as its own line; the crashed remnant becomes
+  // VISIBLE corruption (validate reports it) instead of silently eating it
+  assert.equal(events.length, 2);
+  assert.equal(events.at(-1).data.class, 'crash');
+  assert.deepEqual(badLines, [2]);
+  assert.equal(truncatedTail, false);
+});
+
+test('journals written before the guard still read; validate warns instead of erroring', () => {
+  const f = tmp();
+  const line = (over) => JSON.stringify({ ...spawnEv('impl-1'), ts: '2026-07-26T10:00:00.000Z', ...over });
+  writeFileSync(f, line() + '\n' + line({ ts: '2026-07-26T10:05:00.000Z' }) + '\n');
+  const { events, badLines } = readJournal(f); // rule: reads NEVER break
+  assert.equal(events.length, 2);
+  assert.deepEqual(badLines, []);
+  assert.equal(query(f, { ev: 'spawn' }).length, 2);
+  const result = validateJournal(f);
+  assert.equal(result.ok, true, 'legacy duplicates are not a hard error — history is append-only');
+  assert.equal(result.errors.length, 0);
+  assert.ok(result.warnings.some((w) => /2 open spawns/.test(w) && /impl-1/.test(w)));
+  // and the pairing rule stays FIFO: one report closes the OLDEST one only
+  const { open } = pairSpawns([...events, { ev: 'report', data: { agent: 'impl-1' } }]);
+  assert.equal(open.get('impl-1').length, 1);
+  assert.equal(open.get('impl-1')[0].ts, '2026-07-26T10:05:00.000Z');
+});
+
+test('a report with no open spawn is written, but surfaced as an orphan', () => {
+  const f = tmp();
+  const written = append(f, reportEv('ghost')); // never silently dropped
+  assert.equal(written.ev, 'report');
+  const result = validateJournal(f);
+  assert.equal(result.ok, true);
+  assert.ok(result.warnings.some((w) => /"ghost"/.test(w) && /closes no open spawn/.test(w)));
+  assert.deepEqual(openSpawns(f), []);
+  // an orphan report does NOT bank credit against a future spawn
+  append(f, spawnEv('ghost'));
+  assert.throws(() => append(f, spawnEv('ghost')), /already has an open spawn/);
+});
+
+test('close-spawn closes an abandoned spawn, demands a reason, refuses no-ops', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  assert.throws(() => closeSpawn(f, { init: 'demo', agent: 'impl-1' }), /non-empty --reason/);
+  assert.throws(() => closeSpawn(f, { init: 'demo', agent: 'nobody', reason: 'x' }), /no open spawn/);
+  const written = closeSpawn(f, { init: 'demo', agent: 'impl-1', reason: 'agent killed by timeout' });
+  assert.equal(written.ev, 'report'); // an ordinary event, not a bypass
+  assert.equal(written.data.verdict, 'abandoned');
+  assert.equal(written.data.closed_by, 'close-spawn');
+  assert.deepEqual(openSpawns(f), []);
+  append(f, spawnEv('impl-1')); // the name is usable again
+  assert.deepEqual(validateJournal(f).warnings, []);
+});
+
+test('non-canonical agent names are refused on write (they would defeat the guard)', () => {
+  const f = tmp();
+  append(f, spawnEv('worker'));
+  const bads = [
+    'worker ', // trailing space
+    ' worker', // leading space
+    'worker\u00a0', // trailing NBSP - invisible in every terminal
+    'wor\u200bker', // zero-width space inside
+    'worker\u0007', // control character
+    'e\u0301gide', // NFD - renders identically to the NFC form
+    42, // not a string at all
+    '', // empty
+  ];
+  for (const bad of bads) {
+    assert.throws(
+      () => append(f, spawnEv(bad)),
+      /invalid event: data\.agent/,
+      `expected rejection for ${JSON.stringify(bad)}`,
+    );
+  }
+  // reports are held to the same standard - otherwise they could not close
+  assert.throws(() => append(f, reportEv('worker ')), /invalid event: data\.agent/);
+  // case IS significant: an agent name is an address, not prose
+  assert.equal(agentNameProblem('Worker'), null);
+  append(f, spawnEv('Worker'));
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['worker', 'Worker']);
+  assert.equal(readJournal(f).events.length, 2);
+});
+
+test('a rejected spawn releases the lock (next append is immediate, not a 5s timeout)', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  assert.throws(() => append(f, spawnEv('impl-1')), /open spawn/);
+  const t0 = Date.now();
+  append(f, ev({ ev: 'error', data: { class: 'after-rejection' } }));
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 1000, `append after a rejected one took ${elapsed}ms — lock leaked?`);
+  assert.equal(readJournal(f).events.length, 2);
+});
+
+test('CLI: open-spawns and close-spawn round-trip; duplicate spawn exits 1', () => {
+  const f = tmp();
+  const run = (...args) => execFileSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+  run('append', f, 'spawn', 'demo', '--data', '{"agent":"impl-1","role":"implementer"}');
+  assert.equal(JSON.parse(run('open-spawns', f)).length, 1);
+  let stderr = '';
+  try {
+    execFileSync(process.execPath, [SCRIPT, 'append', f, 'spawn', 'demo', '--data', '{"agent":"impl-1","role":"implementer"}'], { stdio: 'pipe' });
+    assert.fail('duplicate spawn should exit 1');
+  } catch (err) {
+    assert.equal(err.status, 1);
+    stderr = String(err.stderr);
+  }
+  assert.match(stderr, /already has an open spawn/);
+  assert.match(stderr, /close-spawn/);
+  try {
+    execFileSync(process.execPath, [SCRIPT, 'close-spawn', f, 'demo', 'impl-1'], { stdio: 'pipe' });
+    assert.fail('close-spawn without --reason should fail');
+  } catch (err) {
+    assert.equal(err.status, 1);
+    assert.match(String(err.stderr), /requires a non-empty --reason/); // not a usage dump
+  }
+  run('close-spawn', f, 'demo', 'impl-1', '--reason', 'died in a fire');
+  assert.deepEqual(JSON.parse(run('open-spawns', f)), []);
+  run('append', f, 'spawn', 'demo', '--data', '{"agent":"impl-1","role":"implementer"}');
+  assert.equal(JSON.parse(run('open-spawns', f)).length, 1);
+  execFileSync(process.execPath, [SCRIPT, 'validate', f]); // still exit 0
+});
+
+// The guard is worthless if it only holds when nobody is racing. 12 separate
+// OS processes attack the same name at once; the parent proves the overlap by
+// measuring that the last child was launched before the first one exited.
+test('ADR-18 under a real race: 12 concurrent processes, exactly one spawn survives', async () => {
+  const f = tmp();
+  const launched = [];
+  const finished = [];
+  const t0 = Date.now();
+  const procs = Array.from({ length: 12 }, (_, i) => {
+    const p = spawn(process.execPath, [
+      SCRIPT, 'append', f, 'spawn', 'demo', '--actor', `p${i}`,
+      '--data', JSON.stringify({ agent: 'racer', role: 'implementer', ticket: `T-${i}` }),
+    ]);
+    launched.push(Date.now() - t0);
+    let err = '';
+    p.stderr.on('data', (d) => (err += d));
+    return new Promise((res) => {
+      p.on('close', (code) => {
+        finished.push(Date.now() - t0);
+        res({ code, err });
+      });
+    });
+  });
+  const results = await Promise.all(procs);
+
+  assert.ok(
+    Math.max(...launched) < Math.min(...finished),
+    `not concurrent: last launch ${Math.max(...launched)}ms >= first exit ${Math.min(...finished)}ms`,
+  );
+  const winners = results.filter((r) => r.code === 0);
+  const losers = results.filter((r) => r.code !== 0);
+  assert.equal(winners.length, 1, `expected exactly one winner, got ${winners.length}`);
+  assert.equal(losers.length, 11);
+  for (const l of losers) {
+    assert.equal(l.code, 1);
+    assert.match(l.err, /already has an open spawn/);
+  }
+  const { events, badLines, truncatedTail } = readJournal(f);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].ev, 'spawn');
+  assert.deepEqual(badLines, []);
+  assert.equal(truncatedTail, false);
+  const result = validateJournal(f);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
+});
+
+// --- review round 2: the five mutants that survived the first suite -----
+
+// B1. A guard degraded to "look at the previous event only" passed all 36
+// tests, because every duplicate in them sat next to its original. This is
+// exactly the difference between a guarantee and a heuristic.
+test('ADR-18: a duplicate separated from its original is still rejected', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1'));
+  append(f, spawnEv('impl-2'));
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+  append(f, reportEv('impl-2')); // a report for ANOTHER name closes nothing here
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+  append(f, ev({ ev: 'error', data: { class: 'noise' } })); // unrelated events either
+  assert.throws(() => append(f, spawnEv('impl-1')), /already has an open spawn/);
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['impl-1']);
+  assert.equal(query(f, { ev: 'spawn' }).length, 2);
+});
+
+// B2. "warnings never change the exit code" is a documented promise and the
+// backward-compatibility rule for pre-guard journals — pin it at the CLI.
+test('CLI: validate on a legacy duplicate exits 0 and still lists the warning', () => {
+  const f = tmp();
+  const line = (ts) => JSON.stringify({ ...spawnEv('impl-1'), ts });
+  writeFileSync(f, `${line('2026-07-26T10:00:00.000Z')}\n${line('2026-07-26T10:05:00.000Z')}\n`);
+  // execFileSync throws on a non-zero exit — this call IS the exit-0 assertion
+  const parsed = JSON.parse(execFileSync(process.execPath, [SCRIPT, 'validate', f], { encoding: 'utf8' }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.errors, []);
+  assert.equal(parsed.warnings.length, 1);
+  assert.match(parsed.warnings[0], /"impl-1" has 2 open spawns/);
+});
+
+// B3. The hint is what an autonomous caller executes. Names may legally
+// contain spaces, apostrophes or a leading dash — run what we print.
+test('the printed recovery commands actually run, for hostile agent names', () => {
+  for (const agent of ['my agent', "o'brien", '--reason']) {
+    const label = JSON.stringify(agent);
+    const f = tmp();
+    append(f, spawnEv(agent));
+    let msg = '';
+    try {
+      append(f, spawnEv(agent));
+    } catch (e) {
+      msg = e.message;
+    }
+    assert.match(msg, /already has an open spawn/, label);
+    const lines = msg.split('\n');
+    const asShell = (cmd) => cmd.replace('node scripts/journal.mjs', `node '${SCRIPT}'`);
+
+    // 1. the "record its report" hint (two lines, backslash continuation)
+    const ai = lines.findIndex((l) => l.includes('journal.mjs append'));
+    const appendCmd = asShell(`${lines[ai]}\n${lines[ai + 1]}`).replace('<verdict>', 'done');
+    execFileSync('/bin/sh', ['-c', appendCmd], { stdio: 'pipe' });
+    assert.deepEqual(openSpawns(f), [], `append hint did not close ${label}`);
+
+    // 2. the "close it explicitly" hint, on a fresh open spawn
+    const g = tmp();
+    append(g, spawnEv(agent));
+    let msg2 = '';
+    try {
+      append(g, spawnEv(agent));
+    } catch (e) {
+      msg2 = e.message;
+    }
+    const closeCmd = asShell(
+      msg2.split('\n').find((l) => l.includes('close-spawn')).trim(),
+    ).replace('<why>', 'died in a fire');
+    execFileSync('/bin/sh', ['-c', closeCmd], { stdio: 'pipe' });
+    assert.deepEqual(openSpawns(g), [], `close-spawn hint did not close ${label}`);
+    assert.equal(query(g, { ev: 'report' }).at(-1).data.reason, 'died in a fire');
+    assert.equal(query(g, { ev: 'report' }).at(-1).init, 'demo'); // real init, not "<init>"
+  }
+});
+
+test('CLI: an agent named like a flag is closable via the POSIX -- separator', () => {
+  const f = tmp();
+  const run = (...args) => execFileSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+  run('append', f, 'spawn', 'demo', '--data', JSON.stringify({ agent: '--reason', role: 'r' }));
+  assert.equal(JSON.parse(run('open-spawns', f))[0].agent, '--reason');
+  run('close-spawn', f, '--reason', 'stuck otherwise', 'demo', '--', '--reason');
+  assert.deepEqual(JSON.parse(run('open-spawns', f)), []);
+  run('append', f, 'spawn', 'demo', '--data', JSON.stringify({ agent: '--reason', role: 'r' }));
+  assert.equal(JSON.parse(run('open-spawns', f)).length, 1); // the name is usable again
+});
+
+// B4. The "unusable agent name" warning branch had no coverage at all.
+test('validate warns about agent names that cannot serve as a correlator', () => {
+  const f = tmp();
+  const bad = { ts: '2026-07-26T10:00:00.000Z', ev: 'spawn', init: 'demo', actor: 'c', data: { agent: ' worker', role: 'r' } };
+  writeFileSync(f, JSON.stringify(bad) + '\n');
+  const result = validateJournal(f);
+  assert.equal(result.ok, true); // still not an error: reads never break
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /unusable data\.agent/);
+  assert.match(result.warnings[0], /leading\/trailing whitespace/);
+  assert.deepEqual(openSpawns(f), []); // excluded from pairing, never half-trusted
+});
+
+// B5. close-spawn is the way OUT of a deadlock; nothing pinned that it goes
+// through the ordinary append path (a direct appendFileSync passed 36 tests).
+test('close-spawn writes through the ordinary append path (validated, clamped, healed)', () => {
+  const f = tmp();
+  append(f, spawnEv('impl-1', { ts: '2099-01-01T00:00:00.000Z' }));
+  // crash remnant: no trailing newline
+  appendFileSync(f, '{"ts":"2099-01-02T00:00:00.000Z","ev":"report","init":"demo","actor":"c","data":{"agent":"impl-1","verd');
+  const written = closeSpawn(f, { init: 'demo', agent: 'impl-1', reason: 'died' });
+  assert.equal(written.ts, '2099-01-01T00:00:00.000Z'); // ts CLAMPED, not "now"
+  const { events } = readJournal(f);
+  assert.equal(events.at(-1).data.closed_by, 'close-spawn'); // survived: newline HEALED
+  assert.deepEqual(validateEvent(events.at(-1)), []);
+  assert.ok(!validateJournal(f).errors.some((e) => /earlier than previous/.test(e)));
+  // and it is VALIDATED like every other event, writing nothing when invalid
+  append(f, spawnEv('impl-2', { ts: '2099-01-03T00:00:00.000Z' }));
+  const bytes = readFileSync(f);
+  assert.throws(() => closeSpawn(f, { init: '', agent: 'impl-2', reason: 'y' }), /invalid event: init/);
+  assert.deepEqual(readFileSync(f), bytes);
+});
+
+// B6. The lock is keyed by the canonical path, so an alias cannot buy a
+// second lock. Asserted on the lock itself, not on a race outcome: a race
+// only *sometimes* exposes the second lock, and evidence that only sometimes
+// appears is not evidence. (Hard links still alias — documented, not fixed.)
+//
+// There is deliberately NO observation window here. "Still running after N ms"
+// cannot tell a child blocked on the lock from a child that has not reached it
+// yet, so a slow-starting process makes such an assertion pass for the wrong
+// reason — verified: with a 1 s busy-wait at CLI entry, a mutant keying the
+// lock by the given path survives that form of the test. The child is instead
+// left to run to completion: with the lock held it has exactly two possible
+// endings, and only one of them is reachable without a second lock.
+test('the lock is keyed by the canonical path: a symlink alias cannot buy a second lock', async () => {
+  const f = tmp();
+  append(f, ev({ ev: 'init.created', data: {} }));
+  const link = `${f}.link`;
+  symlinkSync(f, link);
+  const heldLock = `${realpathSync(f)}.lock`;
+  mkdirSync(heldLock); // a live writer holds the lock through the REAL path
+  const spawnArgs = [SCRIPT, 'append', link, 'spawn', 'demo', '--data', '{"agent":"racer","role":"r"}'];
+  let result;
+  try {
+    result = await new Promise((res) => {
+      const child = spawn(process.execPath, spawnArgs);
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (err += d));
+      child.on('close', (code) => res({ code, out, err }));
+    });
+  } finally {
+    rmdirSync(heldLock);
+  }
+  // Either it acquired a second lock and wrote (mutant), or it ran into ITS
+  // OWN 5 s timeout on the lock we hold — which no amount of slowness fakes.
+  assert.equal(result.code, 1, `the alias bought a second lock (stdout: ${result.out})`);
+  assert.match(result.err, /journal lock timeout/);
+  assert.equal(query(f, { ev: 'spawn' }).length, 0); // nothing slipped past the lock
+  // Positive control: the very same command succeeds once the lock is free —
+  // so the failure above was the lock, not a broken command. It also proves
+  // the alias writes into the very same file.
+  execFileSync(process.execPath, spawnArgs);
+  assert.equal(query(f, { ev: 'spawn' }).length, 1);
 });

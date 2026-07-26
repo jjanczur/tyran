@@ -176,11 +176,35 @@ test(`fuzz: hostile journal data cannot break the projections (seed ${SEED}, ${C
   const rand = rng(SEED);
   for (let caseNo = 0; caseNo < CASES; caseNo++) {
     const events = Array.from({ length: 1 + Math.floor(rand() * 6) }, () => hostileEvent(rand));
-    const { files } = renderProjections({ events });
+    const { files, warnings } = renderProjections({ events });
     checkDocument(STATE_FILE, files[STATE_FILE], caseNo, events);
     checkDocument(PROGRESS_FILE, files[PROGRESS_FILE], caseNo, events);
+    checkWarnings(warnings, caseNo, events);
   }
 });
+
+/**
+ * STDERR is an output channel and this fuzz did not sweep it — which is
+ * precisely why it leaked. A security review built a journal whose `init` and
+ * `ev` carried a right-to-left override and 18 TAG characters, and got 37
+ * invisible codepoints onto the operator's terminal with a reconstructable
+ * "DELETE THE JOURNAL" inside them, while these 300 cases stayed green.
+ *
+ * A fuzz is worth exactly the channels it enumerates. Table integrity and
+ * angle brackets do not apply to a log line, but "nothing invisible reaches a
+ * reader" and "one warning is one line" both do.
+ */
+function checkWarnings(list, caseNo, events) {
+  const context = () => `case ${caseNo} (seed ${SEED}) warnings\nevents: ${JSON.stringify(events)}`;
+  for (const w of list) {
+    assert.deepEqual(
+      scanText(w).map((f) => `${formatCodePoint(f.codePoint)}`),
+      [],
+      `raw control/bidi character reached a WARNING — ${context()}`,
+    );
+    assert.ok(!w.includes('\n'), `a warning spans two lines, so half of it will look like tool output — ${context()}`);
+  }
+}
 
 test(`fuzz: the same seed renders the same bytes twice (determinism)`, () => {
   const render = () => {
@@ -205,8 +229,9 @@ test('fuzz: non-object and malformed lines are counted, never rendered', () => {
     ['an', 'array'],
     hostileEvent(rand),
   ];
-  const { files, state } = renderProjections({ events, badLines: [3], truncatedTail: true });
+  const { files, state, warnings } = renderProjections({ events, badLines: [3], truncatedTail: true });
   assert.equal(state.malformed, 4);
   checkDocument(STATE_FILE, files[STATE_FILE], 'malformed', events);
   checkDocument(PROGRESS_FILE, files[PROGRESS_FILE], 'malformed', events);
+  checkWarnings(warnings, 'malformed', events);
 });

@@ -135,6 +135,34 @@ Two details worth knowing:
   - A spawn with no matching report stays visible as **running (no report
     yet)** — an agent that died mid-story must not quietly disappear from
     `STATE.md`.
+- **Invisible characters are SHOWN, never dropped — in every channel.**
+  A journal value carrying a bidi override, a zero-width mark or a TAG
+  character is rendered as its escape notation (`<U+202E>`), not deleted.
+  That applies to `STATE.md`, to `PROGRESS.md` **and to the warnings
+  `project.mjs` writes to stderr** — stderr is an output channel, and it was
+  the one that leaked: a journal whose `init` and `ev` carried an override
+  plus 18 TAG characters put 37 invisible codepoints on the operator's
+  terminal, spelling text nobody could see, while the documents were clean.
+  - **Why shown and not removed.** Silent removal made a poisoned value and a
+    clean one render identically: `inline("deploy ok" + <29 TAG characters>)`
+    returned exactly `deploy ok`, with nothing anywhere reporting a removal.
+    **ADR-19** is explicit that an exclusion must never be silent, and
+    `inline()` already signals its other losses — truncation prints an
+    ellipsis — so this was the one lossy step leaving no trace.
+  - **The cost, stated rather than discovered.** The rule's boundary is the
+    Unicode *default-ignorable* property, which includes **legitimate
+    formatting characters of Arabic, Syriac, Kaithi and Egyptian**
+    (`U+0600..0605`, `U+070F`, `U+110BD`, `U+13430..1343F` and others). A
+    report about a repository written in those scripts will show them as
+    `<U+0600>` instead of applying them. This is a real loss of meaning for
+    those texts, accepted because the same codepoints are a working
+    smuggling channel into a document an agent acts on, and because the
+    projection is a *summary* rather than a faithful reproduction of source
+    text. It costs **zero** false findings on ordinary content — measured on
+    66 MB of multilingual text, 392 766 non-ASCII characters, no new hits.
+  - `journal.mjs`'s own CLI escapes the same characters as JSON `\uXXXX`
+    instead, because that output is machine-readable and this repo parses it
+    back; `JSON.parse` of the escaped form is deep-equal to the original.
 - **A gate is open unless it says otherwise.** `data.result` values
   `pass`, `passed`, `ok`, `green`, `approved` and `closed` (case-insensitive)
   close a gate; anything else — including `fail` and `open` — keeps it in

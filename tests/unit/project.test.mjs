@@ -516,11 +516,16 @@ test('the source files carry NO raw control or bidi bytes, only escape notation'
   }
 });
 
-test('inline() strips every listed invisible code point', () => {
+test('inline() SHOWS every listed invisible code point, and deletes none of them', () => {
+  // It used to blank them, so a value made only of invisible characters was
+  // indistinguishable from an empty one and nothing anywhere said anything had
+  // been dropped. ADR-19 correction 1: an exclusion must never be silent.
   for (const ch of INVISIBLE) {
+    const point = ch.codePointAt(0);
     const out = inline(`a${ch}b`);
-    assert.ok(!hasInvisible(out), `U+${ch.codePointAt(0).toString(16)} survived inline()`);
-    assert.equal(out, 'a b');
+    assert.ok(!hasInvisible(out), `U+${point.toString(16)} survived inline()`);
+    const hex = point.toString(16).toUpperCase().padStart(4, '0');
+    assert.equal(out, `a&lt;U+${hex}&gt;b`);
   }
 });
 

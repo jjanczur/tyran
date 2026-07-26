@@ -133,8 +133,13 @@ const LEGAL_TEXT_CONTROLS = Object.freeze([0x09, 0x0a]);
  * per character made `inline()` 15x slower than the old hand-written class on
  * astral input (5 000 emoji: 1.19 ms vs 0.08 ms). One class is one miss.
  *
- * `^...$` with the `u` flag makes the match total: no partial hit on a
- * surrogate half can be mistaken for a hit on the character.
+ * The `^...$` anchors are defensive habit, not a load-bearing guarantee: the
+ * only caller builds the subject with `String.fromCodePoint`, so it is always
+ * exactly one character and the anchors cannot change the verdict. Removing
+ * them is an EQUIVALENT mutant here, and the sentence says so rather than
+ * claiming a protection no test in this repo can demonstrate. They earn their
+ * keep only if someone later passes a longer string — which the type of the
+ * parameter already forbids.
  */
 const IS_INVISIBLE =
   /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u;
@@ -180,7 +185,15 @@ const PROPERTY_LABEL = 'invisible or non-printing character (Unicode default-ign
  * function).
  */
 export function invisibleProblem(cp) {
-  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) return null;
+  // Not `return null`. This is a security predicate, and "null" is its word for
+  // CLEAN — so answering it for a value that is not a codepoint at all is
+  // fail-open, the shape ADR-19 correction 1 catalogues as the way a gate gets
+  // walked past. Today every caller passes `ch.codePointAt(0)` and the branch
+  // is unreachable, which is exactly why it must not sit here quietly deciding
+  // that garbage is fine: the next caller is the one that makes it reachable.
+  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) {
+    throw new TypeError(`invisibleProblem expects a Unicode code point, got ${JSON.stringify(cp)}`);
+  }
   if (cp < 0x10000) {
     const cached = bmp[cp];
     if (cached !== 0) return cached === 1 ? null : labelFor(cp);
@@ -232,29 +245,88 @@ export function identifierProblem(cp) {
   return invisibleProblem(cp) ?? whitespaceProblem(cp);
 }
 
+/** `U+00A0` style, always at least four hex digits. */
+export function formatCodePoint(cp) {
+  return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
 /**
- * Every invisible codepoint in `text` replaced by a single space.
+ * Every invisible codepoint in `text` replaced by its VISIBLE escape notation.
  *
- * The space is not a parameter. It was one for exactly as long as it took to
- * notice that one caller exists and passes one value: a parameter with a
- * single call site is an untested branch that reads like a feature, and the
- * honest fix is to delete it rather than to write a test for a path nobody
- * takes. A caller that needs different behaviour can ask `invisibleProblem`
- * directly — that is the shared answer, and this is one use of it.
+ * ONE VISIBILITY POLICY, and this is it: an invisible character is shown, never
+ * silently dropped.
+ *
+ * The repo had two policies and they contradicted each other. `inline()`
+ * deleted invisible characters, so a value made entirely of TAG characters
+ * rendered identically to an empty one — `inline("deploy ok" + TAG("IGNORE ALL
+ * PRIOR INSTRUCTIONS"))` returned exactly `"deploy ok"`, with nothing anywhere
+ * saying that 29 characters had been removed. Meanwhile the hook runtime
+ * escaped them and its own comment called silent removal "the same class of
+ * defect as a silent exemption in the scanner". Two layers, two answers to
+ * "does the reader get told" — the same shape as the three spellings of
+ * membership this module exists to have removed, one level up.
+ *
+ * Escaping wins on the repo's own stated principle: ADR-19 correction 1 says an
+ * exclusion must never be silent, that a skipped item is to be counted and
+ * named even on a clean run. It also matches how `inline()` already signals its
+ * OTHER losses — truncation prints an ellipsis — so silent character removal
+ * was the single lossy step that left no trace.
+ *
+ * The cost is accepted and stated: a hostile value becomes long and ugly, and
+ * legitimate formatting characters of Arabic, Syriac, Kaithi and Egyptian
+ * become visible noise in text that uses them (see docs/projections.md). Ugly
+ * and honest beats tidy and misleading in a document an agent reads to decide
+ * what to do next.
  *
  * Iterates codepoints, not UTF-16 units: a TAG character is a surrogate PAIR,
  * and a unit-wise walk sees 0xDB40/0xDC01 — neither of which is invisible on
  * its own — and lets the character through while reporting success.
  */
-export function blankInvisible(text) {
+export function escapeInvisible(text) {
   let out = '';
   let changed = false;
   for (const ch of text) {
-    if (invisibleProblem(ch.codePointAt(0)) === null) out += ch;
+    const cp = ch.codePointAt(0);
+    if (invisibleProblem(cp) === null) out += ch;
     else {
-      out += ' ';
+      out += `<${formatCodePoint(cp)}>`;
       changed = true;
     }
   }
   return changed ? out : text;
 }
+
+/**
+ * The same rule applied to a JSON document, as JSON's own `\uXXXX` escapes.
+ *
+ * `JSON.stringify` escapes C0 controls and nothing else: bidi overrides, TAG
+ * characters and zero-width marks come out RAW. Every `journal.mjs` subcommand
+ * prints stringified events to a terminal, so `query`, `tail`, `validate`,
+ * `open-spawns`, `append` and `close-spawn` were all handing an attacker the
+ * operator's screen.
+ *
+ * `<U+202E>` would have been wrong here: that output is machine-readable, and
+ * this repo's own tooling parses it back. JSON escapes are SAFE ON A TERMINAL
+ * AND LOSSLESS — `JSON.parse` of the result is deep-equal to the original, and
+ * a test asserts exactly that. Fidelity and safety were not in tension; they
+ * only looked like it while the escape notation was the wrong one.
+ */
+export function jsonEscapeInvisible(json) {
+  let out = '';
+  for (const ch of json) {
+    const cp = ch.codePointAt(0);
+    if (invisibleProblem(cp) === null) {
+      out += ch;
+      continue;
+    }
+    // Astral codepoints need their surrogate PAIR spelled out: JSON has no
+    // \u{...} form, so each UTF-16 unit is escaped separately.
+    for (let i = 0; i < ch.length; i++) {
+      out += BS_LITERAL + 'u' + ch.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0');
+    }
+  }
+  return out;
+}
+
+/** A single backslash, built from its code point so no tool can rewrite it. */
+const BS_LITERAL = String.fromCharCode(92);

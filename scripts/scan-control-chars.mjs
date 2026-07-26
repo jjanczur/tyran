@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DELIBERATELY_ALLOWED,
   FORBIDDEN,
+  formatCodePoint,
   identifierProblem,
   invisibleProblem,
 } from './invisible.mjs';
@@ -147,10 +148,16 @@ function utf8Len(cp) {
   return 4;
 }
 
-/** `U+00A0` style, always at least four hex digits. */
-export function formatCodePoint(cp) {
-  return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
-}
+/**
+ * `U+00A0` style, re-exported unchanged from the module that owns the rule.
+ *
+ * It moved because the escaper that USES it moved: `escapeInvisible` renders
+ * `<U+202E>`, and a second copy of the formatter next to the first copy of the
+ * escaper is how the notation drifts into two dialects. Same reasoning as
+ * FORBIDDEN above — one rule, one home — and the export shape here is
+ * untouched, so every existing importer of this path keeps working.
+ */
+export { formatCodePoint };
 
 /**
  * Every forbidden codepoint in `text`, each with line, column (in codepoints),

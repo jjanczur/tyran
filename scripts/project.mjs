@@ -29,7 +29,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJournal, pairSpawns } from './journal.mjs';
-import { blankInvisible } from './invisible.mjs';
+import { escapeInvisible } from './invisible.mjs';
 
 /** Projection file names. Both are fully generated — never hand-edited. */
 export const STATE_FILE = 'STATE.md';
@@ -52,6 +52,66 @@ const MAX_MILESTONES = 50;
 // ------------------------------------------------------------- rendering
 
 /**
+ * The shared core of every operator-facing rendering: one line, nothing
+ * invisible, bounded length.
+ *
+ * This is where the ONE invisibility policy is applied, for the document and
+ * for the terminal alike. What is NOT shared is the medium's own escaping —
+ * pipes, backticks and angle brackets are hazards in a Markdown table and
+ * ordinary punctuation on stderr — and that is a different question from "is
+ * this codepoint invisible", not a second answer to it. Keeping the two apart
+ * is the same distinction this module already draws between the invisibility
+ * rule and the disjoint whitespace rule (ADR-21).
+ */
+function oneLine(value) {
+  let s;
+  if (typeof value === 'string') s = value;
+  else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
+  else s = JSON.stringify(value) ?? String(value);
+  // Every invisible codepoint becomes its visible escape notation. An
+  // unterminated RLO would otherwise mirror every following column of a table
+  // row — or every following character of a terminal line — so a journal value
+  // could rewrite the document a human reads (Trojan Source); and a TAG
+  // character would carry readable ASCII straight past a reader who cannot see
+  // it at all. These documents are read by AGENTS, and their content travels
+  // from subagent reports about FOREIGN repositories.
+  //
+  // Escaped, not deleted, and that is a decision with a reason: silent removal
+  // made a poisoned value and a clean one render identically. See
+  // escapeInvisible in scripts/invisible.mjs for the full argument.
+  //
+  // The membership list used to be a character class maintained BY HAND, right
+  // here, and it was the weakest of the three spellings of the rule: it removed
+  // 106 codepoints where the CI scanner removed 475, and it passed the entire
+  // TAG block (U-46). One answer now, and no list here to fall behind it.
+  //
+  // Whitespace collapsing is a SEPARATE normalization: a tab and a newline are
+  // VISIBLE characters that would break a row or a log line, so they are
+  // folded, not banned.
+  s = escapeInvisible(s)
+    .replace(/\s+/g, ' ')
+    .trim();
+  const cps = Array.from(s);
+  if (cps.length > MAX_CELL) s = cps.slice(0, MAX_CELL - 1).join('') + '…';
+  return s;
+}
+
+/**
+ * Make any journal value safe for one line of STDERR.
+ *
+ * Same invisibility policy as `inline()`, without the Markdown escaping that
+ * would put `&lt;` in front of a human reading a terminal. A warning is an
+ * operator-facing channel and gets exactly the same protection the documents
+ * get — which it did not have until a security review put 37 invisible
+ * codepoints, and a reconstructable "DELETE THE JOURNAL", on that terminal.
+ */
+export function inlinePlain(value) {
+  if (value === undefined || value === null) return '(none)';
+  const s = oneLine(value);
+  return s === '' ? '(none)' : s;
+}
+
+/**
  * Make any journal value safe for one Markdown line: no newlines (they would
  * break a table row), no pipes/backticks (they would break the columns), no
  * `<`/`>` (they could close the GENERATED comment or inject HTML), no `[`/`]`
@@ -61,37 +121,8 @@ const MAX_MILESTONES = 50;
  */
 export function inline(value) {
   if (value === undefined || value === null) return '&mdash;';
-  let s;
-  if (typeof value === 'string') s = value;
-  else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
-  else s = JSON.stringify(value) ?? String(value);
-  // Every invisible codepoint collapses to a space. Control characters would
-  // break the row; an unterminated RLO would mirror every following column, so
-  // a journal value could rewrite the document a human reads (Trojan Source);
-  // and a TAG character would carry readable ASCII straight past a reader who
-  // cannot see it at all — this document is read by AGENTS, and its content
-  // travels from subagent reports about FOREIGN repositories.
-  //
-  // This used to be a character class maintained BY HAND, right here, and it
-  // was the weakest of the three spellings of the rule. Measured over the
-  // whole of Unicode it removed 106 codepoints where the CI scanner removed
-  // 475, and it passed the entire TAG block: the gate closest to US was the
-  // strictest, the gate closest to the READER the weakest (U-46). There is
-  // one answer now, in scripts/invisible.mjs, and no list here to fall behind
-  // it — which is also why the Arabic letter mark, found by the seeded fuzz
-  // on its first run, can no longer be missing from one spelling and present
-  // in another.
-  //
-  // Whitespace collapsing below is a SEPARATE normalization: a tab and a
-  // newline are VISIBLE characters that would break a table row, so they are
-  // folded, not banned. Keeping the two apart is what stops "identifier" from
-  // becoming an option on the invisibility answer (ADR-21).
-  s = blankInvisible(s)
-    .replace(/\s+/g, ' ')
-    .trim();
+  const s = oneLine(value);
   if (s === '') return '&mdash;';
-  const cps = Array.from(s);
-  if (cps.length > MAX_CELL) s = cps.slice(0, MAX_CELL - 1).join('') + '…';
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -417,34 +448,54 @@ export function progressLine(state) {
   }`;
 }
 
-/** Warnings for stderr — surfaced, never fatal. */
+/**
+ * Warnings for stderr — surfaced, never fatal.
+ *
+ * STDERR IS AN OUTPUT CHANNEL, and every journal value that reaches it goes
+ * through `inline()` exactly like a value reaching a document.
+ *
+ * That was not true until a security review demonstrated it. `ev` and
+ * `init` were interpolated RAW here, and a journal carrying a right-to-left
+ * override plus 18 TAG characters in those fields put 37 invisible codepoints
+ * on the operator's terminal, spelling "DELETE THE JOURNAL" where nothing was
+ * visible, with the override mirroring the rest of the line. Twenty-eight
+ * lines below, `initiativeName()` was passing the very same `state.initiatives`
+ * through `inline()` on its way into the document — the same value, sanitized
+ * for the file and raw for the human, inside one function. That is the third
+ * spelling of the rule reappearing as a third spelling of WHERE the rule
+ * applies, which is the same defect wearing different clothes (ADR-21).
+ *
+ * The fuzz that should have caught it swept `STATE.md` and `PROGRESS.md`. The
+ * channel it did not sweep was the one that leaked, so the fuzz now sweeps
+ * every channel this module can write to.
+ */
 export function warnings(state) {
   const out = [];
   if (state.truncatedTail) out.push('journal has a truncated final line (crash mid-write) — it was skipped');
   if (state.corruptLines > 0) out.push(`journal has ${state.corruptLines} corrupt line(s) mid-file — they were skipped`);
   if (state.malformed > 0) out.push(`${state.malformed} line(s) parsed to a non-object value — they were skipped`);
   for (const [ev, n] of sortByKey([...state.unknownTypes.entries()], (e) => e[0])) {
-    out.push(`unknown event type "${ev}" x${n} — counted but not folded (newer Tyran?)`);
+    out.push(`unknown event type "${inlinePlain(ev)}" x${n} — counted but not folded (newer Tyran?)`);
   }
   if (state.initiatives.length > 1) {
-    out.push(`journal mixes ${state.initiatives.length} initiatives: ${state.initiatives.join(', ')}`);
+    out.push(
+      `journal mixes ${state.initiatives.length} initiatives: ${state.initiatives.map((i) => inlinePlain(i)).join(', ')}`,
+    );
   }
   if (state.mismatchedReleases.length > 0) {
     out.push(`${state.mismatchedReleases.length} lease release(s) by a non-holder — leases stay open`);
   }
   // Never silent (ADR-19 correction 1): an event excluded from spawn/report
   // pairing is exactly the fact a reader must not have to infer from an
-  // unexplained gap in the table. The name is rendered through inline(), so a
-  // hostile name cannot use this warning as its way into the operator's
-  // terminal.
+  // unexplained gap in the table.
   for (const { raw, problem } of state.unusableAgentNames) {
-    out.push(`unusable data.agent ${inline(raw)}: ${problem} — excluded from spawn/report pairing`);
+    out.push(`unusable data.agent ${inlinePlain(raw)}: ${problem} — excluded from spawn/report pairing`);
   }
   // The state ADR-18 makes unrepresentable through `append`, and which the
   // projection no longer silently guesses at now that ticket-first is gone.
   for (const { agent, count } of state.ambiguousAgents) {
     out.push(
-      `agent ${inline(agent)} has ${count} open spawns — the journal was hand-edited or written ` +
+      `agent ${inlinePlain(agent)} has ${count} open spawns — the journal was hand-edited or written ` +
         'before ADR-18; spawn/report pairing for this name is ambiguous and reports pair oldest-first',
     );
   }

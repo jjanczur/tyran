@@ -295,10 +295,15 @@ test('CLI: invoked through a symlinked path, validation still runs (ADR-19 debt)
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
   writeFileSync(join(realScripts, 'schema.mjs'), readFileSync(SCRIPT));
-  writeFileSync(
-    join(realScripts, 'yaml-lite.mjs'),
-    readFileSync(fileURLToPath(new URL('../../scripts/yaml-lite.mjs', import.meta.url))),
-  );
+  // Both siblings travel with it: yaml-lite, and the shared invisibility rule
+  // that schema and yaml-lite now both import (ADR-21). A copy missing one
+  // fails at module resolution and would report this guard as broken.
+  for (const name of ['yaml-lite.mjs', 'invisible.mjs']) {
+    writeFileSync(
+      join(realScripts, name),
+      readFileSync(fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url))),
+    );
+  }
   const linked = join(base, 'linked-scripts');
   symlinkSync(realScripts, linked);
 
@@ -329,4 +334,29 @@ test('the self-run guard survives an argv[1] that cannot be canonicalized', () =
   const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), 'SURVIVED');
+});
+
+test('CLI: a validation message cannot carry invisible characters to the terminal', () => {
+  // A `.tyran/` tree can come from a template someone else wrote, and this
+  // message quotes values read out of it. Same channel as project.warnings()
+  // and the journal CLI, and it was open for the same reason: nobody swept it.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-schema-invisible-'));
+  const file = join(dir, 'config.yaml');
+  const RLO = String.fromCodePoint(0x202e);
+  const TAG = String.fromCodePoint(0xe0041);
+  // A poisoned KEY, not a poisoned value: the messages that quote journal- or
+  // file-derived text back are the "unknown key" ones. Aimed at a value first,
+  // where nothing is quoted, this test passed over an unescaped sink — the
+  // mutant that removed the escaping SURVIVED it. Found by mutation, not by
+  // reading (ADR-20).
+  writeFileSync(file, `profile: eco\n"bad${RLO}${TAG}key": 1\n`, 'utf8');
+  const r = spawnSync(process.execPath, [SCRIPT, 'validate', 'config', file], { encoding: 'utf8' });
+  const bad = [...(r.stdout + r.stderr)].filter((c) => {
+    const n = c.codePointAt(0);
+    if (n === 0x0a || n === 0x09) return false;
+    return /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u.test(c);
+  });
+  assert.deepEqual(bad.map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`), []);
+  assert.match(r.stdout, /FAIL/, 'premise: this file must fail validation');
+  assert.match(r.stdout, /bad<U\+202E><U\+E0041>key: unknown top-level key/, 'the key must be SHOWN escaped');
 });

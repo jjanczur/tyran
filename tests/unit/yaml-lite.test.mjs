@@ -141,3 +141,33 @@ test('round-trips values containing quotes (regression: E2S2-R11)', () => {
     assert.deepEqual(parse(stringify({ t: value })), { t: value }, `failed for ${JSON.stringify(value)}`);
   }
 });
+
+test('stringify REFUSES an invisible codepoint instead of writing it', () => {
+  // This subset has no escape that survives a round trip: `unquote` rejects a
+  // backslash rather than decode it half-way, so a double-quoted \uXXXX is not
+  // available. That leaves RAW (a Trojan Source payload inside a config file)
+  // or VISIBLY ESCAPED (which parses back as different data). Both are worse
+  // than refusing, and refusing is what this file already does for newlines.
+  //
+  // The worst case being closed: a poisoned value PERSISTED into .tyran/ would
+  // re-enter the conductor's context at every session start, on a path where
+  // none of the runtime layers is looking. A file that cannot be written
+  // cannot do that.
+  const cp = (n) => String.fromCodePoint(n);
+  for (const point of [0x202e, 0x200b, 0xe0041, 0x00ad, 0xfeff, 0x0600]) {
+    assert.throws(
+      () => stringify({ key: `value${cp(point)}` }),
+      /cannot serialize a string containing U\+/,
+      `U+${point.toString(16)} was serialized into a config file`,
+    );
+    assert.throws(
+      () => stringify({ [`key${cp(point)}`]: 'value' }),
+      /cannot serialize a key containing U\+/,
+      `U+${point.toString(16)} was serialized into a KEY`,
+    );
+  }
+  // Ordinary content, including non-ASCII, is untouched — a serializer that
+  // refuses everything would pass the assertions above and be useless.
+  const ok = { name: 'zażółć gęślą jaźń', emoji: '😀', list: ['日本語', 'ok'] };
+  assert.deepEqual(parse(stringify(ok)), ok);
+});

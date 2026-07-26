@@ -23,7 +23,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { readJournal } from '../../scripts/journal.mjs';
-import { fold, progressLine } from '../../scripts/project.mjs';
+import { fold, inlinePlain, progressLine } from '../../scripts/project.mjs';
 import { field, main, runProbe } from './hook-io.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -146,33 +146,53 @@ function rows(list, render) {
 /**
  * Render the summary. Pure, so the whole shape of the injected context is
  * testable without a filesystem, a clock or a child process.
+ *
+ * EVERY journal-derived value goes through `inlinePlain`. This text is
+ * injected straight into the conductor's context — it is the LAST step of the
+ * attack path ADR-19 describes (foreign repo -> subagent report -> journal ->
+ * projection -> conductor), so it is the place where a raw byte costs the most.
+ *
+ * It did not do this until a security review measured it: 400 hostile trees
+ * put 35 819 invisible codepoints into this function's output, 400 of 400
+ * leaking, with "IGNORE PRIOR" reconstructable from the TAG characters. The
+ * process was safe only because hook-io sanitizes one floor up — and that is
+ * caller discipline, the mechanism class this project distrusts on principle
+ * and rejects by name in journal.mjs and doctor.mjs. Worse than redundant
+ * defence: there was ZERO here and ONE at the consumer, and no test at this
+ * level held any of it.
+ *
+ * Sanitizing here also restores the budget below. `fitBudget` measured the
+ * text BEFORE hook-io expanded it, so a hostile journal produced 9 880
+ * characters of injected context against a 2 000-character budget — 4.9x over,
+ * 120 characters under the platform's hard ceiling. Escaping first means the
+ * length fitBudget sees is the length that ships.
  */
 export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso }) {
   if (initiatives.length === 0) return '';
   const lines = [
     '## Tyran state (injected by the session-start probe)',
     '',
-    `Repo: ${repoRoot} · as of ${nowIso}`,
-    `Machine: ${hardware}`,
+    `Repo: ${inlinePlain(repoRoot)} · as of ${inlinePlain(nowIso)}`,
+    `Machine: ${inlinePlain(hardware)}`,
     '',
   ];
 
   for (const { name, state, error } of initiatives) {
-    lines.push(`### Initiative \`${name}\``);
+    lines.push(`### Initiative \`${inlinePlain(name)}\``);
     if (state === null) {
-      lines.push(`- journal unreadable: ${error}`);
+      lines.push(`- journal unreadable: ${inlinePlain(error)}`);
       lines.push('');
       continue;
     }
     lines.push(`- ${progressLine(state)}`);
     if (state.checkpoint) {
       lines.push(
-        `- Checkpoint: ${state.checkpoint.phase ?? '(no phase)'} at ${state.checkpoint.ts} by ${state.checkpoint.actor}`,
+        `- Checkpoint: ${inlinePlain(state.checkpoint.phase ?? '(no phase)')} at ${inlinePlain(state.checkpoint.ts)} by ${inlinePlain(state.checkpoint.actor)}`,
       );
       const steps = Array.isArray(state.checkpoint.nextSteps) ? state.checkpoint.nextSteps : [];
       if (steps.length > 0) {
         lines.push(`- First ${Math.min(MAX_STEPS, steps.length)} step(s) on resume:`);
-        steps.slice(0, MAX_STEPS).forEach((step, i) => lines.push(`  ${i + 1}. ${step}`));
+        steps.slice(0, MAX_STEPS).forEach((step, i) => lines.push(`  ${i + 1}. ${inlinePlain(step)}`));
       }
     } else {
       lines.push('- No checkpoint yet — this initiative has never been paused deliberately.');
@@ -181,20 +201,20 @@ export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso 
     const openGates = state.openGates ?? [];
     if (openGates.length > 0) {
       lines.push(`- Open gates (${openGates.length}):`);
-      lines.push(...rows(openGates, (g) => `  - ${g.kind}: ${g.result ?? 'open'} (${g.ts})`));
+      lines.push(...rows(openGates, (g) => `  - ${inlinePlain(g.kind)}: ${inlinePlain(g.result ?? 'open')} (${inlinePlain(g.ts)})`));
     }
 
     const leases = [...(state.leases?.values() ?? [])];
     if (leases.length > 0) {
       lines.push(`- Open leases (${leases.length}) — do NOT touch these resources:`);
-      lines.push(...rows(leases, (l) => `  - ${l.resource} held by ${l.holder ?? '(unknown)'} since ${l.ts}`));
+      lines.push(...rows(leases, (l) => `  - ${inlinePlain(l.resource)} held by ${inlinePlain(l.holder ?? '(unknown)')} since ${inlinePlain(l.ts)}`));
     }
 
     const working = (state.agents ?? []).filter((a) => a.status === 'running');
     if (working.length > 0) {
       lines.push(`- Agents the journal still believes are working (${working.length}):`);
       lines.push(
-        ...rows(working, (a) => `  - ${a.agent} (${a.role ?? 'no role'}) since ${a.spawnTs ?? '?'}`),
+        ...rows(working, (a) => `  - ${inlinePlain(a.agent)} (${inlinePlain(a.role ?? 'no role')}) since ${inlinePlain(a.spawnTs ?? '?')}`),
       );
     }
     lines.push('');
@@ -204,10 +224,10 @@ export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso 
     const c = doctor.counts ?? { error: 0, warning: 0, info: 0 };
     lines.push(`### Doctor: ${c.error} error(s) · ${c.warning} warning(s) · ${c.info} info`);
     const loud = (doctor.findings ?? []).filter((f) => f.severity !== 'info');
-    lines.push(...rows(loud, (f) => `- [${f.code}] ${f.where}`));
+    lines.push(...rows(loud, (f) => `- [${inlinePlain(f.code)}] ${inlinePlain(f.where)}`));
     if (loud.length === 0) lines.push('- nothing above info level');
   } else {
-    lines.push(`### Doctor did not run: ${doctor.reason}`);
+    lines.push(`### Doctor did not run: ${inlinePlain(doctor.reason)}`);
     lines.push('- run `node scripts/doctor.mjs --state --now "$(date -u +%FT%TZ)"` by hand');
   }
   lines.push('');

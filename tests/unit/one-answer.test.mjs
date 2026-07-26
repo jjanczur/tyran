@@ -8,6 +8,7 @@ import {
   FORBIDDEN,
   DELIBERATELY_ALLOWED,
   jsonEscapeInvisible,
+  astralMemoStats,
 } from '../../scripts/invisible.mjs';
 import { scanText, scanPath } from '../../scripts/scan-control-chars.mjs';
 import { agentNameProblem, pairSpawns } from '../../scripts/journal.mjs';
@@ -412,16 +413,27 @@ test('the journal CLI escapes invisibles without losing them', () => {
   assert.match(escaped, /u202E/i);
 });
 
-test('the astral memo stays bounded, and answers the same after it is cleared', () => {
-  // A memo in a security predicate is a place where a wrong answer can be
-  // cached and an unbounded one is a place where memory grows without limit.
-  // Walking every astral codepoint exercises the clear path many times over.
+test('the astral memo stays bounded, and answers the same after it is recycled', () => {
+  // Round 4, N-8: this test used to promise BOUNDEDNESS in its name and check
+  // only correctness in its body — deleting the `clear()` at the limit left
+  // the whole suite green. That is the same "documented guarantee with no
+  // guard" shape that produced the round-2 blocker, in a test written to guard
+  // against exactly that. Both halves are now asserted.
   const before = invisibleProblem(0xe0041);
-  for (let point = 0x10000; point <= 0x10ffff; point += 1) {
-    if (invisibleProblem(point) !== null && point >= 0xf0000 && point < 0xf0002) break;
-  }
-  assert.equal(invisibleProblem(0xe0041), before, 'the answer changed after the memo was recycled');
   assert.ok(before !== null, 'premise: U+E0041 is invisible');
+
+  const { limit } = astralMemoStats();
+  let peak = 0;
+  // Walk far enough past the ceiling that a missing `clear()` cannot hide:
+  // without it the map grows monotonically and blows the assertion below.
+  for (let point = 0x10000; point <= 0x10000 + limit * 2; point++) {
+    invisibleProblem(point);
+    const { size } = astralMemoStats();
+    if (size > peak) peak = size;
+    assert.ok(size <= limit, `the memo grew past its ceiling: ${size} > ${limit}`);
+  }
+  assert.ok(peak > 0, 'premise: the memo is actually being populated');
+  assert.equal(invisibleProblem(0xe0041), before, 'the answer changed after the memo was recycled');
 });
 
 test('invisibleProblem REFUSES a value that is not a code point', () => {

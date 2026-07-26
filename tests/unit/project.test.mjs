@@ -633,6 +633,25 @@ test('CLI: invoked through a symlinked path, the projector still writes files', 
   assert.ok(existsSync(join(d, PROGRESS_FILE)), `${PROGRESS_FILE} was never written`);
 });
 
+test('the self-run guard survives an argv[1] that cannot be canonicalized', () => {
+  // project.mjs carries its OWN copy of the guard (deliberate: boot
+  // boilerplate, not a domain rule), so it needs its own dead mutant.
+  // Without the fallback, realpathSync throws out of module scope and every
+  // importer of project.mjs dies at startup.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-argv-'));
+  const harness = join(base, 'harness.mjs');
+  writeFileSync(
+    harness,
+    "process.argv[1] = '/nonexistent-dir-" +
+      "e2s6/entry.mjs';\n" +
+      `await import(${JSON.stringify(SCRIPT)});\n` +
+      "console.log('SURVIVED');\n",
+  );
+  const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'SURVIVED');
+});
+
 // --- atomic writes -------------------------------------------------------
 
 test('concurrent projections never leave a partial or temporary file', async () => {

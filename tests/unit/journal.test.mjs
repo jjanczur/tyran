@@ -280,6 +280,32 @@ test('CLI: invoked through a symlinked path, the script still does its work', ()
   assert.equal(readJournal(f).events.length, 1, 'nothing was appended');
 });
 
+test('the self-run guard survives an argv[1] that cannot be canonicalized', () => {
+  // The guard canonicalizes argv[1] with realpathSync, which THROWS when the
+  // path cannot be followed. Without the fallback that throw escapes from
+  // module scope and the tool dies at startup — importing journal.mjs would
+  // fail outright, taking project.mjs (which imports it) down too.
+  //
+  // Reached in reality when argv[1] no longer resolves: the script directory
+  // was renamed or removed after launch, a parent component became unreadable,
+  // or a launcher/shim rewrote argv[1] to a logical name. NOT reached under
+  // `node --eval`, where argv[1] is undefined and the earlier guard returns
+  // first — this test pins the real reason, not the one first written down.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-argv-'));
+  const harness = join(base, 'harness.mjs');
+  writeFileSync(
+    harness,
+    "process.argv[1] = '/nonexistent-dir-" +
+      "e2s6/entry.mjs';\n" +
+      `await import(${JSON.stringify(SCRIPT)});\n` +
+      "console.log('SURVIVED');\n",
+  );
+  const r = execFileSync(process.execPath, [harness], { encoding: 'utf8' });
+  // Survived the import, and correctly declined to run main() for a foreign
+  // entry point: no CLI usage text, no exception.
+  assert.equal(r.trim(), 'SURVIVED');
+});
+
 test('EVENT_TYPES is frozen and matches the documented closed set size', () => {
   assert.ok(Object.isFrozen(EVENT_TYPES));
   assert.equal(EVENT_TYPES.length, 14);

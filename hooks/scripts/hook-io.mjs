@@ -29,7 +29,7 @@
  */
 import { writeSync } from 'node:fs';
 
-import { FORBIDDEN, formatCodePoint } from '../../scripts/scan-control-chars.mjs';
+import { formatCodePoint, scanText } from '../../scripts/scan-control-chars.mjs';
 
 /**
  * The platform's cap on hook stdout and on `additionalContext`, measured as
@@ -131,19 +131,6 @@ export class HookInputError extends Error {
 // ------------------------------------------------------------ sanitization
 
 /**
- * Codepoints this runtime refuses to echo, taken from the SAME table the CI
- * scanner enforces. Deliberately imported rather than restated: ADR-19's own
- * correction found THREE spellings of this rule already in the repo, and the
- * outermost one was the weakest. When that list grows, this grows with it.
- */
-function isForbidden(cp) {
-  for (const range of FORBIDDEN) {
-    if (cp >= range.lo && cp <= range.hi) return true;
-  }
-  return false;
-}
-
-/**
  * Everything that reaches our stdout passes through here first.
  *
  * `tool_input` is written by the model and by repo content, and a refusal
@@ -158,10 +145,19 @@ function isForbidden(cp) {
  */
 export function sanitizeForOutput(value) {
   const text = typeof value === 'string' ? value : String(value);
+  // The membership decision is NOT made here. `scanText` is the repo's one
+  // implementation of "which codepoints are forbidden", and this asks it
+  // rather than re-deriving the answer from its data — ADR-19 correction 1
+  // counted three spellings of that rule and found the outermost one the
+  // weakest. There is now no fourth. When the scanner's set grows, so does
+  // this, with no edit here.
+  const findings = scanText(text);
+  if (findings.length === 0) return text;
+  const forbidden = new Set(findings.map((f) => f.codePoint));
   let out = '';
   for (const ch of text) {
     const cp = ch.codePointAt(0);
-    out += isForbidden(cp) ? `<${formatCodePoint(cp)}>` : ch;
+    out += forbidden.has(cp) ? `<${formatCodePoint(cp)}>` : ch;
   }
   return out;
 }

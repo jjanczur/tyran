@@ -126,9 +126,11 @@ section boundary, always saying how much it dropped.
   77 MB in 1.91 s, inside the probe's budget. On a probe this is fail-open and
   therefore safe; the same shape inside a **gate** would be the third row of
   the deadline table. A gate that reads journals must bound its input first.
-- The forbidden-codepoint membership test is spelled once more here than it
-  should be: the data comes from `scan-control-chars.mjs`, but the loop over
-  it is local because the scanner's `classify` is not exported yet.
+- Sanitization asks `scanText` from `scan-control-chars.mjs` which codepoints
+  are forbidden rather than keeping its own copy of the rule, so the set the
+  CI scanner enforces and the set a gate escapes cannot drift apart. When the
+  scanner's list grows — as it did with the TAG block in ADR-19's first
+  correction — the runtime inherits it with no edit.
 
 ## Testing a hook
 

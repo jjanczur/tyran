@@ -537,8 +537,16 @@ test('the sanitizer and the CI scanner enforce ONE list, not two', () => {
   // scanner's list grows (ADR-19 correction 1), this grows with it. The test
   // proves agreement rather than trusting the import.
   const points = [];
-  for (let cp = 0; cp <= 0x30ff; cp++) points.push(cp);
-  for (const cp of [0xfeff, 0xfff9, 0x1f600, 0xe0001, 0xe0041, 0x10fffe]) points.push(cp);
+  for (let cp = 0; cp <= 0x30ff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue; // lone surrogates are not codepoints
+    points.push(cp);
+  }
+  // Sampled explicitly because they lie outside the sweep above, and every one
+  // of them was added to the scanner AFTER this runtime was written — which is
+  // the whole point of not keeping a second copy of the list.
+  for (const cp of [0x3164, 0xffa0, 0xfeff, 0xfff9, 0x1d173, 0x1f600, 0xe0001, 0xe0041, 0xe0100, 0x10fffe]) {
+    points.push(cp);
+  }
   const sample = points.map((cp) => String.fromCodePoint(cp)).join('|');
   const cleaned = sanitizeForOutput(sample);
   assert.deepEqual(

@@ -1,6 +1,6 @@
 # Projections reference
 
-> **Status:** shipped — `scripts/project.mjs` with 29 unit tests, including
+> **Status:** shipped — `scripts/project.mjs` with 42 unit tests, including
 > byte-exact golden files. The journal stays the only source of truth;
 > everything on this page is a disposable view of it.
 
@@ -35,7 +35,10 @@ node scripts/project.mjs <journal.jsonl> [--out-dir <dir>] [--check]
   projections are current, exit `1` with a per-file summary (how many lines
   differ and where) when they drifted or are missing.
 - Exit codes match `journal.mjs`: `0` ok · `1` drift (`--check` only) ·
-  `2` usage or I/O error (unknown flag, missing journal file).
+  `2` usage or I/O error (unknown flag, missing journal file, a journal path
+  that is a directory, a file that is not a journal at all).
+- A flag given twice (`--out-dir a --out-dir b`) is refused rather than
+  silently resolved — that is how a projection ends up in the wrong place.
 
 Because the comparison is byte-exact, trailing whitespace, CRLF endings, a
 byte-order mark and a missing final newline all count as drift. That is
@@ -51,14 +54,21 @@ catch.
   spawn time, gates and leases by key — with ties keeping journal order.
 - **Idempotent.** Re-running on an unchanged journal rewrites identical
   files, so `project.mjs` twice in a row is a no-op for git.
-- **Atomic.** Each file is written to a temporary file and renamed into
-  place, so a concurrent reader (or a second projector) never observes a
-  half-written document.
+- **Atomic.** Both documents are staged as temporary files first and only
+  then renamed into place, so a concurrent reader (or a second projector)
+  never observes a half-written document, and a failure part-way through
+  leaves the previous projections completely untouched. The pair is still
+  not one transaction: the exposure window is the gap between two renames.
 - **Crash-tolerant.** A truncated final line (crash mid-write), corrupt
   lines mid-file, lines that parse to something other than an object, and
   **unknown event types** are all skipped, counted and reported on stderr —
-  never fatal. A projection over a damaged journal still exits `0`; judging
-  journal health is `doctor`'s job, not the renderer's.
+  never fatal. A projection over a *partially* damaged journal still exits
+  `0`; judging journal health is `doctor`'s job, not the renderer's.
+- **A non-journal is refused, not projected.** When not one event could be
+  read *and* the file did contain unreadable content, `project.mjs` exits
+  `2` and writes nothing: a mistyped path must not replace a good `STATE.md`
+  with an empty one under a success code. An empty journal (no events, no
+  damage) is legal and still projects empty documents with exit `0`.
 - **Nothing vanishes silently.** Every type in the closed event set folds
   into a rendered section (a unit test asserts this against
   `EVENT_TYPES`). Events that arrive without their required keys — a
@@ -67,10 +77,20 @@ catch.
   dropped. A section with no data renders as `_none_`; sections never
   disappear, because a missing section is indistinguishable from a missing
   feature.
-- **Untrusted `data` cannot break the document.** Every value rendered
-  inline is collapsed to a single line, length-capped, and escaped so that
-  `|`, `` ` ``, `\`, `<` and `>` cannot break a table, inject HTML, or
-  forge the `GENERATED` header.
+- **Untrusted `data` cannot break the document.** In a plugin, `data` is
+  written by agents processing someone else's repository, so every value
+  rendered inline is collapsed to a single line, length-capped and escaped:
+  - `|`, `` ` ``, `\` — cannot break a table or its columns;
+  - `<`, `>` — cannot inject HTML or forge the `GENERATED` header;
+  - `[`, `]` — cannot form Markdown link or image syntax. Without this an
+    `![](https://…)` in a journal value renders as a remote `<img>` in
+    GitHub or VS Code: a read beacon plus an exfiltration channel carrying
+    journal text in the URL;
+  - C0/C1 controls, DEL, zero-width characters, direction marks, bidi
+    embeddings, overrides and isolates, and the BOM — all collapse to a
+    space. An unterminated right-to-left override would otherwise mirror
+    every following column and let a journal value rewrite the document a
+    human is reading (Trojan Source).
 
 ## How state is derived
 
@@ -86,11 +106,18 @@ catch.
 
 Two details worth knowing:
 
-- **Agent pairing is by name and order.** The journal carries no spawn id,
-  so a `report` closes the *oldest still-running* spawn with that agent
-  name. A spawn with no matching report stays visible as
-  **running (no report yet)** — an agent that died mid-story must not
-  quietly disappear from `STATE.md`.
+- **Agent pairing follows `data.ticket` first.** A `report` closes the
+  still-running spawn of that agent name working on the *same ticket*; only
+  a report with no ticket falls back to the oldest open spawn of that name.
+  Order alone is not enough: with two concurrent spawns of one agent name,
+  the fast one reporting first would otherwise mark the *other* agent as
+  finished, with someone else's verdict — while the Ledger, which reads
+  `data.ticket` directly, said the opposite. The name fallback stays
+  unambiguous because **ADR-18** has `journal.append` enforce at most one
+  open spawn per agent name (chosen over a `spawn_id` that callers would
+  have to carry across a process boundary). A spawn with no matching report
+  stays visible as **running (no report yet)** — an agent that died
+  mid-story must not quietly disappear from `STATE.md`.
 - **A gate is open unless it says otherwise.** `data.result` values
   `pass`, `passed`, `ok`, `green`, `approved` and `closed` (case-insensitive)
   close a gate; anything else — including `fail` and `open` — keeps it in

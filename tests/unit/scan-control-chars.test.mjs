@@ -739,6 +739,11 @@ test('THIS repository scans clean end to end', () => {
   // while a file quietly left the scan. Any change to either number now has
   // to be made on purpose, in this file, where a reviewer will see it.
   // 45 -> 48: scripts/doctor.mjs, tests/unit/doctor.test.mjs, docs/doctor.md.
-  assert.equal(scanned, 48, 'file count changed — confirm nothing left the scan by accident');
+  // 48 -> 54: hooks/hooks.json, hooks/HOOK-CONTRACT-MEASURED.md,
+  // hooks/scripts/{hook-io,session-start}.mjs and their two test files.
+  // 54 -> 55: docs/hooks.md (review round 2 — the gate-vs-probe rule needed a
+  // page a contributor can find). The trial merge with S-E3-0 was measured at
+  // 54, and S-E3-0 adds no files, so this +1 is entirely this branch's.
+  assert.equal(scanned, 55, 'file count changed — confirm nothing left the scan by accident');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });

@@ -13,7 +13,7 @@
  * CLI:  node schema.mjs validate <kind> <file...>     kind: config|knowledge|policy
  * Exit: 0 valid · 1 findings · 2 usage/IO error
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, YamlLiteError } from './yaml-lite.mjs';
@@ -410,4 +410,36 @@ function main() {
   process.exit(failed ? 1 : 0);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+/**
+ * Absolute, symlink-resolved path; falls back to the merely absolute form when
+ * realpath cannot follow argv[1] (the script directory was renamed after
+ * launch, a parent component is unreadable, or a launcher rewrote argv[1] to a
+ * logical name). Without the fallback the guard would throw out of module
+ * scope and kill the tool at startup — a different bug, not a fix.
+ */
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * True when this module is the program's entry point.
+ *
+ * BOTH sides must be canonicalized. `import.meta.url` already names the real
+ * file — Node resolves module specifiers through symlinks — while
+ * `process.argv[1]` is whatever the caller typed. Comparing them raw turned
+ * every invocation through a symlinked path into a SILENT no-op under exit 0:
+ * `main()` never ran, no file was validated, and CI read that as "valid".
+ * `/tmp` and `/var` are symlinks on macOS and plugin installs reach `scripts/`
+ * through one, so this is the ordinary case rather than an exotic one.
+ */
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

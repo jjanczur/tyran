@@ -29,7 +29,7 @@
  *       that covered zero files
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,11 +46,53 @@ export const FORBIDDEN = Object.freeze([
   Object.freeze({ lo: 0x00, hi: 0x08, what: 'C0 control character' }),
   Object.freeze({ lo: 0x0b, hi: 0x1f, what: 'C0 control character' }),
   Object.freeze({ lo: 0x7f, hi: 0x9f, what: 'DEL / C1 control character' }),
+  Object.freeze({ lo: 0x00ad, hi: 0x00ad, what: 'invisible formatting character (SOFT HYPHEN)' }),
   Object.freeze({ lo: 0x061c, hi: 0x061c, what: 'bidi mark (ARABIC LETTER MARK)' }),
+  Object.freeze({ lo: 0x115f, hi: 0x1160, what: 'invisible filler that renders as nothing' }),
+  Object.freeze({ lo: 0x180e, hi: 0x180e, what: 'invisible separator (MONGOLIAN VOWEL SEPARATOR)' }),
   Object.freeze({ lo: 0x200b, hi: 0x200f, what: 'zero-width or directional mark' }),
   Object.freeze({ lo: 0x202a, hi: 0x202e, what: 'bidi embedding or override' }),
+  Object.freeze({ lo: 0x2060, hi: 0x2064, what: 'word joiner or invisible operator' }),
   Object.freeze({ lo: 0x2066, hi: 0x2069, what: 'bidi isolate' }),
+  Object.freeze({ lo: 0x206a, hi: 0x206f, what: 'deprecated formatting character' }),
+  Object.freeze({ lo: 0x3164, hi: 0x3164, what: 'invisible filler that renders as nothing' }),
+  Object.freeze({ lo: 0xffa0, hi: 0xffa0, what: 'invisible filler that renders as nothing' }),
   Object.freeze({ lo: 0xfeff, hi: 0xfeff, what: 'byte order mark / zero-width no-break space' }),
+  Object.freeze({ lo: 0xfff9, hi: 0xfffb, what: 'interlinear annotation character' }),
+  Object.freeze({ lo: 0x1d173, hi: 0x1d17a, what: 'invisible musical formatting character' }),
+  // The one that matters most, and the one the old test could not even see:
+  // U+E0001..U+E007E map ONE-TO-ONE onto ASCII and render as nothing at all.
+  // Projections (STATE.md, PROGRESS.md) are read by AGENTS, and their content
+  // travels from subagent reports about foreign repositories — so invisible
+  // text in a projection is prompt injection aimed at our own team, not an
+  // aesthetic complaint. The block is astral, which is why the pinning test
+  // stopping at U+FFFF hid it (ADR-19 correction 1).
+  Object.freeze({ lo: 0xe0000, hi: 0xe007f, what: 'TAG character (invisible ASCII)' }),
+  // Variation Selectors Supplement. Same smuggling channel as the TAG block —
+  // a sequence of them encodes arbitrary bytes onto a visible carrier — and
+  // zero occurrences in this repo, so banning them costs nothing here. Their
+  // BMP counterparts are deliberately NOT banned; see below.
+  Object.freeze({ lo: 0xe0100, hi: 0xe01ef, what: 'variation selector (supplement)' }),
+]);
+
+/**
+ * DELIBERATE GAP: U+FE00..U+FE0F (variation selectors 1-16) are NOT banned.
+ *
+ * U+FE0F is the emoji presentation selector and occurs 24 times in this repo's
+ * README today; U+FE0E is its text-presentation twin. Banning the range would
+ * turn CI red on a file nobody touched, and ADR-19 is explicit that a gate
+ * which cries wolf gets switched off and never restored — which costs more
+ * than the gap.
+ *
+ * The gap is real and stated rather than hidden: 16 codepoints still carry
+ * four bits each, so a determined smuggler can encode data with them. That is
+ * an argument for the direction ADR-19 correction 1 already names — an
+ * ALLOWLIST for machine-generated text, where the legal repertoire is narrow —
+ * not for a nineteenth range in a denylist that will always be one Unicode
+ * revision behind.
+ */
+export const DELIBERATELY_ALLOWED = Object.freeze([
+  Object.freeze({ lo: 0xfe00, hi: 0xfe0f, why: 'variation selectors: U+FE0F is legal emoji presentation' }),
 ]);
 
 /** Names worth spelling out; everything else falls back to its range label. */
@@ -61,7 +103,9 @@ const NAMES = Object.freeze({
   0x0b: 'VERTICAL TAB',
   0x0c: 'FORM FEED',
   0x0d: 'CARRIAGE RETURN',
+  0x09: 'TAB',
   0x1b: 'ESC',
+  0x0a: 'LF',
   0x7f: 'DELETE',
   0x061c: 'ARABIC LETTER MARK',
   0x200b: 'ZERO WIDTH SPACE',
@@ -78,14 +122,57 @@ const NAMES = Object.freeze({
   0x2067: 'RIGHT-TO-LEFT ISOLATE',
   0x2068: 'FIRST STRONG ISOLATE',
   0x2069: 'POP DIRECTIONAL ISOLATE',
+  0x00ad: 'SOFT HYPHEN',
+  0x115f: 'HANGUL CHOSEONG FILLER',
+  0x1160: 'HANGUL JUNGSEONG FILLER',
+  0x180e: 'MONGOLIAN VOWEL SEPARATOR',
+  0x2060: 'WORD JOINER',
+  0x2061: 'FUNCTION APPLICATION',
+  0x2062: 'INVISIBLE TIMES',
+  0x2063: 'INVISIBLE SEPARATOR',
+  0x2064: 'INVISIBLE PLUS',
+  0x3164: 'HANGUL FILLER',
+  0xffa0: 'HALFWIDTH HANGUL FILLER',
   0xfeff: 'BYTE ORDER MARK',
+  0xfff9: 'INTERLINEAR ANNOTATION ANCHOR',
+  0xfffa: 'INTERLINEAR ANNOTATION SEPARATOR',
+  0xfffb: 'INTERLINEAR ANNOTATION TERMINATOR',
+  0xe0001: 'LANGUAGE TAG',
 });
+
+/**
+ * The name to print for a codepoint, or null when the range label says enough.
+ *
+ * TAG characters get their ASCII equivalent spelled out, because U+E0041 is
+ * not a fact anyone can act on while `TAG for ASCII "A"` tells the reader what
+ * the invisible text actually SAID. A gate that reports an unfixable finding
+ * is an obstacle (ADR-19).
+ */
+function nameOf(cp) {
+  if (NAMES[cp] !== undefined) return NAMES[cp];
+  if (cp >= 0xe0020 && cp <= 0xe007e) {
+    return `TAG for ASCII ${JSON.stringify(String.fromCharCode(cp - 0xe0000))}`;
+  }
+  return null;
+}
 
 function classify(cp) {
   for (const range of FORBIDDEN) {
     if (cp >= range.lo && cp <= range.hi) return range.what;
   }
   return null;
+}
+
+/**
+ * The same rule, plus TAB and LF, for text that is a PATH rather than file
+ * contents. The asymmetry is deliberate: a tab is ordinary text inside a file
+ * and a catastrophe in a filename, where it makes one path print as two
+ * columns in every tool that lists it — and a newline in a path breaks the
+ * line-oriented output of all of them.
+ */
+function classifyInPath(cp) {
+  if (cp === 0x09 || cp === 0x0a) return 'control character in a path';
+  return classify(cp);
 }
 
 /** UTF-8 width of a codepoint — lets us report byte offsets without re-encoding. */
@@ -106,21 +193,21 @@ export function formatCodePoint(cp) {
  * byte offset and identity. Pure and file-free, which is what makes the rule
  * itself testable rather than only its command-line wrapper.
  */
-export function scanText(text) {
+export function scanText(text, classifier = classify) {
   const findings = [];
   let line = 1;
   let column = 1;
   let byteOffset = 0;
   for (const ch of text) {
     const cp = ch.codePointAt(0);
-    const what = classify(cp);
+    const what = classifier(cp);
     if (what !== null) {
       findings.push({
         line,
         column,
         byteOffset,
         codePoint: cp,
-        name: NAMES[cp] ?? null,
+        name: nameOf(cp),
         what,
       });
     }
@@ -135,10 +222,27 @@ export function scanText(text) {
   return findings;
 }
 
-/** One finding as an operator-readable line: file, position, identity. */
-export function formatFinding(file, f) {
+/**
+ * Every forbidden codepoint in a PATH — a file's name or a symlink's target.
+ * Both reach the reader through tool output and through the projections an
+ * agent reads, so both are part of the repository's text even though neither
+ * is inside a file.
+ */
+export function scanPath(path) {
+  return scanText(path, classifyInPath);
+}
+
+/**
+ * One finding as an operator-readable line: file, position, identity.
+ *
+ * `where` says which text the position refers to. Without it a hit at 1:5 in a
+ * NAME reads as a hit at 1:5 in the contents, and the reader edits the wrong
+ * thing — the same "unfixable finding" failure the byte offsets exist to avoid.
+ */
+export function formatFinding(file, f, where = 'content') {
   const name = f.name ? ` ${f.name}` : '';
-  return `${file}:${f.line}:${f.column} (byte ${f.byteOffset}): ${formatCodePoint(f.codePoint)}${name} — ${f.what}`;
+  const site = where === 'content' ? '' : ` [in the ${where === 'name' ? 'file NAME' : 'symlink TARGET'}]`;
+  return `${file}:${f.line}:${f.column} (byte ${f.byteOffset}): ${formatCodePoint(f.codePoint)}${name} — ${f.what}${site}`;
 }
 
 function git(args, cwd) {
@@ -194,9 +298,21 @@ function isValidUtf8(buffer) {
  * landed. Excusing them would aim the gate away from its own motivating case.
  */
 export function partitionTrackedFiles(cwd = process.cwd()) {
-  const empty = { scan: [], exempt: [], refused: [] };
-  const listing = git(['ls-files', '-z'], cwd);
-  const candidates = listing.split('\0').filter((p) => p !== '');
+  const empty = { paths: [], scan: [], links: [], exempt: [], refused: [] };
+  // `-s` for the mode, because a symlink must never be read with readFileSync:
+  // that FOLLOWS the link, so a link pointing outside the repo would have some
+  // other project's contents scanned in its place, and a dangling one would be
+  // filed as "missing" and skipped — target unread either way. Git's own
+  // record (mode 120000) is the authority here, not a filesystem stat.
+  const listing = git(['ls-files', '-s', '-z'], cwd);
+  const modes = new Map();
+  for (const entry of listing.split('\0')) {
+    if (entry === '') continue;
+    const tab = entry.indexOf('\t');
+    if (tab === -1) continue;
+    modes.set(entry.slice(tab + 1), entry.slice(0, entry.indexOf(' ')));
+  }
+  const candidates = [...modes.keys()];
   if (candidates.length === 0) return empty;
 
   const attr = execFileSync('git', ['check-attr', '-z', '--stdin', 'binary'], {
@@ -212,8 +328,23 @@ export function partitionTrackedFiles(cwd = process.cwd()) {
     if (fields[i + 2] === 'set') declaredBinary.add(fields[i]);
   }
 
-  const out = { scan: [], exempt: [], refused: [] };
+  const out = { paths: candidates, scan: [], links: [], exempt: [], refused: [] };
   for (const path of candidates) {
+    if (modes.get(path) === '120000') {
+      // The payload of a symlink is its target string. Read it with readlink,
+      // which does NOT follow the link, so a dangling target is still text we
+      // can scan rather than an ENOENT that excuses the entry.
+      try {
+        out.links.push({ file: path, target: readlinkSync(resolve(cwd, path)) });
+      } catch (err) {
+        if (err.code === 'ENOENT') {
+          out.exempt.push({ file: path, reason: 'tracked but missing from the working tree' });
+          continue;
+        }
+        throw err;
+      }
+      continue;
+    }
     if (declaredBinary.has(path)) {
       out.exempt.push({ file: path, reason: 'declared `binary` in .gitattributes' });
       continue;
@@ -248,13 +379,26 @@ export function partitionTrackedFiles(cwd = process.cwd()) {
  * Returns findings plus the full accounting of what was NOT scanned.
  */
 export function scanRepo(cwd = process.cwd()) {
-  const { scan, exempt, refused } = partitionTrackedFiles(cwd);
+  const { paths, scan, links, exempt, refused } = partitionTrackedFiles(cwd);
   const results = [];
+  // NAMES first, and for EVERY tracked path — including exempt and refused
+  // ones. `binary` exempts a file's bytes; nothing exempts its name, which
+  // still reaches `git log --stat`, a PR diff header and the projections an
+  // agent reads. An override in a name mirrors the rest of the line exactly
+  // as one inside a table row does.
+  for (const file of paths) {
+    const findings = scanPath(file);
+    if (findings.length > 0) results.push({ file, findings, where: 'name' });
+  }
+  for (const { file, target } of links) {
+    const findings = scanPath(target);
+    if (findings.length > 0) results.push({ file, findings, where: 'target' });
+  }
   for (const file of scan) {
     const findings = scanText(readFileSync(resolve(cwd, file), 'utf8'));
-    if (findings.length > 0) results.push({ file, findings });
+    if (findings.length > 0) results.push({ file, findings, where: 'content' });
   }
-  return { scanned: scan.length, exempt, refused, results };
+  return { scanned: scan.length + links.length, exempt, refused, results };
 }
 
 // ------------------------------------------------------------------- CLI
@@ -324,10 +468,10 @@ function main() {
     return;
   }
   let total = 0;
-  for (const { file, findings } of report.results) {
+  for (const { file, findings, where } of report.results) {
     total += findings.length;
     for (const f of findings.slice(0, MAX_PER_FILE)) {
-      console.error(formatFinding(file, f));
+      console.error(formatFinding(file, f, where));
     }
     if (findings.length > MAX_PER_FILE) {
       console.error(`${file}: ... and ${findings.length - MAX_PER_FILE} more in this file`);

@@ -53,6 +53,14 @@ always-loaded context surface is a guarded resource.
   inferring "this is binary" from a file's own contents — can be defeated by
   editing those contents, which is how a poisoned file bought its way out of
   this gate twice during development.
+  The scan covers a file's **name** and a symlink's **target** as well as its
+  contents — both reach the reader through tool output and through the
+  projections an agent reads, and an exemption granted to a file's bytes never
+  covers its name. TAB and LF are legal inside a file and forbidden in a path.
+  Two gaps are deliberate and documented in the scanner rather than hidden:
+  `U+FE00`-`U+FE0F` stay legal because `U+FE0F` is emoji presentation and this
+  repo's README uses it 24 times, and the list is a denylist, so it is
+  structurally incomplete by construction (ADR-19 correction 1).
 - **A test for a guarantee is finished only once you have watched it fail**
   (ADR-20) — see below.
 

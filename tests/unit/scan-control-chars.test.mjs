@@ -1,14 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
+  DELIBERATELY_ALLOWED,
   FORBIDDEN,
   formatCodePoint,
   formatFinding,
   partitionTrackedFiles,
+  scanPath,
   scanRepo,
   scanText,
 } from '../../scripts/scan-control-chars.mjs';
@@ -57,27 +59,61 @@ test('the banned set is exactly the one ADR-19 specifies', () => {
   // Pinned independently of FORBIDDEN, because the range-walk test below
   // iterates that same list: deleting a range there would delete its own
   // coverage and stay green. This is the list, written out, from the ADR.
+  //
+  // The walk covers EVERY codepoint, astral planes included. It used to skip
+  // them (`if (point === 0xffff) point = 0x10fffe;`) on the assumption that
+  // nothing above the BMP was interesting — and that assumption is exactly
+  // what hid the TAG block, the single most dangerous gap in the list
+  // (ADR-19 correction 1). A test whose scope is an assumption cannot falsify
+  // that assumption.
   const banned = [];
   for (let point = 0x00; point <= 0x10ffff; point++) {
+    if (point >= 0xd800 && point <= 0xdfff) continue; // lone surrogates are not codepoints
     if (scanText(cp(point)).length > 0) banned.push(point);
-    if (point === 0xffff) point = 0x10fffe; // above the BMP nothing is banned
   }
   const expected = [
     ...range(0x00, 0x08),
     ...range(0x0b, 0x1f),
     ...range(0x7f, 0x9f),
+    0x00ad,
     0x061c,
+    ...range(0x115f, 0x1160),
+    0x180e,
     ...range(0x200b, 0x200f),
     ...range(0x202a, 0x202e),
+    ...range(0x2060, 0x2064),
     ...range(0x2066, 0x2069),
+    ...range(0x206a, 0x206f),
+    0x3164,
+    0xffa0,
+    ...range(0xfff9, 0xfffb),
     0xfeff,
-  ];
+    ...range(0x1d173, 0x1d17a),
+    ...range(0xe0000, 0xe007f),
+    ...range(0xe0100, 0xe01ef),
+  ].sort((a, b) => a - b);
   assert.deepEqual(banned, expected);
   // TAB and LF are legal text and must never join the set.
   assert.ok(!banned.includes(0x09) && !banned.includes(0x0a));
+  // U+FE0F is a legal emoji presentation selector and appears 24 times in this
+  // repo's README. Banning it would turn the gate red on a file nobody
+  // touched, which is how gates get switched off (ADR-19). Deliberate gap,
+  // documented in scan-control-chars.mjs.
+  assert.ok(!banned.includes(0xfe0f) && !banned.includes(0xfe0e));
 });
 
 const range = (lo, hi) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+
+test('a deliberately allowed range is never also forbidden', () => {
+  // DELIBERATELY_ALLOWED documents a gap. If a later range quietly covers it,
+  // the comment keeps promising a gap that no longer exists — and the next
+  // reader trusts the comment over the code.
+  for (const gap of DELIBERATELY_ALLOWED) {
+    for (const point of [gap.lo, gap.hi]) {
+      assert.equal(scanText(cp(point)).length, 0, `${formatCodePoint(point)} is documented as allowed`);
+    }
+  }
+});
 
 test('every forbidden range is actually caught, at both of its edges', () => {
   for (const range of FORBIDDEN) {
@@ -103,6 +139,35 @@ test('the characters that actually bit us are named, not just flagged', () => {
   assert.equal(named(0xfeff).name, 'BYTE ORDER MARK');
   // A BOM anywhere, including position 0, is a finding — not a blessed prefix.
   assert.equal(scanText(cp(0xfeff) + '# Title\n').length, 1);
+});
+
+test('the TAG block is caught, and it is measured as ONE codepoint', () => {
+  // The vector, spelled out: U+E0001..U+E007E map one-to-one onto ASCII and
+  // render as nothing at all. STATE.md and PROGRESS.md are read by AGENTS, and
+  // the text in them arrives from subagent reports about foreign repositories,
+  // so an invisible instruction in a projection is prompt injection aimed at
+  // our own team — not an ugly character.
+  //
+  // The proof has to show WHICH unit is being measured. A TAG codepoint is a
+  // surrogate PAIR in UTF-16: charCodeAt sees 0xDB40 and 0xDC01, neither of
+  // which is in any forbidden range, while codePointAt sees 0xE0001. A scanner
+  // walking UTF-16 units would report zero findings here and stay green.
+  const tag = cp(0xe0001);
+  assert.equal(tag.length, 2, 'premise: this is a surrogate pair in UTF-16');
+  assert.equal(tag.charCodeAt(0), 0xdb40);
+  assert.equal(tag.charCodeAt(1), 0xdc01);
+  assert.equal(tag.codePointAt(0), 0xe0001);
+
+  const findings = scanText('visible' + tag + 'text');
+  assert.equal(findings.length, 1, 'the TAG codepoint was not caught');
+  assert.equal(findings[0].codePoint, 0xe0001, 'a surrogate unit was reported instead of the codepoint');
+  assert.equal(findings[0].byteOffset, 7, 'UTF-8 width of a TAG character is 4 bytes, and it starts after "visible"');
+
+  // Both edges of the block, and the ASCII a TAG character stands for, because
+  // "there is an invisible character here" is not a fixable finding.
+  assert.equal(scanText(cp(0xe0000)).length, 1);
+  assert.equal(scanText(cp(0xe007f)).length, 1);
+  assert.match(formatFinding('STATE.md', scanText(cp(0xe0041))[0]), /TAG for ASCII "A"/);
 });
 
 test('CR is a finding: this repo normalizes to LF', () => {
@@ -163,6 +228,97 @@ test('an untracked poisoned file is not the gate\'s business', () => {
   writeFileSync(join(dir, 'scratch.md'), 'x' + cp(0x0000) + 'y\n');
   const r = scan(dir);
   assert.equal(r.status, 0, r.stderr);
+});
+
+// --- the path is part of the repository too --------------------------------
+
+test('a poisoned file NAME fails the gate, even when its contents are clean', () => {
+  // The scanner read contents only. A file whose NAME carries an override was
+  // waved through with a green tick — and the name is what every tool prints:
+  // `git log --stat`, `ls`, a PR diff header, and the projections an agent
+  // reads. A bidi override in a name mirrors the rest of the line just as well
+  // as one in a table row.
+  const dir = gitRepo({ ['notes' + cp(0x202e) + 'fdp.md']: '# clean contents\n' });
+  const r = scan(dir);
+  assert.equal(r.status, 1, 'a poisoned name must not pass');
+  assert.match(r.stderr, /U\+202E RIGHT-TO-LEFT OVERRIDE/);
+  assert.match(r.stderr, /in the file NAME/, 'the message must say WHERE the character is');
+});
+
+test('a poisoned name is caught even on a file that is exempt from the content scan', () => {
+  // The exemption is for a file's BYTES. Its name still reaches every tool and
+  // every projection, so `binary` must not buy an exemption for the path.
+  const blob = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+  const dir = gitRepo({
+    '.gitattributes': '*.jpg binary\n',
+    ['assets/logo' + cp(0x200b) + '.jpg']: blob,
+  });
+  const r = scan(dir);
+  assert.equal(r.status, 1, 'an exempt file still has a name');
+  assert.match(r.stderr, /U\+200B ZERO WIDTH SPACE/);
+  assert.match(r.stderr, /in the file NAME/);
+});
+
+test('TAB and LF are legal in contents and forbidden in a path', () => {
+  // The asymmetry is the point: a tab is ordinary text and a catastrophe in a
+  // filename, where it makes one path print as two columns.
+  assert.deepEqual(scanText('a\tb\nc'), []);
+  assert.equal(scanPath('a\tb').length, 1);
+  assert.equal(scanPath('a\nb').length, 1);
+  assert.equal(scanPath('docs/ordinary-name.md').length, 0);
+
+  // End to end, because a TAB in a name also stresses the parser that reads
+  // `git ls-files -s -z`: the mode is separated from the path by a TAB, so a
+  // parser splitting on the LAST tab would lose half the name of exactly the
+  // file it is meant to report.
+  const dir = gitRepo({ ['na' + cp(0x09) + 'me.md']: '# clean\n' });
+  const r = scan(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /U\+0009 TAB — control character in a path \[in the file NAME\]/);
+});
+
+test('a symlink whose TARGET carries a control character fails the gate', () => {
+  // A symlink's payload IS its target string, and git tracks it as such. The
+  // old scanner called readFileSync on the link, which follows it: a target
+  // outside the repo got its CONTENTS scanned instead (a file we do not own),
+  // and a dangling link was filed as "tracked but missing" and quietly skipped
+  // — with its poisoned target never looked at.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-scan-link-'));
+  const run = (...args) => {
+    const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${args.join(' ')} failed: ${r.stderr}`);
+  };
+  run('init', '-q');
+  run('config', 'user.email', 'test@example.invalid');
+  run('config', 'user.name', 'Test');
+  writeFileSync(join(dir, 'README.md'), '# Title\n');
+  symlinkSync('docs/target' + cp(0x202e) + 'gpj.md', join(dir, 'link.md'));
+  run('add', '-A');
+
+  const part = partitionTrackedFiles(dir);
+  assert.deepEqual(part.links.map((l) => l.file), ['link.md'], 'the symlink must be scanned as a link');
+  assert.ok(!part.scan.includes('link.md'), 'a symlink must not be read as a file');
+  assert.deepEqual(part.exempt.map((e) => e.file), [], 'a dangling link is not an excuse to skip it');
+
+  const r = scan(dir);
+  assert.equal(r.status, 1, 'a poisoned link target must not pass');
+  assert.match(r.stderr, /link\.md/);
+  assert.match(r.stderr, /U\+202E RIGHT-TO-LEFT OVERRIDE/);
+  assert.match(r.stderr, /in the symlink TARGET/);
+});
+
+test('a clean symlink is counted as scanned, not as an exemption', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-scan-link-ok-'));
+  const run = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  run('init', '-q');
+  run('config', 'user.email', 'test@example.invalid');
+  run('config', 'user.name', 'Test');
+  writeFileSync(join(dir, 'README.md'), '# Title\n');
+  symlinkSync('README.md', join(dir, 'alias.md'));
+  run('add', '-A');
+  const r = scan(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /clean \(2 tracked text files\)/, 'the link must be counted');
 });
 
 // --- binary exclusion, the way that actually works ------------------------

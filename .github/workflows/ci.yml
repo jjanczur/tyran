@@ -22,6 +22,13 @@ jobs:
           node scripts/schema.mjs validate policy templates/policies/autonomy.yaml
       - name: Skill description budget
         run: node scripts/desc-budget.mjs --budget 4000 .
+      - name: No raw control or bidi characters in tracked files (ADR-19)
+        # Editing tools turn the TEXT of an escape into the character itself;
+        # it happened seven times in one session here. The damage is silent —
+        # a NUL made grep return zero matches with exit 0, and an unterminated
+        # bidi override mirrored a generated table row. The scanner lives in
+        # scripts/ rather than inline in this YAML so it can be unit-tested.
+        run: node scripts/scan-control-chars.mjs .
 
   validate-plugin:
     runs-on: ubuntu-latest

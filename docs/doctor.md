@@ -111,7 +111,13 @@ possible to change one and keep the suite green.
   a non-empty string — and neither are lease resource names. Values that
   travel as JSON (`--data`) are additionally written with every non-ASCII
   codepoint as `\uXXXX`; both are escapes, not sanitizations, so
-  `JSON.parse` and the shell both return the exact original.
+  `JSON.parse` and the shell both return the exact original. Two values
+  cannot be byte-exact and are called out here rather than left implied: a
+  **NUL** cannot survive at all (`argv` does not carry it, so no quoting
+  fixes it), and a **lone surrogate** becomes U+FFFD on the way to UTF-8 —
+  the command stays safe, but it quietly looks for a different string than
+  the journal holds. Both need the journal repaired, not the command
+  pasted.
 - **Untrusted journal values cannot rewrite the report.** Every value read
   out of a journal is passed through `project.inline()` before it is
   printed, in the text report and in `--json` alike. In a plugin, `data` is
@@ -204,7 +210,7 @@ is protected.
 
 - **`policy-rule-overruled` misses a wildcard *inside* a segment.** The
   candidate paths give `*` a whole segment, so a rule spelled
-  `h<star>/x.mjs` or `hooks<star>/x` passes `validatePolicy` clean, really
+  `h*/x.mjs` or `hooks*/x` passes `validatePolicy` clean, really
   does reach `hooks/x.mjs`, and doctor stays silent. Closing it needs the
   real matcher — `globMatches` in `schema.mjs`, which is private. Writing a
   second copy is exactly what ADR-18 forbids, so the fix is to export the

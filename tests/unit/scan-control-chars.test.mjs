@@ -355,6 +355,7 @@ test('THIS repository scans clean end to end', () => {
   // Pinned, not a floor. A loose `scanned > 20` let the count drop 45 -> 44
   // while a file quietly left the scan. Any change to either number now has
   // to be made on purpose, in this file, where a reviewer will see it.
-  assert.equal(scanned, 45, 'file count changed — confirm nothing left the scan by accident');
+  // 45 -> 48: scripts/doctor.mjs, tests/unit/doctor.test.mjs, docs/doctor.md.
+  assert.equal(scanned, 48, 'file count changed — confirm nothing left the scan by accident');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });

@@ -771,14 +771,14 @@ function policyFindings(path, repoRoot) {
     const parts = [
       `rules[${dead.index}] "${show(dead.path)}" (class ${show(dead.class)}) can never match any path: ` +
         'paths reaching the policy are normalized first (repo-relative, POSIX separators, no "." or ".." ' +
-        'segments), and no normalized path has this shape',
+        'segments), and no normalized path has this shape.',
     ];
-    if (dead.suggestion !== null) parts.push(`did you mean "${show(dead.suggestion)}"?`);
+    if (dead.suggestion !== null) parts.push(`Did you mean "${show(dead.suggestion)}"?`);
     if (dead.aimedAtKernel) {
       parts.push(
-        `note: "${show(dead.suggestion)}" is a protected kernel path (${MANDATORY_KERNEL_PATHS.join(', ')}), ` +
+        `Note: "${show(dead.suggestion)}" is a protected kernel path (${MANDATORY_KERNEL_PATHS.join(', ')}), ` +
           'so even the corrected rule could only tighten it, never lower it — but as written the rule protects ' +
-          'nothing and nothing says so',
+          'nothing and nothing says so.',
       );
     }
     findings.push(
@@ -786,7 +786,7 @@ function policyFindings(path, repoRoot) {
         'warning',
         'policy-rule-dead',
         show(path),
-        parts.join('. '),
+        parts.join(' '),
         dead.suggestion === null
           ? `${sq(path)}: delete the rule, or rewrite its path as a repo-relative glob`
           : `${sq(path)}: replace the rule path with ${sq(dead.suggestion)}`,

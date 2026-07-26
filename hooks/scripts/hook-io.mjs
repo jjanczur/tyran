@@ -71,7 +71,17 @@ export const EVENTS = Object.freeze(
     Stop: Object.freeze({ canBlock: true, refusal: 'decision', context: false }),
     SubagentStop: Object.freeze({ canBlock: true, refusal: 'decision', context: false }),
     PreCompact: Object.freeze({ canBlock: true, refusal: 'decision', context: false }),
-    TaskCompleted: Object.freeze({ canBlock: true, refusal: 'decision', context: false }),
+    // TaskCompleted CAN refuse, but only fires in TEAM mode: the platform
+    // raises it for the in-progress tasks of the current teammate. In
+    // subagent mode it never fires at all, so a check placed only here is
+    // an absent control, not a weak one. Flagged in the type rather than in
+    // prose, because that is the whole point of this table.
+    TaskCompleted: Object.freeze({
+      canBlock: true,
+      refusal: 'decision',
+      context: false,
+      teamModeOnly: true,
+    }),
     // Probes — injection or record only; refusal is impossible.
     SessionStart: Object.freeze({ canBlock: false, refusal: null, context: true }),
     SubagentStart: Object.freeze({ canBlock: false, refusal: null, context: true }),
@@ -344,11 +354,55 @@ export function resolveEvent(declared, fromInput, { mustBlock }) {
 
 // ------------------------------------------------------------------ runners
 
+/** How many times a stalled sink may report no progress before we give up. */
+const WRITE_SPIN_LIMIT = 10000;
+
+/**
+ * Write `text` in full, or throw.
+ *
+ * `writeSync` returns the number of bytes it actually took, and on a
+ * non-blocking pipe — which is what a hook's stdout is when the platform is
+ * busy — that can be fewer than we handed it. Ignoring the return value
+ * therefore produces a TRUNCATED JSON object, which fails the platform's
+ * schema, which discards the whole output, which lets the action through.
+ * A refusal cut in half is not a weaker refusal; it is an approval.
+ *
+ * `sink` is injectable so the loop itself is testable without fiddling with
+ * real file descriptors.
+ */
+export function writeFully(text, sink) {
+  const buf = Buffer.from(text, 'utf8');
+  let offset = 0;
+  let spins = 0;
+  while (offset < buf.length) {
+    let written;
+    try {
+      written = sink(buf, offset, buf.length - offset);
+    } catch (err) {
+      // A momentarily full pipe is not a failure, it is back-pressure. Retry
+      // a bounded number of times rather than spinning forever or reporting
+      // a decision we only half wrote.
+      if ((err?.code === 'EAGAIN' || err?.code === 'EWOULDBLOCK') && spins++ < WRITE_SPIN_LIMIT) {
+        continue;
+      }
+      throw err;
+    }
+    if (!(written > 0)) {
+      if (spins++ >= WRITE_SPIN_LIMIT) {
+        throw new Error(`stdout accepted ${offset} of ${buf.length} bytes and then stalled`);
+      }
+      continue;
+    }
+    offset += written;
+  }
+  return offset;
+}
+
 function defaultIo() {
   return {
     stdin: process.stdin,
-    write: (text) => writeSync(1, text),
-    warn: (text) => writeSync(2, text),
+    write: (text) => writeFully(text, (buf, off, len) => writeSync(1, buf, off, len)),
+    warn: (text) => writeFully(text, (buf, off, len) => writeSync(2, buf, off, len)),
     exit: (code) => process.exit(code),
     onExit: (cb) => {
       process.on('exit', cb);
@@ -396,12 +450,36 @@ function refusalText({ errorClass, message, fix }) {
  *  2. it refuses to be registered on an event that cannot refuse;
  *  3. it holds its OWN deadline, shorter than the one in hooks.json. The
  *     platform's timeout kills the process and DISCARDS its output, so a
- *     gate that is merely slow is a gate that approves. A gate that did not
- *     finish in time refuses on its own terms instead.
+ *     gate that is merely slow is a gate that approves.
  *
  * `handler(input)` returns `PASS` or `{ decision: 'deny', reason }`.
  * Anything else is treated as a bug and refuses — an unrecognised return
  * value must not be able to mean "allow".
+ *
+ * ## What the deadline does and does not promise
+ *
+ * State it narrowly, because the four gates built on this runtime inherit
+ * whatever it claims, and a guarantee wider than its mechanism is worse than
+ * no guarantee at all — readers rely on it.
+ *
+ *  - **Enforced.** A handler that yields the event loop and has not decided
+ *    by `deadlineMs` gets a refusal emitted for it, by the timer.
+ *  - **Enforced.** A handler that overruns the budget and *then* returns has
+ *    its verdict DISCARDED and replaced by a refusal. This is the case that
+ *    actually happens in the field (a gate that greps a large file, or shells
+ *    out to a scanner, finishes — just late), and a timer alone does not
+ *    catch it: the timer callback is a macrotask and the handler's return
+ *    settles in a microtask, so the verdict wins the race.
+ *  - **NOT enforced.** A handler that blocks the thread and never returns.
+ *    Node is single-threaded; nothing on this thread runs while it spins, the
+ *    platform eventually SIGKILLs the process, and a killed hook produces no
+ *    output — the action proceeds. There is no in-process fix. The mitigation
+ *    is a rule for gate authors, in `docs/hooks.md`: a gate does no unbounded
+ *    synchronous work, and every file it reads is size-checked first. If that
+ *    is ever not enough, the fix is a hard-killed child process or a
+ *    worker-thread watchdog claiming the write through `Atomics`, both of
+ *    which cost real latency on every tool call and neither of which is
+ *    justified by anything measured so far.
  */
 export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) {
   if (!isKnownEvent(event)) throw new GateOnProbeEventError(String(event));
@@ -410,11 +488,67 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
     throw new Error(`runGate needs a positive deadlineMs (got ${String(deadlineMs)})`);
   }
 
-  let done = false;
+  const startedAt = Date.now();
+  /** True once the budget is spent, whether or not anything noticed in time. */
+  const overrun = () => Date.now() - startedAt >= deadlineMs;
+
+  let settled = false;
+
+  /**
+   * The endings that are NOT "exit 0 with a decision".
+   *
+   * Reaching here means the decision exists but the channel for it does not.
+   * Exit 2 with the reason on stderr is then the only remaining ending that
+   * still blocks on a blocking event — strictly better than exiting 0 with
+   * nothing on stdout, which is the quietest possible approval.
+   */
+  const loudFailure = (text) => {
+    settled = true;
+    try {
+      io.warn(text.endsWith('\n') ? text : `${text}\n`);
+    } catch {
+      /* stderr is gone too; there is nothing left to do but the exit code */
+    }
+    io.exit(2);
+  };
+
+  /**
+   * A failed write is caught HERE and converted into a loud ending.
+   *
+   * The round-1 version was `if (done) return; done = true; io.write(...)`
+   * with no catch, and it opened a third silent path: a throwing write
+   * propagated out, the outer catch called a refusal, the refusal called
+   * `emit`, `emit` saw the flag already set and returned, the exit guard saw
+   * the same flag and returned — and the process ended with exit 0, an empty
+   * stdout and an empty stderr. The quietest possible approval.
+   *
+   * The catch is the guard; MUST-PASS 2 pins it. Setting `settled` only after
+   * a successful write is the secondary, defensive half — and it is honestly
+   * an EQUIVALENT change while the catch is present, which mutant M18 of
+   * round 2 demonstrated by surviving. It is kept because it is free and
+   * because it is the correct order if the catch is ever refactored away, not
+   * because a test proves it.
+   *
+   * What this can and cannot see, measured: a broken pipe (the platform died
+   * mid-hook) raises `EPIPE` and lands here, and the process ends with exit 2
+   * carrying the reason on stderr. A stdout that was CLOSED before exec
+   * cannot be detected at all — Node reopens a closed fd 1 onto /dev/null at
+   * startup, so the write succeeds and the bytes are simply gone. No hook can
+   * defend against that; it is listed so nobody mistakes the two cases.
+   */
   const emit = (payload) => {
-    if (done) return;
-    done = true;
-    io.write(JSON.stringify(payload) + '\n');
+    if (settled) return;
+    const text = JSON.stringify(payload) + '\n';
+    try {
+      io.write(text);
+    } catch (err) {
+      loudFailure(
+        `tyran hook-io: could not write its decision to stdout (${err?.code ?? err?.message ?? String(err)}).\n` +
+          `The decision was: ${text}`,
+      );
+      return;
+    }
+    settled = true;
     io.exit(0);
   };
   const refuse = (outEvent, info) => {
@@ -437,8 +571,7 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
    * at that point, which is why the whole output path uses writeSync.
    */
   const silentExitGuard = () => {
-    if (done) return;
-    done = true;
+    if (settled) return;
     const { payload } = clampPayload(
       (reason) => refusalPayload(event, reason),
       sanitizeForOutput(
@@ -449,7 +582,22 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
         }),
       ),
     );
-    io.write(JSON.stringify(payload) + '\n');
+    const text = JSON.stringify(payload) + '\n';
+    try {
+      io.write(text);
+    } catch {
+      // Same reasoning as loudFailure, except we are already inside `exit`
+      // and must not call process.exit again: set the code instead.
+      settled = true;
+      try {
+        io.warn(`tyran hook-io: ended without being able to write its refusal.\n${text}`);
+      } catch {
+        /* nothing left */
+      }
+      process.exitCode = 2;
+      return;
+    }
+    settled = true;
     process.exitCode = 0;
   };
   const releaseGuard = io.onExit ? io.onExit(silentExitGuard) : () => {};
@@ -475,6 +623,18 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
       const raw = await readStdin(io.stdin);
       const input = parseHookInput(raw);
       const named = field(input, 'hook_event_name');
+      if (named !== undefined && !isKnownEvent(named)) {
+        // Answering an event this runtime does not model means emitting a
+        // `hookEventName` the platform rejects, which fails open. There is
+        // no decision to write, so the loudest available ending it is: on a
+        // blocking event exit 2 blocks, on a probe it surfaces the message.
+        loudFailure(
+          `tyran hook-io: registered for ${event}, but the platform fired ` +
+            `"${sanitizeForOutput(String(named))}", which this runtime does not model. ` +
+            'Refusing to guess an output shape. Fix hooks.json, or add the event to EVENTS.',
+        );
+        return;
+      }
       outEvent = resolveEvent(event, named, { mustBlock: true });
       if (named !== undefined && named !== event) {
         throw new HookInputError(
@@ -484,6 +644,18 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
         );
       }
       const verdict = await handler(Object.freeze({ event: outEvent, input }));
+      // The budget is checked AFTER the handler returns, not only by a timer.
+      // A timer callback is a macrotask; a handler that blocks the thread and
+      // then returns settles its promise in a microtask, so `emit` would win
+      // the race and a gate that overran its budget fifteenfold would still
+      // approve. Measured, not feared — see MUST-PASS 1.
+      if (overrun()) {
+        throw new HookInputError(
+          'deadline-exceeded',
+          `the gate returned a verdict after ${Date.now() - startedAt} ms, past its ${deadlineMs} ms budget`,
+          'a verdict produced after the budget is not a verdict; make the check faster or raise both numbers',
+        );
+      }
       if (verdict === PASS || (verdict !== null && typeof verdict === 'object' && verdict.decision === 'pass')) {
         // No objection is silence, never `permissionDecision:"allow"` — see PASS.
         emit({});
@@ -508,7 +680,7 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
   await Promise.race([work, deadline]);
   if (timer !== null) clearTimeout(timer);
   releaseGuard();
-  return done;
+  return settled;
 }
 
 /**

@@ -8,7 +8,7 @@ import {
   FORBIDDEN,
   formatCodePoint,
   formatFinding,
-  listTextFiles,
+  partitionTrackedFiles,
   scanRepo,
   scanText,
 } from '../../scripts/scan-control-chars.mjs';
@@ -167,18 +167,33 @@ test('an untracked poisoned file is not the gate\'s business', () => {
 
 // --- binary exclusion, the way that actually works ------------------------
 
-test('binaries are excluded by their bytes, not by any marking', () => {
-  // A JPEG-ish blob with no .gitattributes marking. This is exactly
-  // assets/banner.jpg in the real repo, where `git check-attr binary` answers
-  // "unspecified" — excluding on check-attr alone leaves the gate permanently
-  // red on a file nobody can fix. 0xFF is not valid UTF-8, so it is skipped.
+test('an UNDECLARED binary is refused, and declaring it resolves the refusal', () => {
+  // A JPEG-ish blob. `git check-attr binary` answers "unspecified" for it —
+  // as it does for the real assets/banner.jpg — so nothing marks it, and it
+  // cannot be waved through on its bytes alone (that is the B1 hole).
+  //
+  // The full loop is the point: refused with an actionable message, then one
+  // line of .gitattributes clears it. The exemption is real, and it is a
+  // reviewable diff rather than a silent property of the file's contents.
   const blob = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x00, 0x01, 0x00, 0x00]);
   const dir = gitRepo({ 'README.md': '# Title\n', 'assets/blob.jpg': blob });
 
-  const listed = listTextFiles(dir);
-  assert.ok(!listed.includes('assets/blob.jpg'), `blob was not excluded: ${listed.join(', ')}`);
-  const r = scan(dir);
-  assert.equal(r.status, 0, r.stderr);
+  const before = partitionTrackedFiles(dir);
+  assert.ok(!before.scan.includes('assets/blob.jpg'), 'a binary must never be scanned as text');
+  assert.deepEqual(before.refused.map((r) => r.file), ['assets/blob.jpg']);
+  const red = scan(dir);
+  assert.equal(red.status, 1, 'an undeclared binary must not pass silently');
+  assert.match(red.stderr, /assets\/blob\.jpg binary/, 'the message must state the remedy');
+
+  writeFileSync(join(dir, '.gitattributes'), '*.jpg binary\n');
+  spawnSync('git', ['add', '-A'], { cwd: dir });
+
+  const after = partitionTrackedFiles(dir);
+  assert.deepEqual(after.refused.map((r) => r.file), []);
+  assert.deepEqual(after.exempt.map((e) => e.file), ['assets/blob.jpg']);
+  const green = scan(dir);
+  assert.equal(green.status, 0, green.stderr);
+  assert.match(green.stdout, /not scanned: assets\/blob\.jpg/);
 });
 
 test('a NUL-poisoned source file is CAUGHT, even though git calls it binary', () => {
@@ -200,7 +215,7 @@ test('a NUL-poisoned source file is CAUGHT, even though git calls it binary', ()
   const eol = spawnSync('git', ['ls-files', '--eol', 'src/poisoned.mjs'], { cwd: dir, encoding: 'utf8' });
   assert.match(eol.stdout, /-text/, 'premise changed: git no longer calls this binary');
 
-  assert.ok(listTextFiles(dir).includes('src/poisoned.mjs'), 'the poisoned file must stay in scope');
+  assert.ok(partitionTrackedFiles(dir).scan.includes('src/poisoned.mjs'), 'the poisoned file must stay in scope');
   const r = scan(dir);
   assert.equal(r.status, 1, 'a poisoned file must fail the gate, binary-looking or not');
   assert.match(r.stderr, /src\/poisoned\.mjs/);
@@ -216,7 +231,7 @@ test('goldens are scanned: `-text` protects bytes, it does not buy an exemption'
     '.gitattributes': 'fixtures/** -text\n',
     'fixtures/golden/STATE.md': '| Agent | Status |\n|---|---|\n| a' + cp(0x202e) + ' | ok |\n',
   });
-  assert.ok(listTextFiles(dir).includes('fixtures/golden/STATE.md'));
+  assert.ok(partitionTrackedFiles(dir).scan.includes('fixtures/golden/STATE.md'));
   const r = scan(dir);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /fixtures\/golden\/STATE\.md/);
@@ -230,9 +245,10 @@ test('an explicit `binary` attribute excludes a file whose bytes look like text'
     'README.md': '# Title\n',
     'fixtures/raw.dat': 'looks like text but holds' + cp(0x200e) + 'a mark\n',
   });
-  const listed = listTextFiles(dir);
-  assert.ok(!listed.includes('fixtures/raw.dat'), `marked file was not excluded: ${listed.join(', ')}`);
-  assert.ok(listed.includes('README.md'), 'ordinary files must still be scanned');
+  const { scan: scanned, exempt } = partitionTrackedFiles(dir);
+  assert.ok(!scanned.includes('fixtures/raw.dat'), `marked file was scanned: ${scanned.join(', ')}`);
+  assert.ok(scanned.includes('README.md'), 'ordinary files must still be scanned');
+  assert.deepEqual(exempt.map((e) => e.file), ['fixtures/raw.dat']);
   assert.equal(scan(dir).status, 0);
 });
 
@@ -247,14 +263,98 @@ test('exclusion is by git, not by extension: a poisoned .jpg of real text still 
 
 // --- no false positives on the repository we actually ship ----------------
 
+// --- no file leaves the scan quietly (review blockers B1 and B2) ----------
+
+test('one non-UTF-8 byte cannot smuggle a poisoned file out of the gate', () => {
+  // B1. The first exclusion criterion (git's binary sniffing) was circular:
+  // the poison itself bought the exemption. Valid-UTF-8 only weakened the
+  // loop — appending ONE 0xFF byte to a poisoned README makes it undecodable
+  // and the bidi override inside sails through under a green tick.
+  //
+  // The answer is not a fourth content test, since any content-derived
+  // exemption can be manufactured by editing content. It is that leaving the
+  // scan is never silent, and an UNDECLARED undecodable file is an error.
+  const poisoned = 'row\nvalue' + cp(0x202e) + 'suffix\n';
+  const dir = gitRepo({ 'README.md': poisoned });
+
+  // Baseline: caught.
+  assert.equal(scan(dir).status, 1);
+
+  // Now buy the exemption with one stray byte.
+  writeFileSync(join(dir, 'README.md'), Buffer.concat([Buffer.from(poisoned, 'utf8'), Buffer.from([0xff])]));
+  spawnSync('git', ['add', '-A'], { cwd: dir });
+
+  const { refused } = partitionTrackedFiles(dir);
+  assert.deepEqual(refused.map((r) => r.file), ['README.md'], 'the file must not be silently dropped');
+
+  const r = scan(dir);
+  assert.equal(r.status, 1, 'a stray byte must not turn the gate green');
+  assert.match(r.stderr, /README\.md/);
+  assert.match(r.stderr, /not valid UTF-8 and not declared/);
+  // The remedy has to be stated, or the next person just deletes the file.
+  assert.match(r.stderr, /README\.md binary/);
+});
+
+test('exemptions are printed on EVERY run, including a clean one', () => {
+  // B2. The `binary` escape hatch has to exist — without it an undecodable
+  // asset jams CI forever. What must not exist is using it invisibly: the
+  // same commit could add a poisoned file and the line that excuses it.
+  const dir = gitRepo({
+    '.gitattributes': 'secret.md binary\n',
+    'README.md': '# Title\n',
+    'secret.md': 'hidden' + cp(0x202e) + 'payload\n',
+  });
+  const r = scan(dir);
+  assert.equal(r.status, 0, 'a declared exemption is still allowed');
+  assert.match(r.stdout, /not scanned: secret\.md — declared `binary` in \.gitattributes/);
+  assert.match(r.stdout, /1 file\(s\) exempt, 2 scanned/);
+});
+
+test('a gate that scanned nothing is never a pass', () => {
+  // B2. `* binary` in .gitattributes silences the scanner completely. Exit 0
+  // over zero files is a green tick meaning "we looked at nothing".
+  const dir = gitRepo({
+    '.gitattributes': '* binary\n',
+    'poisoned.md': 'x' + cp(0x0000) + 'y\n',
+  });
+  const { scan: scanned } = partitionTrackedFiles(dir);
+  assert.equal(scanned.length, 0, 'premise: everything is excused');
+
+  const r = scan(dir);
+  assert.equal(r.status, 2, 'zero scanned files must fail, not pass');
+  assert.match(r.stderr, /refusing to pass — 0 files were scanned/);
+});
+
+test('the self-run guard survives an argv[1] that cannot be canonicalized', () => {
+  // Third copy of the guard, third dead mutant. Duplication is a choice here,
+  // so each copy carries its own proof rather than borrowing journal.mjs's.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-argv-'));
+  const harness = join(base, 'harness.mjs');
+  writeFileSync(
+    harness,
+    "process.argv[1] = '/nonexistent-dir-" +
+      "e2s6/entry.mjs';\n" +
+      `await import(${JSON.stringify(SCRIPT)});\n` +
+      "console.log('SURVIVED');\n",
+  );
+  const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'SURVIVED');
+});
+
 test('THIS repository scans clean end to end', () => {
   // The canary for the whole gate: if the scanner is over-eager, or the binary
   // exclusion regresses, CI goes red on files nobody touched and someone turns
   // the gate off. That failure mode is the reason this test exists.
-  const { scanned, results } = scanRepo(REPO_ROOT);
+  const { scanned, results, exempt, refused } = scanRepo(REPO_ROOT);
   assert.deepEqual(
     results.map((r) => `${r.file}: ${formatFinding(r.file, r.findings[0])}`),
     [],
   );
-  assert.ok(scanned > 20, `expected the real file list, got ${scanned} files`);
+  assert.deepEqual(refused.map((r) => r.file), [], 'every binary here must be declared');
+  // Pinned, not a floor. A loose `scanned > 20` let the count drop 45 -> 44
+  // while a file quietly left the scan. Any change to either number now has
+  // to be made on purpose, in this file, where a reviewer will see it.
+  assert.equal(scanned, 45, 'file count changed — confirm nothing left the scan by accident');
+  assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });

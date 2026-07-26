@@ -46,7 +46,13 @@ always-loaded context surface is a guarded resource.
 - **No raw control or bidi characters in tracked files** (ADR-19). Write
   the escape notation, or build the character with `String.fromCodePoint()`.
   `scripts/scan-control-chars.mjs` enforces this in CI and names the file,
-  line, column, byte offset and codepoint of every hit.
+  line, column, byte offset and codepoint of every hit. A binary asset must
+  be declared `binary` in `.gitattributes`; the scanner refuses a tracked
+  file it cannot decode and has not been told about, and prints every
+  exemption on every run. Both rules exist because the alternatives —
+  inferring "this is binary" from a file's own contents — can be defeated by
+  editing those contents, which is how a poisoned file bought its way out of
+  this gate twice during development.
 - **A test for a guarantee is finished only once you have watched it fail**
   (ADR-20) — see below.
 

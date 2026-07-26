@@ -17,17 +17,20 @@
  * offset and the codepoint, because "there is an invisible character somewhere
  * in this file" is not a fixable finding — it is a gate people switch off.
  *
- * Binary files are excluded through git itself, never through an extension
- * whitelist: a whitelist says nothing about the next file type someone adds.
+ * Binaries are exempted only where .gitattributes DECLARES them binary, never
+ * by an extension whitelist and never by a property of their contents — see
+ * partitionTrackedFiles for why every content-derived exemption is defeatable
+ * by editing the content, and why no file may leave the scan silently.
  *
  * CLI:
  *   node scan-control-chars.mjs [repo-root]
- * Exit: 0 clean · 1 forbidden characters found · 2 usage/IO error
+ * Exit: 0 clean · 1 forbidden characters found, or a tracked file that is
+ *       neither decodable nor declared binary · 2 usage/IO error, or a scan
+ *       that covered zero files
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -142,23 +145,7 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
-/**
- * Whether a file's bytes are valid UTF-8. This is the content criterion for
- * "is it text", and the choice matters more than it looks.
- *
- * The obvious criterion — git's own binary sniffing, via `ls-files --eol`
- * reporting `i/-text` — is CIRCULAR here, and it bit this very story. Git
- * calls a file binary when it finds a NUL in the first 8000 bytes. A source
- * file that gets poisoned with one stray NUL therefore becomes "binary" the
- * instant it is damaged, and a scanner that trusts git's answer excludes it
- * for exactly the reason it should have been flagged. That happened: this
- * repo's own fuzz test picked up a raw NUL, git reclassified it as binary,
- * and the scan reported "clean" over a poisoned tracked file.
- *
- * Valid UTF-8 has no such feedback loop. Real binaries (the JPEG in assets/)
- * fail it on their first stray byte; a NUL-poisoned Markdown or JavaScript
- * file is still perfectly valid UTF-8, so it stays in scope and gets caught.
- */
+/** Whether a file's bytes decode as UTF-8. Never used as a silent exemption. */
 function isValidUtf8(buffer) {
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(buffer);
@@ -169,27 +156,48 @@ function isValidUtf8(buffer) {
 }
 
 /**
- * Tracked files worth scanning — decided by git and by bytes, never by an
- * extension list, because a whitelist says nothing about the next file type
- * someone adds.
+ * Partition tracked files into what gets scanned, what is exempt, and what is
+ * refused. Never an extension whitelist: a whitelist says nothing about the
+ * next file type someone adds.
  *
- * A file is skipped only when:
- *  - .gitattributes EXPLICITLY marks it `binary` (an author's declaration,
- *    honoured even when the bytes look like text), or
- *  - its bytes are not valid UTF-8, so it cannot be source or documentation.
+ * The shape of this function matters more than its criteria, because of a
+ * lesson this gate learned twice.
  *
- * Note what is deliberately NOT an exemption. `-text` is not: this repo sets
+ * First attempt: skip what GIT calls binary. That is circular. Git calls a
+ * file binary when it finds a NUL in the first 8000 bytes, so a source file
+ * poisoned with one stray NUL becomes "binary" the instant it is damaged and
+ * leaves the scan for exactly the reason it should have been flagged. It
+ * happened here: this repo's own fuzz test picked up a raw NUL, git
+ * reclassified it, and the scan reported the tree clean over a poisoned file.
+ *
+ * Second attempt: skip what is not valid UTF-8. Weaker loop, same shape —
+ * appending ONE 0xFF byte to a poisoned README makes it "not text" and the
+ * bidi override inside it sails through under a green tick. Measured, not
+ * feared.
+ *
+ * So the conclusion is not "find a better content test". ANY exemption
+ * derived from a file's content can be manufactured by editing that content.
+ * The fix is structural: **no file may leave the scan silently.**
+ *
+ *  - `exempt` — declared `binary` in .gitattributes. A real escape hatch, and
+ *    it must stay one, or an undecodable asset would jam CI forever. It is
+ *    listed in the output on EVERY run, including clean ones, so using it is
+ *    a visible act in a diff and in a log rather than a quiet edit.
+ *  - `refused` — not valid UTF-8 and NOT declared. This is an ERROR, not a
+ *    skip: it is the shape of both attacks above, and the remedy is one line
+ *    of .gitattributes that a reviewer can see.
+ *  - everything else is scanned.
+ *
+ * Note what is deliberately NOT an exemption: `-text`. This repo sets
  * `tests/fixtures/** -text` to protect byte-exact goldens, and those goldens
- * are generated STATE.md files — precisely where the bidi bug that motivated
- * ADR-19 actually landed. Excluding them would aim the gate away from the
- * target. A binary file that happens to be valid UTF-8 will be scanned and
- * will fail; the fix is one line of .gitattributes, and it fails LOUDLY,
- * which is the trade this repo's rules ask for.
+ * are generated STATE.md files — precisely where the bidi bug behind ADR-19
+ * landed. Excusing them would aim the gate away from its own motivating case.
  */
-export function listTextFiles(cwd = process.cwd()) {
+export function partitionTrackedFiles(cwd = process.cwd()) {
+  const empty = { scan: [], exempt: [], refused: [] };
   const listing = git(['ls-files', '-z'], cwd);
   const candidates = listing.split('\0').filter((p) => p !== '');
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) return empty;
 
   const attr = execFileSync('git', ['check-attr', '-z', '--stdin', 'binary'], {
     cwd,
@@ -204,35 +212,49 @@ export function listTextFiles(cwd = process.cwd()) {
     if (fields[i + 2] === 'set') declaredBinary.add(fields[i]);
   }
 
-  return candidates.filter((path) => {
-    if (declaredBinary.has(path)) return false;
+  const out = { scan: [], exempt: [], refused: [] };
+  for (const path of candidates) {
+    if (declaredBinary.has(path)) {
+      out.exempt.push({ file: path, reason: 'declared `binary` in .gitattributes' });
+      continue;
+    }
+    let bytes;
     try {
-      return isValidUtf8(readFileSync(resolve(cwd, path)));
+      bytes = readFileSync(resolve(cwd, path));
     } catch (err) {
-      if (err.code === 'ENOENT') return false; // tracked but absent: dirty tree
+      // Tracked but absent is a dirty working tree, not an attack. Still
+      // reported, because "the gate looked at fewer files than you think" is
+      // exactly the class of fact this scanner must never keep to itself.
+      if (err.code === 'ENOENT') {
+        out.exempt.push({ file: path, reason: 'tracked but missing from the working tree' });
+        continue;
+      }
       throw err;
     }
-  });
+    if (!isValidUtf8(bytes)) {
+      out.refused.push({
+        file: path,
+        reason: 'not valid UTF-8 and not declared `binary` in .gitattributes',
+      });
+      continue;
+    }
+    out.scan.push(path);
+  }
+  return out;
 }
 
-/** Scan every tracked text file under `cwd`. Returns findings grouped by file. */
+/**
+ * Scan every tracked file that is neither exempt nor refused.
+ * Returns findings plus the full accounting of what was NOT scanned.
+ */
 export function scanRepo(cwd = process.cwd()) {
-  const files = listTextFiles(cwd);
+  const { scan, exempt, refused } = partitionTrackedFiles(cwd);
   const results = [];
-  for (const file of files) {
-    let text;
-    try {
-      text = readFileSync(resolve(cwd, file), 'utf8');
-    } catch (err) {
-      // A tracked file missing from the working tree is a dirty checkout, not
-      // a scan finding. In CI it cannot happen; locally it must not fail hard.
-      if (err.code === 'ENOENT') continue;
-      throw err;
-    }
-    const findings = scanText(text);
+  for (const file of scan) {
+    const findings = scanText(readFileSync(resolve(cwd, file), 'utf8'));
     if (findings.length > 0) results.push({ file, findings });
   }
-  return { scanned: files.length, results };
+  return { scanned: scan.length, exempt, refused, results };
 }
 
 // ------------------------------------------------------------------- CLI
@@ -254,6 +276,49 @@ function main() {
     console.error(`scan-control-chars: ${err.message}`);
     process.exit(2);
   }
+  // Announced BEFORE any verdict, on every run, clean or not. An exemption
+  // that only shows up when something else already failed is not visible —
+  // and the whole point is that leaving the scan can never be quiet.
+  for (const { file, reason } of report.exempt) {
+    console.log(`scan-control-chars: not scanned: ${file} — ${reason}`);
+  }
+  if (report.exempt.length > 0) {
+    console.log(
+      `scan-control-chars: ${report.exempt.length} file(s) exempt, ${report.scanned} scanned.`,
+    );
+  }
+
+  // Refusals are diagnosed BEFORE the empty-scan check, so the specific,
+  // actionable message wins over the generic one when a repo's only file is
+  // the undecodable one.
+  if (report.refused.length > 0) {
+    for (const { file, reason } of report.refused) {
+      console.error(`scan-control-chars: ${file}: ${reason}`);
+    }
+    console.error(
+      `\nscan-control-chars: ${report.refused.length} tracked file(s) could not be read as\n` +
+        'text and are not declared binary. This is refused rather than skipped: one\n' +
+        'stray byte is enough to make a poisoned text file undecodable, which would\n' +
+        'otherwise carry it out of the scan under a green tick.\n' +
+        'If the file really is binary, declare it in .gitattributes:\n' +
+        `    ${report.refused[0].file} binary`,
+    );
+    process.exit(1);
+  }
+
+  // Nothing scanned at all is never success. `* binary` in .gitattributes
+  // silences this gate completely and would otherwise exit 0 over an empty
+  // scan — a green tick meaning "we looked at nothing".
+  if (report.scanned === 0) {
+    console.error(
+      'scan-control-chars: refusing to pass — 0 files were scanned.\n' +
+        `  ${report.exempt.length} exempt, ${report.refused.length} refused. A gate that\n` +
+        '  looked at nothing must not report success. Check .gitattributes for a\n' +
+        '  rule that marks everything `binary`.',
+    );
+    process.exit(2);
+  }
+
   if (report.results.length === 0) {
     console.log(`scan-control-chars: clean (${report.scanned} tracked text files)`);
     return;

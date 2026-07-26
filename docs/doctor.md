@@ -117,7 +117,13 @@ possible to change one and keep the suite green.
   fixes it), and a **lone surrogate** becomes U+FFFD on the way to UTF-8 —
   the command stays safe, but it quietly looks for a different string than
   the journal holds. Both need the journal repaired, not the command
-  pasted.
+  pasted. One more limit, for the same reason of stating it rather than
+  implying it: `$'...'` is a bash/zsh construct. Pasted into a POSIX `sh`
+  (dash on Debian, Ubuntu and most containers) it does **not** expand —
+  `dash` reads it as `$` followed by an ordinary quoted string, so the
+  command runs and looks for the literal text `$'demo\x1b[2K'`. Safe, and
+  wrong, which is the failure mode this section exists to prevent. Run
+  printed commands in bash or zsh.
 - **Untrusted journal values cannot rewrite the report.** Every value read
   out of a journal is passed through `project.inline()` before it is
   printed, in the text report and in `--json` alike. In a plugin, `data` is
@@ -197,6 +203,13 @@ const result = runStateChecks({ dir: '.tyran', now: null, staleHours: 4 });
 // finding: { severity, code, where, message, fix }
 process.stdout.write(renderText(result));
 ```
+
+`severityFor(code)` and `SEVERITY_BY_CODE` are exported for the same reason:
+the `SessionStart` hook and any dashboard need to know a finding's weight
+without re-deriving it from the report. `severityFor` **throws** on an
+unregistered code rather than defaulting — that is part of the contract, not
+an implementation detail, because a finding with no severity is how a check
+silently stops failing.
 
 `deadRules(policy, repoRoot)` and `overruledRules(policy, repoRoot)` are
 exported separately so the future policy gate can reuse them without

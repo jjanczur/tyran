@@ -10,14 +10,26 @@
  *  - zero dependencies, plain Node >= 22.
  *
  * CLI:
- *   node journal.mjs append   <file> <ev> <init> [--actor A] [--data JSON]
- *   node journal.mjs query    <file> [--ev E] [--init I] [--ticket T] [--limit N]
- *   node journal.mjs validate <file>
- *   node journal.mjs next-id  <file> <prefix>      # e.g. prefix D -> D-7
- *   node journal.mjs tail     <file>               # last checkpoint + open items
+ *   node journal.mjs append      <file> <ev> <init> [--actor A] [--data JSON]
+ *   node journal.mjs query       <file> [--ev E] [--init I] [--ticket T] [--limit N]
+ *   node journal.mjs validate    <file>
+ *   node journal.mjs next-id     <file> <prefix>   # e.g. prefix D -> D-7
+ *   node journal.mjs tail        <file>            # last checkpoint + open items
+ *   node journal.mjs open-spawns <file>            # agents with no report yet
+ *   node journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V]
  * Exit: 0 ok · 1 validation/finding error · 2 usage/IO error
  */
-import { appendFileSync, readFileSync, existsSync, mkdirSync, rmdirSync, statSync } from 'node:fs';
+import {
+  appendFileSync,
+  readFileSync,
+  existsSync,
+  mkdirSync,
+  rmdirSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -86,6 +98,98 @@ export function validateEvent(event) {
   return errors;
 }
 
+// -------------------------------------------------- spawn ↔ report pairing
+
+/**
+ * Agent names are identifiers, not prose: they address an agent at platform
+ * level and they are the ONLY correlator between `spawn` and `report`
+ * (ADR-18). A name that merely LOOKS like another one would silently defeat
+ * the uniqueness guard, so non-canonical names are refused on write.
+ * Case is deliberately significant — folding it here would make the guard
+ * disagree with the exact-name addressing every consumer uses.
+ */
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+export function agentNameProblem(name) {
+  if (typeof name !== 'string') return `must be a string (got ${typeof name})`;
+  if (name.length === 0) return 'must not be empty';
+  if (name !== name.normalize('NFC')) return 'must be Unicode NFC-normalized';
+  if (name !== name.trim()) return 'must not have leading/trailing whitespace';
+  if (CONTROL_OR_FORMAT.test(name)) {
+    return 'must not contain control or invisible formatting characters';
+  }
+  return null;
+}
+
+/**
+ * Pair `spawn` events with `report` events by agent name, in file order:
+ * a report closes the OLDEST still-open spawn of that name (FIFO). This is
+ * the one and only pairing rule — `append` enforces that it can never be
+ * ambiguous (ADR-18: at most one open spawn per name), so consumers such as
+ * the projection generator implement a guarantee, not a heuristic.
+ *
+ * Operates on the events a reader can actually see. Corrupt or truncated
+ * lines are invisible here for exactly the same reason they are invisible to
+ * every consumer, so writer and readers can never disagree about who is open.
+ */
+export function pairSpawns(events) {
+  const open = new Map(); // agent -> spawn events, oldest first
+  const orphanReports = [];
+  const badNames = new Map(); // raw name (as JSON) -> problem
+  for (const e of events) {
+    if (e?.ev !== 'spawn' && e?.ev !== 'report') continue;
+    const agent = e.data?.agent;
+    const problem = agentNameProblem(agent);
+    if (problem) {
+      badNames.set(JSON.stringify(agent ?? null), problem);
+      continue; // unusable as a correlator; validate() reports it
+    }
+    if (e.ev === 'spawn') {
+      if (!open.has(agent)) open.set(agent, []);
+      open.get(agent).push(e);
+    } else {
+      const queue = open.get(agent);
+      if (queue?.length) {
+        queue.shift();
+        if (queue.length === 0) open.delete(agent);
+      } else orphanReports.push(e);
+    }
+  }
+  return { open, orphanReports, badNames };
+}
+
+/** Agents whose `spawn` has no matching `report` yet — the "still working" set. */
+export function openSpawns(file) {
+  const { open } = pairSpawns(readJournal(file).events);
+  return [...open.values()].flat().map((e) => ({
+    agent: e.data.agent,
+    since: e.ts,
+    by: e.actor,
+    role: e.data.role ?? null,
+    ticket: e.data.ticket ?? null,
+  }));
+}
+
+/** The rejection message is the user interface of this guard — spell it out. */
+function duplicateSpawnMessage(file, agent, previous) {
+  const p = previous[0];
+  const where = p.data.ticket ? ` on ticket ${p.data.ticket}` : '';
+  return (
+    `spawn rejected: agent "${agent}" already has an open spawn in this journal.\n` +
+    `  previous spawn: ${p.ts} by ${p.actor}${where} (role: ${p.data.role ?? '?'})\n` +
+    '  Two open spawns for one name would make spawn↔report pairing ambiguous\n' +
+    '  (ADR-18), so the state is refused at write time rather than guessed later.\n' +
+    '  Fix it with ONE of:\n' +
+    '   - the agent finished: record its report\n' +
+    `       node scripts/journal.mjs append ${file} report <init> \\\n` +
+    `         --data '{"agent":"${agent}","verdict":"<verdict>"}'\n` +
+    '   - the agent died without reporting: close it explicitly\n' +
+    `       node scripts/journal.mjs close-spawn ${file} <init> ${agent} --reason "<why>"\n` +
+    '   - both agents are meant to run at once: give each a distinct name\n' +
+    `       — "${agent}" can address only ONE live agent at a time.\n` +
+    `  See what is open: node scripts/journal.mjs open-spawns ${file}`
+  );
+}
+
 /**
  * Cross-process mutex via atomic mkdir. Steals locks older than 10s
  * (crashed holder); times out loudly after 5s of contention.
@@ -127,28 +231,119 @@ function withLock(file, fn) {
 }
 
 /**
+ * True when the file is empty/absent or its last byte is a newline. A crash
+ * can leave a final line without one; appending straight onto it would FUSE
+ * the truncated line with the new event, destroying the new event silently
+ * (and, for spawns, hiding it from the uniqueness guard). Cheap on purpose:
+ * one byte, so appends that need no full read stay O(1).
+ */
+function endsWithNewline(file) {
+  let fd;
+  try {
+    fd = openSync(file, 'r');
+  } catch (err) {
+    if (err.code === 'ENOENT') return true;
+    throw err;
+  }
+  try {
+    const size = statSync(file).size;
+    if (size === 0) return true;
+    const buf = Buffer.alloc(1);
+    readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] === 0x0a;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The body of `append`, already holding the lock. `read()` memoizes the one
+ * full read this call is allowed: the ts clamp and the spawn guard share it.
+ * A caller that already read the journal under this same lock passes its
+ * snapshot in, so no path reads the file twice.
+ */
+function appendUnderLock(file, event, preread = null) {
+  let snapshot = preread;
+  const read = () => (snapshot ??= readJournal(file));
+
+  let ts = event.ts;
+  if (ts == null) {
+    ts = new Date().toISOString();
+    const lastTs = read().events.at(-1)?.ts;
+    if (lastTs && Date.parse(ts) < Date.parse(lastTs)) ts = lastTs;
+  }
+  const stamped = { ...event, ts };
+  const errors = validateEvent(stamped);
+  if (errors.length > 0) {
+    throw new Error('invalid event: ' + errors.join('; '));
+  }
+  if (stamped.ev === 'spawn' || stamped.ev === 'report') {
+    const problem = agentNameProblem(stamped.data.agent);
+    if (problem) {
+      throw new Error(
+        `invalid event: data.agent ${problem} — it is the only correlator ` +
+          `between spawn and report (got ${JSON.stringify(stamped.data.agent)})`,
+      );
+    }
+  }
+  if (stamped.ev === 'spawn') {
+    // ADR-18: refuse a second OPEN spawn for one agent name. Same lock as the
+    // write, same read as the clamp — a check outside the lock would let two
+    // concurrent writers both pass it and both append.
+    const previous = pairSpawns(read().events).open.get(stamped.data.agent);
+    if (previous?.length) {
+      throw new Error(duplicateSpawnMessage(file, stamped.data.agent, previous));
+    }
+  }
+  const heal = endsWithNewline(file) ? '' : '\n';
+  appendFileSync(file, heal + JSON.stringify(stamped) + '\n', 'utf8');
+  return stamped;
+}
+
+/**
  * Append one event under a cross-process lock. Validates first; stamps ts
  * when absent, CLAMPED to be >= the journal's last timestamp — concurrent
  * writers therefore can never produce a ts regression (validateJournal
  * stays a hard error, and it holds by construction). An EXPLICIT ts is
  * written as given: the caller owns it and validate will flag regressions.
+ *
+ * `spawn` additionally must not duplicate an agent name that is still open
+ * (ADR-18) — see `duplicateSpawnMessage` for how to get unstuck.
  */
 export function append(file, event) {
   mkdirSync(dirname(resolve(file)), { recursive: true });
+  return withLock(file, () => appendUnderLock(file, event));
+}
+
+/**
+ * Close an orphaned spawn — the agent died, or was killed, without reporting.
+ * This is NOT a bypass: it writes an ordinary `report` event through the
+ * ordinary path, so the journal stays a plain, honest event log. It refuses
+ * when there is nothing open to close, and it demands a reason, so a forced
+ * closure is always attributable. Check + write share one lock, so two
+ * simultaneous closures cannot both write a report for the same spawn.
+ */
+export function closeSpawn(file, { init, agent, actor = 'conductor', verdict = 'abandoned', reason }) {
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    throw new Error('close-spawn requires a non-empty --reason (why was the spawn abandoned?)');
+  }
+  mkdirSync(dirname(resolve(file)), { recursive: true });
   return withLock(file, () => {
-    let ts = event.ts;
-    if (ts == null) {
-      ts = new Date().toISOString();
-      const lastTs = readJournal(file).events.at(-1)?.ts;
-      if (lastTs && Date.parse(ts) < Date.parse(lastTs)) ts = lastTs;
+    const snapshot = readJournal(file);
+    const { open } = pairSpawns(snapshot.events);
+    const previous = open.get(agent);
+    if (!previous?.length) {
+      const others = [...open.keys()];
+      throw new Error(
+        `no open spawn for agent "${agent}" in ${file} — nothing to close.\n` +
+          `  open spawns: ${others.length ? others.join(', ') : '(none)'}`,
+      );
     }
-    const stamped = { ...event, ts };
-    const errors = validateEvent(stamped);
-    if (errors.length > 0) {
-      throw new Error('invalid event: ' + errors.join('; '));
-    }
-    appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
-    return stamped;
+    return appendUnderLock(
+      file,
+      { ev: 'report', init, actor, data: { agent, verdict, reason, closed_by: 'close-spawn' } },
+      snapshot,
+    );
   });
 }
 
@@ -191,7 +386,14 @@ export function query(file, { ev, init, ticket, limit } = {}) {
   return events;
 }
 
-/** Full-journal validation: per-event schema + non-decreasing timestamps. */
+/**
+ * Full-journal validation: per-event schema + non-decreasing timestamps.
+ *
+ * Spawn-pairing findings are WARNINGS, not errors: journals written before
+ * the ADR-18 guard existed may legitimately contain duplicates, and the
+ * append-only rule forbids rewriting history. They must not stay invisible
+ * either — a projection built on such a file cannot be trusted.
+ */
 export function validateJournal(file) {
   const { events, truncatedTail, badLines } = readJournal(file);
   const errors = badLines.map((n) => `line ${n}: not valid JSON (mid-file corruption)`);
@@ -203,7 +405,25 @@ export function validateJournal(file) {
     }
     prevTs = e.ts;
   });
-  return { ok: errors.length === 0, errors, count: events.length, truncatedTail };
+  const warnings = [];
+  const { open, orphanReports, badNames } = pairSpawns(events);
+  for (const [agent, spawns] of open) {
+    if (spawns.length > 1) {
+      warnings.push(
+        `agent "${agent}" has ${spawns.length} open spawns (since ${spawns
+          .map((s) => s.ts)
+          .join(', ')}) — written before the ADR-18 guard or edited by hand; ` +
+          'spawn↔report pairing for this agent is ambiguous',
+      );
+    }
+  }
+  for (const r of orphanReports) {
+    warnings.push(`report for agent "${r.data.agent}" at ${r.ts} closes no open spawn`);
+  }
+  for (const [raw, problem] of badNames) {
+    warnings.push(`unusable data.agent ${raw}: ${problem} — excluded from spawn↔report pairing`);
+  }
+  return { ok: errors.length === 0, errors, warnings, count: events.length, truncatedTail };
 }
 
 /**
@@ -271,6 +491,8 @@ const CMD_FLAGS = {
   validate: [],
   'next-id': [],
   tail: [],
+  'open-spawns': [],
+  'close-spawn': ['actor', 'verdict', 'reason'],
 };
 
 function main() {
@@ -318,13 +540,35 @@ function main() {
         console.log(JSON.stringify(tail(file), null, 2));
         return;
       }
+      case 'open-spawns': {
+        const [file] = rest;
+        if (!file) throw new UsageError();
+        console.log(JSON.stringify(openSpawns(file), null, 2));
+        return;
+      }
+      case 'close-spawn': {
+        const [file, init, agent] = rest;
+        if (!file || !init || !agent) throw new UsageError();
+        // a missing --reason gets closeSpawn's specific message, not a usage dump
+        const written = closeSpawn(file, {
+          init,
+          agent,
+          actor: flags.actor ?? 'conductor',
+          verdict: flags.verdict ?? 'abandoned',
+          reason: flags.reason ?? '',
+        });
+        console.log(JSON.stringify(written));
+        return;
+      }
     }
   } catch (err) {
     if (err instanceof UsageError) {
       console.error(
         'usage: journal.mjs append <file> <ev> <init> [--actor A] [--data JSON]\n' +
           '       journal.mjs query <file> [--ev E] [--init I] [--ticket T] [--limit N]\n' +
-          '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>',
+          '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>\n' +
+          '       journal.mjs open-spawns <file>\n' +
+          '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]',
       );
       process.exit(2);
     }

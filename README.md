@@ -150,6 +150,7 @@ links to a LICENSE file that does not exist in the repo.</sub>
 - 🏛️ [Architecture](docs/architecture.md) — the three layers, the journal, the hooks
 - 📜 [Journal reference](docs/journal.md) — the append-only event schema (shipped)
 - 🧾 [Projections](docs/projections.md) — generated `STATE.md` / `PROGRESS.md` and `--check` (shipped)
+- 🩺 [Doctor](docs/doctor.md) — `--state` consistency check: drift, orphan leases, dead policy rules (shipped)
 - 🧠 [Self-improvement](docs/self-improvement.md) — how Tyran learns your repo, and its guardrails
 - ❓ [FAQ](docs/faq.md)
 - 🤝 [Contributing](CONTRIBUTING.md)

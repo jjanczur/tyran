@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, appendFileSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  symlinkSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, execSync } from 'node:child_process';
@@ -14,6 +24,7 @@ import {
   overruledRules,
   SEVERITIES,
   SEVERITY_BY_CODE,
+  severityFor,
   DEFAULT_STALE_HOURS,
 } from '../../scripts/doctor.mjs';
 import { append } from '../../scripts/journal.mjs';
@@ -910,6 +921,20 @@ test('a hostile init reaches neither the text report nor a printed command raw',
   assert.equal(cli.stdout.includes(rlo), false, 'bidi override reached stdout');
 });
 
+/** The `--init <arg>` token of a fix command, exactly as it was printed. */
+function initArgOf(fix) {
+  const at = fix.indexOf('--init ');
+  assert.notEqual(at, -1, fix);
+  return fix.slice(at + '--init '.length).split('\n')[0].trim();
+}
+
+/** Feed a printed argument back through a real shell, byte for byte. */
+function shellExpand(arg) {
+  // bash explicitly: $'...' is a bash/zsh construct, and /bin/sh is dash on
+  // the CI runner. The printed commands are documented as bash/zsh.
+  return execSync(`printf '%s' ${arg}`, { encoding: 'utf8', shell: '/bin/bash' });
+}
+
 test('ANSI-C quoting keeps a hostile value byte-exact and runnable', () => {
   const root = repo();
   const dir = scaffold(root);
@@ -918,9 +943,111 @@ test('ANSI-C quoting keeps a hostile value byte-exact and runnable', () => {
   writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {}, { init })]);
   const fix = byCode(runStateChecks({ dir }), 'journal-init-mismatch')[0].fix;
   assert.match(fix, /\$'demo\\x1b\[2K'/);
-  // The shell must turn the escaped form back into the exact original.
-  const echoed = execSync(`printf '%s' ${fix.slice(fix.indexOf('--init ') + 7)}`, { encoding: 'utf8' });
-  assert.equal(echoed, init);
+  assert.equal(shellExpand(initArgOf(fix)), init);
+});
+
+test('a quote inside an ANSI-C quoted value cannot close it and run commands', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir, 'demo');
+  const sentinel = join(root, 'PWNED');
+  // The non-printable byte forces the ANSI-C branch; the apostrophe is the
+  // payload. Escape the quote wrongly and everything after it is a command
+  // list, executed by whoever pasted the "fix".
+  const init = `demo${String.fromCodePoint(0x202e)}'; touch ${sentinel}; :'`;
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {}, { init })]);
+  const fix = byCode(runStateChecks({ dir }), 'journal-init-mismatch')[0].fix;
+  assert.match(fix, /\$'/, 'the payload did not reach the ANSI-C branch at all');
+
+  const expanded = shellExpand(initArgOf(fix));
+  assert.equal(existsSync(sentinel), false, 'the printed fix command executed injected commands');
+  assert.equal(expanded, init, 'the value did not survive the round trip byte for byte');
+});
+
+test('a backslash inside an ANSI-C quoted value cannot escape the closing quote', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir, 'demo');
+  // A trailing backslash left unescaped turns the closing quote into a
+  // literal, so the command runs off the end: "unexpected EOF".
+  const init = `demo${String.fromCodePoint(0x202e)}\\`;
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {}, { init })]);
+  const fix = byCode(runStateChecks({ dir }), 'journal-init-mismatch')[0].fix;
+  assert.match(fix, /\$'/);
+  assert.equal(shellExpand(initArgOf(fix)), init);
+});
+
+test('the whole printed fix command runs, with a hostile init, and does nothing extra', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir, 'demo');
+  const sentinel = join(root, 'PWNED-E2E');
+  const init = `demo${String.fromCodePoint(0x202e)}'; touch ${sentinel}; :'`;
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'init.created', {}, { init }),
+    ev('2026-07-26T09:00:01.000Z', 'checkpoint', { phase: 'x', next_steps: [] }, { init }),
+  ]);
+  const fix = byCode(runStateChecks({ dir }), 'journal-init-mismatch')[0].fix;
+  // Not a fragment: the real command, in the repo, as a human would paste it.
+  const out = execSync(fix, { cwd: REPO, encoding: 'utf8', shell: '/bin/bash' });
+  assert.equal(existsSync(sentinel), false, 'the fix command executed injected commands');
+  assert.equal(out.trim().split('\n').length, 2, `query returned the wrong rows:\n${out}`);
+  for (const line of out.trim().split('\n')) assert.equal(JSON.parse(line).init, init);
+});
+
+test('the self-run guard survives an argv[1] that cannot be canonicalized', () => {
+  // canonicalPath() calls realpathSync, which THROWS on a path that cannot be
+  // followed. Without the fallback that throw escapes from module scope and
+  // doctor dies on import — and doctor is meant to be imported by the future
+  // SessionStart hook, not only run as a CLI. Reached when argv[1] stops
+  // resolving: the script directory renamed or removed after launch, a parent
+  // component made unreadable, or a launcher rewriting argv[1] to a logical
+  // name. Mirrors the same pin in tests/unit/journal.test.mjs.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-doctor-argv-'));
+  const harness = join(base, 'harness.mjs');
+  writeFileSync(
+    harness,
+    "process.argv[1] = '/nonexistent-dir-" +
+      "e2s4/entry.mjs';\n" +
+      `const m = await import(${JSON.stringify(DOCTOR)});\n` +
+      "console.log('SURVIVED', typeof m.runStateChecks);\n",
+  );
+  const r = execFileSync(process.execPath, [harness], { encoding: 'utf8' });
+  // Imported cleanly, and correctly declined to run main() for a foreign
+  // entry point: no usage text, no exception, module still usable.
+  assert.equal(r.trim(), 'SURVIVED function');
+});
+
+test('CLI: invoked through a symlinked path, doctor still does its work', () => {
+  // The self-run guard used to compare resolve(argv[1]) — which keeps
+  // symlinks — with import.meta.url, which Node has already canonicalized.
+  // Reaching the script through a link therefore made main() never run: no
+  // output, EXIT 0. For a tool whose one promise is "never reports clean for
+  // something it skipped", a silent success is the worst possible failure —
+  // and /tmp and /var are symlinks on macOS.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-doctor-symlink-'));
+  const linked = join(base, 'linked-scripts');
+  symlinkSync(fileURLToPath(new URL('../../scripts/', import.meta.url)).replace(/\/$/, ''), linked);
+
+  const dir = scaffold(base);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'teleport', {})]);
+
+  const direct = run(['--state', '--dir', dir]);
+  let linkedRun;
+  try {
+    execFileSync(process.execPath, [join(linked, 'doctor.mjs'), '--state', '--dir', dir], {
+      encoding: 'utf8',
+      cwd: REPO,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    linkedRun = { code: 0, stdout: '' };
+  } catch (err) {
+    linkedRun = { code: err.status, stdout: err.stdout ?? '' };
+  }
+  assert.notEqual(linkedRun.stdout, '', 'the CLI produced no output at all through the symlink');
+  assert.equal(linkedRun.code, 1, 'a state with an error exited 0 through the symlink');
+  assert.equal(linkedRun.stdout, direct.stdout, 'the symlinked run disagreed with the direct one');
 });
 
 test('an unreadable initiative directory is not diagnosed as an empty one', { skip: rootUser }, () => {
@@ -1038,13 +1165,50 @@ test('every code the source can emit is registered, and documented', () => {
 });
 
 test('an unregistered code is a loud bug, not a finding with no severity', () => {
-  const root = repo();
-  const dir = scaffold(root);
-  // finding() is internal; prove the guard through the exported table, which
-  // is what every call site reads.
-  assert.equal(SEVERITY_BY_CODE['not-a-real-code'], undefined);
-  assert.equal(Object.getPrototypeOf(SEVERITY_BY_CODE), null, 'a code named "constructor" must not inherit');
-  assert.equal(runStateChecks({ dir }).ok, true);
+  // Two code families are built from a template variable, so the static scan
+  // above cannot see them: a typo there would yield severity `undefined`,
+  // which counts as nothing and silently stops failing the check.
+  assert.throws(() => severityFor('not-a-real-code'), /no severity in SEVERITY_BY_CODE/);
+  assert.throws(() => severityFor('policies-invalid'), /no severity/, 'a plausible typo must still throw');
+  assert.throws(() => severityFor(''), /no severity/);
+  assert.throws(() => severityFor(undefined), /no severity/);
+  // A code called `constructor` must be data, not an inherited member.
+  assert.equal(Object.getPrototypeOf(SEVERITY_BY_CODE), null);
+  assert.throws(() => severityFor('constructor'), /no severity/);
+  assert.throws(() => severityFor('__proto__'), /no severity/);
+  // and the registered ones do not throw
+  for (const code of Object.keys(SEVERITY_BY_CODE)) {
+    assert.ok(SEVERITIES.includes(severityFor(code)), code);
+  }
+});
+
+test('the docs table is the same map as SEVERITY_BY_CODE, in both directions', () => {
+  const docs = readFileSync(fileURLToPath(new URL('../../docs/doctor.md', import.meta.url)), 'utf8');
+  // Parse the severity table properly. Checking `docs.includes('`code`')` was
+  // not coupling: the token also occurs in the Known limits prose, so a row
+  // could carry the wrong severity — or be deleted outright — and the test
+  // stayed green. This is the only place a human reads to learn whether a
+  // finding will cost them exit 0 or exit 1.
+  const documented = new Map();
+  for (const line of docs.split('\n')) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').slice(1, -1);
+    if (cells.length !== 3) continue;
+    const severity = cells[1].trim();
+    if (!SEVERITIES.includes(severity)) continue;
+    const codesInRow = [...cells[0].matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1]);
+    assert.ok(codesInRow.length > 0, `severity row with no code: ${line}`);
+    for (const code of codesInRow) {
+      assert.equal(documented.has(code), false, `${code} is documented twice`);
+      documented.set(code, severity);
+    }
+  }
+  assert.equal(documented.size > 40, true, `only ${documented.size} rows parsed — did the table shape change?`);
+  // both directions: a wrong severity, a missing row and a stale row all fail
+  assert.deepEqual(
+    Object.fromEntries([...documented].sort((a, b) => (a[0] < b[0] ? -1 : 1))),
+    Object.fromEntries(Object.entries(SEVERITY_BY_CODE).sort((a, b) => (a[0] < b[0] ? -1 : 1))),
+  );
 });
 
 test('state/ that is not a directory is an error, and fails the check alone', () => {

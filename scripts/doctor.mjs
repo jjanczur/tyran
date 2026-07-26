@@ -28,7 +28,7 @@
  * Exit: 0 healthy (info findings allowed) · 1 findings (error or warning)
  *       · 2 usage / I/O error
  */
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJournal, validateJournal, pairSpawns, tail } from './journal.mjs';
@@ -183,12 +183,26 @@ export const SEVERITY_BY_CODE = Object.freeze(
   }),
 );
 
-function finding(code, where, message, fix = null) {
+/**
+ * The severity of a finding code, or a loud failure.
+ *
+ * Exported so the guard itself can be tested: not every code reaches
+ * `SEVERITY_BY_CODE` as a literal — two families are built from a template
+ * variable (`${kind}-invalid`, `${label}-not-a-directory`) and a static scan
+ * of the source cannot see those. A typo there would otherwise produce a
+ * finding with `severity: undefined`, which sorts and counts as nothing and
+ * would quietly stop failing the check.
+ */
+export function severityFor(code) {
   const severity = SEVERITY_BY_CODE[code];
   if (severity === undefined) {
     throw new Error(`doctor bug: finding code "${code}" has no severity in SEVERITY_BY_CODE`);
   }
-  return { severity, code, where, message, fix };
+  return severity;
+}
+
+function finding(code, where, message, fix = null) {
+  return { severity: severityFor(code), code, where, message, fix };
 }
 
 /**
@@ -1160,4 +1174,37 @@ function main() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+/**
+ * Absolute, symlink-resolved path; falls back to the merely absolute form
+ * when the path cannot be resolved (deleted file, permission denied), which
+ * keeps the comparison below defined instead of throwing.
+ */
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * True when this module is the program's entry point.
+ *
+ * BOTH sides must be canonicalized. `import.meta.url` already names the real
+ * file — Node resolves module specifiers through symlinks — while
+ * `process.argv[1]` is whatever the caller typed. Comparing them raw turned
+ * every invocation through a symlinked path into a SILENT no-op under exit
+ * 0: `main()` never ran, nothing was printed, and nothing said so. For a
+ * tool whose entire promise is "it never reports clean for something it
+ * skipped", that is the worst possible failure. `/tmp` and `/var` are
+ * symlinks on macOS and plugin installs routinely reach `scripts/` through
+ * one, so it is not theoretical. Shared with journal.mjs, project.mjs and
+ * scan-control-chars.mjs.
+ */
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

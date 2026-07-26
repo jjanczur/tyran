@@ -95,7 +95,16 @@ only what it couldn't infer.
 
 - 🧾 **Proof-or-it-didn't-happen.** Agent reports without raw command output
   (exit codes, `X passed / Y failed`) are rejected *mechanically* at the
-  `SubagentStop` hook — not by asking nicely in a prompt.
+  `SubagentStop` hook — not by asking nicely in a prompt. **This gate blocks
+  SILENCE, not FORGERY:** an agent that invents the text `232 passed / 0
+  failed` walks straight through it. The gate raises the price of a lie — it
+  has to be deliberately fabricated rather than simply waved away — and it does
+  not remove it. Nor is the criterion "raw command output" — mechanically it is
+  *"a digit next to one of seven test-runner keywords"*, so a build log without
+  an exit code is refused and a sentence containing `6 / 6 passed` is not.
+  Measured on 55 real reports from this project's own agents: 53 pass, and both
+  misses turned out not to be reports at all. Details, numbers in both
+  directions, and limits in [the evidence gate](docs/evidence-gate.md).
 - 🧠 **It learns *your* workflow — autonomously.** After every initiative a
   retrospective agent distills your repo's rules, writes repo-specific
   skills, and tunes Tyran's own playbook — through a hard anti-bloat filter
@@ -152,6 +161,7 @@ links to a LICENSE file that does not exist in the repo.</sub>
 - 🧾 [Projections](docs/projections.md) — generated `STATE.md` / `PROGRESS.md` and `--check` (shipped)
 - 🩺 [Doctor](docs/doctor.md) — `--state` consistency check: drift, orphan leases, dead policy rules (shipped)
 - 🪝 [Hook runtime](docs/hooks.md) — gates vs probes, why hooks fail open, and what the deadline really promises (shipped)
+- 🧾 [Evidence gate](docs/evidence-gate.md) — the criterion, who it binds, the recorded escape hatch, and the line between silence and forgery (shipped)
 - 🧠 [Self-improvement](docs/self-improvement.md) — how Tyran learns your repo, and its guardrails
 - ❓ [FAQ](docs/faq.md)
 - 🤝 [Contributing](CONTRIBUTING.md)

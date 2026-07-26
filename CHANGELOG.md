@@ -2,6 +2,23 @@
 
 ## 0.1.0 — unreleased
 
+### The evidence contract is now a gate, not a request
+
+`hooks/scripts/evidence-gate.mjs` runs on `SubagentStop` and refuses a report
+from an implementer or a reviewer that carries no raw command output. The
+refusal names what to add and reaches the agent's context, which takes another
+turn.
+
+**It blocks SILENCE, not FORGERY** — an invented `232 passed / 0 failed` walks
+through it. See [`docs/evidence-gate.md`](docs/evidence-gate.md) for the
+criterion, the roles it binds, the recorded `EVIDENCE: none-required` escape
+hatch, and the measurements behind all three (53 of 55 real reports from this
+project's own agents pass; both misses were not reports).
+
+Every decision, including every exemption, is written to the initiative journal
+as a `gate` event, so "how often did someone opt out" is a question with an
+answer. `stop_hook_active` caps the cost at one extra turn per agent.
+
 ### Behaviour change: invisible characters are SHOWN, not deleted
 
 Projections used to delete invisible codepoints (bidi overrides, zero-width

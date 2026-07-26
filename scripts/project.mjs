@@ -28,7 +28,8 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readJournal } from './journal.mjs';
+import { readJournal, pairSpawns } from './journal.mjs';
+import { escapeInvisible } from './invisible.mjs';
 
 /** Projection file names. Both are fully generated — never hand-edited. */
 export const STATE_FILE = 'STATE.md';
@@ -51,6 +52,66 @@ const MAX_MILESTONES = 50;
 // ------------------------------------------------------------- rendering
 
 /**
+ * The shared core of every operator-facing rendering: one line, nothing
+ * invisible, bounded length.
+ *
+ * This is where the ONE invisibility policy is applied, for the document and
+ * for the terminal alike. What is NOT shared is the medium's own escaping —
+ * pipes, backticks and angle brackets are hazards in a Markdown table and
+ * ordinary punctuation on stderr — and that is a different question from "is
+ * this codepoint invisible", not a second answer to it. Keeping the two apart
+ * is the same distinction this module already draws between the invisibility
+ * rule and the disjoint whitespace rule (ADR-21).
+ */
+function oneLine(value) {
+  let s;
+  if (typeof value === 'string') s = value;
+  else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
+  else s = JSON.stringify(value) ?? String(value);
+  // Every invisible codepoint becomes its visible escape notation. An
+  // unterminated RLO would otherwise mirror every following column of a table
+  // row — or every following character of a terminal line — so a journal value
+  // could rewrite the document a human reads (Trojan Source); and a TAG
+  // character would carry readable ASCII straight past a reader who cannot see
+  // it at all. These documents are read by AGENTS, and their content travels
+  // from subagent reports about FOREIGN repositories.
+  //
+  // Escaped, not deleted, and that is a decision with a reason: silent removal
+  // made a poisoned value and a clean one render identically. See
+  // escapeInvisible in scripts/invisible.mjs for the full argument.
+  //
+  // The membership list used to be a character class maintained BY HAND, right
+  // here, and it was the weakest of the three spellings of the rule: it removed
+  // 106 codepoints where the CI scanner removed 475, and it passed the entire
+  // TAG block (U-46). One answer now, and no list here to fall behind it.
+  //
+  // Whitespace collapsing is a SEPARATE normalization: a tab and a newline are
+  // VISIBLE characters that would break a row or a log line, so they are
+  // folded, not banned.
+  s = escapeInvisible(s)
+    .replace(/\s+/g, ' ')
+    .trim();
+  const cps = Array.from(s);
+  if (cps.length > MAX_CELL) s = cps.slice(0, MAX_CELL - 1).join('') + '…';
+  return s;
+}
+
+/**
+ * Make any journal value safe for one line of STDERR.
+ *
+ * Same invisibility policy as `inline()`, without the Markdown escaping that
+ * would put `&lt;` in front of a human reading a terminal. A warning is an
+ * operator-facing channel and gets exactly the same protection the documents
+ * get — which it did not have until a security review put 37 invisible
+ * codepoints, and a reconstructable "DELETE THE JOURNAL", on that terminal.
+ */
+export function inlinePlain(value) {
+  if (value === undefined || value === null) return '(none)';
+  const s = oneLine(value);
+  return s === '' ? '(none)' : s;
+}
+
+/**
  * Make any journal value safe for one Markdown line: no newlines (they would
  * break a table row), no pipes/backticks (they would break the columns), no
  * `<`/`>` (they could close the GENERATED comment or inject HTML), no `[`/`]`
@@ -60,33 +121,8 @@ const MAX_MILESTONES = 50;
  */
 export function inline(value) {
   if (value === undefined || value === null) return '&mdash;';
-  let s;
-  if (typeof value === 'string') s = value;
-  else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
-  else s = JSON.stringify(value) ?? String(value);
-  // C0 (\u0000-\u001F), DEL + C1 (\u007F-\u009F), the Arabic letter
-  // mark (\u061C), zero-width and direction marks (\u200B-\u200F), bidi
-  // embeddings/overrides (\u202A-\u202E), bidi isolates (\u2066-\u2069) and
-  // the BOM (\uFEFF) all collapse to a space. Control characters would break
-  // the row; an unterminated RLO would mirror every following column, so a
-  // journal value could rewrite the document a human reads (Trojan Source).
-  //
-  // \u061C was MISSING until the seeded fuzz in
-  // tests/unit/projection-fuzz.test.mjs caught it on its first run. This list
-  // was maintained by hand here while journal.mjs expressed the same idea as
-  // \p{Cf}, which covers \u061C for free — two spellings of one rule, drifting
-  // exactly as ADR-18 predicts. Keep it in step with
-  // scripts/scan-control-chars.mjs (ADR-19), which bans the same set repo-wide.
-  s = s
-    .replace(
-      /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
+  const s = oneLine(value);
   if (s === '') return '&mdash;';
-  const cps = Array.from(s);
-  if (cps.length > MAX_CELL) s = cps.slice(0, MAX_CELL - 1).join('') + '…';
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -172,7 +208,44 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
     retro: [],
     errors: [],
     milestones: [],
+    unusableAgentNames: [],
+    ambiguousAgents: [],
   };
+
+  /**
+   * Who is still working is answered ONCE, by journal.pairSpawns, and rendered
+   * here (ADR-21). This function used to compute its own answer with its own
+   * rule — "prefer the running spawn of that agent working on THAT ticket,
+   * else the oldest open spawn of the same name" — while pairSpawns paired
+   * strictly FIFO by name and excluded unusable names outright. The two
+   * disagreed on both axes, and the operator got both answers at once: for a
+   * spawn whose agent name carried a zero-width joiner, STATE.md said
+   * **running (no report yet)** while doctor, reading pairSpawns, saw no open
+   * spawn at all. Two artefacts that doctor itself produces, contradicting
+   * each other about the one question the state layer exists to answer.
+   *
+   * The ticket-first rule is GONE, not parameterized. Its only stated
+   * justification was journals written before ADR-18, which can hold two open
+   * spawns of one name — and that population was measured before this change:
+   * zero. Not one such journal exists in this repository, in its entire git
+   * history, or anywhere on the machine that develops it; the only .jsonl ever
+   * committed is the demo fixture, which has one spawn per name. Journals are
+   * append-only, so a rule kept "for old files" cannot ever be retired later —
+   * it is a permanent second semantics, not a migration window. ADR-18 already
+   * makes `append` REFUSE the state ticket-first existed to disambiguate, so
+   * the rule was resolving an ambiguity the system had declared illegal, and
+   * resolving it differently from every other consumer.
+   *
+   * When that state does appear (a hand-edited file), it is now REPORTED
+   * rather than silently guessed at — see `warnings()` — which is what ADR-18
+   * asks for: make the ambiguity visible, do not have each reader guess.
+   */
+  const paired = pairSpawns(events);
+  const reportForSpawn = new Map(paired.pairs.map((p) => [p.spawn, p.report]));
+  const orphanReports = new Set(paired.orphanReports);
+  const unusableEvents = new Map(paired.unusable.map((u) => [u.event, u.problem]));
+  for (const [raw, problem] of paired.badNames) state.unusableAgentNames.push({ raw, problem });
+  for (const [agent, count] of paired.ambiguous) state.ambiguousAgents.push({ agent, count });
 
   const ticketOf = (id, seenTs) => {
     const key = String(id);
@@ -241,42 +314,34 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           verdict: null,
           reportTs: null,
         };
+        // An unusable name is NOT a correlator, so pairSpawns excludes it — and
+        // this row must say so. The two answers that were available were
+        // "invisible" and "running", and the operator was getting both. It is
+        // neither: a silent exclusion is the failure ADR-19 correction 1
+        // forbids outright ("a skipped item must be counted and named, even on
+        // a clean run"), and rendering it as an ordinary running agent is the
+        // false picture of state that ADR-18 calls worse than no picture. So:
+        // visible, and visibly unusable, in both artefacts.
+        if (unusableEvents.has(event)) {
+          agent.status = 'unusable agent name (excluded from pairing)';
+        } else {
+          const report = reportForSpawn.get(event);
+          if (report) {
+            agent.status = 'reported';
+            agent.verdict = report.data?.verdict ?? null;
+            agent.reportTs = typeof report.ts === 'string' ? report.ts : null;
+            if (agent.ticket == null && report.data?.ticket != null) agent.ticket = report.data.ticket;
+          }
+        }
         state.agents.push(agent);
         if (data.ticket != null) ticketOf(data.ticket, ts).agents.push(agent.agent);
         break;
       }
       case 'report': {
-        // Pair the report with the spawn it actually belongs to. `report`
-        // carries `data.ticket`, so prefer the still-running spawn of that
-        // agent name working on THAT ticket; only when the report has no
-        // ticket do we fall back to the oldest open spawn of the same name.
-        //
-        // The name fallback is ambiguous by nature, and deliberately so:
-        // ADR-18 makes the journal enforce at most ONE open spawn per agent
-        // name in `journal.append`, which makes it provably unambiguous
-        // instead of pushing a spawn_id across a process boundary (the
-        // mechanism class that failed outright in v1). Do NOT "simplify"
-        // this back to a name-only lookup — see ADR-18 and the two
-        // concurrent-spawn tests in tests/unit/project.test.mjs.
-        //
-        // When S-E2-5 extracts this into an exported `pairSpawns()`, the
-        // ticket-first rule MUST survive the move. ADR-18 constrains only
-        // journals written after it ships; every journal recorded before it
-        // can still hold two open spawns of one name, and projections have to
-        // render those correctly — dropping to name-only would bring B1 back
-        // through the back door on historical data.
-        const open =
-          (data.ticket != null &&
-            state.agents.find(
-              (a) => a.agent === data.agent && a.status === 'running' && a.ticket === data.ticket,
-            )) ||
-          state.agents.find((a) => a.agent === data.agent && a.status === 'running');
-        if (open) {
-          open.status = 'reported';
-          open.verdict = data.verdict ?? null;
-          open.reportTs = ts;
-          if (open.ticket == null && data.ticket != null) open.ticket = data.ticket;
-        } else {
+        // A report that pairSpawns matched to a spawn has already been applied
+        // to that spawn's row above — this branch only has to render what
+        // pairing left over, so the two never compute the same thing twice.
+        if (orphanReports.has(event) || unusableEvents.has(event)) {
           state.agents.push({
             agent: data.agent ?? '(no agent)',
             role: null,
@@ -284,7 +349,9 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
             ticket: data.ticket ?? null,
             worktree: null,
             spawnTs: null,
-            status: 'reported (no spawn event)',
+            status: unusableEvents.has(event)
+              ? 'unusable agent name (excluded from pairing)'
+              : 'reported (no spawn event)',
             verdict: data.verdict ?? null,
             reportTs: ts,
           });
@@ -381,20 +448,56 @@ export function progressLine(state) {
   }`;
 }
 
-/** Warnings for stderr — surfaced, never fatal. */
+/**
+ * Warnings for stderr — surfaced, never fatal.
+ *
+ * STDERR IS AN OUTPUT CHANNEL, and every journal value that reaches it goes
+ * through `inline()` exactly like a value reaching a document.
+ *
+ * That was not true until a security review demonstrated it. `ev` and
+ * `init` were interpolated RAW here, and a journal carrying a right-to-left
+ * override plus 18 TAG characters in those fields put 37 invisible codepoints
+ * on the operator's terminal, spelling "DELETE THE JOURNAL" where nothing was
+ * visible, with the override mirroring the rest of the line. Twenty-eight
+ * lines below, `initiativeName()` was passing the very same `state.initiatives`
+ * through `inline()` on its way into the document — the same value, sanitized
+ * for the file and raw for the human, inside one function. That is the third
+ * spelling of the rule reappearing as a third spelling of WHERE the rule
+ * applies, which is the same defect wearing different clothes (ADR-21).
+ *
+ * The fuzz that should have caught it swept `STATE.md` and `PROGRESS.md`. The
+ * channel it did not sweep was the one that leaked, so the fuzz now sweeps
+ * every channel this module can write to.
+ */
 export function warnings(state) {
   const out = [];
   if (state.truncatedTail) out.push('journal has a truncated final line (crash mid-write) — it was skipped');
   if (state.corruptLines > 0) out.push(`journal has ${state.corruptLines} corrupt line(s) mid-file — they were skipped`);
   if (state.malformed > 0) out.push(`${state.malformed} line(s) parsed to a non-object value — they were skipped`);
   for (const [ev, n] of sortByKey([...state.unknownTypes.entries()], (e) => e[0])) {
-    out.push(`unknown event type "${ev}" x${n} — counted but not folded (newer Tyran?)`);
+    out.push(`unknown event type "${inlinePlain(ev)}" x${n} — counted but not folded (newer Tyran?)`);
   }
   if (state.initiatives.length > 1) {
-    out.push(`journal mixes ${state.initiatives.length} initiatives: ${state.initiatives.join(', ')}`);
+    out.push(
+      `journal mixes ${state.initiatives.length} initiatives: ${state.initiatives.map((i) => inlinePlain(i)).join(', ')}`,
+    );
   }
   if (state.mismatchedReleases.length > 0) {
     out.push(`${state.mismatchedReleases.length} lease release(s) by a non-holder — leases stay open`);
+  }
+  // Never silent (ADR-19 correction 1): an event excluded from spawn/report
+  // pairing is exactly the fact a reader must not have to infer from an
+  // unexplained gap in the table.
+  for (const { raw, problem } of state.unusableAgentNames) {
+    out.push(`unusable data.agent ${inlinePlain(raw)}: ${problem} — excluded from spawn/report pairing`);
+  }
+  // The state ADR-18 makes unrepresentable through `append`, and which the
+  // projection no longer silently guesses at now that ticket-first is gone.
+  for (const { agent, count } of state.ambiguousAgents) {
+    out.push(
+      `agent ${inlinePlain(agent)} has ${count} open spawns — the journal was hand-edited or written ` +
+        'before ADR-18; spawn/report pairing for this name is ambiguous and reports pair oldest-first',
+    );
   }
   return out;
 }
@@ -864,9 +967,11 @@ function canonicalPath(path) {
  * routinely reach `scripts/` through one.
  *
  * Deliberately duplicated in journal.mjs rather than shared: this is boot
- * boilerplate, not a domain rule, and journal.mjs is the zero-dependency core
- * that imports nothing but `node:` builtins. ADR-18 is about one RULE having
- * one implementation (see pairSpawns), which this is not.
+ * boilerplate, not a domain rule. ADR-18 is about one RULE having one
+ * implementation (see pairSpawns), which this is not — and the difference is
+ * visible in what DID get shared: the invisibility rule moved to
+ * scripts/invisible.mjs because three copies of it had drifted apart, while
+ * these eight lines have no semantics to drift.
  */
 function isMainModule(moduleUrl) {
   if (!process.argv[1]) return false;

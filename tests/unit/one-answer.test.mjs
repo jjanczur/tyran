@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { invisibleProblem, whitespaceProblem, FORBIDDEN, DELIBERATELY_ALLOWED } from '../../scripts/invisible.mjs';
+import {
+  invisibleProblem,
+  whitespaceProblem,
+  identifierProblem,
+  FORBIDDEN,
+  DELIBERATELY_ALLOWED,
+} from '../../scripts/invisible.mjs';
 import { scanText, scanPath } from '../../scripts/scan-control-chars.mjs';
 import { agentNameProblem, pairSpawns } from '../../scripts/journal.mjs';
 import { inline, fold, warnings, renderProjections, STATE_FILE } from '../../scripts/project.mjs';
@@ -124,6 +130,68 @@ test('ALL THREE layers give the same answer for every codepoint in Unicode', () 
     [],
     `${disagreements.length} codepoint(s) where the layers disagree — the rule has more than one spelling again`,
   );
+});
+
+test('every COMPOSITION of the two rules gives the same answer too', () => {
+  // Round 2, raised as a gap in the previous report and correctly refused as
+  // "accept it and move on": the two rules are composed in three places, and
+  // three compositions of one pair is exactly how a fourth spelling gets in
+  // through the back door — the defect this whole story removes.
+  //
+  //   1. invisible.identifierProblem   — invisibleProblem ?? whitespaceProblem
+  //   2. scan-control-chars.scanPath   — file NAMEs and symlink TARGETs
+  //   3. journal.agentNameProblem      — two separate loops, two messages
+  //
+  // Driven through the PUBLIC surface of each, so a composition that starts
+  // disagreeing fails here rather than in a security review.
+  //
+  // `agentNameProblem` also rejects names that are not NFC-normalized, which
+  // is a third, unrelated rule. Those codepoints are excluded from the
+  // comparison — and the exclusion is asserted to be disjoint from the two
+  // rules being compared, so it cannot become a place to hide a real
+  // disagreement.
+  const nfcOnly = [];
+  const disagreements = [];
+  for (let point = 0; point <= 0x10ffff; point++) {
+    if (point >= 0xd800 && point <= 0xdfff) continue;
+    const ch = cp(point);
+    const truth = identifierProblem(point) !== null;
+
+    // Composition 2 — the scanner over a PATH.
+    const path = scanPath(`a${ch}b`).length > 0;
+
+    // Composition 3 — the journal over an agent NAME.
+    const name = `a${ch}b`;
+    if (name !== name.normalize('NFC')) {
+      nfcOnly.push(point);
+      // Still checked, but only in the direction that cannot be confounded:
+      // whatever NFC says, an identifier-illegal codepoint must be rejected.
+      if (truth && agentNameProblem(name) === null) {
+        disagreements.push(`U+${point.toString(16).toUpperCase()} journal ACCEPTED an illegal identifier`);
+      }
+      continue;
+    }
+    const journal = agentNameProblem(name) !== null;
+
+    if (path !== truth || journal !== truth) {
+      disagreements.push(
+        `U+${point.toString(16).toUpperCase().padStart(4, '0')} identifierProblem=${truth} ` +
+          `scanPath=${path} agentNameProblem=${journal}`,
+      );
+    }
+  }
+  assert.deepEqual(disagreements.slice(0, 40), [], `${disagreements.length} composition disagreement(s)`);
+
+  // The excluded set must be about NORMALIZATION only. If an invisible or an
+  // identifier-illegal codepoint ever lands in it, the exclusion above would
+  // be silently carrying the very thing it claims not to cover.
+  for (const point of nfcOnly) {
+    assert.equal(
+      identifierProblem(point),
+      null,
+      `U+${point.toString(16).toUpperCase()} was excluded as an NFC case but IS identifier-illegal`,
+    );
+  }
 });
 
 test('the TAG block: the case that made the layering visible', () => {

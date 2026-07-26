@@ -29,7 +29,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJournal, pairSpawns } from './journal.mjs';
-import { replaceInvisible } from './invisible.mjs';
+import { blankInvisible } from './invisible.mjs';
 
 /** Projection file names. Both are fully generated — never hand-edited. */
 export const STATE_FILE = 'STATE.md';
@@ -86,7 +86,7 @@ export function inline(value) {
   // newline are VISIBLE characters that would break a table row, so they are
   // folded, not banned. Keeping the two apart is what stops "identifier" from
   // becoming an option on the invisibility answer (ADR-21).
-  s = replaceInvisible(s, ' ')
+  s = blankInvisible(s)
     .replace(/\s+/g, ' ')
     .trim();
   if (s === '') return '&mdash;';

@@ -1,6 +1,6 @@
 # Projections reference
 
-> **Status:** shipped — `scripts/project.mjs` with 42 unit tests, including
+> **Status:** shipped — `scripts/project.mjs` with 46 unit tests, including
 > byte-exact golden files. The journal stays the only source of truth;
 > everything on this page is a disposable view of it.
 
@@ -65,10 +65,13 @@ catch.
   never fatal. A projection over a *partially* damaged journal still exits
   `0`; judging journal health is `doctor`'s job, not the renderer's.
 - **A non-journal is refused, not projected.** When not one event could be
-  read *and* the file did contain unreadable content, `project.mjs` exits
-  `2` and writes nothing: a mistyped path must not replace a good `STATE.md`
-  with an empty one under a success code. An empty journal (no events, no
-  damage) is legal and still projects empty documents with exit `0`.
+  read *and* the file showed any damage — corrupt lines, non-object lines,
+  or a truncated final line — `project.mjs` exits `2` and writes nothing: a
+  mistyped path must not replace a good `STATE.md` with an empty one under a
+  success code. A one-line file with no trailing newline counts here too
+  (that is how a token file or minified JSON arrives), and so does a journal
+  whose very first append died mid-write. An empty journal — no events and
+  no damage at all — stays legal and projects empty documents with exit `0`.
 - **Nothing vanishes silently.** Every type in the closed event set folds
   into a rendered section (a unit test asserts this against
   `EVENT_TYPES`). Events that arrive without their required keys — a

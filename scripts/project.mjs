@@ -242,6 +242,13 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         // mechanism class that failed outright in v1). Do NOT "simplify"
         // this back to a name-only lookup — see ADR-18 and the two
         // concurrent-spawn tests in tests/unit/project.test.mjs.
+        //
+        // When S-E2-5 extracts this into an exported `pairSpawns()`, the
+        // ticket-first rule MUST survive the move. ADR-18 constrains only
+        // journals written after it ships; every journal recorded before it
+        // can still hold two open spawns of one name, and projections have to
+        // render those correctly — dropping to name-only would bring B1 back
+        // through the back door on historical data.
         const open =
           (data.ticket != null &&
             state.agents.find(
@@ -659,7 +666,17 @@ export function writeAllAtomic(entries) {
     for (const [tmp] of staged) cleanUp(tmp);
     throw err;
   }
-  for (const [tmp, path] of staged) renameSync(tmp, path);
+  for (let i = 0; i < staged.length; i++) {
+    try {
+      renameSync(staged[i][0], staged[i][1]);
+    } catch (err) {
+      // A rename failing part-way leaves earlier files already swapped — that
+      // window is documented. What must NOT happen is temp files piling up as
+      // hidden dotfiles in .tyran/state/<init>/, invisible to --check.
+      for (const [tmp] of staged.slice(i)) cleanUp(tmp);
+      throw err;
+    }
+  }
 }
 
 /**
@@ -737,15 +754,30 @@ function main() {
     // Zero signal, pure noise: not one event parsed, yet the file had content
     // we could not read. That is a wrong path or a non-journal file, and
     // overwriting a good STATE.md with an empty one would hand the operator a
-    // false picture of the initiative under a success exit code. An EMPTY
-    // journal (no events, no damage) is still perfectly legal and projects to
-    // empty documents; partial damage with >= 1 readable event still warns
-    // and succeeds.
-    if (state.total === 0 && state.corruptLines + state.malformed > 0) {
+    // false picture of the initiative under a success exit code.
+    //
+    // `truncatedTail` counts as damage too: readJournal classifies a final
+    // line without a trailing newline as truncated rather than corrupt, so a
+    // one-line file (minified JSON, a token, a single log line) would
+    // otherwise walk straight through this gate. A journal whose very first
+    // append died mid-write lands here as well, and that is the intended
+    // reading: zero readable events plus any trace of damage means we do not
+    // project.
+    //
+    // An EMPTY journal (no events, no damage at all) stays perfectly legal
+    // and projects to empty documents; partial damage with >= 1 readable
+    // event still only warns.
+    if (state.total === 0 && (state.corruptLines + state.malformed > 0 || state.truncatedTail)) {
+      // Only report damage that actually occurred: "0 corrupt line(s),
+      // 0 non-object line(s)" next to a refusal reads like a contradiction.
+      const damage = [
+        state.corruptLines > 0 ? `${state.corruptLines} corrupt line(s)` : null,
+        state.malformed > 0 ? `${state.malformed} non-object line(s)` : null,
+        state.truncatedTail ? 'a truncated final line' : null,
+      ].filter(Boolean);
       throw new IOError(
         `this does not look like a journal: 0 readable events, ` +
-          `${state.corruptLines} corrupt line(s), ${state.malformed} non-object line(s) — ` +
-          `refusing to overwrite projections in ${dir}`,
+          `${damage.join(', ')} — refusing to overwrite projections in ${dir}`,
       );
     }
 

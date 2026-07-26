@@ -295,6 +295,13 @@ export function stringify(value, indent = 0) {
 
 function formatKey(key) {
   const s = String(key);
+  if (s.includes('\n')) {
+    // Mirrors the guard in formatScalar: a newline has no representation in
+    // this subset, so refuse at serialization time instead of emitting a file
+    // our own parser rejects with a confusing "unbalanced quote" (review
+    // E2S2-R11, note 1).
+    throw new YamlLiteError('cannot serialize a key containing a newline (no block scalars in this subset)');
+  }
   if (s === '' || /[\s:#'"&*!|>[\]{},]/.test(s)) return `'${s.replace(/'/g, "''")}'`;
   return s;
 }

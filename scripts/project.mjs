@@ -64,15 +64,22 @@ export function inline(value) {
   if (typeof value === 'string') s = value;
   else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
   else s = JSON.stringify(value) ?? String(value);
-  // C0 (\u0000-\u001F), DEL + C1 (\u007F-\u009F), zero-width and
-  // direction marks (\u200B-\u200F), bidi embeddings/overrides
-  // (\u202A-\u202E), bidi isolates (\u2066-\u2069) and the BOM (\uFEFF)
-  // all collapse to a space. Control characters would break the row; an
-  // unterminated RLO would mirror every following column, so a journal
-  // value could rewrite the document a human reads (Trojan Source).
+  // C0 (\u0000-\u001F), DEL + C1 (\u007F-\u009F), the Arabic letter
+  // mark (\u061C), zero-width and direction marks (\u200B-\u200F), bidi
+  // embeddings/overrides (\u202A-\u202E), bidi isolates (\u2066-\u2069) and
+  // the BOM (\uFEFF) all collapse to a space. Control characters would break
+  // the row; an unterminated RLO would mirror every following column, so a
+  // journal value could rewrite the document a human reads (Trojan Source).
+  //
+  // \u061C was MISSING until the seeded fuzz in
+  // tests/unit/projection-fuzz.test.mjs caught it on its first run. This list
+  // was maintained by hand here while journal.mjs expressed the same idea as
+  // \p{Cf}, which covers \u061C for free — two spellings of one rule, drifting
+  // exactly as ADR-18 predicts. Keep it in step with
+  // scripts/scan-control-chars.mjs (ADR-19), which bans the same set repo-wide.
   s = s
     .replace(
-      /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
+      /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
       ' ',
     )
     .replace(/\s+/g, ' ')

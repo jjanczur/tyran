@@ -9,6 +9,7 @@
   "homepage": "https://github.com/jjanczur/tyran#readme",
   "repository": "https://github.com/jjanczur/tyran",
   "license": "Apache-2.0",
+  "hooks": "./hooks/hooks.json",
   "keywords": [
     "orchestration",
     "multi-agent",

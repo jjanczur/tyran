@@ -5,13 +5,25 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runStateChecks, renderText, renderJson, parseArgs, deadRules, overruledRules, DEFAULT_STALE_HOURS } from '../../scripts/doctor.mjs';
+import {
+  runStateChecks,
+  renderText,
+  renderJson,
+  parseArgs,
+  deadRules,
+  overruledRules,
+  SEVERITIES,
+  SEVERITY_BY_CODE,
+  DEFAULT_STALE_HOURS,
+} from '../../scripts/doctor.mjs';
 import { append } from '../../scripts/journal.mjs';
 
 const DOCTOR = fileURLToPath(new URL('../../scripts/doctor.mjs', import.meta.url));
 const PROJECT = fileURLToPath(new URL('../../scripts/project.mjs', import.meta.url));
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const TEMPLATES = fileURLToPath(new URL('../../templates/', import.meta.url));
+
+const rootUser = typeof process.getuid === 'function' && process.getuid() === 0;
 
 // --------------------------------------------------------------- fixtures
 
@@ -158,11 +170,12 @@ test('projections that were never generated are info, not drift', () => {
   const journal = journalPathFor(dir);
   writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {})]);
   const result = runStateChecks({ dir });
-  const missing = byCode(result, 'projection-missing');
-  assert.equal(missing.length, 1);
-  assert.equal(missing[0].severity, 'info');
+  const absent = byCode(result, 'projection-absent');
+  assert.equal(absent.length, 1);
+  assert.equal(absent[0].severity, 'info');
   assert.equal(result.ok, true);
   assert.deepEqual(byCode(result, 'projection-drift'), []);
+  assert.deepEqual(byCode(result, 'projection-missing'), []);
 });
 
 test('a half-generated pair is a warning, because a run stopped part way', () => {
@@ -187,6 +200,8 @@ test('an unprojectable journal is not reported as drift with a command that woul
   const result = runStateChecks({ dir });
   assert.deepEqual(byCode(result, 'projection-drift'), []);
   assert.equal(byCode(result, 'projection-blocked').length, 1);
+  assert.equal(byCode(result, 'projection-blocked')[0].severity, 'warning');
+  assert.equal(result.ok, false);
   // The refusal doctor predicts is the one project.mjs actually gives.
   let projectExit = 0;
   try {
@@ -293,8 +308,11 @@ test('an orphan report and an unusable agent name are raised from journal.mjs', 
     ev('2026-07-26T09:01:00.000Z', 'spawn', { agent: padded, role: 'implementer' }),
   ]);
   const result = runStateChecks({ dir });
+  assert.equal(byCode(result, 'spawn-orphan-report')[0].severity, 'warning');
+  assert.equal(byCode(result, 'agent-name-unusable')[0].severity, 'warning');
   assert.equal(byCode(result, 'spawn-orphan-report').length, 1);
   assert.equal(byCode(result, 'agent-name-unusable').length, 1);
+  assert.equal(result.ok, false);
 });
 
 // ---------------------------------------------------------------- journal
@@ -334,6 +352,8 @@ test('a journal path that is a directory is an error, not a crash', () => {
   mkdirSync(join(dir, 'state', 'demo', 'journal.jsonl'), { recursive: true });
   const result = runStateChecks({ dir });
   assert.deepEqual(codes(result), ['journal-not-a-file']);
+  assert.equal(result.findings[0].severity, 'error');
+  assert.equal(result.ok, false);
 });
 
 test('an initiative directory with no journal is a warning', () => {
@@ -351,7 +371,10 @@ test('a stray file under state/ is reported instead of being skipped', () => {
   const dir = scaffold(root);
   mkdirSync(join(dir, 'state'), { recursive: true });
   writeFileSync(join(dir, 'state', 'notes.txt'), 'hi');
-  assert.deepEqual(codes(runStateChecks({ dir })), ['state-stray-file']);
+  const result = runStateChecks({ dir });
+  assert.deepEqual(codes(result), ['state-stray-file']);
+  assert.equal(result.findings[0].severity, 'warning');
+  assert.equal(result.ok, false);
 });
 
 // -------------------------------------------------------- one init per file
@@ -394,7 +417,10 @@ test('two initiatives in one file without a crossed pairing is a warning', () =>
     ev('2026-07-26T09:02:00.000Z', 'checkpoint', { phase: 'x', next_steps: [] }, { init: 'other' }),
   ]);
   const result = runStateChecks({ dir });
-  assert.equal(byCode(result, 'journal-mixed-initiatives').length, 1);
+  const mixed = byCode(result, 'journal-mixed-initiatives');
+  assert.equal(mixed.length, 1);
+  assert.equal(mixed[0].severity, 'warning');
+  assert.equal(result.ok, false);
   assert.deepEqual(byCode(result, 'journal-cross-init-pairing'), []);
 });
 
@@ -460,7 +486,9 @@ test('a release by a non-holder is raised from journal.tail(), leaving the lease
   regenerate(journal);
   const result = runStateChecks({ dir });
   assert.equal(byCode(result, 'lease-release-by-non-holder').length, 1);
+  assert.equal(byCode(result, 'lease-release-by-non-holder')[0].severity, 'warning');
   assert.equal(byCode(result, 'lease-open').length, 1);
+  assert.equal(result.ok, false);
 });
 
 test('a leftover journal lock directory is surfaced', () => {
@@ -668,15 +696,13 @@ test('a journal shape that throws inside a reader costs one check, not the repor
   assert.match(failed[0].message, /"leases" check/);
   // everything else still ran
   assert.ok(byCode(result, 'journal-invalid').length > 0, 'integrity check was skipped too');
-  assert.ok(byCode(result, 'projection-missing').length > 0, 'projection check was skipped too');
+  assert.ok(byCode(result, 'projection-absent').length > 0, 'projection check was skipped too');
   // and the CLI reports it instead of dying with a stack trace
   const cli = run(['--state', '--dir', dir]);
   assert.equal(cli.code, 1);
   assert.equal(cli.stderr, '');
   assert.match(cli.stdout, /\[check-failed\]/);
 });
-
-const rootUser = typeof process.getuid === 'function' && process.getuid() === 0;
 
 test('an unreadable journal is an error naming the errno', { skip: rootUser }, () => {
   const root = repo();
@@ -757,6 +783,41 @@ test('findings are grouped by severity, whatever order the checks produced them 
   assert.ok(leases[0].includes('r-2') && leases[1].includes('r-10'), leases.join(' | '));
 });
 
+test('the scanned-initiative list is ordered by doctor, not by the filesystem', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  // Created in an order that is neither natural nor lexicographic, and named
+  // so that natural order (i-2 < i-10) disagrees with lexicographic order
+  // (i-10 < i-2). readdirSync order is a filesystem detail; the report is not
+  // allowed to inherit it.
+  for (const name of ['i-10', 'i-2', 'i-20', 'i-1']) {
+    const journal = journalPathFor(dir, name);
+    writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {}, { init: name })]);
+    regenerate(journal);
+  }
+  const line = runStateChecks({ dir }).checked.find((l) => l.startsWith('state/:'));
+  assert.equal(line, 'state/: i-1 (1 event(s)), i-2 (1 event(s)), i-10 (1 event(s)), i-20 (1 event(s))');
+  // same bytes on a second run, and the CLI agrees with the module
+  assert.equal(renderText(runStateChecks({ dir })), renderText(runStateChecks({ dir })));
+  assert.ok(run(['--state', '--dir', dir]).stdout.includes(line));
+});
+
+test('findings whose sort keys compare equal keep the order they were produced in', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  // naturalCompare treats "x-01" and "x-1" as equal (both parse to 1), so
+  // these two findings tie on every component of the sort key. Without an
+  // explicit tie-break the surviving order is whatever the sort happens to
+  // do; with one it is the order the checks produced, which is the scan
+  // order — deterministic by construction.
+  for (const name of ['x-01', 'x-1']) mkdirSync(join(dir, 'state', name), { recursive: true });
+  const first = runStateChecks({ dir }).findings.map((f) => f.where);
+  const second = runStateChecks({ dir }).findings.map((f) => f.where);
+  assert.equal(first.length, 2);
+  assert.deepEqual(first, second);
+  assert.deepEqual(first, [join(dir, 'state', 'x-01'), join(dir, 'state', 'x-1')]);
+});
+
 // -------------------------------------------------------------- injection
 
 test('journal values cannot inject escapes or bidi overrides into the report', () => {
@@ -813,6 +874,234 @@ test('a lease fix command escapes a bidi-carrying resource instead of printing i
   // ...and the escape still round-trips to the exact resource
   const data = orphan.fix.slice(orphan.fix.indexOf("--data '") + 8, -1);
   assert.equal(JSON.parse(data).resource, resource);
+});
+
+test('a hostile init reaches neither the text report nor a printed command raw', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir, 'demo');
+  const esc = String.fromCodePoint(0x1b);
+  const rlo = String.fromCodePoint(0x202e);
+  // erase-line + cursor-up: printed raw, this wipes the finding above it.
+  const init = `demo${esc}[2K${esc}[1A${rlo}`;
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'spawn', { agent: 'impl-1', role: 'x' }, { init }),
+    ev('2026-07-26T09:00:01.000Z', 'lease.acquired', { resource: 'w', holder: 'impl-1' }, { init }),
+    ev('2026-07-26T09:00:02.000Z', 'report', { agent: 'impl-1', verdict: 'DONE' }, { init }),
+  ]);
+  const result = runStateChecks({ dir });
+  assert.ok(byCode(result, 'journal-init-mismatch').length > 0, 'the hostile init was not even flagged');
+
+  const text = renderText(result);
+  assert.equal(text.includes(esc), false, 'ANSI escape reached the text report');
+  assert.equal(text.includes(rlo), false, 'bidi override reached the text report');
+  const json = renderJson(result);
+  assert.equal(json.includes(esc), false, 'ANSI escape reached the JSON output');
+  assert.equal(json.includes(rlo), false, 'bidi override reached the JSON output');
+
+  // Every fix line, not just the message, and the CLI's real bytes too.
+  for (const f of result.findings) {
+    if (!f.fix) continue;
+    assert.equal(f.fix.includes(esc), false, `raw escape in fix of ${f.code}`);
+    assert.equal(f.fix.includes(rlo), false, `raw bidi in fix of ${f.code}`);
+  }
+  const cli = run(['--state', '--dir', dir]);
+  assert.equal(cli.stdout.includes(esc), false, 'ANSI escape reached stdout');
+  assert.equal(cli.stdout.includes(rlo), false, 'bidi override reached stdout');
+});
+
+test('ANSI-C quoting keeps a hostile value byte-exact and runnable', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir, 'demo');
+  const init = `demo${String.fromCodePoint(0x1b)}[2K`;
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {}, { init })]);
+  const fix = byCode(runStateChecks({ dir }), 'journal-init-mismatch')[0].fix;
+  assert.match(fix, /\$'demo\\x1b\[2K'/);
+  // The shell must turn the escaped form back into the exact original.
+  const echoed = execSync(`printf '%s' ${fix.slice(fix.indexOf('--init ') + 7)}`, { encoding: 'utf8' });
+  assert.equal(echoed, init);
+});
+
+test('an unreadable initiative directory is not diagnosed as an empty one', { skip: rootUser }, () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {})]);
+  const initiativeDir = dirname(journal);
+  chmodSync(initiativeDir, 0o000);
+  try {
+    const result = runStateChecks({ dir });
+    assert.deepEqual(codes(result), ['journal-unreadable']);
+    assert.equal(result.findings[0].severity, 'error');
+    assert.match(result.findings[0].message, /EACCES/);
+    assert.deepEqual(byCode(result, 'journal-missing'), [], 'EACCES was mistaken for a missing journal');
+    // and no finding on this state may propose destroying it
+    for (const f of result.findings) assert.doesNotMatch(f.fix ?? '', /\brm\b/);
+  } finally {
+    chmodSync(initiativeDir, 0o755);
+  }
+  // the journal was intact all along
+  assert.match(readFileSync(journal, 'utf8'), /init\.created/);
+});
+
+test('no finding anywhere proposes a destructive command', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  mkdirSync(join(dir, 'state', 'empty'), { recursive: true });
+  const journal = journalPathFor(dir, 'demo');
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'teleport', {})]);
+  for (const f of runStateChecks({ dir }).findings) {
+    assert.doesNotMatch(f.fix ?? '', /\brm\b|\bmv\b|>\s*\S/, `${f.code} hands out a destructive command`);
+  }
+});
+
+// ------------------------------------------------------------ severity pins
+
+// Every code, pinned literally. A severity is a promise about the exit code,
+// and each of these was once a per-call-site literal that could be flipped
+// with all 54 tests still green.
+const EXPECTED_SEVERITY = {
+  'journal-missing': 'warning',
+  'journal-unreadable': 'error',
+  'journal-not-a-file': 'error',
+  'journal-invalid': 'error',
+  'journal-truncated': 'warning',
+  'journal-warning': 'warning',
+  'journal-lock-present': 'warning',
+  'journal-init-mismatch': 'error',
+  'journal-cross-init-pairing': 'error',
+  'journal-mixed-initiatives': 'warning',
+  'check-failed': 'error',
+  'spawn-open': 'info',
+  'spawn-stale': 'warning',
+  'spawn-duplicate': 'warning',
+  'spawn-orphan-report': 'warning',
+  'agent-name-unusable': 'warning',
+  'lease-open': 'info',
+  'lease-orphan': 'warning',
+  'lease-expired': 'warning',
+  'lease-release-by-non-holder': 'warning',
+  'projection-drift': 'warning',
+  'projection-absent': 'info',
+  'projection-missing': 'warning',
+  'projection-blocked': 'warning',
+  'projection-failed': 'error',
+  'projection-unreadable': 'error',
+  'config-missing': 'info',
+  'config-invalid': 'error',
+  'config-unreadable': 'error',
+  'knowledge-invalid': 'error',
+  'knowledge-unreadable': 'error',
+  'knowledge-not-a-directory': 'warning',
+  'policy-missing': 'info',
+  'policy-invalid': 'error',
+  'policy-unreadable': 'error',
+  'policies-unreadable': 'error',
+  'policies-not-a-directory': 'warning',
+  'policy-kernel-downgrade': 'error',
+  'policy-rule-dead': 'warning',
+  'policy-rule-overruled': 'warning',
+  'no-state-dir': 'info',
+  'state-not-a-directory': 'error',
+  'state-unreadable': 'error',
+  'state-stray-file': 'warning',
+};
+
+test('every finding code has exactly one pinned severity', () => {
+  assert.deepEqual({ ...SEVERITY_BY_CODE }, EXPECTED_SEVERITY);
+  for (const severity of Object.values(SEVERITY_BY_CODE)) {
+    assert.ok(SEVERITIES.includes(severity), severity);
+  }
+});
+
+test('every code the source can emit is registered, and documented', () => {
+  const source = readFileSync(fileURLToPath(new URL('../../scripts/doctor.mjs', import.meta.url)), 'utf8');
+  const literal = [...source.matchAll(/finding\(\s*'([a-z0-9-]+)'/g)].map((m) => m[1]);
+  assert.ok(literal.length > 20, `only ${literal.length} literal codes found — did the call shape change?`);
+  for (const code of new Set(literal)) {
+    assert.ok(code in SEVERITY_BY_CODE, `finding('${code}') is emitted but not registered`);
+  }
+  // the two families built from a template variable
+  for (const kind of ['config', 'knowledge', 'policy']) {
+    assert.ok(`${kind}-invalid` in SEVERITY_BY_CODE);
+    assert.ok(`${kind}-unreadable` in SEVERITY_BY_CODE);
+  }
+  for (const label of ['knowledge', 'policies']) {
+    assert.ok(`${label}-not-a-directory` in SEVERITY_BY_CODE);
+    assert.ok(`${label}-unreadable` in SEVERITY_BY_CODE);
+  }
+  const docs = readFileSync(fileURLToPath(new URL('../../docs/doctor.md', import.meta.url)), 'utf8');
+  for (const code of Object.keys(SEVERITY_BY_CODE)) {
+    assert.ok(docs.includes(`\`${code}\``), `${code} is not in the docs/doctor.md table`);
+  }
+});
+
+test('an unregistered code is a loud bug, not a finding with no severity', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  // finding() is internal; prove the guard through the exported table, which
+  // is what every call site reads.
+  assert.equal(SEVERITY_BY_CODE['not-a-real-code'], undefined);
+  assert.equal(Object.getPrototypeOf(SEVERITY_BY_CODE), null, 'a code named "constructor" must not inherit');
+  assert.equal(runStateChecks({ dir }).ok, true);
+});
+
+test('state/ that is not a directory is an error, and fails the check alone', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(join(dir, 'state'), 'not a directory');
+  const result = runStateChecks({ dir });
+  const found = byCode(result, 'state-not-a-directory');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'error');
+  assert.equal(result.ok, false);
+  assert.equal(run(['--state', '--dir', dir]).code, 1);
+});
+
+test('policy-rule-overruled reaches the report as a warning that fails the check', () => {
+  const root = repo();
+  const dir = scaffold(root, { policy: false });
+  mkdirSync(join(dir, 'policies'), { recursive: true });
+  writeFileSync(
+    join(dir, 'policies', 'autonomy.yaml'),
+    [
+      'default: GATED',
+      'rules:',
+      '  - path: hooks/**',
+      '    class: KERNEL',
+      '    reason: the mechanism',
+      '  - path: .tyran/policies/**',
+      '    class: KERNEL',
+      '    reason: the boundary',
+      "  - path: '*/policy-gate.mjs'",
+      '    class: AUTO',
+      '    reason: looks like it covers every policy gate',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  const result = runStateChecks({ dir });
+  const found = byCode(result, 'policy-rule-overruled');
+  assert.equal(found.length, 1, JSON.stringify(codes(result)));
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].message, /hooks\/policy-gate\.mjs/);
+  assert.equal(result.ok, false);
+});
+
+test('a knowledge directory that cannot be listed is an error, not zero files', { skip: rootUser }, () => {
+  const root = repo();
+  const dir = scaffold(root);
+  chmodSync(join(dir, 'knowledge'), 0o000);
+  try {
+    const result = runStateChecks({ dir });
+    const found = byCode(result, 'knowledge-unreadable');
+    assert.equal(found.length, 1);
+    assert.equal(found[0].severity, 'error');
+    assert.match(found[0].message, /EACCES/);
+  } finally {
+    chmodSync(join(dir, 'knowledge'), 0o755);
+  }
 });
 
 // ------------------------------------------------------------------- CLI

@@ -9,6 +9,7 @@ import {
   existsSync,
   chmodSync,
   mkdirSync,
+  symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -605,6 +606,50 @@ test('CLI: --out-dir defaults to the journal directory', () => {
   const r = run([file]);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(join(d, STATE_FILE)) && existsSync(join(d, PROGRESS_FILE)));
+});
+
+test('CLI: invoked through a symlinked path, the projector still writes files', () => {
+  // Same guard bug as journal.mjs, with a nastier symptom: `project.mjs` run
+  // through a link exited 0, printed nothing, and wrote no projection — so a
+  // caller checking only the exit code believed STATE.md had been refreshed
+  // while it still held whatever was there before (or nothing at all).
+  const base = mkdtempSync(join(tmpdir(), 'tyran-symlink-'));
+  const realScripts = join(base, 'real-scripts');
+  mkdirSync(realScripts);
+  // project.mjs imports journal.mjs — the copy has to carry both.
+  for (const name of ['project.mjs', 'journal.mjs']) {
+    writeFileSync(join(realScripts, name), readFileSync(new URL(`../../scripts/${name}`, import.meta.url)));
+  }
+  const linked = join(base, 'linked-scripts');
+  symlinkSync(realScripts, linked);
+
+  const { d, file } = journal([ev()]);
+  const r = spawnSync(process.execPath, [join(linked, 'project.mjs'), file, '--out-dir', d], {
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /wrote /, 'the projector produced no output at all');
+  assert.ok(existsSync(join(d, STATE_FILE)), `${STATE_FILE} was never written`);
+  assert.ok(existsSync(join(d, PROGRESS_FILE)), `${PROGRESS_FILE} was never written`);
+});
+
+test('the self-run guard survives an argv[1] that cannot be canonicalized', () => {
+  // project.mjs carries its OWN copy of the guard (deliberate: boot
+  // boilerplate, not a domain rule), so it needs its own dead mutant.
+  // Without the fallback, realpathSync throws out of module scope and every
+  // importer of project.mjs dies at startup.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-argv-'));
+  const harness = join(base, 'harness.mjs');
+  writeFileSync(
+    harness,
+    "process.argv[1] = '/nonexistent-dir-" +
+      "e2s6/entry.mjs';\n" +
+      `await import(${JSON.stringify(SCRIPT)});\n` +
+      "console.log('SURVIVED');\n",
+  );
+  const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'SURVIVED');
 });
 
 // --- atomic writes -------------------------------------------------------

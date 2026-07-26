@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   EVENT_TYPES,
   validateEvent,
@@ -266,7 +266,12 @@ test('CLI: invoked through a symlinked path, the script still does its work', ()
   const base = mkdtempSync(join(tmpdir(), 'tyran-symlink-'));
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
-  writeFileSync(join(realScripts, 'journal.mjs'), readFileSync(SCRIPT));
+  // journal.mjs now imports the shared invisibility rule (ADR-21), so the
+  // sibling has to travel with it — a copy that omits it fails at module
+  // resolution and would report the guard as broken when it is not.
+  for (const name of ['journal.mjs', 'invisible.mjs']) {
+    writeFileSync(join(realScripts, name), readFileSync(new URL(`../../scripts/${name}`, import.meta.url)));
+  }
   const linked = join(base, 'linked-scripts');
   symlinkSync(realScripts, linked);
 
@@ -743,4 +748,93 @@ test('the lock is keyed by the canonical path: a symlink alias cannot buy a seco
   // the alias writes into the very same file.
   execFileSync(process.execPath, spawnArgs);
   assert.equal(query(f, { ev: 'spawn' }).length, 1);
+});
+
+// --- operator-facing output --------------------------------------------------
+
+/**
+ * `JSON.stringify` escapes C0 controls and nothing else, so bidi overrides,
+ * TAG characters and zero-width marks came out RAW from every subcommand that
+ * prints journal content. Same class as the blocker a security review found in
+ * `project.warnings()`, on a channel nobody had swept.
+ *
+ * Driven through the real CLI, because the escaping lives in the CLI's sink:
+ * a unit test of `jsonEscapeInvisible` alone stays green while every
+ * `console.log` in this file goes back to printing raw bytes (measured — that
+ * mutant survived until this test existed).
+ */
+const INVISIBLE_IN = (text) =>
+  [...text].filter((c) => {
+    const n = c.codePointAt(0);
+    if (n === 0x0a || n === 0x09) return false;
+    return /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u.test(c);
+  });
+
+test('every CLI subcommand escapes invisible characters, and stays parseable', () => {
+  const RLO = String.fromCodePoint(0x202e);
+  const TAG = String.fromCodePoint(0xe0041);
+  const ZWSP = String.fromCodePoint(0x200b);
+  const d = mkdtempSync(join(tmpdir(), 'tyran-journal-cli-'));
+  const f = join(d, 'journal.jsonl');
+  const poisoned = `demo${RLO}${TAG}${ZWSP}`;
+  writeFileSync(
+    f,
+    [
+      { ts: '2026-07-26T10:00:00.000Z', ev: 'checkpoint', init: poisoned, actor: `a${TAG}`, data: { phase: `p${RLO}`, next_steps: [`s${TAG}`] } },
+      { ts: '2026-07-26T10:00:01.000Z', ev: 'spawn', init: poisoned, actor: 'c', data: { agent: 'impl', role: `r${ZWSP}` } },
+      { ts: '2026-07-26T10:00:02.000Z', ev: `bogus${TAG}`, init: poisoned, actor: 'c', data: {} },
+    ]
+      .map((e) => JSON.stringify(e))
+      .join('\n') + '\n',
+    'utf8',
+  );
+
+  for (const args of [['query', f], ['tail', f], ['open-spawns', f], ['validate', f], ['next-id', f, 'T']]) {
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+    assert.ok(r.status === 0 || r.status === 1, `${args[0]} crashed: ${r.stderr}`);
+    assert.deepEqual(
+      INVISIBLE_IN(r.stdout).map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`),
+      [],
+      `journal.mjs ${args[0]} printed invisible characters to the terminal`,
+    );
+  }
+
+  // Safety must not have cost fidelity: `query` output is parsed by tooling.
+  const q = spawnSync(process.execPath, [SCRIPT, 'query', f], { encoding: 'utf8' });
+  const parsed = q.stdout.trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(parsed[0].init, poisoned, 'escaping the CLI output must be LOSSLESS');
+  assert.equal(parsed.length, 3);
+});
+
+test('validateJournal messages carry no raw journal values', () => {
+  // The module that BUILDS a message owns making it safe. Both of today's
+  // consumers happen to sanitize as well, which makes this redundant — and
+  // redundant is the point: relying on every consumer remembering is the
+  // caller-discipline mechanism this project distrusts. Without this test the
+  // source-level escaping is an unguarded claim (measured: the mutant that
+  // removes it survives on consumer tests alone).
+  const TAG = String.fromCodePoint(0xe0041);
+  const RLO = String.fromCodePoint(0x202e);
+  const d = mkdtempSync(join(tmpdir(), 'tyran-journal-msg-'));
+  const f = join(d, 'journal.jsonl');
+  writeFileSync(
+    f,
+    [
+      { ts: '2026-07-26T10:00:00.000Z', ev: `bogus${TAG}type`, init: 'demo', actor: 'a', data: {} },
+      { ts: '2026-07-26T10:00:01.000Z', ev: 'report', init: 'demo', actor: 'a', data: { agent: `ghost${RLO}`, verdict: 'v' } },
+      { ts: '2026-07-26T09:00:00.000Z', ev: 'checkpoint', init: 'demo', actor: 'a', data: { phase: 'p', next_steps: [] } },
+    ]
+      .map((e) => JSON.stringify(e))
+      .join('\n') + '\n',
+    'utf8',
+  );
+  const result = validateJournal(f);
+  assert.ok(result.errors.length > 0 && result.warnings.length > 0, 'premise: this journal produces both');
+  for (const message of [...result.errors, ...result.warnings]) {
+    assert.deepEqual(
+      INVISIBLE_IN(message).map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`),
+      [],
+      `a raw journal value reached a message: ${JSON.stringify(message)}`,
+    );
+  }
 });

@@ -109,18 +109,74 @@ catch.
 
 Two details worth knowing:
 
-- **Agent pairing follows `data.ticket` first.** A `report` closes the
-  still-running spawn of that agent name working on the *same ticket*; only
-  a report with no ticket falls back to the oldest open spawn of that name.
-  Order alone is not enough: with two concurrent spawns of one agent name,
-  the fast one reporting first would otherwise mark the *other* agent as
-  finished, with someone else's verdict — while the Ledger, which reads
-  `data.ticket` directly, said the opposite. The name fallback stays
-  unambiguous because **ADR-18** has `journal.append` enforce at most one
-  open spawn per agent name (chosen over a `spawn_id` that callers would
-  have to carry across a process boundary). A spawn with no matching report
-  stays visible as **running (no report yet)** — an agent that died
-  mid-story must not quietly disappear from `STATE.md`.
+- **Agent pairing is `journal.pairSpawns`, and nothing else.** A `report`
+  closes the oldest still-open `spawn` of the same agent name, and the
+  projection does not compute that answer itself — it renders the one the
+  journal gives. This used to be two implementations with two different
+  rules (this file preferred a spawn on the *same ticket*, `pairSpawns`
+  paired oldest-first and excluded unusable names outright), so `STATE.md`
+  and `doctor` could describe the same journal differently. **ADR-21**
+  settled it: one answer, not one function.
+  - The pairing stays unambiguous because **ADR-18** has `journal.append`
+    enforce at most one open spawn per agent name — chosen over a `spawn_id`
+    that callers would have to carry across a process boundary.
+  - When a journal nonetheless holds two open spawns of one name (only a
+    hand-edited file can), the pairing is oldest-first **and it says so**:
+    `project.mjs` prints `spawn/report pairing for this name is ambiguous`
+    on stderr. The old ticket-first rule guessed silently instead, and it
+    existed for journals written before ADR-18 — a population measured at
+    zero before it was removed.
+  - A `spawn` whose `data.agent` is not a usable correlator (invisible
+    characters, not NFC, empty) is **not** rendered as running and **not**
+    dropped: it appears as `unusable agent name (excluded from pairing)`,
+    with a warning. Silently omitting it would hide an agent that may still
+    be working; showing it as running would repeat the false state picture
+    ADR-18 calls worse than no picture.
+  - A spawn with no matching report stays visible as **running (no report
+    yet)** — an agent that died mid-story must not quietly disappear from
+    `STATE.md`.
+- **Invisible characters are SHOWN, never dropped — in every channel.**
+  A journal value carrying a bidi override, a zero-width mark or a TAG
+  character is rendered as its escape notation (`<U+202E>`), not deleted.
+  That applies to `STATE.md`, to `PROGRESS.md` **and to the warnings
+  `project.mjs` writes to stderr** — stderr is an output channel, and it was
+  the one that leaked: a journal whose `init` and `ev` carried an override
+  plus 18 TAG characters put 37 invisible codepoints on the operator's
+  terminal, spelling text nobody could see, while the documents were clean.
+  - **Why shown and not removed.** Silent removal made a poisoned value and a
+    clean one render identically: `inline("deploy ok" + <29 TAG characters>)`
+    returned exactly `deploy ok`, with nothing anywhere reporting a removal.
+    **ADR-19** is explicit that an exclusion must never be silent, and
+    `inline()` already signals its other losses — truncation prints an
+    ellipsis — so this was the one lossy step leaving no trace.
+  - **The cost, stated rather than discovered.** The rule's boundary is the
+    Unicode *default-ignorable* property, which includes **legitimate
+    formatting characters of Arabic, Syriac, Kaithi and Egyptian**
+    (`U+0600..0605`, `U+070F`, `U+110BD`, `U+13430..1343F` and others). A
+    report about a repository written in those scripts will show them as
+    `<U+0600>` instead of applying them. This is a real loss of meaning for
+    those texts, accepted because the same codepoints are a working
+    smuggling channel into a document an agent acts on, and because the
+    projection is a *summary* rather than a faithful reproduction of source
+    text. It costs **zero** false findings on ordinary content — measured on
+    66 MB of multilingual text, 392 766 non-ASCII characters, no new hits.
+  - **Escaping is a content-suppression lever, and a cheap one.** One
+    invisible codepoint becomes eight visible characters, so a prefix of a
+    dozen hostile characters expands ~17x and pushes the rest of a cell past
+    the 160-codepoint cap and behind the ellipsis. A journal value can
+    therefore hide *legitimate* text from a reader without hiding anything
+    invisibly. This is a real trade against the blanking it replaced, taken
+    because the failure is now **visible** — the reader sees escapes and an
+    ellipsis and knows the value was tampered with — where silent deletion
+    left a value that looked ordinary and complete.
+  - **The session-start budget is measured AFTER escaping.** Expansion used to
+    happen downstream of `fitBudget`, so a hostile journal shipped 9 880
+    characters of injected context against a 2 000-character budget. The
+    escaping now happens in `renderContext`, before the budget is applied, so
+    the length the budget sees is the length that ships.
+  - `journal.mjs`'s own CLI escapes the same characters as JSON `\uXXXX`
+    instead, because that output is machine-readable and this repo parses it
+    back; `JSON.parse` of the escaped form is deep-equal to the original.
 - **A gate is open unless it says otherwise.** `data.result` values
   `pass`, `passed`, `ok`, `green`, `approved` and `closed` (case-insensitive)
   close a gate; anything else — including `fail` and `open` — keeps it in

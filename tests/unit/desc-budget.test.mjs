@@ -68,6 +68,13 @@ test('CLI: invoked through a symlinked path, the budget is still enforced (ADR-1
   const real = join(base, 'real-root');
   mkdirSync(join(real, 'scripts'), { recursive: true });
   writeFileSync(join(real, 'scripts', 'desc-budget.mjs'), readFileSync(SCRIPT));
+  // desc-budget prints skill DIRECTORY NAMES, which are attacker-controlled
+  // the moment a repo installs a third-party skill, so it now escapes them
+  // through the shared rule — and the sibling has to travel with the copy.
+  writeFileSync(
+    join(real, 'scripts', 'invisible.mjs'),
+    readFileSync(new URL('../../scripts/invisible.mjs', import.meta.url)),
+  );
   mkdirSync(join(real, 'skills', 'huge'), { recursive: true });
   writeFileSync(join(real, 'skills', 'huge', 'SKILL.md'), '---\ndescription: ' + 'a'.repeat(80) + '\n---\n');
   const linked = join(base, 'linked-root');
@@ -98,4 +105,27 @@ test('the self-run guard survives an argv[1] that cannot be canonicalized', () =
   const r = spawnSync(process.execPath, [harness], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), 'SURVIVED');
+});
+
+test('a skill directory name cannot carry invisible characters into CI output', () => {
+  // This runs in CI and prints skill DIRECTORY NAMES. The moment a repo
+  // installs a third-party skill, that name is attacker-controlled — and CI
+  // output is read by whoever is debugging the build. Reviewer's measurement
+  // put this in the same class as the doctor and warnings leaks.
+  const root = mkdtempSync(join(tmpdir(), 'tyran-descbudget-invisible-'));
+  const name = `evil${String.fromCodePoint(0x202e)}${String.fromCodePoint(0xe0041)}skill`;
+  mkdirSync(join(root, 'skills', name), { recursive: true });
+  writeFileSync(
+    join(root, 'skills', name, 'SKILL.md'),
+    '---\nname: evil\ndescription: short\n---\n',
+    'utf8',
+  );
+  const r = spawnSync(process.execPath, [SCRIPT, root], { encoding: 'utf8' });
+  const bad = [...(r.stdout + r.stderr)].filter((c) => {
+    const n = c.codePointAt(0);
+    if (n === 0x0a || n === 0x09) return false;
+    return /^[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Noncharacter_Code_Point}]$/u.test(c);
+  });
+  assert.deepEqual(bad.map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase()}`), []);
+  assert.match(r.stdout, /<U\+202E>/, 'the name must be SHOWN escaped, not silently dropped');
 });

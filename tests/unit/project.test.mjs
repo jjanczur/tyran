@@ -8,6 +8,7 @@ import {
   readdirSync,
   existsSync,
   chmodSync,
+  mkdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -161,6 +162,37 @@ test('a file that is not a journal is refused instead of erasing good projection
   assert.match(r.stderr, /refusing to overwrite projections/);
   const after = [STATE_FILE, PROGRESS_FILE].map((n) => readFileSync(join(out, n)));
   assert.deepEqual(after, before, 'projections were overwritten by a non-journal input');
+});
+
+test('a one-line file with no trailing newline is refused too (truncatedTail is damage)', () => {
+  // readJournal calls a final line without a newline `truncatedTail`, not a
+  // bad line — so minified JSON, a token file or a single log line would slip
+  // through a gate that only counts corrupt/malformed lines.
+  const out = dir();
+  assert.equal(run([FIXTURE, '--out-dir', out]).status, 0);
+  const before = [STATE_FILE, PROGRESS_FILE].map((n) => readFileSync(join(out, n)));
+
+  for (const content of ['GARBAGE NO TRAILING NEWLINE', 'a-single-line-token-file', '{"ev":"cut off"']) {
+    const { file } = journal([content], { trailingNewline: false });
+    const r = run([file, '--out-dir', out]);
+    assert.equal(r.status, 2, `"${content}" was projected instead of refused`);
+    assert.match(r.stderr, /does not look like a journal/);
+    assert.match(r.stderr, /a truncated final line/);
+    assert.deepEqual(
+      [STATE_FILE, PROGRESS_FILE].map((n) => readFileSync(join(out, n))),
+      before,
+      `"${content}" overwrote the projections`,
+    );
+  }
+});
+
+test('a journal path that is a directory fails cleanly', () => {
+  const d = dir();
+  const r = run([d, '--out-dir', d]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /journal path is a directory, not a file/);
+  assert.deepEqual(readdirSync(d), []);
+  assert.throws(() => projectFile(d), /directory, not a file/);
 });
 
 test('an EMPTY journal is still legal — the refusal only fires on pure noise', () => {
@@ -677,7 +709,10 @@ test('atomic writes: a failure hits the temp file, never the destination', (t) =
   assert.deepEqual(readdirSync(out), [STATE_FILE]); // no temp left behind
 });
 
-test('writeAllAtomic stages every file before renaming any of them', (t) => {
+test('writeAllAtomic: an unwritable directory fails before touching anything', (t) => {
+  // NOTE: this does NOT prove staging-before-rename — the FIRST write already
+  // fails here, so no rename happens in either the correct or the broken
+  // implementation. The test below is the one that pins the ordering.
   if (typeof process.getuid === 'function' && process.getuid() === 0) {
     t.skip('running as root: permissions are not enforced');
     return;
@@ -696,8 +731,47 @@ test('writeAllAtomic stages every file before renaming any of them', (t) => {
   } finally {
     chmodSync(out, 0o700);
   }
-  // neither file was swapped: staging failed before the first rename
   assert.equal(readFileSync(join(out, STATE_FILE), 'utf8'), 'OLD STATE\n');
   assert.equal(readFileSync(join(out, PROGRESS_FILE), 'utf8'), 'OLD PROGRESS\n');
   assert.deepEqual(readdirSync(out).sort(), [PROGRESS_FILE, STATE_FILE].sort());
+});
+
+test('writeAllAtomic stages EVERY file before renaming any of them', () => {
+  // The first entry stages fine; the second cannot even be staged (its
+  // directory does not exist). A rename-as-you-go implementation would have
+  // already swapped STATE.md by then — this is what pins the ordering.
+  const out = dir();
+  writeFileSync(join(out, STATE_FILE), 'OLD STATE\n');
+  assert.throws(() =>
+    writeAllAtomic([
+      [join(out, STATE_FILE), 'NEW STATE\n'],
+      [join(out, 'no-such-dir', PROGRESS_FILE), 'NEW PROGRESS\n'],
+    ]),
+  );
+  assert.equal(
+    readFileSync(join(out, STATE_FILE), 'utf8'),
+    'OLD STATE\n',
+    'STATE.md was swapped before the whole set could be staged',
+  );
+  assert.deepEqual(readdirSync(out), [STATE_FILE], 'a temp file was left behind');
+});
+
+test('writeAllAtomic leaves no orphaned .tmp when a RENAME fails', () => {
+  // Staging succeeds for both; the second rename then fails because the
+  // destination path is a non-empty directory. The already-renamed first file
+  // stays swapped (documented window) — but nothing may be left on disk.
+  const out = dir();
+  const blocked = join(out, PROGRESS_FILE);
+  mkdirSync(blocked);
+  writeFileSync(join(blocked, 'occupant'), 'x'); // rename onto it must fail
+  writeFileSync(join(out, STATE_FILE), 'OLD STATE\n');
+
+  assert.throws(() =>
+    writeAllAtomic([
+      [join(out, STATE_FILE), 'NEW STATE\n'],
+      [blocked, 'NEW PROGRESS\n'],
+    ]),
+  );
+  const leftovers = readdirSync(out).filter((f) => f.endsWith('.tmp'));
+  assert.deepEqual(leftovers, [], `orphaned temp files: ${leftovers}`);
 });

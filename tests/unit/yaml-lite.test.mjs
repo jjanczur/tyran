@@ -151,8 +151,15 @@ test('stringify REFUSES an invisible codepoint instead of writing it', () => {
   //
   // The worst case being closed: a poisoned value PERSISTED into .tyran/ would
   // re-enter the conductor's context at every session start, on a path where
-  // none of the runtime layers is looking. A file that cannot be written
-  // cannot do that.
+  // none of the runtime layers is looking.
+  //
+  // What this guard does NOT do — corrected after a review disproved the
+  // earlier claim here by measurement: it does not make such a file
+  // impossible. It closes THIS WRITER. `parse` is untouched and happily reads
+  // a hand-written hostile file (measured: 7 invisible codepoints straight
+  // into a value), and the file can arrive by any other route — an editor, an
+  // agent's write tool, a template copied from somewhere else. The guarantee
+  // is "tyran will not author one", not "one cannot exist".
   const cp = (n) => String.fromCodePoint(n);
   for (const point of [0x202e, 0x200b, 0xe0041, 0x00ad, 0xfeff, 0x0600]) {
     assert.throws(

@@ -307,11 +307,21 @@ export function stringify(value, indent = 0) {
  * `formatScalar` already gives for newlines: fail loudly at serialization
  * time rather than write a file that reads back as something else.
  *
- * Refusing is also the STRONGEST available fix rather than the cheapest. The
- * worst case for a serializer is a poisoned value PERSISTED to a config file:
- * it would then re-enter the conductor's context at every session start,
- * through a path where none of the three runtime layers is looking. Refusing
- * to write it means that file can never exist.
+ * Refusing is the strongest fix available TO A SERIALIZER, which is a narrower
+ * claim than the one that stood here first. The worst case is a poisoned value
+ * PERSISTED to a config file: it would re-enter the conductor's context at
+ * every session start, through a path where none of the runtime layers is
+ * looking. This guard stops THIS WRITER from authoring such a file.
+ *
+ * It does NOT make the file impossible, and the earlier wording here said it
+ * did — corrected after a review disproved it by measurement. `parse` is
+ * untouched and reads a hand-written hostile file without complaint (measured:
+ * 7 invisible codepoints straight into a value), and the file can arrive by an
+ * editor, an agent's write tool, or a template copied from elsewhere. The
+ * honest guarantee is "tyran will not author one", not "one cannot exist".
+ * Closing the READ side is a separate decision with a live consumer question
+ * behind it — `schema.mjs` is the only importer today and its parsed values do
+ * not leave the validating function — so it is deliberately not done here.
  *
  * Measured before choosing: `stringify` has ZERO production consumers today —
  * only its own unit test imports it, and `schema.mjs` imports `parse` alone.

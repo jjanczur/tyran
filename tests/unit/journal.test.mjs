@@ -255,6 +255,31 @@ test('CLI: validate exits 1 on a broken journal; bad usage exits 2', () => {
   assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'append']), /status 2|Command failed/);
 });
 
+test('CLI: invoked through a symlinked path, the script still does its work', () => {
+  // The self-run guard compared resolve(argv[1]) — which keeps symlinks — with
+  // import.meta.url, which Node has already canonicalized. Reaching the script
+  // through a link therefore made main() never run: no output, no append, and
+  // EXIT 0. A critical tool that succeeds without doing anything is the exact
+  // failure "critical gates fail loudly" exists to forbid, and it is not
+  // exotic: /tmp and /var are symlinks on macOS and plugin installs resolve
+  // through links routinely.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-symlink-'));
+  const realScripts = join(base, 'real-scripts');
+  mkdirSync(realScripts);
+  writeFileSync(join(realScripts, 'journal.mjs'), readFileSync(SCRIPT));
+  const linked = join(base, 'linked-scripts');
+  symlinkSync(realScripts, linked);
+
+  const f = join(base, 'journal.jsonl');
+  const out = execFileSync(
+    process.execPath,
+    [join(linked, 'journal.mjs'), 'append', f, 'init.created', 'demo', '--data', '{"title":"t"}'],
+    { encoding: 'utf8' },
+  );
+  assert.match(out, /"ev":"init.created"/, 'the CLI produced no output at all');
+  assert.equal(readJournal(f).events.length, 1, 'nothing was appended');
+});
+
 test('EVENT_TYPES is frozen and matches the documented closed set size', () => {
   assert.ok(Object.isFrozen(EVENT_TYPES));
   assert.equal(EVENT_TYPES.length, 14);

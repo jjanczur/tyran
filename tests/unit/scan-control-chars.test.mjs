@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, lstatSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -364,6 +364,27 @@ test('a checkout without symlink support still gets its link TARGET scanned', ()
   assert.match(r.stderr, /in the symlink TARGET/);
 });
 
+test('a symlink that is tracked but absent is EXEMPT, and says so', () => {
+  // Review round 3. ENOENT is the only branch of readLinkTarget that lets an
+  // entry through, and it was the only one with no guard: turning it into a
+  // refusal passed the whole suite. The mutation makes the gate stricter
+  // rather than weaker, which is why it is not a security hole — but an
+  // unguarded pass-through is exactly the shape this story exists to remove,
+  // and a dirty working tree must not turn CI red on a file nobody edited.
+  const dir = gitRepo({ 'README.md': '# Title\n' });
+  addIndexSymlink(dir, 'gone.md', 'docs/target.md');
+
+  const part = partitionTrackedFiles(dir);
+  assert.deepEqual(part.exempt.map((e) => e.file), ['gone.md'], 'an absent link is an exemption');
+  assert.deepEqual(part.refused.map((r) => r.file), [], 'absence is a dirty tree, not an attack');
+  assert.deepEqual(part.links.map((l) => l.file), []);
+
+  const r = scan(dir);
+  assert.equal(r.status, 0, r.stderr);
+  // And, like every other exemption, it is announced rather than assumed.
+  assert.match(r.stdout, /not scanned: gone\.md — tracked but missing from the working tree/);
+});
+
 test('a link whose target cannot be read at all is REFUSED, with a remedy', () => {
   // The third branch: neither ENOENT nor EINVAL. A path too long for the
   // system answers ENAMETOOLONG to readlink and to every other syscall, so
@@ -445,8 +466,45 @@ test('every deliberate gap is announced on EVERY run, including a clean one', ()
   assert.match(r.stdout, /clean \(1 tracked text files\)/);
   assert.match(r.stdout, /deliberate gap: U\+FE00\.\.U\+FE0F/, 'the gap must be announced');
   assert.match(r.stdout, /variation selectors/);
-  // And the announcement has to be derived from the export, not typed twice.
-  assert.equal(DELIBERATELY_ALLOWED.length, 1);
+});
+
+test('the announcement is DERIVED from the export, not typed alongside it', () => {
+  // Review round 3. The test above passes just as happily over a single
+  // hard-coded console.log — it asserts that the sentence appears, not that
+  // the sentence comes from the list. `DELIBERATELY_ALLOWED.length === 1` did
+  // not help: a hard-coded printer satisfies it too.
+  //
+  // That is blocker 2 one level up. There the assertion could not go negative
+  // over an EMPTY array; here it cannot go negative over an IGNORED one. So
+  // the probe has to change the data and watch the OUTPUT follow: a second
+  // entry is added to the export in a copy of the script, and nothing else is
+  // touched. A printer that types its own sentence announces one gap and
+  // fails; a printer that walks the list announces two.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-gap-derived-'));
+  const patched = join(base, 'scan-control-chars.mjs');
+  const source = readFileSync(SCRIPT, 'utf8');
+  const anchor = 'export const DELIBERATELY_ALLOWED = Object.freeze([\n';
+  assert.ok(source.includes(anchor), 'the export moved — this probe patches source text');
+  writeFileSync(
+    patched,
+    source.replace(
+      anchor,
+      anchor + "  Object.freeze({ lo: 0x2e80, hi: 0x2e81, why: 'probe entry, review round 3' }),\n",
+    ),
+  );
+
+  const dir = gitRepo({ 'README.md': '# Title\n' });
+  const r = spawnSync(process.execPath, [patched, dir], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /deliberate gap: U\+FE00\.\.U\+FE0F/, 'the original gap must still be announced');
+  assert.match(
+    r.stdout,
+    /deliberate gap: U\+2E80\.\.U\+2E81 — probe entry, review round 3/,
+    'a gap added to the export alone was not announced: the printer is not reading the list',
+  );
+  // Both the bounds and the reason come from the entry's fields, so a printer
+  // that formats one of them by hand cannot pass either.
+  assert.equal(r.stdout.match(/deliberate gap:/g).length, 2);
 });
 
 test('a clean symlink is counted as scanned, not as an exemption', () => {

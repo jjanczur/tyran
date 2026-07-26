@@ -125,6 +125,15 @@ test('stringify quotes values that would otherwise change type', () => {
   assert.match(out, /e: plain/);
 });
 
+test('refuses to serialize a newline in a KEY, not just a value (E2S2-R11 note 1)', () => {
+  // Asymmetry found by the reviewer's 8000-case roundtrip fuzz: formatScalar
+  // guarded newlines but formatKey did not, so stringify emitted a file its
+  // own parser rejected. Loud refusal on both sides, never silent corruption.
+  assert.throws(() => stringify({ 'a\nb': 1 }), /key containing a newline/);
+  assert.throws(() => stringify({ ok: { 'x\ny': 1 } }), /key containing a newline/);
+  assert.throws(() => stringify({ ok: 'a\nb' }), /string containing a newline/);
+});
+
 test('round-trips values containing quotes (regression: E2S2-R11)', () => {
   // stringify must never emit a file its own parser rejects. The parser now
   // treats an unbalanced quote as an error, so apostrophes must be quoted.

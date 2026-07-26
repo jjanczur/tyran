@@ -266,7 +266,12 @@ test('CLI: invoked through a symlinked path, the script still does its work', ()
   const base = mkdtempSync(join(tmpdir(), 'tyran-symlink-'));
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
-  writeFileSync(join(realScripts, 'journal.mjs'), readFileSync(SCRIPT));
+  // journal.mjs now imports the shared invisibility rule (ADR-21), so the
+  // sibling has to travel with it — a copy that omits it fails at module
+  // resolution and would report the guard as broken when it is not.
+  for (const name of ['journal.mjs', 'invisible.mjs']) {
+    writeFileSync(join(realScripts, name), readFileSync(new URL(`../../scripts/${name}`, import.meta.url)));
+  }
   const linked = join(base, 'linked-scripts');
   symlinkSync(realScripts, linked);
 

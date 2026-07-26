@@ -109,18 +109,32 @@ catch.
 
 Two details worth knowing:
 
-- **Agent pairing follows `data.ticket` first.** A `report` closes the
-  still-running spawn of that agent name working on the *same ticket*; only
-  a report with no ticket falls back to the oldest open spawn of that name.
-  Order alone is not enough: with two concurrent spawns of one agent name,
-  the fast one reporting first would otherwise mark the *other* agent as
-  finished, with someone else's verdict — while the Ledger, which reads
-  `data.ticket` directly, said the opposite. The name fallback stays
-  unambiguous because **ADR-18** has `journal.append` enforce at most one
-  open spawn per agent name (chosen over a `spawn_id` that callers would
-  have to carry across a process boundary). A spawn with no matching report
-  stays visible as **running (no report yet)** — an agent that died
-  mid-story must not quietly disappear from `STATE.md`.
+- **Agent pairing is `journal.pairSpawns`, and nothing else.** A `report`
+  closes the oldest still-open `spawn` of the same agent name, and the
+  projection does not compute that answer itself — it renders the one the
+  journal gives. This used to be two implementations with two different
+  rules (this file preferred a spawn on the *same ticket*, `pairSpawns`
+  paired oldest-first and excluded unusable names outright), so `STATE.md`
+  and `doctor` could describe the same journal differently. **ADR-21**
+  settled it: one answer, not one function.
+  - The pairing stays unambiguous because **ADR-18** has `journal.append`
+    enforce at most one open spawn per agent name — chosen over a `spawn_id`
+    that callers would have to carry across a process boundary.
+  - When a journal nonetheless holds two open spawns of one name (only a
+    hand-edited file can), the pairing is oldest-first **and it says so**:
+    `project.mjs` prints `spawn/report pairing for this name is ambiguous`
+    on stderr. The old ticket-first rule guessed silently instead, and it
+    existed for journals written before ADR-18 — a population measured at
+    zero before it was removed.
+  - A `spawn` whose `data.agent` is not a usable correlator (invisible
+    characters, not NFC, empty) is **not** rendered as running and **not**
+    dropped: it appears as `unusable agent name (excluded from pairing)`,
+    with a warning. Silently omitting it would hide an agent that may still
+    be working; showing it as running would repeat the false state picture
+    ADR-18 calls worse than no picture.
+  - A spawn with no matching report stays visible as **running (no report
+    yet)** — an agent that died mid-story must not quietly disappear from
+    `STATE.md`.
 - **A gate is open unless it says otherwise.** `data.result` values
   `pass`, `passed`, `ok`, `green`, `approved` and `closed` (case-insensitive)
   close a gate; anything else — including `fail` and `open` — keeps it in

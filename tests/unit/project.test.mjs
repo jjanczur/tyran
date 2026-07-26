@@ -14,7 +14,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync, spawn } from 'node:child_process';
-import { EVENT_TYPES } from '../../scripts/journal.mjs';
+import { EVENT_TYPES, pairSpawns } from '../../scripts/journal.mjs';
 import {
   STATE_FILE,
   PROGRESS_FILE,
@@ -25,6 +25,7 @@ import {
   progressLine,
   projectFile,
   renderProjections,
+  warnings,
   checkFile,
   writeAtomic,
   writeAllAtomic,
@@ -252,54 +253,77 @@ test('an unclosed spawn stays visible as running', () => {
   assert.match(files[STATE_FILE], /\| impl-9 \|.*\*\*running \(no report yet\)\*\*/);
 });
 
-test('concurrent spawns: a report is paired by data.ticket, not by arrival order', () => {
-  // The fast agent (T-2) finishes first. Pairing on name alone would mark the
-  // agent still working on T-1 as reported, with someone else's verdict —
-  // while the Ledger, which reads data.ticket directly, said the opposite.
-  const state = fold({
-    events: [
-      ev({ ev: 'spawn', data: { agent: 'impl', role: 'implementer', ticket: 'T-1' } }),
-      ev({ ev: 'spawn', data: { agent: 'impl', role: 'implementer', ticket: 'T-2' } }),
-      ev({ ev: 'report', data: { agent: 'impl', verdict: 'REFUTED', ticket: 'T-2' } }),
-    ],
-  });
+/**
+ * TWO OPEN SPAWNS OF ONE NAME — the state ADR-18 made unrepresentable.
+ *
+ * These cases used to assert a ticket-first pairing rule that lived only here,
+ * in `fold()`. S-E3-6 removed it, and did not replace it with an option: the
+ * rule's sole justification was journals written before the ADR-18 guard, and
+ * that population was measured at zero — no such journal exists in this
+ * repository, in its git history, or on the machine that develops it. Journals
+ * are append-only, so a rule kept "for old files" can never be retired; it is
+ * a permanent second semantics, not a migration window (ADR-21).
+ *
+ * What replaces it is not a worse guess but a LOUD one. `journal.pairSpawns`
+ * is the single implementation, it pairs oldest-first by name, and `warnings()`
+ * now says the pairing is ambiguous — where previously two consumers resolved
+ * the same journal differently and neither told anyone.
+ */
+test('two open spawns of one name: pairing is oldest-first, and it says so out loud', () => {
+  const events = [
+    ev({ ev: 'spawn', data: { agent: 'impl', role: 'implementer', ticket: 'T-1' } }),
+    ev({ ev: 'spawn', data: { agent: 'impl', role: 'implementer', ticket: 'T-2' } }),
+    ev({ ev: 'report', data: { agent: 'impl', verdict: 'REFUTED', ticket: 'T-2' } }),
+  ];
+  const state = fold({ events });
   const byTicket = Object.fromEntries(state.agents.map((a) => [a.ticket, a]));
-  assert.equal(byTicket['T-2'].status, 'reported');
-  assert.equal(byTicket['T-2'].verdict, 'REFUTED');
-  assert.equal(byTicket['T-1'].status, 'running');
-  assert.equal(byTicket['T-1'].verdict, null);
-  // the Agents table and the Ledger must tell the same story
+  // Oldest-first: the report closes the T-1 spawn, because that is the answer
+  // journal.pairSpawns gives and there is now only one answer.
+  assert.equal(byTicket['T-1'].status, 'reported');
+  assert.equal(byTicket['T-1'].verdict, 'REFUTED');
+  assert.equal(byTicket['T-2'].status, 'running');
+  // The projection agrees with journal.pairSpawns, codepoint for codepoint.
+  const { open } = pairSpawns(events);
+  assert.deepEqual([...open.keys()], ['impl']);
+  assert.equal(open.get('impl').length, 1);
+  // And the ambiguity is REPORTED rather than silently resolved.
+  assert.ok(
+    warnings(state).some((w) => /2 open spawns/.test(w) && /ambiguous/.test(w)),
+    'an ambiguous pairing must not be silent',
+  );
+  // The Ledger still records the report against the ticket the report NAMED —
+  // that reads data.ticket directly and never depended on pairing.
   assert.equal(state.ticketList.find((t) => t.id === 'T-2').report.verdict, 'REFUTED');
-  assert.equal(state.ticketList.find((t) => t.id === 'T-1').report, null);
 });
 
-test('three concurrent spawns, two out-of-order reports: every verdict lands right', () => {
-  const state = fold({
-    events: [
-      ev({ ev: 'spawn', data: { agent: 'impl', role: 'r', ticket: 'T-1' } }),
-      ev({ ev: 'spawn', data: { agent: 'impl', role: 'r', ticket: 'T-2' } }),
-      ev({ ev: 'spawn', data: { agent: 'impl', role: 'r', ticket: 'T-3' } }),
-      ev({ ev: 'report', data: { agent: 'impl', verdict: 'v3', ticket: 'T-3' } }),
-      ev({ ev: 'report', data: { agent: 'impl', verdict: 'v1', ticket: 'T-1' } }),
-    ],
-  });
+test('the projection and journal.pairSpawns agree on who is still open', () => {
+  // The conformance check for the OTHER half of ADR-21, on ordinary journals:
+  // one spawn per name, which is the only shape `append` will write.
+  const events = [
+    ev({ ev: 'spawn', data: { agent: 'a1', role: 'r', ticket: 'T-1' } }),
+    ev({ ev: 'spawn', data: { agent: 'a2', role: 'r', ticket: 'T-2' } }),
+    ev({ ev: 'spawn', data: { agent: 'a3', role: 'r', ticket: 'T-3' } }),
+    ev({ ev: 'report', data: { agent: 'a3', verdict: 'v3', ticket: 'T-3' } }),
+    ev({ ev: 'report', data: { agent: 'a1', verdict: 'v1', ticket: 'T-1' } }),
+  ];
+  const state = fold({ events });
   assert.deepEqual(
     state.agents.map((a) => `${a.ticket}:${a.status}:${a.verdict ?? '-'}`),
     ['T-1:reported:v1', 'T-2:running:-', 'T-3:reported:v3'],
   );
+  const stillRunning = state.agents.filter((a) => a.status === 'running').map((a) => a.agent);
+  assert.deepEqual(stillRunning, [...pairSpawns(events).open.keys()]);
+  assert.deepEqual(warnings(state), [], 'a well-formed journal must produce no pairing warning');
 });
 
-test('a report with no ticket still falls back to the oldest open spawn of that name', () => {
-  // Ambiguous by nature; ADR-18 makes journal.append enforce one open spawn
-  // per agent name, which is what makes this fallback provably unambiguous.
+test('a report with no ticket closes the open spawn of that name', () => {
   const state = fold({
     events: [
       ev({ ev: 'spawn', data: { agent: 'impl', role: 'r', ticket: 'T-1' } }),
-      ev({ ev: 'spawn', data: { agent: 'impl', role: 'r', ticket: 'T-2' } }),
       ev({ ev: 'report', data: { agent: 'impl', verdict: 'done' } }),
     ],
   });
-  assert.deepEqual(state.agents.map((a) => a.status), ['reported', 'running']);
+  assert.deepEqual(state.agents.map((a) => a.status), ['reported']);
 });
 
 test('a report whose ticket matches no open spawn does not steal another ticket', () => {
@@ -309,8 +333,8 @@ test('a report whose ticket matches no open spawn does not steal another ticket'
       ev({ ev: 'report', data: { agent: 'impl', verdict: 'done', ticket: 'T-9' } }),
     ],
   });
-  // falls back to the open spawn of the same name (ADR-18 keeps that unique),
-  // and the ledger still records the report against the ticket it named
+  // closes the open spawn of the same name (ADR-18 keeps that unique), and the
+  // ledger still records the report against the ticket it named
   assert.equal(state.agents.length, 1);
   assert.equal(state.ticketList.find((t) => t.id === 'T-9').report.verdict, 'done');
 });
@@ -617,7 +641,7 @@ test('CLI: invoked through a symlinked path, the projector still writes files', 
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
   // project.mjs imports journal.mjs — the copy has to carry both.
-  for (const name of ['project.mjs', 'journal.mjs']) {
+  for (const name of ['project.mjs', 'journal.mjs', 'invisible.mjs']) {
     writeFileSync(join(realScripts, name), readFileSync(new URL(`../../scripts/${name}`, import.meta.url)));
   }
   const linked = join(base, 'linked-scripts');

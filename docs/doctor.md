@@ -90,10 +90,12 @@ possible to change one and keep the suite green.
 - **One implementation per rule.** Spawn/report pairing is
   `journal.pairSpawns()`, lease ownership is `journal.tail()`, projection
   freshness is `project.checkFile()`, path classification is
-  `schema.classifyPath()`, file schemas are `schema.validateFile()`. Doctor
+  `schema.classifyPath()`, file schemas are `schema.validateFile()`, and
+  "is this codepoint invisible" is `invisible.invisibleProblem()`. Doctor
   asks those modules; it never re-derives their answers. Two implementations
   of one rule diverge at the first "optimization" — this repo has the scar
-  (ADR-18).
+  twice over (ADR-18, and ADR-21 after the invisibility rule was found in
+  three spellings that disagreed on 456 codepoints).
 - **No false alarm on a healthy repo.** No `.tyran/`, an empty journal, no
   projections yet, no config: all exit `0`. A tool that cries wolf on a
   fresh checkout is uninstalled before it ever finds anything.

@@ -4,3 +4,16 @@
 # ...but never touch test fixtures: the golden projections are compared
 # byte for byte, so a CRLF rewrite on checkout would fail the suite.
 tests/fixtures/** -text
+
+# Binary assets, declared EXPLICITLY. scripts/scan-control-chars.mjs (ADR-19)
+# skips only what is declared here; a tracked file that is not valid UTF-8 and
+# not listed below fails the gate, so no file can leave the scan quietly.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary

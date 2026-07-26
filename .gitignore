@@ -10,3 +10,6 @@ dist/
 # OS / editor noise
 .DS_Store
 *.log
+
+# Coordination leases held by running agents — machine-local, never shared.
+locks/

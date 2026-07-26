@@ -16,7 +16,16 @@
  *   node project.mjs <journal.jsonl> [--out-dir <dir>] [--check]
  * Exit: 0 ok · 1 projections drifted (--check) · 2 usage/IO error
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJournal } from './journal.mjs';
@@ -55,15 +64,22 @@ export function inline(value) {
   if (typeof value === 'string') s = value;
   else if (Array.isArray(value)) s = value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ');
   else s = JSON.stringify(value) ?? String(value);
-  // C0 (\u0000-\u001F), DEL + C1 (\u007F-\u009F), zero-width and
-  // direction marks (\u200B-\u200F), bidi embeddings/overrides
-  // (\u202A-\u202E), bidi isolates (\u2066-\u2069) and the BOM (\uFEFF)
-  // all collapse to a space. Control characters would break the row; an
-  // unterminated RLO would mirror every following column, so a journal
-  // value could rewrite the document a human reads (Trojan Source).
+  // C0 (\u0000-\u001F), DEL + C1 (\u007F-\u009F), the Arabic letter
+  // mark (\u061C), zero-width and direction marks (\u200B-\u200F), bidi
+  // embeddings/overrides (\u202A-\u202E), bidi isolates (\u2066-\u2069) and
+  // the BOM (\uFEFF) all collapse to a space. Control characters would break
+  // the row; an unterminated RLO would mirror every following column, so a
+  // journal value could rewrite the document a human reads (Trojan Source).
+  //
+  // \u061C was MISSING until the seeded fuzz in
+  // tests/unit/projection-fuzz.test.mjs caught it on its first run. This list
+  // was maintained by hand here while journal.mjs expressed the same idea as
+  // \p{Cf}, which covers \u061C for free — two spellings of one rule, drifting
+  // exactly as ADR-18 predicts. Keep it in step with
+  // scripts/scan-control-chars.mjs (ADR-19), which bans the same set repo-wide.
   s = s
     .replace(
-      /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
+      /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,
       ' ',
     )
     .replace(/\s+/g, ' ')
@@ -814,4 +830,47 @@ function main() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+/**
+ * Canonical absolute path, falling back to the merely-resolved one when the
+ * path cannot be canonicalized.
+ *
+ * The fallback is load-bearing, and NOT for `node --eval`: there argv[1] is
+ * undefined and the caller returns before ever reaching this. It is for the
+ * cases where argv[1] names something realpath cannot follow — the script
+ * directory was renamed or deleted after launch, a parent component is an
+ * unreadable directory (EACCES), or a launcher/shim rewrote argv[1] to a
+ * logical name that was never a real file. Without the fallback the guard
+ * throws ENOENT out of module scope and the tool dies at startup, which is a
+ * different bug, not a fix.
+ */
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * True when this module is the program's entry point.
+ *
+ * BOTH sides must be canonicalized. `import.meta.url` already names the real
+ * file — Node resolves module specifiers through symlinks — while
+ * `process.argv[1]` is whatever the caller typed. Comparing them raw turned
+ * every invocation through a symlinked path into a SILENT no-op under exit 0:
+ * `main()` never ran, no projection was written, nothing said so. That is not
+ * theoretical — `/tmp` and `/var` are symlinks on macOS, and plugin installs
+ * routinely reach `scripts/` through one.
+ *
+ * Deliberately duplicated in journal.mjs rather than shared: this is boot
+ * boilerplate, not a domain rule, and journal.mjs is the zero-dependency core
+ * that imports nothing but `node:` builtins. ADR-18 is about one RULE having
+ * one implementation (see pairSpawns), which this is not.
+ */
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

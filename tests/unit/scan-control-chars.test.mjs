@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -305,6 +305,148 @@ test('a symlink whose TARGET carries a control character fails the gate', () => 
   assert.match(r.stderr, /link\.md/);
   assert.match(r.stderr, /U\+202E RIGHT-TO-LEFT OVERRIDE/);
   assert.match(r.stderr, /in the symlink TARGET/);
+});
+
+/**
+ * A repo where an index entry is a symlink but the working tree is not — the
+ * shape `git clone` produces under `core.symlinks=false`, which is the DEFAULT
+ * on Windows. Git materializes mode 120000 as an ordinary file whose CONTENTS
+ * are the target path, and still reports 120000 from `ls-files -s`.
+ */
+function gitRepoWithFakeSymlink(files, linkName, linkTarget) {
+  const dir = gitRepo(files);
+  const run = (args, opts) => {
+    const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', ...opts });
+    assert.equal(r.status, 0, `git ${args.join(' ')} failed: ${r.stderr}`);
+    return r.stdout;
+  };
+  run(['config', 'core.symlinks', 'false']);
+  const sha = run(['hash-object', '-w', '--stdin'], { input: linkTarget }).trim();
+  run(['update-index', '--add', '--cacheinfo', `120000,${sha},${linkName}`]);
+  writeFileSync(join(dir, linkName), linkTarget);
+  return dir;
+}
+
+/** Add a mode-120000 index entry directly, without creating a link on disk. */
+function addIndexSymlink(dir, path, target) {
+  const hash = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: dir, encoding: 'utf8', input: target });
+  assert.equal(hash.status, 0, hash.stderr);
+  const upd = spawnSync('git', ['update-index', '--add', '--cacheinfo', `120000,${hash.stdout.trim()},${path}`], {
+    cwd: dir,
+    encoding: 'utf8',
+  });
+  assert.equal(upd.status, 0, upd.stderr);
+}
+
+test('a checkout without symlink support still gets its link TARGET scanned', () => {
+  // Blocker 1 (review round 2). readlink() answers EINVAL here, because the
+  // entry git calls a symlink is an ordinary file on disk. Handling only
+  // ENOENT turned that into `throw` -> exit 2 with a bare errno: a REGRESSION,
+  // since the previous scanner read the same file with readFileSync and caught
+  // the payload. Git has already told us the entry is a link; the target is in
+  // the file's bytes, and the gate must go on reading it.
+  const dir = gitRepoWithFakeSymlink(
+    { 'README.md': '# Title\n' },
+    'link.md',
+    'docs/target' + cp(0x202e) + 'gpj.md',
+  );
+  assert.equal(lstatSync(join(dir, 'link.md')).isSymbolicLink(), false, 'premise: not a real symlink');
+
+  const part = partitionTrackedFiles(dir);
+  assert.deepEqual(part.links.map((l) => l.file), ['link.md'], 'the entry must still be read as a link');
+  assert.deepEqual(part.exempt.map((e) => e.file), [], 'an unreadable link must never be skipped silently');
+  assert.deepEqual(part.refused.map((r) => r.file), [], 'the target is recoverable, so this is not a refusal');
+
+  const r = scan(dir);
+  assert.equal(r.status, 1, 'the payload must still fail the gate');
+  assert.match(r.stderr, /link\.md/);
+  assert.match(r.stderr, /U\+202E RIGHT-TO-LEFT OVERRIDE/);
+  assert.match(r.stderr, /in the symlink TARGET/);
+});
+
+test('a link whose target cannot be read at all is REFUSED, with a remedy', () => {
+  // The third branch: neither ENOENT nor EINVAL. A path too long for the
+  // system answers ENAMETOOLONG to readlink and to every other syscall, so
+  // nothing is recoverable. It must not crash with a bare errno — exit 2 says
+  // "the gate broke" and offers no next step — and it must not be skipped. It
+  // is a refusal, the same answer this scanner already gives an undecodable
+  // file, and it carries the remedy for THIS problem rather than the advice to
+  // declare a binary that is not the problem.
+  const dir = gitRepo({ 'README.md': '# Title\n' });
+  const tooLong = Array.from({ length: 12 }, (_, i) => `d${i}`.padEnd(200, 'x')).join('/') + '/link.md';
+  addIndexSymlink(dir, tooLong, 'target.md');
+
+  const part = partitionTrackedFiles(dir);
+  assert.deepEqual(part.refused.map((r) => r.file), [tooLong]);
+  assert.deepEqual(part.exempt.map((e) => e.file), [], 'an unreadable link is not an exemption');
+  assert.deepEqual(part.links.map((l) => l.file), []);
+
+  const r = scan(dir);
+  assert.equal(r.status, 1, 'refusal is exit 1, not a crash');
+  assert.match(r.stderr, /ENAMETOOLONG/, 'the errno is a fact in the message, not the whole message');
+  assert.match(r.stderr, /git ls-files -s/, 'the message must tell the reader how to look into it');
+  assert.doesNotMatch(r.stderr, /^\s+at /m, 'a stack trace is not a finding');
+  assert.doesNotMatch(r.stderr, /binary$/m, 'declaring a binary is the wrong remedy for a broken link');
+});
+
+test('a 120000 entry that is a DIRECTORY on disk is refused, not crashed on', () => {
+  // The EINVAL branch again, with the bytes unreadable too: readlink says
+  // EINVAL for a directory and readFileSync says EISDIR. Both failures have to
+  // land in one refusal rather than escaping as an exception from inside the
+  // recovery path — the recovery must not be able to break the gate worse than
+  // the problem it recovers from.
+  const dir = gitRepo({ 'README.md': '# Title\n' });
+  mkdirSync(join(dir, 'weird'));
+  addIndexSymlink(dir, 'weird', 'target.md');
+
+  const part = partitionTrackedFiles(dir);
+  assert.deepEqual(part.refused.map((r) => r.file), ['weird']);
+  const r = scan(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /EISDIR/);
+  assert.match(r.stderr, /git ls-files -s/);
+});
+
+test('a link target that is not valid UTF-8 is refused, not silently mangled', () => {
+  // Review point 4. readlinkSync without 'buffer' replaces undecodable bytes
+  // with U+FFFD, so a target could lose its poison on the way in — while the
+  // CONTENTS of a file in the same situation are refused outright. The two
+  // sides of one criterion have to agree, or the weaker one is the whole rule.
+  const dir = gitRepo({ 'README.md': '# Title\n' });
+  symlinkSync(Buffer.from([0x64, 0x6f, 0x63, 0xff, 0x2e, 0x6d, 0x64]), join(dir, 'link.md'));
+  spawnSync('git', ['add', '-A'], { cwd: dir });
+
+  const part = partitionTrackedFiles(dir);
+  assert.deepEqual(part.refused.map((r) => r.file), ['link.md']);
+  assert.deepEqual(part.links.map((l) => l.file), [], 'a mangled target must not be scanned as if it were fine');
+  const r = scan(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /link\.md/);
+  assert.match(r.stderr, /not valid UTF-8/);
+});
+
+test('every deliberate gap is announced on EVERY run, including a clean one', () => {
+  // Blocker 2 (review round 2). The gap in U+FE00..U+FE0F is a real decision,
+  // but a decision recorded only in a source comment is invisible where it
+  // matters: 50 variation selectors carry 25 bytes of ASCII past all three
+  // layers, and the gate's output said "clean" without a word about it.
+  //
+  // This file already applies the opposite rule to file exemptions —
+  // "leaving the scan can never be quiet" — and prints them before any
+  // verdict, clean or not. A gap in the RULE deserves at least as much.
+  //
+  // Asserted on the CLI output rather than on the exported array, because an
+  // assertion that loops over the array proves nothing when the array is
+  // empty: emptying DELIBERATELY_ALLOWED left the whole suite green (mutant
+  // R16 in review round 2).
+  const dir = gitRepo({ 'README.md': '# Title\n' });
+  const r = scan(dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /clean \(1 tracked text files\)/);
+  assert.match(r.stdout, /deliberate gap: U\+FE00\.\.U\+FE0F/, 'the gap must be announced');
+  assert.match(r.stdout, /variation selectors/);
+  // And the announcement has to be derived from the export, not typed twice.
+  assert.equal(DELIBERATELY_ALLOWED.length, 1);
 });
 
 test('a clean symlink is counted as scanned, not as an exemption', () => {

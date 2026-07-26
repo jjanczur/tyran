@@ -297,6 +297,63 @@ function isValidUtf8(buffer) {
  * are generated STATE.md files — precisely where the bidi bug behind ADR-19
  * landed. Excusing them would aim the gate away from its own motivating case.
  */
+const LINK_REMEDY =
+  'Git records the mode of every entry. Inspect it with:\n' +
+  '    git ls-files -s -- <path>\n' +
+  'A 120000 entry whose target cannot be read is either a damaged working tree\n' +
+  '(re-checkout the path) or a target this scanner must not guess at.';
+
+/**
+ * The target of an entry git records as a symlink (mode 120000), as
+ * `{target}` | `{exempt}` | `{refused}` — never a throw.
+ *
+ * Three outcomes, and the reason each exists:
+ *
+ *  - **ENOENT** — the working tree is dirty and the entry is simply absent.
+ *    An exemption, reported like every other one.
+ *  - **EINVAL** — readlink was handed something that is not a link. This is
+ *    NOT exotic: `core.symlinks=false` is git's DEFAULT on Windows, and under
+ *    it a clone materializes mode 120000 as an ordinary file whose CONTENTS
+ *    are the target path, while `ls-files -s` still says 120000. Git has
+ *    already told us this is a link, so the target is read from those bytes.
+ *    Failing here would be a regression: the previous scanner read that file
+ *    with readFileSync and caught the payload inside it.
+ *  - **anything else** — a refusal with an actionable message, not a bare
+ *    errno escaping as an exception. A gate that dies with a stack trace has
+ *    not made a finding; it has broken, and exit 2 tells the reader nothing
+ *    about what to do next.
+ *
+ * The target is read as BYTES in both branches. `readlinkSync` with no
+ * encoding replaces undecodable bytes with U+FFFD, which would quietly sand
+ * the poison off a target — while the same bytes inside a file's CONTENTS are
+ * refused outright. One criterion cannot hold on one side and not the other,
+ * or the weaker side is the real rule.
+ */
+function readLinkTarget(abs) {
+  let bytes;
+  try {
+    bytes = readlinkSync(abs, 'buffer');
+  } catch (err) {
+    if (err.code === 'ENOENT') return { exempt: 'tracked but missing from the working tree' };
+    if (err.code !== 'EINVAL') {
+      return { refused: `git records this as a symlink (mode 120000) but its target could not be read (${err.code})` };
+    }
+    try {
+      bytes = readFileSync(abs);
+    } catch (readErr) {
+      return {
+        refused:
+          'git records this as a symlink (mode 120000), it is not one on disk, ' +
+          `and its contents could not be read either (${readErr.code})`,
+      };
+    }
+  }
+  if (!isValidUtf8(bytes)) {
+    return { refused: 'the symlink target is not valid UTF-8, so it cannot be scanned without mangling it' };
+  }
+  return { target: bytes.toString('utf8') };
+}
+
 export function partitionTrackedFiles(cwd = process.cwd()) {
   const empty = { paths: [], scan: [], links: [], exempt: [], refused: [] };
   // `-s` for the mode, because a symlink must never be read with readFileSync:
@@ -331,18 +388,10 @@ export function partitionTrackedFiles(cwd = process.cwd()) {
   const out = { paths: candidates, scan: [], links: [], exempt: [], refused: [] };
   for (const path of candidates) {
     if (modes.get(path) === '120000') {
-      // The payload of a symlink is its target string. Read it with readlink,
-      // which does NOT follow the link, so a dangling target is still text we
-      // can scan rather than an ENOENT that excuses the entry.
-      try {
-        out.links.push({ file: path, target: readlinkSync(resolve(cwd, path)) });
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          out.exempt.push({ file: path, reason: 'tracked but missing from the working tree' });
-          continue;
-        }
-        throw err;
-      }
+      const outcome = readLinkTarget(resolve(cwd, path));
+      if (outcome.target !== undefined) out.links.push({ file: path, target: outcome.target });
+      else if (outcome.exempt !== undefined) out.exempt.push({ file: path, reason: outcome.exempt });
+      else out.refused.push({ file: path, reason: outcome.refused, remedy: LINK_REMEDY });
       continue;
     }
     if (declaredBinary.has(path)) {
@@ -420,6 +469,19 @@ function main() {
     console.error(`scan-control-chars: ${err.message}`);
     process.exit(2);
   }
+  // Announced BEFORE any verdict, on every run, clean or not — the same rule
+  // the file exemptions below follow, for the same reason. A gap that lives
+  // only in a source comment is invisible exactly where it is load-bearing:
+  // fifty variation selectors carry twenty-five bytes of ASCII past all three
+  // layers of this repo's defences, and without this line the gate would print
+  // "clean" over them without a word. Derived from the export, never typed
+  // twice, so emptying the export cannot leave the promise standing.
+  for (const gap of DELIBERATELY_ALLOWED) {
+    console.log(
+      `scan-control-chars: deliberate gap: ${formatCodePoint(gap.lo)}..${formatCodePoint(gap.hi)} — ${gap.why}`,
+    );
+  }
+
   // Announced BEFORE any verdict, on every run, clean or not. An exemption
   // that only shows up when something else already failed is not visible —
   // and the whole point is that leaving the scan can never be quiet.
@@ -439,14 +501,23 @@ function main() {
     for (const { file, reason } of report.refused) {
       console.error(`scan-control-chars: ${file}: ${reason}`);
     }
-    console.error(
-      `\nscan-control-chars: ${report.refused.length} tracked file(s) could not be read as\n` +
-        'text and are not declared binary. This is refused rather than skipped: one\n' +
-        'stray byte is enough to make a poisoned text file undecodable, which would\n' +
-        'otherwise carry it out of the scan under a green tick.\n' +
-        'If the file really is binary, declare it in .gitattributes:\n' +
-        `    ${report.refused[0].file} binary`,
-    );
+    // Two classes of refusal, two remedies. Printing the `binary` advice for a
+    // broken symlink would send the reader to declare a file that is not the
+    // problem — an unactionable message is how a gate becomes an obstacle.
+    const undecodable = report.refused.filter((r) => r.remedy === undefined);
+    if (undecodable.length > 0) {
+      console.error(
+        `\nscan-control-chars: ${undecodable.length} tracked file(s) could not be read as\n` +
+          'text and are not declared binary. This is refused rather than skipped: one\n' +
+          'stray byte is enough to make a poisoned text file undecodable, which would\n' +
+          'otherwise carry it out of the scan under a green tick.\n' +
+          'If the file really is binary, declare it in .gitattributes:\n' +
+          `    ${undecodable[0].file} binary`,
+      );
+    }
+    for (const remedy of new Set(report.refused.map((r) => r.remedy).filter((r) => r !== undefined))) {
+      console.error(`\n${remedy}`);
+    }
     process.exit(1);
   }
 

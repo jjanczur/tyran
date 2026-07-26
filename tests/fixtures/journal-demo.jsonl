@@ -1,0 +1,20 @@
+{"ts":"2026-07-26T09:00:00.000Z","ev":"init.created","init":"demo","actor":"conductor","data":{"title":"Demo initiative"}}
+{"ts":"2026-07-26T09:01:00.000Z","ev":"plan.accepted","init":"demo","actor":"conductor","data":{"stories":3}}
+{"ts":"2026-07-26T09:02:00.000Z","ev":"ticket.created","init":"demo","actor":"conductor","data":{"id":"T-1","title":"journal module","deps":[]}}
+{"ts":"2026-07-26T09:02:01.000Z","ev":"ticket.created","init":"demo","actor":"conductor","data":{"id":"T-2","title":"schemas | with a pipe and `backticks`","deps":["T-1"]}}
+{"ts":"2026-07-26T09:02:02.000Z","ev":"ticket.created","init":"demo","actor":"conductor","data":{"id":"T-10","title":"projections","deps":["T-1"]}}
+{"ts":"2026-07-26T09:03:00.000Z","ev":"decision","init":"demo","actor":"conductor","data":{"id":"D-1","text":"zero dependencies, plain Node >= 22"}}
+{"ts":"2026-07-26T09:04:00.000Z","ev":"lease.acquired","init":"demo","actor":"conductor","data":{"resource":"worktree:tyran-s1","holder":"impl-1"}}
+{"ts":"2026-07-26T09:04:01.000Z","ev":"spawn","init":"demo","actor":"conductor","data":{"agent":"impl-1","role":"implementer","model":"work","ticket":"T-1","worktree":"tyran-s1"}}
+{"ts":"2026-07-26T09:30:00.000Z","ev":"report","init":"demo","actor":"impl-1","data":{"agent":"impl-1","verdict":"done","ticket":"T-1","evidence":[{"cmd":"node --test","exit":0,"counts":"22 passed"}]}}
+{"ts":"2026-07-26T09:31:00.000Z","ev":"review","init":"demo","actor":"rev-1","data":{"ticket":"T-1","verdict":"APPROVE","by":"rev-1"}}
+{"ts":"2026-07-26T09:32:00.000Z","ev":"merge","init":"demo","actor":"conductor","data":{"ticket":"T-1","sha":"88ea8cb","mode":"rebase"}}
+{"ts":"2026-07-26T09:33:00.000Z","ev":"lease.released","init":"demo","actor":"impl-1","data":{"resource":"worktree:tyran-s1","holder":"impl-1"}}
+{"ts":"2026-07-26T09:34:00.000Z","ev":"gate","init":"demo","actor":"conductor","data":{"kind":"tests","result":"pass","evidence_ref":"28 passing / 0 failing"}}
+{"ts":"2026-07-26T09:35:00.000Z","ev":"gate","init":"demo","actor":"conductor","data":{"kind":"plan-approval","result":"open","evidence_ref":"waiting for the operator"}}
+{"ts":"2026-07-26T09:36:00.000Z","ev":"lease.acquired","init":"demo","actor":"conductor","data":{"resource":"worktree:tyran-s2","holder":"impl-2"}}
+{"ts":"2026-07-26T09:36:01.000Z","ev":"spawn","init":"demo","actor":"conductor","data":{"agent":"impl-2","role":"implementer","model":"work","ticket":"T-2","worktree":"tyran-s2"}}
+{"ts":"2026-07-26T09:40:00.000Z","ev":"error","init":"demo","actor":"impl-2","data":{"class":"flaky-test","detail":"race in withLock under 20 concurrent processes"}}
+{"ts":"2026-07-26T09:41:00.000Z","ev":"retro.entry","init":"demo","actor":"tyran-retro","data":{"kind":"skill","target":"skills/tyran/SKILL.md","confidence":"medium"}}
+{"ts":"2026-07-26T09:41:30.000Z","ev":"lease.released","init":"demo","actor":"intruder","data":{"resource":"worktree:tyran-s2","holder":"intruder"}}
+{"ts":"2026-07-26T09:42:00.000Z","ev":"checkpoint","init":"demo","actor":"conductor","data":{"phase":"E2","next_steps":["re-read STATE.md","finish the T-2 review","then start T-10"]}}

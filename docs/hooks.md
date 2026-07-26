@@ -47,8 +47,13 @@ await main(() =>
     deadlineMs: DEADLINE_MS,
     handler: ({ input }) => {
       const command = input.tool_input?.command ?? '';
+      // Note what the reason does NOT contain. A refusal is written into the
+      // transcript and into the model's context, so `reason: ${command}`
+      // would republish whatever it objected to — which for a secrets check
+      // means leaking the key in the act of refusing to leak it. Name the
+      // location and the rule, never the finding.
       return looksLikeASecret(command)
-        ? { decision: 'deny', reason: `refusing: ${command}` }
+        ? { decision: 'deny', reason: 'refusing: the command matched rule X at position N' }
         : PASS;
     },
   }),
@@ -143,6 +148,110 @@ section boundary, always saying how much it dropped.
   CI scanner enforces and the set a gate escapes cannot drift apart. When the
   scanner's list grows — as it did with the TAG block in ADR-19's first
   correction — the runtime inherits it with no edit.
+
+## The secrets gate, and exactly where it stops
+
+`hooks/scripts/secrets-gate.mjs` is registered on `PreToolUse` / `Bash`. It is
+the one control here whose failure is irreversible: a key pushed to a public
+repository is burned when it is published, and deleting the commit afterwards
+does not unburn it. Everything about it — including the parts that look
+paranoid — comes from that.
+
+### What it checks, and why it is placed where it is
+
+A `PreToolUse` hook sees the state **before** the command runs, so it can only
+check content that already exists. That decides the architecture:
+
+| the command | what is scanned | effective? |
+|---|---|---|
+| `git commit` | the staged index | yes — the early warning |
+| `git push`, `gh pr create`, `gh release create`, `gh repo create` | every local commit not reachable from any remote | yes — **this is the real boundary** |
+| `git am`, `git apply`, `git cherry-pick`, `git rebase`, a commit made through the GitHub API, a commit made before the gate was installed | nothing, at that moment | no — and it does not need to be |
+
+The last row is the point rather than the gap. Content arriving from a patch
+or another branch does not exist in a scannable form when the gate runs, so
+the gate does not pretend to check it; it is caught at the **push**, because
+publication is the irreversible act and every path converges there.
+
+The command line itself is scanned as data too, through the same ruleset.
+Without that, `git commit -m "<key>"` puts a secret in history without it ever
+being a staged file — a hole shaped exactly like a commit message.
+
+### What it refuses without scanning anything
+
+`--no-verify` (and `-n` on `commit`, which is the same flag), a `core.hooksPath`
+override, `--force` on a push (`--force-with-lease` and `--force-if-includes`
+are fine and the refusal explains why the difference is not stylistic), and
+`kill -9`. Each of these is a way of switching a control off rather than a way
+of doing work, and each refusal carries the thing to do instead — a refusal
+with no way forward produces an agent that looks for a way around it.
+
+### What it does NOT catch — the declared boundary
+
+This section is the honest half, and it is pinned by tests (`DECLARED_MISSES`
+in `tests/unit/hook-secrets-gate.test.mjs`) so it cannot quietly become a lie.
+Recognising "this is a commit" from a shell command is a denylist on hostile
+input and is **structurally incapable of being complete** (ADR-19 correction
+1): an enumeration moves the hole, it does not close it.
+
+- **Aliases and wrappers.** `gc -m x`, an aliased `g`, `bash ./release.sh`,
+  `make deploy`. The gate never sees the alias table or the script's contents.
+- **A subcommand assembled at run time.** `c=commit; git $c -m x`,
+  `git $(printf commit) -m x`. The gate does not expand anything, on purpose —
+  that is what keeps hostile input out of a shell.
+- **Any tool that is not `Bash`.** A git MCP server exposing `git_commit`, or
+  a future tool that commits directly, is not covered. `Write` and `Edit` are
+  deliberately not gated: they put content in the working tree, and the
+  working tree is not published — the index and the push are, and both are
+  checked whichever tool wrote the file.
+- **Exfiltration that never touches git.** `curl -d @.env`, `gh gist create`,
+  printing a key into the transcript. Those are a different control's job.
+- **The scanner's own false negatives, which are not small.** Measured on
+  gitleaks 8.30.1: of 60 randomly generated, correctly formatted AWS access
+  key IDs written as `AWS_ACCESS_KEY_ID=<key>`, **24 were reported clean**; in
+  the `aws_key = "<key>"` shape, 5 of 60 were still missed. A private-key
+  block was detected 10 times out of 10. This gate is exactly as good as the
+  ruleset it delegates to, and that ruleset misses things.
+
+So: **this gate is not a guarantee that a secret cannot be committed.** It is
+a mechanical check that catches the ordinary case at the point where the
+damage becomes permanent. A control advertised as unbypassable would be a
+false guarantee, and a false guarantee is worse than a stated limit because
+people stop looking.
+
+### False alarms, measured rather than asserted
+
+A gate that blocks legitimate work gets switched off, and then it protects
+nothing. Measured on 7168 real `Bash` commands from this project's own
+transcripts:
+
+| outcome | count | share |
+|---|---|---|
+| no scan, no cost | 6815 | 95.1% |
+| a scan is triggered (34 ms staged, 187 ms for a 133-commit range) | 352 | 4.9% |
+| refused by an unconditional rule | 1 | 0.014% — and it was a **true** positive, a real `git commit --no-verify` |
+| refused because a directory was named through a variable | 14 | 0.20% of all commands, 4.0% of the ones that trigger |
+
+On content: over the full history of a 2151-commit repository, gitleaks flags
+30 commits (1.4%). Over this repository's own 52 commits it flags none.
+
+The remedy for a false positive is the scanner's own: record the finding's
+fingerprint in `.gitleaksignore`, or agree a baseline at
+`.gitleaks-baseline.json` (or point `TYRAN_GITLEAKS_BASELINE` at one). Working
+around the gate is not on the list.
+
+### Costs that are deliberate
+
+- **No gitleaks means no commit.** A missing scanner is a refusal with install
+  instructions, not a warning. A check that passes when its dependency is gone
+  is a check you disable by uninstalling a package.
+- **The push scan is bounded to `--all --not --remotes`.** Measured: scanning
+  the full history of a 2151-commit repository takes 18.8 s, which is past
+  every hook budget — an unbounded scan is a gate that always times out, and a
+  gate that always refuses is switched off within a day.
+- **A scan that overruns refuses and does not read its partial report.** A
+  killed scan can leave a well-formed empty report on disk, and "nothing
+  found" must never be confusable with "never looked".
 
 ## Testing a hook
 

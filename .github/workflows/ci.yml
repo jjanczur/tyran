@@ -13,8 +13,37 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - name: Install gitleaks (the secrets gate's scanner)
+        # Pinned by version AND by checksum. Without it the secrets gate's
+        # end-to-end test SKIPS, and a skipped test on the one control whose
+        # failure is irreversible is indistinguishable from a passing one.
+        # A skip that only happens on CI is the worst kind: it is invisible
+        # exactly where the merge decision is made.
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          sha=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          curl -sSL --retry 3 -o /tmp/gitleaks.tar.gz "$url"
+          echo "${sha}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
       - name: Unit tests
         run: node --test "tests/**/*.test.mjs"
+      - name: No test may be silently skipped
+        # `node --test` reports a skip as a pass. The secrets gate's real-binary
+        # test skips itself when gitleaks is absent, which is right locally and
+        # wrong here, so CI asserts the count is zero rather than trusting the
+        # green tick above it.
+        run: |
+          set -euo pipefail
+          node --test "tests/**/*.test.mjs" > /tmp/test-output.txt 2>&1 || true
+          grep -E '^# skipped 0$' /tmp/test-output.txt || {
+            echo "A test was skipped on CI. Skips are invisible in a green run:"
+            grep -E '^# skipped|SKIP' /tmp/test-output.txt || true
+            exit 1
+          }
       - name: Validate shipped templates against their schemas
         run: |
           node scripts/schema.mjs validate config templates/config.yaml

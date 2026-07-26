@@ -502,7 +502,11 @@ function journalIntegrity(journalPath, at, read) {
 
   for (const error of result.errors) {
     findings.push(
-      finding('journal-invalid', at, error, `node scripts/journal.mjs validate ${sq(journalPath)}`),
+      // `show()` even though journal.mjs now escapes its own messages: the
+      // sibling sweep below has always done it, and a fuzz of this file found
+      // 137 leaks in exactly the one place that did not. Relying on the other
+      // module's discipline is how the gap got here in the first place.
+      finding('journal-invalid', at, show(error), `node scripts/journal.mjs validate ${sq(journalPath)}`),
     );
   }
   if (read.truncatedTail) {

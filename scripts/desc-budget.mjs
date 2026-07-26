@@ -11,6 +11,7 @@
  * Exit:   0 within budget · 1 over budget · 2 usage/IO error
  */
 import { readFileSync, readdirSync, statSync, existsSync, realpathSync } from 'node:fs';
+import { escapeInvisible } from './invisible.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,7 +71,10 @@ function main() {
   const total = rows.reduce((s, r) => s + r.length, 0);
 
   for (const r of rows) {
-    console.log(`${String(r.length).padStart(6)}  ${r.skill}${r.missing ? '  (MISSING description)' : ''}`);
+    // A skill directory name is attacker-controlled the moment a repo
+    // installs a third-party skill, and this line runs in CI where the output
+    // is read by whoever is debugging the build.
+    console.log(`${String(r.length).padStart(6)}  ${escapeInvisible(r.skill)}${r.missing ? '  (MISSING description)' : ''}`);
   }
   console.log(`${String(total).padStart(6)}  TOTAL (budget: ${budget})`);
 

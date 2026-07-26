@@ -17,6 +17,7 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, YamlLiteError } from './yaml-lite.mjs';
+import { escapeInvisible } from './invisible.mjs';
 
 export const PROFILES = Object.freeze(['eco', 'balanced', 'full']);
 export const AUTONOMY_CLASSES = Object.freeze(['P1', 'P2', 'P3']);
@@ -400,11 +401,14 @@ function main() {
   for (const file of files) {
     const { ok, errors } = validateFile(kind, file);
     if (ok) {
-      console.log(`ok    ${file}`);
+      console.log(`ok    ${escapeInvisible(file)}`);
     } else {
       failed = true;
-      console.log(`FAIL  ${file}`);
-      for (const e of errors) console.log(`      - ${e}`);
+      console.log(`FAIL  ${escapeInvisible(file)}`);
+      // Validation messages quote values read out of a YAML file, and a
+      // .tyran/ tree can come from a template someone else wrote. Same channel
+      // as project.warnings() and the journal CLI, closed the same way.
+      for (const e of errors) console.log(`      - ${escapeInvisible(String(e))}`);
     }
   }
   process.exit(failed ? 1 : 0);

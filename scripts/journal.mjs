@@ -33,6 +33,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { escapeInvisible, invisibleProblem, jsonEscapeInvisible, whitespaceProblem } from './invisible.mjs';
 
 /** Closed set of event types. Extending it is a reviewed core change. */
 export const EVENT_TYPES = Object.freeze([
@@ -68,6 +69,22 @@ const DATA_REQUIRED = Object.freeze({
   error: ['class'],
 });
 
+/**
+ * A journal-derived value on its way into a HUMAN-READABLE MESSAGE.
+ *
+ * Messages built here travel further than this file: `validateJournal`'s
+ * errors and warnings are rendered by `doctor.mjs` into a report an operator
+ * reads. A 400-tree fuzz of doctor measured 137 leaks in its text output and
+ * 118 in its JSON, and every one of them traced back to a message built RIGHT
+ * HERE with a raw `ev` or agent name in it — not to doctor's own sanitizer.
+ *
+ * The module that BUILDS a message owns making it safe. Leaving it to each
+ * consumer is caller discipline, which is the mechanism class this project
+ * exists because it distrusts: one consumer forgets, and the forgetting is
+ * invisible.
+ */
+const q = (value) => escapeInvisible(String(value));
+
 /** Validate a single event object. Returns [] when valid, else error strings. */
 export function validateEvent(event) {
   const errors = [];
@@ -78,7 +95,7 @@ export function validateEvent(event) {
     errors.push('ts must be an ISO-8601 timestamp string');
   }
   if (!EVENT_TYPES.includes(event.ev)) {
-    errors.push(`ev "${event.ev}" is not in the closed event set`);
+    errors.push(`ev "${q(event.ev)}" is not in the closed event set`);
   }
   if (typeof event.init !== 'string' || event.init.length === 0) {
     errors.push('init (initiative slug) must be a non-empty string');
@@ -90,9 +107,9 @@ export function validateEvent(event) {
     errors.push('data must be a JSON object (may be empty)');
   } else if (DATA_REQUIRED[event.ev]) {
     for (const key of DATA_REQUIRED[event.ev]) {
-      if (!(key in event.data)) errors.push(`data.${key} is required for ev "${event.ev}"`);
+      if (!(key in event.data)) errors.push(`data.${q(key)} is required for ev "${q(event.ev)}"`);
       else if (key === 'id' && typeof event.data.id !== 'string') {
-        errors.push(`data.id must be a string for ev "${event.ev}" (got ${typeof event.data.id})`);
+        errors.push(`data.id must be a string for ev "${q(event.ev)}" (got ${typeof event.data.id})`);
       }
     }
   }
@@ -108,15 +125,36 @@ export function validateEvent(event) {
  * the uniqueness guard, so non-canonical names are refused on write.
  * Case is deliberately significant — folding it here would make the guard
  * disagree with the exact-name addressing every consumer uses.
+ *
+ * The invisibility test is NOT spelled out here any more. It used to read
+ * `\p{Cc}\p{Cf}`, which is a third spelling of a rule the CI scanner and the
+ * projection sanitizer also carried — measured over the whole of Unicode, the
+ * three disagreed on 456 codepoints. `\p{Cf}` in particular does not cover
+ * Hangul fillers (U+3164, U+FFA0) or most of the TAG block, so a name could be
+ * refused by the repo gate and accepted here. One question, one function
+ * (ADR-19 correction 1 point 4, ADR-21).
  */
-const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
 export function agentNameProblem(name) {
   if (typeof name !== 'string') return `must be a string (got ${typeof name})`;
   if (name.length === 0) return 'must not be empty';
+  // Invisibility is checked BEFORE normalization on purpose. A few invisible
+  // codepoints are also not NFC-stable, and reporting "must be Unicode
+  // NFC-normalized" for a name carrying a zero-width joiner is a true sentence
+  // that sends the reader to fix the wrong thing.
+  for (const ch of name) {
+    if (invisibleProblem(ch.codePointAt(0)) !== null) {
+      return 'must not contain control or invisible formatting characters';
+    }
+  }
   if (name !== name.normalize('NFC')) return 'must be Unicode NFC-normalized';
   if (name !== name.trim()) return 'must not have leading/trailing whitespace';
-  if (CONTROL_OR_FORMAT.test(name)) {
-    return 'must not contain control or invisible formatting characters';
+  // TAB and LF are visible text, so they are not an answer to "is this
+  // invisible" — but they wreck a name, which is printed in tables, shell
+  // hints and projections. Separate, disjoint rule; see scripts/invisible.mjs.
+  for (const ch of name) {
+    if (whitespaceProblem(ch.codePointAt(0)) !== null) {
+      return 'must not contain a tab or a newline';
+    }
   }
   return null;
 }
@@ -131,31 +169,52 @@ export function agentNameProblem(name) {
  * Operates on the events a reader can actually see. Corrupt or truncated
  * lines are invisible here for exactly the same reason they are invisible to
  * every consumer, so writer and readers can never disagree about who is open.
+ *
+ * Returns, additively (ADR-21): `pairs` names WHICH report closed WHICH spawn,
+ * and `unusable` carries the EVENTS whose agent name is not a usable
+ * correlator. Both exist so that the projection generator can render this
+ * function's answer instead of computing a second one of its own — which is
+ * what it used to do, with a different rule, giving the operator two
+ * contradictory pictures of who was still working.
  */
 export function pairSpawns(events) {
   const open = new Map(); // agent -> spawn events, oldest first
   const orphanReports = [];
   const badNames = new Map(); // raw name (as JSON) -> problem
+  const unusable = []; // the EVENTS behind badNames, so a consumer can show them
+  const pairs = []; // {spawn, report}, in report order
+  /**
+   * Names that were EVER open more than once at the same time. Deliberately
+   * not "names open more than once right now": by the time a report has closed
+   * one of two simultaneous spawns, the final map holds a single entry and the
+   * ambiguity is invisible — yet that report already had to choose between two
+   * spawns, and the choice it made is the thing a reader must be told about.
+   */
+  const ambiguous = new Map(); // agent -> the largest number of spawns open at once
   for (const e of events) {
     if (e?.ev !== 'spawn' && e?.ev !== 'report') continue;
     const agent = e.data?.agent;
     const problem = agentNameProblem(agent);
     if (problem) {
       badNames.set(JSON.stringify(agent ?? null), problem);
+      unusable.push({ event: e, problem });
       continue; // unusable as a correlator; validate() reports it
     }
     if (e.ev === 'spawn') {
       if (!open.has(agent)) open.set(agent, []);
       open.get(agent).push(e);
+      const depth = open.get(agent).length;
+      if (depth > 1 && depth > (ambiguous.get(agent) ?? 0)) ambiguous.set(agent, depth);
     } else {
       const queue = open.get(agent);
       if (queue?.length) {
-        queue.shift();
+        const spawn = queue.shift();
+        pairs.push({ spawn, report: e });
         if (queue.length === 0) open.delete(agent);
       } else orphanReports.push(e);
     }
   }
-  return { open, orphanReports, badNames };
+  return { open, orphanReports, badNames, pairs, unusable, ambiguous };
 }
 
 /** Agents whose `spawn` has no matching `report` yet — the "still working" set. */
@@ -371,8 +430,8 @@ export function closeSpawn(file, { init, agent, actor = 'conductor', verdict = '
     if (!previous?.length) {
       const others = [...open.keys()];
       throw new Error(
-        `no open spawn for agent "${agent}" in ${file} — nothing to close.\n` +
-          `  open spawns: ${others.length ? others.join(', ') : '(none)'}`,
+        `no open spawn for agent "${q(agent)}" in ${q(file)} — nothing to close.\n` +
+          `  open spawns: ${others.length ? others.map(q).join(', ') : '(none)'}`,
       );
     }
     return appendUnderLock(
@@ -437,7 +496,7 @@ export function validateJournal(file) {
   events.forEach((e, i) => {
     for (const err of validateEvent(e)) errors.push(`event ${i + 1}: ${err}`);
     if (prevTs !== null && Date.parse(e.ts) < Date.parse(prevTs)) {
-      errors.push(`event ${i + 1}: ts ${e.ts} is earlier than previous ${prevTs}`);
+      errors.push(`event ${i + 1}: ts ${q(e.ts)} is earlier than previous ${q(prevTs)}`);
     }
     prevTs = e.ts;
   });
@@ -446,18 +505,18 @@ export function validateJournal(file) {
   for (const [agent, spawns] of open) {
     if (spawns.length > 1) {
       warnings.push(
-        `agent "${agent}" has ${spawns.length} open spawns (since ${spawns
-          .map((s) => s.ts)
+        `agent "${q(agent)}" has ${spawns.length} open spawns (since ${spawns
+          .map((s) => q(s.ts))
           .join(', ')}) — written before the ADR-18 guard or edited by hand; ` +
           'spawn↔report pairing for this agent is ambiguous',
       );
     }
   }
   for (const r of orphanReports) {
-    warnings.push(`report for agent "${r.data.agent}" at ${r.ts} closes no open spawn`);
+    warnings.push(`report for agent "${q(r.data.agent)}" at ${q(r.ts)} closes no open spawn`);
   }
   for (const [raw, problem] of badNames) {
-    warnings.push(`unusable data.agent ${raw}: ${problem} — excluded from spawn↔report pairing`);
+    warnings.push(`unusable data.agent ${q(raw)}: ${problem} — excluded from spawn↔report pairing`);
   }
   return { ok: errors.length === 0, errors, warnings, count: events.length, truncatedTail };
 }
@@ -537,6 +596,32 @@ const CMD_FLAGS = {
   'close-spawn': ['actor', 'verdict', 'reason'],
 };
 
+/**
+ * The ONE way this CLI writes a value to a terminal.
+ *
+ * `JSON.stringify` escapes C0 controls and stops there: bidi overrides, TAG
+ * characters and zero-width marks come out RAW. Every subcommand here prints
+ * journal content — `query`, `tail`, `validate`, `open-spawns`, `append`,
+ * `close-spawn`, `next-id` — so each was a way for a foreign repository's text
+ * to reach the operator's screen invisibly, exactly as it reached it through
+ * project.mjs's warnings until a security review demonstrated that one.
+ *
+ * The escape notation is JSON's own, not `<U+202E>`, because this output is
+ * MACHINE-READABLE and this repo parses it back. `JSON.parse` of the result is
+ * deep-equal to the input, so safety costs no fidelity here — a test asserts
+ * the round trip rather than trusting the claim.
+ *
+ * The round-trip guarantee is about the JSON subcommands, and `next-id` is not
+ * one of them: it prints a bare identifier, so there is nothing to parse back.
+ * It still goes through here rather than being the one sink that does not,
+ * because "this one is safe by construction" is how a sink gets forgotten when
+ * the construction changes. Its own safety is separately guaranteed: `nextId`
+ * rejects any prefix outside `[A-Za-z][A-Za-z0-9]*` before it builds a value.
+ */
+function emit(value, indent) {
+  return jsonEscapeInvisible(typeof value === 'string' ? value : JSON.stringify(value, null, indent));
+}
+
 function main() {
   const [cmd, ...args] = process.argv.slice(2);
   try {
@@ -551,14 +636,14 @@ function main() {
         if (!file || !ev || !init) throw new UsageError();
         const data = flags.data ? JSON.parse(flags.data) : {};
         const written = append(file, { ev, init, actor: flags.actor ?? 'conductor', data });
-        console.log(JSON.stringify(written));
+        console.log(emit(written));
         return;
       }
       case 'query': {
         const [file] = rest;
         if (!file) throw new UsageError();
         for (const e of query(file, { ev: flags.ev, init: flags.init, ticket: flags.ticket, limit: flags.limit && Number(flags.limit) })) {
-          console.log(JSON.stringify(e));
+          console.log(emit(e));
         }
         return;
       }
@@ -566,26 +651,26 @@ function main() {
         const [file] = rest;
         if (!file) throw new UsageError();
         const result = validateJournal(file);
-        console.log(JSON.stringify(result, null, 2));
+        console.log(emit(result, 2));
         if (!result.ok) process.exit(1);
         return;
       }
       case 'next-id': {
         const [file, prefix] = rest;
         if (!file || !prefix) throw new UsageError();
-        console.log(nextId(file, prefix));
+        console.log(emit(nextId(file, prefix)));
         return;
       }
       case 'tail': {
         const [file] = rest;
         if (!file) throw new UsageError();
-        console.log(JSON.stringify(tail(file), null, 2));
+        console.log(emit(tail(file), 2));
         return;
       }
       case 'open-spawns': {
         const [file] = rest;
         if (!file) throw new UsageError();
-        console.log(JSON.stringify(openSpawns(file), null, 2));
+        console.log(emit(openSpawns(file), 2));
         return;
       }
       case 'close-spawn': {
@@ -599,7 +684,7 @@ function main() {
           verdict: flags.verdict ?? 'abandoned',
           reason: flags.reason ?? '',
         });
-        console.log(JSON.stringify(written));
+        console.log(emit(written));
         return;
       }
     }

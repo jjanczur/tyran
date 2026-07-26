@@ -23,6 +23,7 @@
  * multi-line scalars (| >), flow mappings ({}), nested flow sequences,
  * tabs for indentation, duplicate keys, multiple documents.
  */
+import { formatCodePoint, invisibleProblem } from './invisible.mjs';
 
 // Prototype-free lookup: `constructor`/`__proto__` must be data, not
 // inherited members (review E2S2-R2).
@@ -293,6 +294,54 @@ export function stringify(value, indent = 0) {
   return `${pad}${formatScalar(value)}\n`;
 }
 
+/**
+ * Refuse to SERIALIZE an invisible codepoint, the same way this file already
+ * refuses a newline and for the same reason.
+ *
+ * This subset has no lossless way to carry one. Double-quoted \uXXXX escapes
+ * are real YAML but explicitly out of the subset — `unquote` rejects a
+ * backslash rather than decode it half-way — so the only representations
+ * available are RAW (a Trojan Source payload in a config file) or VISIBLY
+ * ESCAPED (which parses back as different data and breaks the round trip this
+ * file guarantees). Neither is acceptable, so the answer is the one
+ * `formatScalar` already gives for newlines: fail loudly at serialization
+ * time rather than write a file that reads back as something else.
+ *
+ * Refusing is the strongest fix available TO A SERIALIZER, which is a narrower
+ * claim than the one that stood here first. The worst case is a poisoned value
+ * PERSISTED to a config file: it would re-enter the conductor's context at
+ * every session start, through a path where none of the runtime layers is
+ * looking. This guard stops THIS WRITER from authoring such a file.
+ *
+ * It does NOT make the file impossible, and the earlier wording here said it
+ * did — corrected after a review disproved it by measurement. `parse` is
+ * untouched and reads a hand-written hostile file without complaint (measured:
+ * 7 invisible codepoints straight into a value), and the file can arrive by an
+ * editor, an agent's write tool, or a template copied from elsewhere. The
+ * honest guarantee is "tyran will not author one", not "one cannot exist".
+ * Closing the READ side is a separate decision with a live consumer question
+ * behind it — `schema.mjs` is the only importer today and its parsed values do
+ * not leave the validating function — so it is deliberately not done here.
+ *
+ * Measured before choosing: `stringify` has ZERO production consumers today —
+ * only its own unit test imports it, and `schema.mjs` imports `parse` alone.
+ * So the persisted-poison case is not reachable in this repository right now,
+ * and this guard is prophylactic. It is still worth having, because "no caller
+ * yet" is a fact about today and this module is published API.
+ */
+function rejectInvisible(s, what) {
+  for (const ch of s) {
+    const problem = invisibleProblem(ch.codePointAt(0));
+    if (problem !== null) {
+      throw new YamlLiteError(
+        `cannot serialize a ${what} containing ${formatCodePoint(ch.codePointAt(0))} — ${problem}. ` +
+          'This subset has no escape for it, so writing it would either hide it in the file ' +
+          'or change the value on the way back.',
+      );
+    }
+  }
+}
+
 function formatKey(key) {
   const s = String(key);
   if (s.includes('\n')) {
@@ -302,6 +351,7 @@ function formatKey(key) {
     // E2S2-R11, note 1).
     throw new YamlLiteError('cannot serialize a key containing a newline (no block scalars in this subset)');
   }
+  rejectInvisible(s, 'key');
   if (s === '' || /[\s:#'"&*!|>[\]{},]/.test(s)) return `'${s.replace(/'/g, "''")}'`;
   return s;
 }
@@ -316,6 +366,7 @@ function formatScalar(value) {
     // (review E2S2-R1).
     throw new YamlLiteError('cannot serialize a string containing a newline (no block scalars in this subset)');
   }
+  rejectInvisible(s, 'string');
   const needsQuotes =
     s === '' ||
     /^\s|\s$/.test(s) ||

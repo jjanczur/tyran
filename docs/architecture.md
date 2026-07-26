@@ -35,8 +35,9 @@ closed, validated set: `init.created`, `plan.accepted`, `ticket.created`,
 `spawn`, `report` (with raw evidence), `gate`, `review`, `merge`, `decision`,
 `lease.acquired/released`, `checkpoint`, `retro.entry`, `error`.
 
-Humans never read JSONL: `STAN.md` and `PROGRESS.md` are **generated
-projections** with a `GENERATED — do not edit` header. Append-only means a
+Humans never read JSONL: `STATE.md` and `PROGRESS.md` are **generated
+projections** with a `GENERATED — do not edit` header (see
+[projections.md](./projections.md)). Append-only means a
 crash mid-write can at worst produce one truncated final line, which the
 reader discards. No database, no build step, git-friendly diffs.
 

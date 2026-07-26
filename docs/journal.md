@@ -166,6 +166,12 @@ alone.
 
 The guard binds writes through `append`. Hand-editing `journal.jsonl` can
 still create a duplicate; `validate` warnings are how you find out.
+## Projections
+
+Humans read `STATE.md` and `PROGRESS.md`, not this file. Both are generated
+from the journal by `scripts/project.mjs` and carry a `GENERATED — do not
+edit` header; `--check` verifies they are still in sync. See
+[projections.md](./projections.md).
 
 ## CLI
 

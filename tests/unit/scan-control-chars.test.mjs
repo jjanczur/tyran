@@ -16,6 +16,8 @@ import {
 } from '../../scripts/scan-control-chars.mjs';
 
 const SCRIPT = new URL('../../scripts/scan-control-chars.mjs', import.meta.url).pathname;
+/** The single home of the rule itself — see scripts/invisible.mjs (ADR-21). */
+const RULE = new URL('../../scripts/invisible.mjs', import.meta.url).pathname;
 const REPO_ROOT = new URL('../../', import.meta.url).pathname;
 
 /**
@@ -55,10 +57,10 @@ test('LF, TAB and ordinary text are never findings', () => {
   assert.deepEqual(scanText(''), []);
 });
 
-test('the banned set is exactly the one ADR-19 specifies', () => {
+test('the banned set covers ADR-19 in full and can only ever grow', () => {
   // Pinned independently of FORBIDDEN, because the range-walk test below
   // iterates that same list: deleting a range there would delete its own
-  // coverage and stay green. This is the list, written out, from the ADR.
+  // coverage and stay green. These are the ranges, written out, from the ADR.
   //
   // The walk covers EVERY codepoint, astral planes included. It used to skip
   // them (`if (point === 0xffff) point = 0x10fffe;`) on the assumption that
@@ -66,12 +68,22 @@ test('the banned set is exactly the one ADR-19 specifies', () => {
   // what hid the TAG block, the single most dangerous gap in the list
   // (ADR-19 correction 1). A test whose scope is an assumption cannot falsify
   // that assumption.
-  const banned = [];
+  //
+  // The assertion is a SUPERSET one now, not an equality, and that is a
+  // deliberate consequence of the shape change in ADR-21: the boundary of the
+  // rule is a Unicode property (`Default_Ignorable_Code_Point` and friends),
+  // so it follows the Unicode version bundled with Node. An equality here
+  // would turn red on a Node upgrade that adds a character — punishing the
+  // upgrade for doing exactly what this shape was chosen for. What must never
+  // happen is the rule getting NARROWER, and that is what is asserted:
+  // every ADR-19 range is still banned, every measured gap is now banned, the
+  // declared exceptions are still exceptions, and the cardinality is a floor.
+  const banned = new Set();
   for (let point = 0x00; point <= 0x10ffff; point++) {
     if (point >= 0xd800 && point <= 0xdfff) continue; // lone surrogates are not codepoints
-    if (scanText(cp(point)).length > 0) banned.push(point);
+    if (scanText(cp(point)).length > 0) banned.add(point);
   }
-  const expected = [
+  const required = [
     ...range(0x00, 0x08),
     ...range(0x0b, 0x1f),
     ...range(0x7f, 0x9f),
@@ -91,15 +103,39 @@ test('the banned set is exactly the one ADR-19 specifies', () => {
     ...range(0x1d173, 0x1d17a),
     ...range(0xe0000, 0xe007f),
     ...range(0xe0100, 0xe01ef),
-  ].sort((a, b) => a - b);
-  assert.deepEqual(banned, expected);
+  ];
+  assert.deepEqual(
+    required.filter((p) => !banned.has(p)).map(formatCodePoint),
+    [],
+    'a range ADR-19 names is no longer banned',
+  );
+
+  // The gaps three separate measurements found in the hand-written list, each
+  // one impossible to close by adding "one more range". They are the reason
+  // the boundary moved to a property (ADR-19 correction 1 point 1).
+  const previouslyMissed = [0x034f, 0x0600, 0x0605, 0x06dd, 0x070f, 0x08e2, 0x110bd, 0x13430, 0x1bca0, 0xfffe];
+  assert.deepEqual(
+    previouslyMissed.filter((p) => !banned.has(p)).map(formatCodePoint),
+    [],
+    'a measured gap in the old denylist is open again',
+  );
+
+  // A floor, not a pin: Unicode only ever adds default-ignorable characters,
+  // so this number can rise on a Node upgrade and must never fall. Measured at
+  // the commit that introduced the shared rule.
+  assert.ok(
+    banned.size >= 4319,
+    `the rule got NARROWER: ${banned.size} codepoints banned, floor is 4319`,
+  );
+
   // TAB and LF are legal text and must never join the set.
-  assert.ok(!banned.includes(0x09) && !banned.includes(0x0a));
+  assert.ok(!banned.has(0x09) && !banned.has(0x0a));
   // U+FE0F is a legal emoji presentation selector and appears 24 times in this
   // repo's README. Banning it would turn the gate red on a file nobody
   // touched, which is how gates get switched off (ADR-19). Deliberate gap,
-  // documented in scan-control-chars.mjs.
-  assert.ok(!banned.includes(0xfe0f) && !banned.includes(0xfe0e));
+  // documented in scripts/invisible.mjs — and now the ONLY thing the property
+  // rule is overridden for, which is why it is a list checked first.
+  assert.ok(!banned.has(0xfe0f) && !banned.has(0xfe0e));
 });
 
 const range = (lo, hi) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
@@ -274,7 +310,11 @@ test('TAB and LF are legal in contents and forbidden in a path', () => {
   const dir = gitRepo({ ['na' + cp(0x09) + 'me.md']: '# clean\n' });
   const r = scan(dir);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /U\+0009 TAB — control character in a path \[in the file NAME\]/);
+  // "a name or path": one wording, because one rule now serves the file NAME,
+  // the symlink TARGET and the journal's agent name (ADR-21). It is stated as
+  // its own sentence and not as an invisibility finding, because TAB and LF are
+  // perfectly visible — they are banned here for what they do to a NAME.
+  assert.match(r.stderr, /U\+0009 TAB — control character in a name or path \[in the file NAME\]/);
 });
 
 test('a symlink whose TARGET carries a control character fails the gate', () => {
@@ -507,14 +547,20 @@ test('the announcement is DERIVED from the export, not typed alongside it', () =
   // entry is added to the export in a copy of the script, and nothing else is
   // touched. A printer that types its own sentence announces one gap and
   // fails; a printer that walks the list announces two.
+  //
+  // The declaration now lives in scripts/invisible.mjs, the single home of the
+  // rule (ADR-21), so the probe patches it THERE and runs the scanner over the
+  // module boundary. That makes it a stronger probe than before: it proves the
+  // announcement follows the shared export, not a copy this file kept.
   const base = mkdtempSync(join(tmpdir(), 'tyran-gap-derived-'));
   const patched = join(base, 'scan-control-chars.mjs');
-  const source = readFileSync(SCRIPT, 'utf8');
+  writeFileSync(patched, readFileSync(SCRIPT));
+  const ruleSource = readFileSync(RULE, 'utf8');
   const anchor = 'export const DELIBERATELY_ALLOWED = Object.freeze([\n';
-  assert.ok(source.includes(anchor), 'the export moved — this probe patches source text');
+  assert.ok(ruleSource.includes(anchor), 'the export moved — this probe patches source text');
   writeFileSync(
-    patched,
-    source.replace(
+    join(base, 'invisible.mjs'),
+    ruleSource.replace(
       anchor,
       anchor + "  Object.freeze({ lo: 0x2e80, hi: 0x2e81, why: 'probe entry, review round 3' }),\n",
     ),

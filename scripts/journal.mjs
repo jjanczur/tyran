@@ -33,6 +33,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { invisibleProblem, whitespaceProblem } from './invisible.mjs';
 
 /** Closed set of event types. Extending it is a reviewed core change. */
 export const EVENT_TYPES = Object.freeze([
@@ -108,15 +109,36 @@ export function validateEvent(event) {
  * the uniqueness guard, so non-canonical names are refused on write.
  * Case is deliberately significant — folding it here would make the guard
  * disagree with the exact-name addressing every consumer uses.
+ *
+ * The invisibility test is NOT spelled out here any more. It used to read
+ * `\p{Cc}\p{Cf}`, which is a third spelling of a rule the CI scanner and the
+ * projection sanitizer also carried — measured over the whole of Unicode, the
+ * three disagreed on 456 codepoints. `\p{Cf}` in particular does not cover
+ * Hangul fillers (U+3164, U+FFA0) or most of the TAG block, so a name could be
+ * refused by the repo gate and accepted here. One question, one function
+ * (ADR-19 correction 1 point 4, ADR-21).
  */
-const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
 export function agentNameProblem(name) {
   if (typeof name !== 'string') return `must be a string (got ${typeof name})`;
   if (name.length === 0) return 'must not be empty';
+  // Invisibility is checked BEFORE normalization on purpose. A few invisible
+  // codepoints are also not NFC-stable, and reporting "must be Unicode
+  // NFC-normalized" for a name carrying a zero-width joiner is a true sentence
+  // that sends the reader to fix the wrong thing.
+  for (const ch of name) {
+    if (invisibleProblem(ch.codePointAt(0)) !== null) {
+      return 'must not contain control or invisible formatting characters';
+    }
+  }
   if (name !== name.normalize('NFC')) return 'must be Unicode NFC-normalized';
   if (name !== name.trim()) return 'must not have leading/trailing whitespace';
-  if (CONTROL_OR_FORMAT.test(name)) {
-    return 'must not contain control or invisible formatting characters';
+  // TAB and LF are visible text, so they are not an answer to "is this
+  // invisible" — but they wreck a name, which is printed in tables, shell
+  // hints and projections. Separate, disjoint rule; see scripts/invisible.mjs.
+  for (const ch of name) {
+    if (whitespaceProblem(ch.codePointAt(0)) !== null) {
+      return 'must not contain a tab or a newline';
+    }
   }
   return null;
 }
@@ -131,31 +153,52 @@ export function agentNameProblem(name) {
  * Operates on the events a reader can actually see. Corrupt or truncated
  * lines are invisible here for exactly the same reason they are invisible to
  * every consumer, so writer and readers can never disagree about who is open.
+ *
+ * Returns, additively (ADR-21): `pairs` names WHICH report closed WHICH spawn,
+ * and `unusable` carries the EVENTS whose agent name is not a usable
+ * correlator. Both exist so that the projection generator can render this
+ * function's answer instead of computing a second one of its own — which is
+ * what it used to do, with a different rule, giving the operator two
+ * contradictory pictures of who was still working.
  */
 export function pairSpawns(events) {
   const open = new Map(); // agent -> spawn events, oldest first
   const orphanReports = [];
   const badNames = new Map(); // raw name (as JSON) -> problem
+  const unusable = []; // the EVENTS behind badNames, so a consumer can show them
+  const pairs = []; // {spawn, report}, in report order
+  /**
+   * Names that were EVER open more than once at the same time. Deliberately
+   * not "names open more than once right now": by the time a report has closed
+   * one of two simultaneous spawns, the final map holds a single entry and the
+   * ambiguity is invisible — yet that report already had to choose between two
+   * spawns, and the choice it made is the thing a reader must be told about.
+   */
+  const ambiguous = new Map(); // agent -> the largest number of spawns open at once
   for (const e of events) {
     if (e?.ev !== 'spawn' && e?.ev !== 'report') continue;
     const agent = e.data?.agent;
     const problem = agentNameProblem(agent);
     if (problem) {
       badNames.set(JSON.stringify(agent ?? null), problem);
+      unusable.push({ event: e, problem });
       continue; // unusable as a correlator; validate() reports it
     }
     if (e.ev === 'spawn') {
       if (!open.has(agent)) open.set(agent, []);
       open.get(agent).push(e);
+      const depth = open.get(agent).length;
+      if (depth > 1 && depth > (ambiguous.get(agent) ?? 0)) ambiguous.set(agent, depth);
     } else {
       const queue = open.get(agent);
       if (queue?.length) {
-        queue.shift();
+        const spawn = queue.shift();
+        pairs.push({ spawn, report: e });
         if (queue.length === 0) open.delete(agent);
       } else orphanReports.push(e);
     }
   }
-  return { open, orphanReports, badNames };
+  return { open, orphanReports, badNames, pairs, unusable, ambiguous };
 }
 
 /** Agents whose `spawn` has no matching `report` yet — the "still working" set. */

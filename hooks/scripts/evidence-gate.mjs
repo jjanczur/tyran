@@ -47,8 +47,8 @@
  * pass" does not match. "12 passed" does. The line between them is the entire
  * point, and it has to be drawable by a regex or it is not enforceable.
  */
-import { readdirSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { append } from '../../scripts/journal.mjs';
@@ -121,8 +121,24 @@ export const SIGNALS = Object.freeze([
   Object.freeze({ name: 'evidence-block', re: /^[\s>*-]*EVIDENCE\s*:(?!\s*none-required\b)\s*\S/im }),
 ]);
 
-/** The declared escape hatch, and the reason it is obliged to carry. */
-const HATCH_RE = /^[\s>*-]*EVIDENCE\s*:\s*none-required\b[ \t]*(.*)$/im;
+/**
+ * A CLAIMED hatch: the keyword at the very start of a line.
+ *
+ * Column zero, no leading whitespace, no `>` and no list bullet. The first
+ * version allowed `[\s>*-]*` in front and it was a hole big enough to walk
+ * through: a review found four natural reports that were granted an exemption
+ * they never asked for — the hatch quoted in a blockquote, shown in a code
+ * block, listed as a bullet, and a report that merely DOCUMENTED the syntax.
+ * A hatch is a declaration the agent makes about its own work, so it has to
+ * look like one and not like a mention of one.
+ */
+const HATCH_LINE_RE = /^EVIDENCE:[ \t]*none-required\b[ \t]*(.*)$/i;
+
+/** A fenced code block delimiter, in either Markdown spelling. */
+const FENCE_RE = /^ {0,3}(?:```|~~~)/;
+
+/** `<why there was nothing to run>` and friends — shape, not content. */
+const PLACEHOLDER_RE = /<[^<>]*>/g;
 
 /** Which signals `text` carries. Empty array means "no evidence". */
 export function findEvidence(text) {
@@ -132,19 +148,42 @@ export function findEvidence(text) {
 }
 
 /**
- * The hatch, if the report declares it.
+ * The hatch, if the report DECLARES it.
  *
  * `present` and `reason` are separate answers on purpose: a hatch with no
- * reason is a different situation from no hatch at all, and it gets a
+ * usable reason is a different situation from no hatch at all, and it gets a
  * different refusal, because "you forgot the why" and "you forgot the
  * evidence" are different mistakes and a gate that conflates them teaches the
  * wrong lesson.
+ *
+ * Three conditions, each of which a review demonstrated to be load-bearing:
+ *
+ *  1. **column zero** — see `HATCH_LINE_RE`;
+ *  2. **not inside a fenced code block** — a report showing the syntax to a
+ *     reader is documentation, not a claim about its own work;
+ *  3. **the reason may not be a placeholder.** This one is the sharpest,
+ *     because the trigger was text THIS GATE INJECTS: the refusal shows the
+ *     hatch with `<why there was nothing to run>` in it, 30 characters, which
+ *     cleared a bare length check. Pasting the refusal back therefore granted
+ *     an exemption — the gate handing out the key along with the lock. Angle
+ *     bracketed spans are removed before the length is measured, so what has
+ *     to be long enough is what the agent actually wrote.
  */
 export function findHatch(text) {
-  const m = HATCH_RE.exec(text);
-  if (m === null) return { present: false, reason: null };
-  const reason = m[1].trim();
-  return { present: true, reason: reason.length >= MIN_HATCH_REASON ? reason : null };
+  let inFence = false;
+  for (const line of String(text).split('\n')) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m = HATCH_LINE_RE.exec(line);
+    if (m === null) continue;
+    const reason = m[1].trim();
+    const written = reason.replace(PLACEHOLDER_RE, ' ').trim();
+    return { present: true, reason: written.length >= MIN_HATCH_REASON ? reason : null };
+  }
+  return { present: false, reason: null };
 }
 
 // -------------------------------------------------------------- role scope
@@ -158,25 +197,82 @@ export function findHatch(text) {
  * if "I am only a scout" exempted an agent, every agent would write it. This
  * initiative measured that lesson three times before it wrote it down.
  *
- * Both spellings are listed. `tyran:implementer` is what a plugin agent is
- * called (namespace from `plugin.json`'s `name`, measured), `tyran-
- * implementer` is what the v1 project-level agents are called, and a repo
- * mid-migration has both. Exact strings, never a substring test: an
- * unanchored match on `implementer` would also bind an agent called
- * `evil-tyran-implementer-nope`.
+ * Exact strings, never a substring test: an unanchored match on `implementer`
+ * would also bind an agent called `evil-tyran-implementer-nope`.
+ *
+ * The namespaced half of the table is BUILT FROM THE MANIFEST, not written
+ * out. A plugin agent's `agent_type` is `<plugin.json name>:<agent name>`
+ * (measured), so a literal `tyran:` here is a copy of the manifest kept in
+ * sync by nobody. A review measured what that costs: renaming the plugin to
+ * `tyran-conductor` left the whole suite green at 398/398 while the gate
+ * stopped enforcing anything — an implementer reported *"all tests are green
+ * and everything works"* and the journal recorded zero lines. That is the
+ * canonical failure this story is named after, passing in silence, triggered
+ * by one word in a manifest that the truth file warns about by name.
  */
-export const ROLE_SCOPE = Object.freeze(
+export const ROLE_BY_NAME = Object.freeze(
   Object.assign(Object.create(null), {
-    'tyran:implementer': 'enforce',
-    'tyran:reviewer': 'enforce',
-    'tyran-implementer': 'enforce',
-    'tyran-reviewer': 'enforce',
-    'tyran:scout': 'exempt',
-    'tyran:retro': 'exempt',
-    'tyran-scout': 'exempt',
-    'tyran-retro': 'exempt',
+    implementer: 'enforce',
+    reviewer: 'enforce',
+    scout: 'exempt',
+    retro: 'exempt',
   }),
 );
+
+/**
+ * The v1 spellings, which are NOT derived from the manifest and must not be.
+ *
+ * These are project-level agents in `.claude/agents/`, whose `agent_type` is
+ * the frontmatter `name`. The plugin does not own those names, so renaming the
+ * plugin cannot rename them, and a repo mid-migration runs both kinds.
+ */
+export const LEGACY_V1_AGENTS = Object.freeze({
+  'tyran-implementer': 'enforce',
+  'tyran-reviewer': 'enforce',
+  'tyran-scout': 'exempt',
+  'tyran-retro': 'exempt',
+});
+
+/** The scope table for a given plugin namespace. Pure, so a rename is testable. */
+export function buildRoleScope(namespace) {
+  const scope = Object.create(null);
+  for (const [name, treatment] of Object.entries(ROLE_BY_NAME)) {
+    scope[`${namespace}:${name}`] = treatment;
+  }
+  for (const [name, treatment] of Object.entries(LEGACY_V1_AGENTS)) scope[name] = treatment;
+  return Object.freeze(scope);
+}
+
+/** Bounded read of the plugin manifest: it is tiny, and a gate reads nothing unbounded. */
+export const MAX_MANIFEST_BYTES = 64 * 1024;
+
+/**
+ * The plugin's own name, straight out of the manifest that defines it.
+ *
+ * `fallback` is what happens when the manifest cannot be read at all — a
+ * partial install, a permission error. It keeps today's behaviour rather than
+ * classifying every plugin agent as out-of-scope, which would be the silent
+ * disarm this whole change exists to remove. A test asserts the real manifest
+ * IS readable and IS the name the shipped table was built from, so the
+ * fallback cannot become the quiet normal case.
+ */
+export function readPluginName(root, fallback = 'tyran') {
+  const file = join(root, '.claude-plugin', 'plugin.json');
+  try {
+    if (statSync(file).size > MAX_MANIFEST_BYTES) return fallback;
+    const name = JSON.parse(readFileSync(file, 'utf8'))?.name;
+    return typeof name === 'string' && name !== '' ? name : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** The namespace every plugin agent's `agent_type` is prefixed with. */
+export const PLUGIN_NAMESPACE = readPluginName(PLUGIN_ROOT);
+
+export const ROLE_SCOPE = buildRoleScope(PLUGIN_NAMESPACE);
 
 /**
  * `enforce`, `exempt`, or `out-of-scope`.
@@ -196,9 +292,9 @@ export const ROLE_SCOPE = Object.freeze(
  * function is why the matcher in hooks.json is deliberately a catch-all: the
  * decision lives here, where an empty type is a case rather than an accident.
  */
-export function classifyAgent(agentType) {
+export function classifyAgent(agentType, scope = ROLE_SCOPE) {
   if (typeof agentType !== 'string' || agentType === '') return 'out-of-scope';
-  return Object.hasOwn(ROLE_SCOPE, agentType) ? ROLE_SCOPE[agentType] : 'out-of-scope';
+  return Object.hasOwn(scope, agentType) ? scope[agentType] : 'out-of-scope';
 }
 
 // ------------------------------------------------------------------ verdict
@@ -440,12 +536,15 @@ export const REFUSALS = Object.freeze(
       '  labelled count Tests: <N>         or  "Suites: <N>", "checks = <N>"\n' +
       '\n' +
       'If there was genuinely nothing to measure - a scouting pass, an analysis,\n' +
-      'an answer to a question - say so on a line of its own, with a reason:\n' +
+      'an answer to a question - say so, with a reason, on a line that starts at\n' +
+      'the FIRST COLUMN and is not inside a code block:\n' +
       '\n' +
-      '  EVIDENCE: none-required <why there was nothing to run>\n' +
+      'EVIDENCE: none-required <why there was nothing to run>\n' +
       '\n' +
-      'That line is not a formality. Every use of it is recorded in the\n' +
-      'initiative journal, so exemptions are counted rather than assumed.\n' +
+      'Replace the angle brackets with your own words; a line that is still all\n' +
+      'placeholder does not count as a reason. That line is not a formality\n' +
+      'either: every use of it is recorded in the initiative journal, so\n' +
+      'exemptions are counted rather than assumed.\n' +
       '\n' +
       'What this gate does NOT do: it cannot tell real output from invented\n' +
       'output. It blocks silence, not forgery.',
@@ -454,12 +553,14 @@ export const REFUSALS = Object.freeze(
       'claimed without a reason.\n' +
       '\n' +
       'The exemption is legitimate and it is recorded. What is recorded has to\n' +
-      'say something, or the record answers no question later. Write it as:\n' +
+      'say something, or the record answers no question later. Write it at the\n' +
+      'first column of a line of its own, outside any code block:\n' +
       '\n' +
-      '  EVIDENCE: none-required <why there was nothing to run>\n' +
+      'EVIDENCE: none-required <why there was nothing to run>\n' +
       '\n' +
       'A phrase is enough - "read-only reconnaissance, no code changed" - but it\n' +
-      'has to be a phrase, not a placeholder.\n' +
+      'has to be YOUR phrase. The angle-bracketed placeholder above is not one,\n' +
+      'which is why pasting this message back verbatim lands you here again.\n' +
       '\n' +
       'If something WAS run, paste its raw output instead and drop the exemption.',
     [DENY.HATCH_NOT_RECORDABLE]:

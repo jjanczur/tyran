@@ -40,6 +40,34 @@ machine output and it is not the shape of a summary.
 *"All tests pass"* does not match. *"12 passed"* does. That line is the whole
 point, and it has to be drawable by a regex or it is not enforceable.
 
+### Say what the criterion actually is, because it is narrower than it sounds
+
+The criterion is **not** "raw command output". It is **"a digit next to one of
+seven keywords"**, and all seven are test-runner or exit-code shaped. Measured
+in review, in both directions, and neither number is a bug — they are the shape
+of the rule:
+
+| probe | result |
+|---|---|
+| evidence-free prose that happens to contain a matching shape | **7 of 8 pass** |
+| genuine raw command output with no matching shape | **7 of 7 refused** |
+
+Passing prose: *"fixed 3 failing edge cases"*, *"the process should exit 0"*,
+*"6 / 6 passed my read-through of the diff"*, *"Tests: 4 new cases to write"*.
+Refused real output: `git commit`, `git diff --stat`, `npm run build` printing
+`Compiled successfully`, a silent `tsc --noEmit`, `eslint` followed by
+`echo $?` → `0`, a `curl` status of `200`, a `psql` row count.
+
+Two consequences worth stating rather than discovering:
+
+- **If your evidence is a build log, a diff stat, an HTTP status or a row
+  count, append the exit code.** `npm run build; echo "EXIT=$?"` turns a refused
+  report into a passing one, and the contract asked for the exit code anyway.
+- **A sentence with a number in it can satisfy the gate.** That is the same
+  boundary as forgery, reached by accident instead of on purpose. The gate
+  raises the cost of an empty report; it does not measure whether the work
+  happened.
+
 ### Why the criterion is wide rather than strict
 
 Measured against 128 real subagent final messages recovered from Claude Code
@@ -94,10 +122,26 @@ An agent that honestly had nothing to measure writes, on a line of its own:
 EVIDENCE: none-required <why there was nothing to run>
 ```
 
-The reason is mandatory (10 characters minimum) and the gate **records every
-use in the initiative journal**. An exemption nobody can count is a silent
-exclusion, which ADR-19 forbids by name — so this is the one exemption that is
-refused when it cannot be recorded.
+Three conditions, all of them mechanical, and each one was a hole before a
+review measured it:
+
+1. **at the first column of a line** — not indented, not behind `>`, not as a
+   list bullet;
+2. **not inside a fenced code block** — showing the syntax to a reader is
+   documentation, not a claim about your own work;
+3. **the reason is your own words** (10 characters after angle-bracketed
+   placeholders are removed).
+
+Condition 3 exists because of the sharpest version of the problem: the refusal
+this gate injects into an agent's context *contains* the hatch template, and
+`<why there was nothing to run>` is 30 characters. Under a bare length check,
+**pasting the refusal back granted the exemption** — the gate handing out the
+key along with the lock. Four natural reports were measured walking through it
+that way, none of which had asked for an exemption.
+
+The gate **records every use in the initiative journal**. An exemption nobody
+can count is a silent exclusion, which ADR-19 forbids by name — so this is the
+one exemption that is refused when it cannot be recorded.
 
 ## What lands in the journal
 
@@ -156,7 +200,7 @@ correct report?** The two failures are not symmetrical.
 So the record gates **the exemption an agent claims for itself**, and nothing
 else:
 
-| situation | journal broken or absent |
+| situation | journal broken, absent, oversized, or its lock contended |
 |---|---|
 | report carries evidence | passes |
 | role exemption (scout, retro) | passes |
@@ -165,6 +209,13 @@ else:
 
 The cost of the last row is bounded at one extra turn, because the fuse
 releases the second stop.
+
+**Lock contention lands in the same column**, and it is the likeliest of the
+four in practice. The journal's mutex gives up after 5 s under contention;
+`append` then throws, the record does not happen, and a legitimate hatch is
+refused exactly as if the journal were unwritable. Enough parallel agents
+stopping at once will therefore bounce honest exemptions. Nothing is lost —
+the second stop passes — but the turn is spent.
 
 ### Bounded before it is read
 
@@ -209,6 +260,10 @@ the fuse released the second stop.
 
 - **Forgery is out of reach.** Stated at the top and repeated here, because it
   is the limit a reader will otherwise assume away.
+- **The criterion is seven keyword shapes, not "raw output".** Measured: 7 of 8
+  pieces of evidence-free prose containing such a shape pass, and 7 of 7
+  genuine command outputs without one are refused. See the table above; the
+  fix for a refused build log is `echo "EXIT=$?"`.
 - **A quoted counter counts.** Evidence inside a code block citing someone
   else's run is indistinguishable from a produced one without re-running the
   commands ourselves.

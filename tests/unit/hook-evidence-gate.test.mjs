@@ -29,16 +29,19 @@ import {
   MAX_JOURNAL_BYTES,
   MAX_RECORDED_POINTS,
   MIN_HATCH_REASON,
+  PLUGIN_NAMESPACE,
   REFUSALS,
   ROLE_SCOPE,
   SIGNALS,
   apply,
+  buildRoleScope,
   classifyAgent,
   findEvidence,
   findHatch,
   forJournal,
   judge,
   locateJournal,
+  readPluginName,
   recordGate,
 } from '../../hooks/scripts/evidence-gate.mjs';
 
@@ -250,6 +253,60 @@ test('each signal fires on the raw output shape it names', () => {
   }
 });
 
+test('pasting a refusal back gets you refused again — THE VERDICT, not the library', () => {
+  // This assertion used to live on `findEvidence` and was green while the gate
+  // let the pasted refusal straight through: the refusal quotes the hatch
+  // template, the old hatch pattern matched it through its indentation, and
+  // `<why there was nothing to run>` is 30 characters, which cleared the bare
+  // length check. The gate was handing out the key along with the lock, and the
+  // guard was pointed at a library function instead of at the verdict.
+  // ADR-20 correction 1, case three.
+  const repo = tempRepo();
+  for (const [code, text] of Object.entries(REFUSALS)) {
+    const verdict = judge(input({ cwd: repo, last_assistant_message: text }));
+    assert.equal(verdict.outcome, 'deny', `pasting refusal "${code}" was not refused`);
+    const out = decisionOf(runScript(input({ cwd: repo, last_assistant_message: text })).stdout);
+    assert.equal(out.decision, 'block', `the real process let refusal "${code}" through`);
+  }
+  // ...and nothing was recorded as an exemption while that was happening.
+  assert.equal(journalEvents(repo).filter((e) => e.data.result === 'exempt-hatch').length, 0);
+});
+
+test('a hatch MENTIONED is not a hatch CLAIMED', () => {
+  // Four natural reports that a review measured walking through the gate as
+  // exemptions they never asked for. A hatch is a declaration an agent makes
+  // about its own work; it has to look like one, not like a mention of one.
+  const repo = tempRepo();
+  const mentions = {
+    'inside a fenced code block':
+      'Here is the syntax:\n```\nEVIDENCE: none-required read-only reconnaissance\n```\nI ran nothing.',
+    'inside a blockquote': 'The docs say:\n> EVIDENCE: none-required read-only reconnaissance\nThat is all.',
+    'as a list bullet': 'Notes:\n- EVIDENCE: none-required read-only reconnaissance\nNothing executed.',
+    indented: '  EVIDENCE: none-required read-only reconnaissance, nothing executed',
+    'inside a tilde fence':
+      'Example:\n~~~\nEVIDENCE: none-required read-only reconnaissance\n~~~\nnothing ran.',
+  };
+  for (const [where, text] of Object.entries(mentions)) {
+    assert.equal(findHatch(text).present, false, `a hatch ${where} was read as a claim`);
+    const verdict = judge(input({ cwd: repo, last_assistant_message: text }));
+    assert.equal(verdict.outcome, 'deny', `a hatch ${where} still granted an exemption`);
+  }
+  // ...and the honest form, at the first column, still works. Without this the
+  // test above would hold on a gate that never grants the hatch at all.
+  const honest = 'EVIDENCE: none-required read-only reconnaissance, nothing executed';
+  assert.equal(judge(input({ cwd: repo, last_assistant_message: honest })).outcome, 'exempt-hatch');
+});
+
+test('a reason that is entirely a placeholder is not a reason', () => {
+  assert.equal(findHatch('EVIDENCE: none-required <why there was nothing to run>').reason, null);
+  assert.equal(findHatch('EVIDENCE: none-required <a> <b> <c>').reason, null);
+  // partly a placeholder, but with enough of the agent's own words, is fine
+  assert.equal(
+    findHatch('EVIDENCE: none-required nothing was executed <see the plan>').reason,
+    'nothing was executed <see the plan>',
+  );
+});
+
 test('the refusal text does not itself satisfy the criterion', () => {
   // An agent that pastes the refusal back verbatim must be refused again. The
   // examples inside the refusals are written with placeholders — `EXIT=<code>`,
@@ -310,34 +367,127 @@ test('an out-of-scope agent leaves NO journal record — that is not an exemptio
   assert.deepEqual(journalEvents(repo), []);
 });
 
-test('every agent shipped in agents/ is classified', () => {
-  // The mechanism that keeps this table honest as roles are added. A new
-  // agent definition that nobody classified would otherwise fall silently out
-  // of scope, which is exactly the "absent control that looks installed"
-  // failure this epic exists to remove.
-  let names;
+/**
+ * Every agent definition under `dir`, RECURSIVELY.
+ *
+ * Measured, and the reason this is not a `readdirSync`: the platform loads
+ * agent definitions from subdirectories. `.claude/agents/sub/nested-probe.md`
+ * and `.claude/agents/sub/deeper/deep-probe.md` both appear in
+ * `claude agents`. A flat guard would leave an agent in a subdirectory
+ * unclassified, and unclassified means out of scope — the silent disarm this
+ * whole guard exists to prevent, coming back by a different door.
+ */
+function agentFilesUnder(dir, depth = 0) {
+  if (depth > 8) return [];
+  let entries;
   try {
-    names = readdirSync(join(REPO_ROOT, 'agents')).filter((n) => n.endsWith('.md'));
+    entries = readdirSync(dir, { withFileTypes: true });
   } catch {
-    names = [];
+    return [];
   }
-  for (const file of names) {
-    const front = readFileSync(join(REPO_ROOT, 'agents', file), 'utf8');
-    const m = /^name:\s*(\S+)\s*$/m.exec(front);
+  const out = [];
+  for (const e of entries) {
+    if (e.isDirectory()) out.push(...agentFilesUnder(join(dir, e.name), depth + 1));
+    else if (e.name.endsWith('.md')) out.push(join(dir, e.name));
+  }
+  return out;
+}
+
+/** The frontmatter `name` of every shipped agent — that IS its `agent_type`. */
+function shippedAgentNames(root) {
+  return agentFilesUnder(join(root, 'agents')).map((file) => {
+    const m = /^name:\s*(\S+)\s*$/m.exec(readFileSync(file, 'utf8'));
     assert.ok(m, `${file} has no frontmatter name`);
+    return m[1];
+  });
+}
+
+test('every agent shipped in agents/ is classified, at any nesting depth', () => {
+  // The mechanism that keeps this table honest as roles are added. A new agent
+  // definition that nobody classified would otherwise fall silently out of
+  // scope, which is exactly the "absent control that looks installed" failure
+  // this epic exists to remove.
+  for (const name of shippedAgentNames(REPO_ROOT)) {
     assert.ok(
-      Object.hasOwn(ROLE_SCOPE, `tyran:${m[1]}`),
-      `agent "${m[1]}" is shipped but not classified in ROLE_SCOPE — enforce it or exempt it`,
+      Object.hasOwn(ROLE_SCOPE, `${PLUGIN_NAMESPACE}:${name}`),
+      `agent "${name}" is shipped but not classified — enforce it or exempt it in ROLE_BY_NAME`,
     );
   }
 });
 
-test('an UNCLASSIFIED agent name is detectable — the check above can fail', () => {
-  // agents/ is empty today, so the test above passes vacuously. This is the
-  // half of it that can go red: it demonstrates the predicate the other test
-  // applies, on a name that is deliberately absent from the table.
-  assert.equal(Object.hasOwn(ROLE_SCOPE, 'tyran:brand-new-role'), false);
-  assert.equal(classifyAgent('tyran:brand-new-role'), 'out-of-scope');
+test('the classification guard SEES an agent in a subdirectory', () => {
+  // agents/ is empty today, so the test above passes vacuously and would keep
+  // passing on a flat reader. This is the half that can go red: it builds the
+  // nesting the platform was measured to load and asserts the guard finds it.
+  const root = mkdtempSync(join(tmpdir(), 'tyran-agents-'));
+  mkdirSync(join(root, 'agents', 'sub', 'deeper'), { recursive: true });
+  writeFileSync(join(root, 'agents', 'flat.md'), '---\nname: implementer\n---\nx\n');
+  writeFileSync(join(root, 'agents', 'sub', 'nested.md'), '---\nname: brand-new-role\n---\nx\n');
+  writeFileSync(join(root, 'agents', 'sub', 'deeper', 'deep.md'), '---\nname: deeper-role\n---\nx\n');
+  assert.deepEqual(shippedAgentNames(root).sort(), ['brand-new-role', 'deeper-role', 'implementer']);
+
+  // ...and those two nested ones are exactly what the guard must reject.
+  assert.equal(Object.hasOwn(ROLE_SCOPE, `${PLUGIN_NAMESPACE}:brand-new-role`), false);
+  assert.equal(classifyAgent(`${PLUGIN_NAMESPACE}:brand-new-role`), 'out-of-scope');
+});
+
+// -------------------------------------------- the namespace is not a literal
+
+test('the scope table is built from the MANIFEST, not from a literal prefix', () => {
+  // Measured by review: renaming the plugin to `tyran-conductor` left the suite
+  // green at 398/398 while the gate stopped enforcing anything — an implementer
+  // reported "all tests are green and everything works" and the journal
+  // recorded zero lines. One word in a manifest disarmed the gate this story is
+  // named after.
+  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, '.claude-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(PLUGIN_NAMESPACE, manifest.name, 'the shipped table was not built from the manifest');
+  assert.equal(classifyAgent(`${manifest.name}:implementer`), 'enforce');
+});
+
+test('a renamed plugin re-scopes the table — and the old namespace stops binding', () => {
+  const renamed = buildRoleScope('tyran-conductor');
+  assert.equal(classifyAgent('tyran-conductor:implementer', renamed), 'enforce');
+  assert.equal(classifyAgent('tyran-conductor:scout', renamed), 'exempt');
+  assert.equal(classifyAgent('tyran:implementer', renamed), 'out-of-scope');
+});
+
+test('the v1 spellings do NOT follow the manifest, because the plugin does not own them', () => {
+  // `.claude/agents/*.md` agents get their frontmatter name as `agent_type`.
+  // Renaming the plugin cannot rename those, and a repo mid-migration runs both.
+  const renamed = buildRoleScope('anything-at-all');
+  assert.equal(classifyAgent('tyran-implementer', renamed), 'enforce');
+  assert.equal(classifyAgent('tyran-scout', renamed), 'exempt');
+});
+
+test('readPluginName READS the manifest — it does not return the fallback', () => {
+  // A mutant that made this function `return fallback` unconditionally SURVIVED
+  // the first run, because this repo's manifest happens to be named `tyran` and
+  // so is the fallback: every assertion about "the table matches the manifest"
+  // held while the manifest was no longer being read at all. ADR-20 correction
+  // 1, case three — the guard was pinning a coincidence, not the boundary. So
+  // this one reads a manifest that says something else.
+  const root = mkdtempSync(join(tmpdir(), 'tyran-manifest-'));
+  mkdirSync(join(root, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'not-tyran-at-all' }));
+  assert.equal(readPluginName(root), 'not-tyran-at-all');
+  assert.equal(readPluginName(root, 'unused-fallback'), 'not-tyran-at-all');
+
+  // ...and the whole way through to the scope table, which is what actually
+  // ships. Reading the name and then ignoring it would be the same defect.
+  assert.equal(classifyAgent('not-tyran-at-all:implementer', buildRoleScope(readPluginName(root))), 'enforce');
+});
+
+test('a manifest with no usable name, or none at all, falls back rather than disarming', () => {
+  // The other direction: classifying every plugin agent as out-of-scope on a
+  // partial install would be the silent disarm this change exists to remove.
+  assert.equal(readPluginName('/definitely/not/a/plugin'), 'tyran');
+  assert.equal(readPluginName('/definitely/not/a/plugin', 'other'), 'other');
+  const root = mkdtempSync(join(tmpdir(), 'tyran-manifest-'));
+  mkdirSync(join(root, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: '' }));
+  assert.equal(readPluginName(root, 'fell-back'), 'fell-back');
+  writeFileSync(join(root, '.claude-plugin', 'plugin.json'), 'not json at all');
+  assert.equal(readPluginName(root, 'fell-back'), 'fell-back');
 });
 
 // ============================================================ the exemptions
@@ -588,6 +738,11 @@ test('an absurd .tyran/state is not searched', () => {
     mkdirSync(join(repo, '.tyran', 'state', `init-${i}`), { recursive: true });
   }
   assert.equal(locateJournal(repo).why, 'too-many-initiatives');
+  // Pinned, like its three neighbours. The fixture above is built FROM the
+  // constant, so it pins the relation and not the boundary — a mutant that
+  // moves the ceiling moves the fixture with it and stays green. Its three
+  // neighbouring constants had this line and this one did not.
+  assert.equal(MAX_INITIATIVES, 64, 'pinned so a change is deliberate');
 });
 
 test('no .tyran at all is a stated reason, not an exception', () => {

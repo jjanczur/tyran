@@ -99,9 +99,12 @@ only what it couldn't infer.
   SILENCE, not FORGERY:** an agent that invents the text `232 passed / 0
   failed` walks straight through it. The gate raises the price of a lie — it
   has to be deliberately fabricated rather than simply waved away — and it does
-  not remove it. Measured on 55 real reports from this project's own agents:
-  53 pass, and both misses turned out not to be reports at all. Details and
-  limits in [the evidence gate](docs/evidence-gate.md).
+  not remove it. Nor is the criterion "raw command output" — mechanically it is
+  *"a digit next to one of seven test-runner keywords"*, so a build log without
+  an exit code is refused and a sentence containing `6 / 6 passed` is not.
+  Measured on 55 real reports from this project's own agents: 53 pass, and both
+  misses turned out not to be reports at all. Details, numbers in both
+  directions, and limits in [the evidence gate](docs/evidence-gate.md).
 - 🧠 **It learns *your* workflow — autonomously.** After every initiative a
   retrospective agent distills your repo's rules, writes repo-specific
   skills, and tunes Tyran's own playbook — through a hard anti-bloat filter

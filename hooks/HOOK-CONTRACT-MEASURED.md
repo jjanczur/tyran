@@ -21,11 +21,43 @@ when any of these happen:
 | stdout is not JSON at all (does not start with `{`) | treated as plain text, **proceeds** |
 | stdout is JSON but fails the output schema | validation error, **proceeds** |
 | `hookSpecificOutput.hookEventName` differs from the fired event | the platform **throws while reading our output**, caught, **proceeds** (only when `hookSpecificOutput` is present at all — see §3) |
-| the hook is killed at its `timeout` | killed with `SIGKILL`; measured `rc=137`, **stdout empty**, **proceeds** |
+| the hook is killed at its `timeout` | killed with `SIGKILL` — and the output is **not read at all**; see below, this row is the one that misleads |
 | an exception escapes hook *selection* | the selector is wrapped in `try { … } catch { return [] }`, so **every hook for that event disappears** with no transcript entry |
 
-Two corrections to how this was first written, both worth stating because the
-wrong mechanism leads to the wrong fix:
+### The timeout row, in full — because the obvious reading of it is wrong
+
+An earlier version of this file said "measured `rc=137`, stdout empty,
+proceeds". Every word of that is true and the sentence is still misleading,
+because it points at the wrong cause. The problem is **not** that a killed
+hook has no time to write. Measured on a live run: a `PreToolUse` hook with
+`timeout: 3` wrote a complete, valid refusal through `writeSync(1, …)`,
+logged that it had done so, and only then blocked for 60 s. The refusal was
+**ignored and the tool ran**.
+
+The reason is visible in the runner. The same moment that kills the process
+aborts the `AbortSignal`, the `close` handler reports `aborted: true`, and
+the consumer does this:
+
+```
+if (o.aborted) { …record telemetry, including o.stdout…; return }   // ← returns here
+const { json, plainText, validationError } = parse(o.stdout);       // ← never reached
+```
+
+The bytes were collected. They are even stored in the telemetry record. They
+are simply **never parsed**. So:
+
+> **Writing earlier does not help.** A watchdog that emits the refusal sooner
+> and lets the process keep running buys nothing at all. The only thing that
+> closes this case is a mechanism that makes the process **EXIT** before the
+> platform's timeout — a hard-killed child process, or a watchdog that forces
+> the whole process to terminate. Anything that merely produces output while
+> the process stays alive is defeated by this branch.
+
+This is why `hook-io.mjs` enforces its budget by emitting **and exiting**,
+rather than by writing early and hoping.
+
+Two further corrections to how this file was first written, both worth
+stating because the wrong mechanism leads to the wrong fix:
 
 - a missing hook file does **not** make `spawn` throw. There is no
   pre-existence check; `shell: true` means the shell reports it. The

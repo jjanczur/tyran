@@ -1,6 +1,6 @@
 # Hook runtime reference
 
-> **Status:** shipped — `hooks/scripts/hook-io.mjs` with 45 unit tests.
+> **Status:** shipped — `hooks/scripts/hook-io.mjs`.
 > Read this before writing a gate. The platform's default failure mode is to
 > **let the action through**, so most of the ways a gate can be wrong end in
 > it silently not existing.
@@ -93,18 +93,30 @@ narrowly — four gates inherit whatever this claims:
 |---|---|
 | the handler yields the event loop and has not decided in time | **yes** — the timer emits the refusal |
 | the handler overruns and *then* returns a verdict | **yes** — the verdict is discarded and replaced by a refusal |
-| the handler blocks the thread and never returns | **no** — nothing on this thread can run; the platform `SIGKILL`s the process and a killed hook produces no output |
+| the handler blocks the thread and never returns | **no** — nothing on this thread can run, and the platform kills the process |
 
-The third row has no in-process fix (Node is single-threaded), so it is a rule
-for gate authors instead:
+**The third row is worse than "the hook had no time to write", and the
+difference decides what a fix would have to look like.** Measured live: a hook
+that wrote a complete, valid refusal to stdout and *then* blocked past its
+timeout was **ignored, and the tool ran**. The kill and the abort are the same
+event, and the platform returns on `aborted` before it ever parses stdout —
+the bytes are collected, even recorded in telemetry, and never read.
+
+> **Writing earlier does not help.** A watchdog that emits the refusal sooner
+> while the process keeps running buys **nothing**. Only making the process
+> **exit** before the platform's timeout closes this case.
+
+That is why every ending in `hook-io.mjs` writes and then exits — and why
+there is no cheap fix for a handler that never returns. The mitigation is a
+rule for gate authors:
 
 > **A gate does no unbounded synchronous work.** Size-check before
 > `readFileSync`, prefer async I/O, and give any child process its own
 > `timeout`.
 
-If that ever proves insufficient the fix is a hard-killed child process or a
-worker-thread watchdog claiming the write through `Atomics`. Both cost real
-latency on **every** tool call, and nothing measured so far justifies it.
+The only remaining escape hatch is running the gate's work in a hard-killed
+child process. That costs real latency on **every** tool call, and nothing
+measured so far justifies it.
 
 ## Writing a probe
 

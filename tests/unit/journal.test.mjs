@@ -12,7 +12,6 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   EVENT_TYPES,
@@ -654,6 +653,14 @@ test('close-spawn writes through the ordinary append path (validated, clamped, h
 // second lock. Asserted on the lock itself, not on a race outcome: a race
 // only *sometimes* exposes the second lock, and evidence that only sometimes
 // appears is not evidence. (Hard links still alias — documented, not fixed.)
+//
+// There is deliberately NO observation window here. "Still running after N ms"
+// cannot tell a child blocked on the lock from a child that has not reached it
+// yet, so a slow-starting process makes such an assertion pass for the wrong
+// reason — verified: with a 1 s busy-wait at CLI entry, a mutant keying the
+// lock by the given path survives that form of the test. The child is instead
+// left to run to completion: with the lock held it has exactly two possible
+// endings, and only one of them is reachable without a second lock.
 test('the lock is keyed by the canonical path: a symlink alias cannot buy a second lock', async () => {
   const f = tmp();
   append(f, ev({ ev: 'init.created', data: {} }));
@@ -661,24 +668,28 @@ test('the lock is keyed by the canonical path: a symlink alias cannot buy a seco
   symlinkSync(f, link);
   const heldLock = `${realpathSync(f)}.lock`;
   mkdirSync(heldLock); // a live writer holds the lock through the REAL path
+  const spawnArgs = [SCRIPT, 'append', link, 'spawn', 'demo', '--data', '{"agent":"racer","role":"r"}'];
+  let result;
   try {
-    const child = spawn(process.execPath, [
-      SCRIPT, 'append', link, 'spawn', 'demo', '--data', '{"agent":"racer","role":"r"}',
-    ]);
-    let out = '';
-    child.stdout.on('data', (d) => (out += d));
-    await sleep(900); // node starts in ~130ms (see the race test): far more than enough
-    assert.equal(
-      child.exitCode,
-      null,
-      `append through the symlink ignored the lock held on the real path (exit ${child.exitCode}, stdout: ${out})`,
-    );
-    child.kill('SIGKILL');
-    await new Promise((res) => child.on('close', res));
+    result = await new Promise((res) => {
+      const child = spawn(process.execPath, spawnArgs);
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (err += d));
+      child.on('close', (code) => res({ code, out, err }));
+    });
   } finally {
     rmdirSync(heldLock);
   }
+  // Either it acquired a second lock and wrote (mutant), or it ran into ITS
+  // OWN 5 s timeout on the lock we hold — which no amount of slowness fakes.
+  assert.equal(result.code, 1, `the alias bought a second lock (stdout: ${result.out})`);
+  assert.match(result.err, /journal lock timeout/);
   assert.equal(query(f, { ev: 'spawn' }).length, 0); // nothing slipped past the lock
-  append(link, spawnEv('racer')); // and the alias writes into the very same file
+  // Positive control: the very same command succeeds once the lock is free —
+  // so the failure above was the lock, not a broken command. It also proves
+  // the alias writes into the very same file.
+  execFileSync(process.execPath, spawnArgs);
   assert.equal(query(f, { ev: 'spawn' }).length, 1);
 });

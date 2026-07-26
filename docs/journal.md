@@ -105,6 +105,12 @@ gaps are known rather than hypothetical:
   canonical path — keying by `(dev, ino)` would be needed. Reaching one
   journal through two hard links is not something the tooling does; it is
   listed because the guarantee would otherwise read as stronger than it is.
+  One narrower case behaves the same way: a symlink to a journal **that does
+  not exist yet** cannot be resolved, so the *first* write through it takes
+  its own lock (measured: alias not blocked, 71 ms, while the real path was
+  held). From the second write on the file exists and the alias shares the
+  lock like any other symlink. Both cases are fixed by the same `(dev, ino)`
+  change and are tracked with it.
 
 Consequences you will meet in practice:
 

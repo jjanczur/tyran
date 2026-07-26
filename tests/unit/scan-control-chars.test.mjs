@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, lstatSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -385,6 +385,33 @@ test('a symlink that is tracked but absent is EXEMPT, and says so', () => {
   assert.match(r.stdout, /not scanned: gone\.md — tracked but missing from the working tree/);
 });
 
+// A path long enough that the SYSTEM refuses to resolve it, measured rather
+// than assumed. The first version of this helper was a fixed 2419 characters,
+// which is over PATH_MAX on macOS (1024) and comfortably under it on Linux
+// (4096): the suite was green on the author's machine, on the reviewer's
+// machine, and red on the first CI run, because on Linux the path simply did
+// not exist and answered ENOENT — the exempt branch, not the refused one.
+//
+// Guessing a second constant would only move the guess to the next platform,
+// so the length is grown until the system itself says the name is too long.
+// If no length produces that answer, the test FAILS rather than skips: a check
+// that quietly does not run is the exact defect this file exists to prevent.
+function aPathThisSystemRefusesToResolve(dir) {
+  const component = (i) => `d${i}`.padEnd(200, 'x');
+  const parts = [];
+  for (let i = 0; i < 200; i += 1) {
+    parts.push(component(i));
+    const relative = parts.join('/') + '/link.md';
+    try {
+      readlinkSync(join(dir, relative));
+    } catch (err) {
+      if (err.code === 'ENAMETOOLONG') return relative;
+      // ENOENT and friends mean the path is still short enough to be resolved.
+    }
+  }
+  assert.fail('could not build a path this system considers too long — the ENAMETOOLONG branch would go untested');
+}
+
 test('a link whose target cannot be read at all is REFUSED, with a remedy', () => {
   // The third branch: neither ENOENT nor EINVAL. A path too long for the
   // system answers ENAMETOOLONG to readlink and to every other syscall, so
@@ -394,7 +421,7 @@ test('a link whose target cannot be read at all is REFUSED, with a remedy', () =
   // file, and it carries the remedy for THIS problem rather than the advice to
   // declare a binary that is not the problem.
   const dir = gitRepo({ 'README.md': '# Title\n' });
-  const tooLong = Array.from({ length: 12 }, (_, i) => `d${i}`.padEnd(200, 'x')).join('/') + '/link.md';
+  const tooLong = aPathThisSystemRefusesToResolve(dir);
   addIndexSymlink(dir, tooLong, 'target.md');
 
   const part = partitionTrackedFiles(dir);

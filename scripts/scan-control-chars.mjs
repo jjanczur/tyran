@@ -32,68 +32,34 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  DELIBERATELY_ALLOWED,
+  FORBIDDEN,
+  formatCodePoint,
+  identifierProblem,
+  invisibleProblem,
+} from './invisible.mjs';
 
 /**
- * Forbidden codepoint ranges, as numbers rather than string escapes — on
- * purpose. A regex literal written with escape notation is one careless
- * "helpful" rewrite away from becoming the very character it bans, and this
- * file would then fail its own scan. Numbers cannot be mangled that way, and
- * they double as the reporting vocabulary.
+ * The rule itself now lives in scripts/invisible.mjs and is re-exported here
+ * UNCHANGED in shape, because this scanner was where it was written down first
+ * and other code already imports it from this path.
+ *
+ * Why it moved (ADR-19 correction 1 point 4, ADR-21): the same rule had three
+ * spellings — this list, `journal.agentNameProblem`'s `\p{Cc}\p{Cf}` and a
+ * hand-maintained character class inside `project.inline()` — and measured
+ * over the whole of Unicode they disagreed on 456 codepoints in 37 ranges.
+ * The layering was inverted: this file, which protects OUR repository, caught
+ * the entire TAG block, while `inline()`, which protects the STATE.md an agent
+ * reads, passed all 128 of them straight through.
+ *
+ * The list is no longer the boundary of the rule — `invisibleProblem` is, and
+ * it consults a Unicode property so the boundary stops being one revision
+ * behind. The list is the VOCABULARY: it is what turns a finding from
+ * "default-ignorable" into a sentence a reader can act on.
  */
-export const FORBIDDEN = Object.freeze([
-  // C0 controls, except TAB (0x09) and LF (0x0A) which are legal text.
-  // CR (0x0D) is deliberately IN: this repo normalizes to LF (.gitattributes).
-  Object.freeze({ lo: 0x00, hi: 0x08, what: 'C0 control character' }),
-  Object.freeze({ lo: 0x0b, hi: 0x1f, what: 'C0 control character' }),
-  Object.freeze({ lo: 0x7f, hi: 0x9f, what: 'DEL / C1 control character' }),
-  Object.freeze({ lo: 0x00ad, hi: 0x00ad, what: 'invisible formatting character (SOFT HYPHEN)' }),
-  Object.freeze({ lo: 0x061c, hi: 0x061c, what: 'bidi mark (ARABIC LETTER MARK)' }),
-  Object.freeze({ lo: 0x115f, hi: 0x1160, what: 'invisible filler that renders as nothing' }),
-  Object.freeze({ lo: 0x180e, hi: 0x180e, what: 'invisible separator (MONGOLIAN VOWEL SEPARATOR)' }),
-  Object.freeze({ lo: 0x200b, hi: 0x200f, what: 'zero-width or directional mark' }),
-  Object.freeze({ lo: 0x202a, hi: 0x202e, what: 'bidi embedding or override' }),
-  Object.freeze({ lo: 0x2060, hi: 0x2064, what: 'word joiner or invisible operator' }),
-  Object.freeze({ lo: 0x2066, hi: 0x2069, what: 'bidi isolate' }),
-  Object.freeze({ lo: 0x206a, hi: 0x206f, what: 'deprecated formatting character' }),
-  Object.freeze({ lo: 0x3164, hi: 0x3164, what: 'invisible filler that renders as nothing' }),
-  Object.freeze({ lo: 0xffa0, hi: 0xffa0, what: 'invisible filler that renders as nothing' }),
-  Object.freeze({ lo: 0xfeff, hi: 0xfeff, what: 'byte order mark / zero-width no-break space' }),
-  Object.freeze({ lo: 0xfff9, hi: 0xfffb, what: 'interlinear annotation character' }),
-  Object.freeze({ lo: 0x1d173, hi: 0x1d17a, what: 'invisible musical formatting character' }),
-  // The one that matters most, and the one the old test could not even see:
-  // U+E0001..U+E007E map ONE-TO-ONE onto ASCII and render as nothing at all.
-  // Projections (STATE.md, PROGRESS.md) are read by AGENTS, and their content
-  // travels from subagent reports about foreign repositories — so invisible
-  // text in a projection is prompt injection aimed at our own team, not an
-  // aesthetic complaint. The block is astral, which is why the pinning test
-  // stopping at U+FFFF hid it (ADR-19 correction 1).
-  Object.freeze({ lo: 0xe0000, hi: 0xe007f, what: 'TAG character (invisible ASCII)' }),
-  // Variation Selectors Supplement. Same smuggling channel as the TAG block —
-  // a sequence of them encodes arbitrary bytes onto a visible carrier — and
-  // zero occurrences in this repo, so banning them costs nothing here. Their
-  // BMP counterparts are deliberately NOT banned; see below.
-  Object.freeze({ lo: 0xe0100, hi: 0xe01ef, what: 'variation selector (supplement)' }),
-]);
+export { FORBIDDEN, DELIBERATELY_ALLOWED };
 
-/**
- * DELIBERATE GAP: U+FE00..U+FE0F (variation selectors 1-16) are NOT banned.
- *
- * U+FE0F is the emoji presentation selector and occurs 24 times in this repo's
- * README today; U+FE0E is its text-presentation twin. Banning the range would
- * turn CI red on a file nobody touched, and ADR-19 is explicit that a gate
- * which cries wolf gets switched off and never restored — which costs more
- * than the gap.
- *
- * The gap is real and stated rather than hidden: 16 codepoints still carry
- * four bits each, so a determined smuggler can encode data with them. That is
- * an argument for the direction ADR-19 correction 1 already names — an
- * ALLOWLIST for machine-generated text, where the legal repertoire is narrow —
- * not for a nineteenth range in a denylist that will always be one Unicode
- * revision behind.
- */
-export const DELIBERATELY_ALLOWED = Object.freeze([
-  Object.freeze({ lo: 0xfe00, hi: 0xfe0f, why: 'variation selectors: U+FE0F is legal emoji presentation' }),
-]);
 
 /** Names worth spelling out; everything else falls back to its range label. */
 const NAMES = Object.freeze({
@@ -156,24 +122,23 @@ function nameOf(cp) {
   return null;
 }
 
-function classify(cp) {
-  for (const range of FORBIDDEN) {
-    if (cp >= range.lo && cp <= range.hi) return range.what;
-  }
-  return null;
-}
+/**
+ * One call, no options. Every layer of this repo asks this same question of
+ * the same function, so "is this codepoint invisible" has exactly one answer
+ * (ADR-21: one ANSWER, not one function).
+ */
+const classify = (cp) => invisibleProblem(cp);
 
 /**
- * The same rule, plus TAB and LF, for text that is a PATH rather than file
- * contents. The asymmetry is deliberate: a tab is ordinary text inside a file
- * and a catastrophe in a filename, where it makes one path print as two
- * columns in every tool that lists it — and a newline in a path breaks the
- * line-oriented output of all of them.
+ * The invisibility rule PLUS the disjoint identifier rule, for text that is a
+ * PATH rather than file contents. The asymmetry is deliberate and it is not a
+ * second configuration of the invisibility answer: a tab is ordinary, visible
+ * text inside a file and a catastrophe in a filename, where it makes one path
+ * print as two columns in every tool that lists it — and a newline in a path
+ * breaks the line-oriented output of all of them. The two rules never overlap,
+ * and a test asserts that over the whole of Unicode.
  */
-function classifyInPath(cp) {
-  if (cp === 0x09 || cp === 0x0a) return 'control character in a path';
-  return classify(cp);
-}
+const classifyInPath = (cp) => identifierProblem(cp);
 
 /** UTF-8 width of a codepoint — lets us report byte offsets without re-encoding. */
 function utf8Len(cp) {
@@ -183,10 +148,16 @@ function utf8Len(cp) {
   return 4;
 }
 
-/** `U+00A0` style, always at least four hex digits. */
-export function formatCodePoint(cp) {
-  return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
-}
+/**
+ * `U+00A0` style, re-exported unchanged from the module that owns the rule.
+ *
+ * It moved because the escaper that USES it moved: `escapeInvisible` renders
+ * `<U+202E>`, and a second copy of the formatter next to the first copy of the
+ * escaper is how the notation drifts into two dialects. Same reasoning as
+ * FORBIDDEN above — one rule, one home — and the export shape here is
+ * untouched, so every existing importer of this path keeps working.
+ */
+export { formatCodePoint };
 
 /**
  * Every forbidden codepoint in `text`, each with line, column (in codepoints),

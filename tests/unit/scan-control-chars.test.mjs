@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
@@ -16,6 +17,8 @@ import {
 } from '../../scripts/scan-control-chars.mjs';
 
 const SCRIPT = new URL('../../scripts/scan-control-chars.mjs', import.meta.url).pathname;
+/** The single home of the rule itself — see scripts/invisible.mjs (ADR-21). */
+const RULE = new URL('../../scripts/invisible.mjs', import.meta.url).pathname;
 const REPO_ROOT = new URL('../../', import.meta.url).pathname;
 
 /**
@@ -55,10 +58,10 @@ test('LF, TAB and ordinary text are never findings', () => {
   assert.deepEqual(scanText(''), []);
 });
 
-test('the banned set is exactly the one ADR-19 specifies', () => {
+test('the banned set covers ADR-19 in full and can only ever grow', () => {
   // Pinned independently of FORBIDDEN, because the range-walk test below
   // iterates that same list: deleting a range there would delete its own
-  // coverage and stay green. This is the list, written out, from the ADR.
+  // coverage and stay green. These are the ranges, written out, from the ADR.
   //
   // The walk covers EVERY codepoint, astral planes included. It used to skip
   // them (`if (point === 0xffff) point = 0x10fffe;`) on the assumption that
@@ -66,12 +69,22 @@ test('the banned set is exactly the one ADR-19 specifies', () => {
   // what hid the TAG block, the single most dangerous gap in the list
   // (ADR-19 correction 1). A test whose scope is an assumption cannot falsify
   // that assumption.
-  const banned = [];
+  //
+  // The assertion is a SUPERSET one now, not an equality, and that is a
+  // deliberate consequence of the shape change in ADR-21: the boundary of the
+  // rule is a Unicode property (`Default_Ignorable_Code_Point` and friends),
+  // so it follows the Unicode version bundled with Node. An equality here
+  // would turn red on a Node upgrade that adds a character — punishing the
+  // upgrade for doing exactly what this shape was chosen for. What must never
+  // happen is the rule getting NARROWER, and that is what is asserted:
+  // every ADR-19 range is still banned, every measured gap is now banned, the
+  // declared exceptions are still exceptions, and the cardinality is a floor.
+  const banned = new Set();
   for (let point = 0x00; point <= 0x10ffff; point++) {
     if (point >= 0xd800 && point <= 0xdfff) continue; // lone surrogates are not codepoints
-    if (scanText(cp(point)).length > 0) banned.push(point);
+    if (scanText(cp(point)).length > 0) banned.add(point);
   }
-  const expected = [
+  const required = [
     ...range(0x00, 0x08),
     ...range(0x0b, 0x1f),
     ...range(0x7f, 0x9f),
@@ -91,15 +104,71 @@ test('the banned set is exactly the one ADR-19 specifies', () => {
     ...range(0x1d173, 0x1d17a),
     ...range(0xe0000, 0xe007f),
     ...range(0xe0100, 0xe01ef),
-  ].sort((a, b) => a - b);
-  assert.deepEqual(banned, expected);
+  ];
+  assert.deepEqual(
+    required.filter((p) => !banned.has(p)).map(formatCodePoint),
+    [],
+    'a range ADR-19 names is no longer banned',
+  );
+
+  // The gaps three separate measurements found in the hand-written list, each
+  // one impossible to close by adding "one more range". They are the reason
+  // the boundary moved to a property (ADR-19 correction 1 point 1).
+  const previouslyMissed = [0x034f, 0x0600, 0x0605, 0x06dd, 0x070f, 0x08e2, 0x110bd, 0x13430, 0x1bca0, 0xfffe];
+  assert.deepEqual(
+    previouslyMissed.filter((p) => !banned.has(p)).map(formatCodePoint),
+    [],
+    'a measured gap in the old denylist is open again',
+  );
+
+  // A FLOOR, expressed as ranges rather than as a count.
+  //
+  // `banned.size >= 4319` was the right guarantee and a useless failure
+  // message: a future red would have said "4318, floor is 4319" and left the
+  // reader to find the missing codepoint themselves — the same defect the file
+  // canary had, one file down. Ranges name what went missing.
+  //
+  // It stays a floor, not an equality, because the boundary is a Unicode
+  // property and follows the version bundled with Node. Measured identical
+  // (4 319) on Node 20, 22 and 24 — Unicode 15, 16 and 17 — so the drift this
+  // tolerates is theoretical today and the tolerance costs nothing. What must
+  // never happen is the rule getting NARROWER.
+  const REQUIRED_RANGES = [
+    [0x0, 0x8], [0xb, 0x1f], [0x7f, 0x9f], [0xad, 0xad], [0x34f, 0x34f],
+    [0x600, 0x605], [0x61c, 0x61c], [0x6dd, 0x6dd], [0x70f, 0x70f],
+    [0x890, 0x891], [0x8e2, 0x8e2], [0x115f, 0x1160], [0x17b4, 0x17b5],
+    [0x180b, 0x180f], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x206f],
+    [0x3164, 0x3164], [0xfdd0, 0xfdef], [0xfeff, 0xfeff], [0xffa0, 0xffa0],
+    [0xfff0, 0xfffb], [0xfffe, 0xffff], [0x110bd, 0x110bd], [0x110cd, 0x110cd],
+    [0x13430, 0x1343f], [0x1bca0, 0x1bca3], [0x1d173, 0x1d17a],
+    [0x1fffe, 0x1ffff], [0x2fffe, 0x2ffff], [0x3fffe, 0x3ffff],
+    [0x4fffe, 0x4ffff], [0x5fffe, 0x5ffff], [0x6fffe, 0x6ffff],
+    [0x7fffe, 0x7ffff], [0x8fffe, 0x8ffff], [0x9fffe, 0x9ffff],
+    [0xafffe, 0xaffff], [0xbfffe, 0xbffff], [0xcfffe, 0xcffff],
+    [0xdfffe, 0xe0fff], [0xefffe, 0xeffff], [0xffffe, 0xfffff],
+    [0x10fffe, 0x10ffff],
+  ];
+  const missing = [];
+  for (const [lo, hi] of REQUIRED_RANGES) {
+    for (let point = lo; point <= hi; point++) {
+      if (point >= 0xd800 && point <= 0xdfff) continue;
+      if (!banned.has(point)) missing.push(formatCodePoint(point));
+    }
+  }
+  assert.deepEqual(
+    missing.slice(0, 30),
+    [],
+    `the rule got NARROWER: ${missing.length} codepoint(s) are no longer banned`,
+  );
+
   // TAB and LF are legal text and must never join the set.
-  assert.ok(!banned.includes(0x09) && !banned.includes(0x0a));
+  assert.ok(!banned.has(0x09) && !banned.has(0x0a));
   // U+FE0F is a legal emoji presentation selector and appears 24 times in this
   // repo's README. Banning it would turn the gate red on a file nobody
   // touched, which is how gates get switched off (ADR-19). Deliberate gap,
-  // documented in scan-control-chars.mjs.
-  assert.ok(!banned.includes(0xfe0f) && !banned.includes(0xfe0e));
+  // documented in scripts/invisible.mjs — and now the ONLY thing the property
+  // rule is overridden for, which is why it is a list checked first.
+  assert.ok(!banned.has(0xfe0f) && !banned.has(0xfe0e));
 });
 
 const range = (lo, hi) => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
@@ -274,7 +343,11 @@ test('TAB and LF are legal in contents and forbidden in a path', () => {
   const dir = gitRepo({ ['na' + cp(0x09) + 'me.md']: '# clean\n' });
   const r = scan(dir);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /U\+0009 TAB — control character in a path \[in the file NAME\]/);
+  // "a name or path": one wording, because one rule now serves the file NAME,
+  // the symlink TARGET and the journal's agent name (ADR-21). It is stated as
+  // its own sentence and not as an invisibility finding, because TAB and LF are
+  // perfectly visible — they are banned here for what they do to a NAME.
+  assert.match(r.stderr, /U\+0009 TAB — control character in a name or path \[in the file NAME\]/);
 });
 
 test('a symlink whose TARGET carries a control character fails the gate', () => {
@@ -507,14 +580,20 @@ test('the announcement is DERIVED from the export, not typed alongside it', () =
   // entry is added to the export in a copy of the script, and nothing else is
   // touched. A printer that types its own sentence announces one gap and
   // fails; a printer that walks the list announces two.
+  //
+  // The declaration now lives in scripts/invisible.mjs, the single home of the
+  // rule (ADR-21), so the probe patches it THERE and runs the scanner over the
+  // module boundary. That makes it a stronger probe than before: it proves the
+  // announcement follows the shared export, not a copy this file kept.
   const base = mkdtempSync(join(tmpdir(), 'tyran-gap-derived-'));
   const patched = join(base, 'scan-control-chars.mjs');
-  const source = readFileSync(SCRIPT, 'utf8');
+  writeFileSync(patched, readFileSync(SCRIPT));
+  const ruleSource = readFileSync(RULE, 'utf8');
   const anchor = 'export const DELIBERATELY_ALLOWED = Object.freeze([\n';
-  assert.ok(source.includes(anchor), 'the export moved — this probe patches source text');
+  assert.ok(ruleSource.includes(anchor), 'the export moved — this probe patches source text');
   writeFileSync(
-    patched,
-    source.replace(
+    join(base, 'invisible.mjs'),
+    ruleSource.replace(
       anchor,
       anchor + "  Object.freeze({ lo: 0x2e80, hi: 0x2e81, why: 'probe entry, review round 3' }),\n",
     ),
@@ -730,28 +809,138 @@ test('THIS repository scans clean end to end', () => {
   // exclusion regresses, CI goes red on files nobody touched and someone turns
   // the gate off. That failure mode is the reason this test exists.
   const { scanned, results, exempt, refused } = scanRepo(REPO_ROOT);
+  const { scan, links } = partitionTrackedFiles(REPO_ROOT);
   assert.deepEqual(
     results.map((r) => `${r.file}: ${formatFinding(r.file, r.findings[0])}`),
     [],
   );
   assert.deepEqual(refused.map((r) => r.file), [], 'every binary here must be declared');
-  // Pinned, not a floor. A loose `scanned > 20` let the count drop 45 -> 44
-  // while a file quietly left the scan. Any change to either number now has
-  // to be made on purpose, in this file, where a reviewer will see it.
-  // 45 -> 48: scripts/doctor.mjs, tests/unit/doctor.test.mjs, docs/doctor.md.
-  // 48 -> 54: hooks/hooks.json, hooks/HOOK-CONTRACT-MEASURED.md,
-  // hooks/scripts/{hook-io,session-start}.mjs and their two test files.
-  // 54 -> 55: docs/hooks.md (review round 2 — the gate-vs-probe rule needed a
-  // page a contributor can find). The trial merge with S-E3-0 was measured at
-  // 54, and S-E3-0 adds no files, so this +1 is entirely this branch's.
-  // 55 -> 57: hooks/scripts/secrets-gate.mjs and its test file (S-E3-3). The
-  // other four files that branch touches were already tracked.
+
+  // Pinned, not a floor. A loose `scanned > 20` once let the count drop 45 ->
+  // 44 while a file quietly left the scan, so what is covered has to be stated
+  // on purpose, in this file, where a reviewer will see it.
   //
-  // Worth recording how this tripwire earned its keep rather than just
-  // bumping the number: it went red on CI and not locally, because the local
-  // full run happened BEFORE `git add` and the scanner only sees TRACKED
-  // files. So the two new files were invisible to the very check meant to
-  // notice them. The lesson is about the run order, not about the pin.
-  assert.equal(scanned, 57, 'file count changed — confirm nothing left the scan by accident');
+  // The PATHS are pinned, not the count (U-62). A bare number was the right
+  // tripwire and the wrong data structure, for two measured reasons:
+  //
+  //  - It generates conflicts it cannot help resolve. Two branches adding
+  //    different files both edit the same single line to different values, and
+  //    git cannot merge that — while two branches adding different PATHS touch
+  //    different lines and merge cleanly. This branch and the hook runtime hit
+  //    exactly that: the conductor had to forbid touching the line and take it
+  //    on himself at merge, which left a story branch that could not be green.
+  //  - `50 !== 48` does not say WHICH file. The whole purpose of the canary is
+  //    "confirm nothing left the scan by accident", and a bare count answers
+  //    "something changed" when the question is "what". A deepEqual on sorted
+  //    paths prints the added and the missing entry by name.
+  const scannedPaths = [...scan, ...links.map((l) => l.file)].sort();
+  assert.deepEqual(scannedPaths, [
+    '.claude-plugin/marketplace.json',
+    '.claude-plugin/plugin.json',
+    '.env.example',
+    '.gitattributes',
+    '.github/workflows/ci.yml',
+    '.github/workflows/security.yml',
+    '.gitignore',
+    'CHANGELOG.md',
+    'CONTRIBUTING.md',
+    'LICENSE',
+    'README.md',
+    'agents/.gitkeep',
+    'benchmarks/.gitkeep',
+    'docs/architecture.md',
+    'docs/configuration.md',
+    'docs/doctor.md',
+    'docs/evidence-gate.md',
+    'docs/faq.md',
+    'docs/getting-started.md',
+    'docs/hooks.md',
+    'docs/journal.md',
+    'docs/projections.md',
+    'docs/self-improvement.md',
+    'hooks/HOOK-CONTRACT-MEASURED.md',
+    'hooks/hooks.json',
+    'hooks/scripts/.gitkeep',
+    'hooks/scripts/evidence-gate.mjs',
+    'hooks/scripts/hook-io.mjs',
+    'hooks/scripts/secrets-gate.mjs',
+    'hooks/scripts/session-start.mjs',
+    'scripts/desc-budget.mjs',
+    'scripts/doctor.mjs',
+    'scripts/invisible.mjs',
+    'scripts/journal.mjs',
+    'scripts/project.mjs',
+    'scripts/scan-control-chars.mjs',
+    'scripts/schema.mjs',
+    'scripts/yaml-lite.mjs',
+    'skills/hello/SKILL.md',
+    'templates/.gitkeep',
+    'templates/config.yaml',
+    'templates/knowledge.yaml',
+    'templates/policies/autonomy.yaml',
+    'tests/fixtures/golden/PROGRESS.md',
+    'tests/fixtures/golden/STATE.md',
+    'tests/fixtures/journal-demo.jsonl',
+    'tests/fixtures/repo-mini/.gitkeep',
+    'tests/hooks/.gitkeep',
+    'tests/pressure/.gitkeep',
+    'tests/unit/desc-budget.test.mjs',
+    'tests/unit/doctor.test.mjs',
+    'tests/unit/hook-evidence-gate.test.mjs',
+    'tests/unit/hook-io.test.mjs',
+    'tests/unit/hook-secrets-gate.test.mjs',
+    'tests/unit/hook-session-start.test.mjs',
+    'tests/unit/journal.test.mjs',
+    'tests/unit/one-answer.test.mjs',
+    'tests/unit/project.test.mjs',
+    'tests/unit/projection-fuzz.test.mjs',
+    'tests/unit/scan-control-chars.test.mjs',
+    'tests/unit/schema.test.mjs',
+    'tests/unit/yaml-lite.test.mjs',
+  ], 'the set of scanned files changed — confirm nothing left the scan by accident');
+
+  // The count stays asserted too, derived from the list rather than typed
+  // beside it: `scanned` is what the scanner REPORTS, and a partition that
+  // dropped a file from `scan` while still counting it would otherwise pass
+  // the list check and lie in the summary line operators actually read.
+  assert.equal(scanned, scannedPaths.length, 'reported count disagrees with the files scanned');
   assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
+});
+
+test('a declared gap WINS over a forbidden range that covers it', () => {
+  // M-W from the review: the module documents that DELIBERATELY_ALLOWED is
+  // consulted BEFORE FORBIDDEN, and today the two lists are disjoint, so
+  // swapping the order changes nothing and the documented precedence has no
+  // killed mutant behind it. That is a guarantee a reader relies on with
+  // nothing enforcing it — the exact shape ADR-20 refuses.
+  //
+  // The probe makes the lists OVERLAP in a copy of the module and asks which
+  // one wins, the same technique the "announcement is DERIVED" probe uses.
+  const base = mkdtempSync(join(tmpdir(), 'tyran-gap-precedence-'));
+  const source = readFileSync(RULE, 'utf8');
+  const anchor = 'export const FORBIDDEN = Object.freeze([\n';
+  assert.ok(source.includes(anchor), 'the export moved — this probe patches source text');
+  writeFileSync(
+    join(base, 'invisible.mjs'),
+    source.replace(
+      anchor,
+      anchor + "  Object.freeze({ lo: 0xfe00, hi: 0xfe0f, what: 'probe: overlaps the declared gap' }),\n",
+    ),
+  );
+
+  return import(pathToFileURL(join(base, 'invisible.mjs')).href).then((patched) => {
+    // U+FE0F is now in BOTH lists. The gap must still win, or the README's 24
+    // emoji presentation selectors would turn CI red on a file nobody touched.
+    assert.equal(
+      patched.invisibleProblem(0xfe0f),
+      null,
+      'a forbidden range overrode the declared gap — the documented precedence is backwards',
+    );
+    // ...and the probe really did overlap, so a green result cannot come from
+    // the patch having missed.
+    assert.ok(
+      patched.FORBIDDEN.some((r) => r.lo === 0xfe00 && r.hi === 0xfe0f),
+      'the probe did not take: this test proves nothing',
+    );
+  });
 });

@@ -12,6 +12,9 @@ Two files, two jobs:
 | [`hooks/scripts/hook-io.mjs`](../hooks/scripts/hook-io.mjs) | the runtime every hook runs inside |
 | [`hooks/HOOK-CONTRACT-MEASURED.md`](../hooks/HOOK-CONTRACT-MEASURED.md) | what the platform actually does, read out of the shipped binary |
 
+Gates shipped so far: [the evidence gate](evidence-gate.md)
+(`SubagentStop`). Probes: `session-start.mjs` (`SessionStart`).
+
 ## The rule that decides everything: gates and probes
 
 Claude Code gives some events a way to refuse and others none at all. That is
@@ -86,7 +89,15 @@ Rules **you** have to keep:
   the gate quietly does not exist;
 - **write the matcher as a list, never with commas or spaces.** `Edit|Write`
   is a list; `Edit, Write` is an *unanchored regex* that matches nothing at
-  all, and nothing anywhere reports it.
+  all, and nothing anywhere reports it;
+- **on `SubagentStop`, read `stop_hook_active` and pass when it is true.** It
+  is true from the second stop for the same agent onward, so it is the only
+  thing standing between a refusal and an infinite bounce. A gate that loops is
+  removed by its user, after which it protects nothing. Do not filter by
+  `agent_type` in the matcher either: an empty `agent_type` makes the platform
+  skip matcher filtering entirely, so the scope decision belongs in the gate's
+  own code. [`evidence-gate.mjs`](../hooks/scripts/evidence-gate.mjs) is the
+  worked example of both.
 
 ## The deadline: what it promises, exactly
 
@@ -142,7 +153,10 @@ section boundary, always saying how much it dropped.
 - `readInitiatives` folds journals synchronously. Measured: 400 000 events /
   77 MB in 1.91 s, inside the probe's budget. On a probe this is fail-open and
   therefore safe; the same shape inside a **gate** would be the third row of
-  the deadline table. A gate that reads journals must bound its input first.
+  the deadline table. A gate that reads journals must bound its input first —
+  the evidence gate `statSync`s the journal and refuses anything over 16 MiB,
+  and sizes its own deadline (8 s) to contain the journal lock's synchronous
+  5 s wait.
 - Sanitization asks `scanText` from `scan-control-chars.mjs` which codepoints
   are forbidden rather than keeping its own copy of the rule, so the set the
   CI scanner enforces and the set a gate escapes cannot drift apart. When the

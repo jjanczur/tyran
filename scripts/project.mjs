@@ -16,7 +16,16 @@
  *   node project.mjs <journal.jsonl> [--out-dir <dir>] [--check]
  * Exit: 0 ok · 1 projections drifted (--check) · 2 usage/IO error
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readJournal } from './journal.mjs';
@@ -814,4 +823,40 @@ function main() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+/**
+ * Canonical absolute path, or the merely-resolved one when the file cannot be
+ * canonicalized (it does not exist, or a path component is unreadable).
+ * Falling back is the point: a guard that throws on `node --eval` would trade
+ * one silent failure for a loud irrelevant one.
+ */
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * True when this module is the program's entry point.
+ *
+ * BOTH sides must be canonicalized. `import.meta.url` already names the real
+ * file — Node resolves module specifiers through symlinks — while
+ * `process.argv[1]` is whatever the caller typed. Comparing them raw turned
+ * every invocation through a symlinked path into a SILENT no-op under exit 0:
+ * `main()` never ran, no projection was written, nothing said so. That is not
+ * theoretical — `/tmp` and `/var` are symlinks on macOS, and plugin installs
+ * routinely reach `scripts/` through one.
+ *
+ * Deliberately duplicated in journal.mjs rather than shared: this is boot
+ * boilerplate, not a domain rule, and journal.mjs is the zero-dependency core
+ * that imports nothing but `node:` builtins. ADR-18 is about one RULE having
+ * one implementation (see pairSpawns), which this is not.
+ */
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

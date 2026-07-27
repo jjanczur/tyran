@@ -239,6 +239,18 @@ no idea a secrets gate reads it, an **accidental** hole — which is why that
 class is closed by not consulting attributes at all. A `.gitleaksignore` has
 no purpose other than suppressing findings.
 
+### The alias hole, closed 2026-07-27
+
+`git -c alias.zz=push zz origin main` pushes for real, and the word `push`
+never reaches the subcommand slot. This gate therefore computed that there was
+nothing to publish and returned before assembling a byte: **a push carrying a
+key was published unscanned, with every liveness guard green.** Found while
+building the policy gate, which had the same blind spot.
+
+`planCommand` now reports `aliased`, which forces `needsScan` — an unmodellable
+construct that nothing needs to scan is discarded, and that is exactly how the
+hole stayed open. Both gates read the one answer.
+
 ### What it does NOT catch — the declared boundary
 
 Pinned by tests (`DECLARED_MISSES`) so code and documentation cannot drift.

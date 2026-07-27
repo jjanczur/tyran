@@ -103,6 +103,13 @@ it is the commonest spelling there is. A refspec the shell would rewrite is
 outright: an alias can rename any subcommand, so the visible words are not the
 command git runs.
 
+The alias answer lives in the shared lexer (`planCommand().aliased`) and **both
+gates read it**, because the secrets gate had the same blind spot with a worse
+consequence: with no `push` in the subcommand slot it computed that there was
+nothing to scan and returned early, so **a push carrying a key was published
+without being scanned at all**. Measured cost of the rule: 2 commands in a
+14-command corpus, both of them commands that define or use an alias.
+
 **Which branch is production is answered twice, on purpose.** A name list
 (`main`, `master`, `production`, `prod`, `release`, `live`, `trunk`, `stable`)
 is an enumeration and therefore incomplete — a repository whose production
@@ -230,8 +237,25 @@ Two families are refused:
 - a **credential-shaped** path, whatever the program does with it. `cat`,
   `grep`, `cp` and `base64` all publish the bytes, and the distinction between
   reading and copying is not one a gate reading text can make;
-- a path under `hooks/**` or `.tyran/policies/**`. To *read* one, use the
-  `Read` tool, which is not refused for them.
+- a path under `hooks/**`, `.tyran/policies/**`, `.claude/settings.json` or
+  `.claude/settings.local.json`. To *read* one, use the `Read` tool, which is
+  not refused for them.
+
+**`.claude/settings.json` is on that list because it registers the hooks** — it
+is the one place inside a repository from which every gate can be switched off
+at once. The template classifies it `KERNEL`, so `Edit` and `Write` refused it
+from the start; `echo x > .claude/settings.json` did not, which left the
+shortest route to disabling this gate as the one route it did not watch.
+
+**The asymmetry that leaves, named rather than hidden.** The shell list
+(`SHELL_PROTECTED_GLOBS`) and the validator's list (`MANDATORY_KERNEL_PATHS`)
+answer two different questions: what this gate refuses to see in a shell
+command, and what a *policy* may not downgrade. The registry is on the first
+list and not the second. So a user who rewrites their own policy can make
+`Edit .claude/settings.json` allowed while `echo > .claude/settings.json` stays
+refused. Raising it into the validator's list would close that and would change
+what every policy file is allowed to say — a separate decision, deliberately
+not taken here.
 
 The argument of `-m` / `--message` / `-F` / `--file` / `-t` / `--template` is
 removed from the text first, so `git commit -m "fix .env loading"` is not a
@@ -249,7 +273,9 @@ Not a ceiling. `SHELL_DECLARED_MISSES` in the source is the same list:
 2. a relative path resolved against the **session** directory rather than the
    one a `cd` moved to — stricter, but a different path from the shell's;
 3. anything a script writes once it is running;
-4. a `KERNEL` path declared by the **policy** rather than built in.
+4. a `KERNEL` path declared by the **policy** rather than built in — only
+   `SHELL_PROTECTED_GLOBS` is checked, so a broken policy can never be the
+   thing that stops an operator repairing it.
 
 ## The cost, measured
 

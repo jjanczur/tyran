@@ -367,6 +367,8 @@ export function planCommand(command, startDir) {
 
   let cur = startDir;
   const stack = [];
+  /** Set when a git alias makes some subcommand of this line unreadable. */
+  let aliased = false;
   /** Set once a `git add` is seen: a later commit in the line will include it. */
   let pendingAdd = null;
 
@@ -397,6 +399,27 @@ export function planCommand(command, startDir) {
     if (OPAQUE_MOVERS.has(basename(program)) || isSourceInvocation(tokens)) {
       unmodellable.push({
         what: `\`${basename(program)}\` can move the shell using text this gate must not execute`,
+      });
+    }
+
+    // A git ALIAS makes the subcommand unreadable, and that zeroed this gate.
+    //
+    // Found while building the policy gate and measured here: `git -c
+    // alias.zz=push zz origin main` pushes for real, and the word `push` never
+    // reaches the subcommand slot. No target was noted, `needsScan` came back
+    // false, and `decide` returned PASS before any scan — so **a push carrying
+    // a key was published without being scanned at all**. That is this gate's
+    // one irreversible failure, produced by a spelling rather than by a
+    // scanner problem, and it is why `aliased` also forces `needsScan`: an
+    // unmodellable construct that nothing needs to scan is discarded.
+    //
+    // `git config alias.up push` is caught too. It publishes nothing by
+    // itself, but it installs a name this gate cannot follow, and the same
+    // command line can use it two segments later.
+    if (raw.some(isGitProgram) && raw.some((t) => /(^|=)alias\./i.test(t))) {
+      aliased = true;
+      unmodellable.push({
+        what: 'a `git` alias decides which subcommand runs, and the command line does not say which',
       });
     }
 
@@ -636,8 +659,12 @@ export function planCommand(command, startDir) {
     }
   }
 
-  const needsScan = targets.size > 0 || extraFiles.length > 0;
+  // `aliased` counts as "something might be published here": without it the
+  // unmodellable entry above is discarded by the filter below, which is
+  // exactly how the hole stayed open.
+  const needsScan = targets.size > 0 || extraFiles.length > 0 || aliased;
   return {
+    aliased,
     denials,
     triggers: [...new Set(triggers)],
     targets: [...targets.values()],

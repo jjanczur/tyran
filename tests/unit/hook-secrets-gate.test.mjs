@@ -41,6 +41,7 @@ import {
   handle,
   isAbbreviationOf,
   isLiteralPath,
+  isLiteralRef,
   locate,
   buildPayload,
   makeBudget,
@@ -137,12 +138,20 @@ const bashInput = (command, cwd) => ({
   tool_input: { command },
 });
 
-/** Run the REAL hook script end to end and return its parsed decision. */
-function runGateScript(command, cwd, env = {}) {
+/**
+ * Run the REAL hook script end to end and return its parsed decision.
+ *
+ * `processCwd` is the working directory of the GATE PROCESS, which is not the
+ * same thing as the `cwd` the session reports in the hook payload. They are
+ * separated because one test needs them to differ: the scanner must not be able
+ * to discover a suppression file by sitting next to it.
+ */
+function runGateScript(command, cwd, env = {}, processCwd = undefined) {
   const out = execFileSync(process.execPath, [SCRIPT], {
     input: JSON.stringify(bashInput(command, cwd)),
     encoding: 'utf8',
     env: { ...process.env, ...env },
+    cwd: processCwd,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   return JSON.parse(out);
@@ -1011,4 +1020,251 @@ test('the registered timeout leaves the internal deadline room to refuse first',
   assert.equal(typeof entry.timeout, 'number');
   assert.ok(DEADLINE_MS <= (entry.timeout * 1000) / 2);
   assert.equal(DEADLINE_MS, 7000, 'pinned so a change has to be deliberate');
+});
+
+// ============================================== 4. THE EIGHT ROUND-2 BLOCKERS
+//
+// Every test below is a counterexample that was RUN against this file and is
+// pinned here because it was not pinned anywhere. Verification found the fixes
+// for BL-1, BL-2, BL-5, BL-7 and BL-8 present and correct in the code and
+// covered by NOTHING: each defect was reintroduced by hand, the counterexample
+// went red, and the whole 104-test suite stayed green. A fix nobody can break
+// on purpose is a fix that comes back.
+//
+// Each test names, in its own body, the mutation it kills.
+
+/** A repository holding a submodule, which is how a gitlink gets into a diff. */
+function repoWithSubmodule(keyName) {
+  const parent = repo('tyran-gate-sub-parent-');
+  const child = repo('tyran-gate-sub-child-');
+  writeFileSync(join(child, 'inner.txt'), 'inner\n');
+  git(child, 'add', '-A');
+  git(child, 'commit', '-qm', 'inner');
+  writeFileSync(join(parent, 'seed.txt'), 'seed\n');
+  git(parent, 'add', '-A');
+  git(parent, 'commit', '-qm', 'seed');
+  git(parent, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', child, 'a-sub');
+  writeFileSync(join(parent, keyName), fakeSecret());
+  return parent;
+}
+
+test(
+  'BL-1: a gitlink answers `<sha> missing` and the records AFTER it still arrive',
+  () => {
+    // The exact framing `git cat-file --batch` uses for a submodule commit that
+    // is not in the parent repository. The round-1 shape was `break` on a short
+    // header, which threw away every remaining record — so a key whose filename
+    // sorted after the gitlink was never read at all.
+    //
+    // KILLS: replacing the `parts.length === 2` branch with `break`.
+    const batch = Buffer.concat([
+      Buffer.from('aaa blob 5\nhello\n'),
+      Buffer.from('bbb missing\n'),
+      Buffer.from('ccc blob 3\nkey\n'),
+    ]);
+    assert.deepEqual(
+      parseCatFileBatch(batch).map((r) => [r.sha, r.type, r.body.toString()]),
+      [
+        ['aaa', 'blob', 'hello'],
+        ['bbb', 'missing', ''],
+        ['ccc', 'blob', 'key'],
+      ],
+    );
+  },
+);
+
+test(
+  'BL-1: a key committed beside a submodule is found WHEREVER its name sorts',
+  { skip: NEEDS_SCANNER },
+  () => {
+    // Measured before the fix: refused when the filename sorted before the
+    // gitlink, PASSED when it sorted after. No attacker required — one
+    // `git submodule add`. The assertion is on the REASON, not just the
+    // verdict: with the parser broken the gate still refuses, but for
+    // "git answered for 1 of the 2 objects", which is a different control
+    // doing a different job and would hide this one being dead.
+    for (const keyName of ['zz-key.pem', 'aa-key.pem']) {
+      const dir = repoWithSubmodule(keyName);
+      const decision = runGateScript('git add -A && git commit -m x', dir);
+      assert.equal(verdictOf(decision), 'deny', keyName);
+      assert.match(reasonOf(decision), /private-key/, `${keyName}: refused for the wrong reason`);
+    }
+  },
+);
+
+test('BL-2: `git add <file>` names the file, and a later commit in the line scans it', () => {
+  // The commonest form an agent uses, and the one round 2 left open: only
+  // `-A`/`.`/`-u` folded anything in, so a file staged BY NAME reached the
+  // commit unscanned.
+  //
+  // KILLS: `paths: named` -> `paths: []`.
+  const plan = planCommand('git add secret.env && git commit -m x', '/repo');
+  assert.deepEqual(plan.targets[0].includePaths, ['secret.env']);
+  assert.equal(plan.targets[0].includeUntracked, false, 'naming one file must not widen to all of them');
+  assert.deepEqual(
+    planCommand('git add a.pem b.pem && git commit -m x', '/repo').targets[0].includePaths,
+    ['a.pem', 'b.pem'],
+  );
+});
+
+test(
+  'BL-2: end to end, `git add <file> && git commit` refuses on the file it named',
+  { skip: NEEDS_SCANNER },
+  () => {
+    for (const spelling of ['git add k.pem && git commit -m x', 'git add ./k.pem; git commit -m x']) {
+      const dir = repo();
+      writeFileSync(join(dir, 'seed.txt'), 'seed\n');
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-qm', 'seed');
+      writeFileSync(join(dir, 'k.pem'), fakeSecret());
+      const decision = runGateScript(spelling, dir);
+      assert.equal(verdictOf(decision), 'deny', spelling);
+      assert.match(reasonOf(decision), /private-key/, spelling);
+    }
+  },
+);
+
+test(
+  'BL-5: the refusal names the file that HOLDS the key, not the one before it',
+  { skip: NEEDS_SCANNER },
+  () => {
+    // The round-2 line map counted `newlines + 1` per chunk and advanced by
+    // `newlines + 3` past a two-byte separator, so every chunk after the first
+    // drifted one line further along. Measured with this exact fixture before
+    // the fix: the refusal said `"c.txt":5` — the file BEFORE the key, at a
+    // line c.txt does not have. An agent follows that, finds nothing, and
+    // reaches for suppression.
+    //
+    // KILLS: `newlineCount(b)` -> `newlineCount(b) + 1` with `endsOnNewline`
+    // forced false, i.e. the shape recovered from commit 5d6d469.
+    const dir = repo();
+    writeFileSync(join(dir, 'a.txt'), 'alpha one\nalpha two\nalpha three\n');
+    writeFileSync(join(dir, 'b.txt'), 'beta one\nbeta two\n');
+    writeFileSync(join(dir, 'c.txt'), 'gamma one\ngamma two\ngamma three\ngamma four\n');
+    writeFileSync(join(dir, 'd-key.pem'), fakeSecret());
+    git(dir, 'add', '-A');
+    const reason = reasonOf(runGateScript('git commit -m x', dir));
+    assert.match(reason, /"d-key\.pem":1 — rule `private-key`/);
+    assert.equal(/"[abc]\.txt":/.test(reason), false, `named an innocent file:\n${reason}`);
+  },
+);
+
+test('BL-7: a here-doc body that IS a program is still lexed as one', () => {
+  // Skipping here-doc bodies removed 45% of this gate's false alarms and lost
+  // two shapes round 1 had caught. A body is DATA only when the command reading
+  // it is not a shell; here the program is right there on the command line.
+  //
+  // KILLS: `const feedsAShell = ...` -> `false`.
+  for (const command of [
+    "bash <<'EOF'\ngit push origin main\nEOF",
+    "cat <<'EOF' | bash\ngit push origin main\nEOF",
+    'sh <<EOF\ngit push origin main\nEOF',
+  ]) {
+    const plan = planCommand(command, '/repo');
+    assert.equal(plan.needsScan, true, command);
+    assert.equal(plan.targets.some((t) => t.scanPush), true, command);
+  }
+  // The counterweight, so this test cannot be satisfied by lexing every body
+  // again: an ordinary commit message is still data.
+  assert.equal(planCommand("git commit -F- <<'EOF'\nfix the thing. the end.\nEOF", '/repo').unmodellable.length, 0);
+});
+
+test(
+  'BL-7: end to end, a push written inside a here-doc that feeds a shell refuses',
+  { skip: NEEDS_SCANNER },
+  () => {
+    const dir = repo();
+    const bare = tempDir('tyran-gate-bare-');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    writeFileSync(join(dir, 'seed.txt'), 'seed\n');
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'seed');
+    git(dir, 'remote', 'add', 'origin', bare);
+    git(dir, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+    writeFileSync(join(dir, 'k.pem'), fakeSecret());
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'add key');
+    const decision = runGateScript("bash <<'EOF'\ngit push origin main\nEOF", dir);
+    assert.equal(verdictOf(decision), 'deny');
+    assert.match(reasonOf(decision), /private-key/);
+  },
+);
+
+test(
+  'BL-8: the scanner runs in an EMPTY directory, so an untracked config cannot reach it',
+  { skip: NEEDS_SCANNER },
+  () => {
+    // The empty work directory is the only thing standing between an untracked
+    // `.gitleaks.toml` and a gate that finds nothing — the same defect as the
+    // untracked `.gitleaksignore` in part 1, one file name over, and it had no
+    // test at all. The gate's OWN process cwd is set to the repository here, so
+    // a scanner that inherited it would discover the config by proximity.
+    //
+    // KILLS: `cwd: workDir` -> `cwd: process.cwd()` in scanBytes.
+    const dir = repo();
+    writeFileSync(join(dir, '.gitleaks.toml'), `title = "none"\n[allowlist]\nregexes = ['''.''']\n`);
+    writeFileSync(join(dir, 'k.pem'), fakeSecret());
+    git(dir, 'add', 'k.pem');
+    const decision = runGateScript('git commit -m x', dir, {}, dir);
+    assert.equal(verdictOf(decision), 'deny');
+    assert.match(reasonOf(decision), /private-key/);
+  },
+);
+
+test('BL-3: a refspec source with `~` NARROWS the range instead of widening it', () => {
+  // `~` is a shell expansion only at the start of a word; in the middle of one
+  // it is git's ancestor operator. Rejecting `HEAD~130` dropped every refspec
+  // and widened the range back to `--all`, so the gate's only remedy for a
+  // blocked push produced a range that was not smaller. Measured on a real
+  // repository: full range 1376 objects, `HEAD~5:refs/heads/tiny` 1410.
+  //
+  // KILLS: `every(isLiteralRef)` -> `every(isLiteralPath)`.
+  assert.deepEqual(planCommand('git push origin HEAD~130:refs/heads/tiny', '/repo').targets[0].pushRefs, ['HEAD~130']);
+  assert.deepEqual(planCommand('git push origin main', '/repo').targets[0].pushRefs, ['main']);
+  // Still refused where the shell really would rewrite the word.
+  assert.deepEqual(planCommand('git push origin ~/x:refs/heads/t', '/repo').targets[0].pushRefs, []);
+  assert.deepEqual(planCommand('git push origin $B:refs/heads/t', '/repo').targets[0].pushRefs, []);
+  assert.equal(isLiteralRef('HEAD~130'), true);
+  assert.equal(isLiteralRef('~/x'), false);
+  assert.equal(isLiteralPath('HEAD~130'), false, 'the path rule is deliberately unchanged');
+});
+
+test(
+  'BL-3: an oversized push is refused for its SIZE, with the remedy that narrows it',
+  () => {
+    // The failure that makes this gate get uninstalled. Before the fix the gate
+    // asked for the CONTENT of every object first, `runChild` stopped
+    // collecting at MAX_CHILD_OUTPUT_BYTES, and the truncated stream tripped
+    // the completeness assertion — so an ordinary large push was refused with
+    // "git answered for 121 of the 1376 objects", whose remedy names a
+    // submodule or a corrupt object. Measured on a local clone of a real
+    // project: 64,584,110 bytes of `--batch` output against a 5 MiB buffer.
+    //
+    // KILLS: removing the `assertPayloadFits` call from `addBlobs`.
+    const dir = repo();
+    const bare = tempDir('tyran-gate-bare-big-');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    // Incompressible, so the object is as big as the file and the `--batch`
+    // stream really does pass the child-output ceiling.
+    writeFileSync(join(dir, 'big.bin'), randomBytes(MAX_PAYLOAD_BYTES + 2 * 1024 * 1024).toString('base64'));
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-qm', 'big');
+    git(dir, 'remote', 'add', 'origin', bare);
+    const reason = reasonOf(runGateScript('git push origin HEAD:refs/heads/main', dir));
+    assert.match(reason, /this would publish \d+ bytes in \d+ object\(s\), past the 4194304/);
+    assert.match(reason, /push in smaller steps/);
+    assert.equal(/git answered for \d+ of the \d+ objects/.test(reason), false, reason);
+    // And the floor is stated, because a refspec cannot split one commit.
+    assert.match(reason, /cannot split a\s+SINGLE commit/);
+  },
+);
+
+test('BL-4: the payload ceiling the documentation publishes is the one the code enforces', () => {
+  // The constant was corrected to 4 MiB and `docs/hooks.md` went on saying
+  // 8 MB — the same shape as the AWS miss rate that was wrong for two rounds.
+  // A number a user reads is part of the control.
+  const doc = readFileSync(join(REPO_ROOT, 'docs', 'hooks.md'), 'utf8');
+  assert.equal(MAX_PAYLOAD_BYTES, 4 * 1024 * 1024, 'pinned so a change has to be deliberate');
+  assert.match(doc, new RegExp(String(MAX_PAYLOAD_BYTES).replace(/\B(?=(\d{3})+(?!\d))/g, ',')));
+  assert.equal(/capped at 8 ?MB/.test(doc), false, 'the retired figure is back');
 });

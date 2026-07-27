@@ -1,0 +1,49 @@
+{
+  "name": "tyran",
+  "version": "0.1.0",
+  "description": "Command-line scripts for the Tyran task conductor (doctor, journal, schema, and repo tooling) for CI and terminals outside Claude Code. Installing this package does NOT install the Claude Code plugin — add that separately with `/plugin marketplace add jjanczur/tyran` inside Claude Code.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "tyran": "./bin/tyran.mjs"
+  },
+  "files": [
+    ".claude-plugin/",
+    "agents/",
+    "bin/",
+    "hooks/",
+    "scripts/",
+    "skills/",
+    "templates/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "author": {
+    "name": "Jacek Janczura",
+    "url": "https://github.com/jjanczur"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jjanczur/tyran.git"
+  },
+  "homepage": "https://github.com/jjanczur/tyran#readme",
+  "bugs": {
+    "url": "https://github.com/jjanczur/tyran/issues"
+  },
+  "keywords": [
+    "agent-orchestration",
+    "ai-agents",
+    "claude-code",
+    "claude-code-plugin",
+    "code-quality",
+    "developer-tools",
+    "git-hooks",
+    "llm-agents",
+    "multi-agent",
+    "self-improving"
+  ]
+}

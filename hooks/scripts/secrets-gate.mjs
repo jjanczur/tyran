@@ -532,7 +532,16 @@ export function planCommand(command, startDir) {
       // always safe; refusing here would block work for no coverage gain.
       const readable = after.slice(1).every(isLiteralRef);
       const refs = readable ? after.slice(1).map((spec) => spec.split(':')[0]).filter((r) => r !== '') : [];
-      note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs });
+      // The argv AFTER `push`, flags included, kept verbatim.
+      //
+      // Nothing in this file reads it: it exists so the policy gate can decide
+      // WHERE a push lands (destination refspecs, `--delete`, `--mirror`)
+      // without lexing the command line a second time. A second decomposition
+      // would have been the third spelling of one rule in this repository
+      // (ADR-21), and the one that decides whether a push reaches production is
+      // not the place to start diverging.
+      const pushArgv = tokens.slice(tokens.indexOf('push') + 1);
+      note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs, pushArgv, pushReadable: readable });
       triggers.push('a git push (every commit not already on the target remote is scanned)');
     }
     if (ghPublishes) {
@@ -1390,8 +1399,16 @@ export function elideOpaqueRuns(text, minimum = OPAQUE_RUN_CHARS) {
   return String(text).replace(new RegExp(`[A-Za-z0-9+=]{${minimum},}`, 'g'), (run) => `<elided:${run.length}>`);
 }
 
-/** Shorten a path for display without losing which file it is. */
-function shortPath(path) {
+/**
+ * Shorten a path for display without losing which file it is.
+ *
+ * Exported so the policy gate quotes paths through the SAME rule rather than
+ * approximating it: `elideOpaqueRuns` exists because a review committed
+ * `backup_<aws key>.txt` and round 1 printed the key body in the refusal.
+ * A second gate re-deriving "how do I print a path safely" is how that comes
+ * back.
+ */
+export function shortPath(path) {
   const text = elideOpaqueRuns(path);
   if (text.length <= MAX_PATH_CHARS) return text;
   return `${text.slice(0, 40)}...${text.slice(-(MAX_PATH_CHARS - 43))}`;

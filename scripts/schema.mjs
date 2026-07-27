@@ -352,8 +352,18 @@ export function normalizePath(filePath, repoRoot = process.env.CLAUDE_PROJECT_DI
   return segments.join('/');
 }
 
-/** Minimal glob: `**` spans separators, `*` does not. */
-function globMatches(glob, filePath) {
+/**
+ * Minimal glob: `**` spans separators, `*` does not.
+ *
+ * Exported so a caller can ask WHICH glob matched, which `classifyPath` cannot
+ * answer: it applies `MANDATORY_KERNEL_PATHS` unconditionally and returns a
+ * class, so probing it with a one-rule policy reports the first protected glob
+ * for every protected path. The policy gate needs the real answer to name the
+ * right authority in a refusal, and the only alternative was a fourth spelling
+ * of glob matching in a repository that already counted three spellings of one
+ * rule (ADR-21).
+ */
+export function globMatches(glob, filePath) {
   const pattern = glob
     .split('**')
     .map((part) => part.split('*').map(escapeRegExp).join('[^/]*'))

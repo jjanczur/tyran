@@ -24,6 +24,20 @@ export const url = (path: string): string => BASE + path.replace(/^\/+/, '');
 export const REPO = 'https://github.com/jjanczur/tyran';
 
 /**
+ * Where the footer signature points.
+ *
+ * Here rather than in `SiteFooter.astro` for the reason at the top of this
+ * file: an external URL typed into a component is the copy that gets missed
+ * when it changes, and the footer is not the only surface that can carry it —
+ * the docs pages reach LinkedIn through Starlight's `social` config in
+ * `astro.config.mjs`.
+ */
+export const AUTHOR = {
+  site: 'https://janczura.com',
+  linkedin: 'https://www.linkedin.com/in/jacekjanczura/',
+} as const;
+
+/**
  * `releases/latest`, never a pinned tag.
  *
  * A hard-coded `releases/tag/v0.1.0` is correct on the day it is written and

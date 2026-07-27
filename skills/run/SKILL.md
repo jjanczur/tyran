@@ -171,9 +171,18 @@ open one.
    that is impossible (a limit, an outage), you spot-check AND the ledger
    carries an explicit **"NO INDEPENDENT REVIEW"** stamp; staying quiet about
    it is forbidden. Tests for every non-trivial change. Repo validation per
-   the project configuration. For UI, always drive a browser: navigation,
-   clickability, a clean console. An optimization pass per story. You merge,
-   sequentially.
+   the project configuration. You merge, sequentially.
+   - **How a diff is read is the `code-review` skill**; what the verdict looks
+     like stays in `tyran:reviewer`. The part you enforce as conductor is that
+     a finding arrives as an input and an expected result — anything vaguer
+     cannot be pinned as a test, so it cannot be verified as fixed.
+   - **For UI, always drive a browser** — navigation, clickability, a clean
+     console — and drive it through `browser-check`, which returns counts
+     rather than impressions. A browser pass reported without numbers is the
+     same claim as a test run reported without output.
+   - **The optimization pass per story is the `deslop` skill.** Its default
+     action is deletion and its precondition is a test that ran BEFORE the
+     edit; a pass that ends with more lines than it started was a refactor.
    - **Against a visual reference, follow the `fidelity-gate` skill** and
      enforce it as definition-of-done from the FIRST piece of work. Read it;
      the inventory, the relics list and the measurement steps live there and
@@ -195,14 +204,22 @@ open one.
      skill — it carries the rest of what that initiative cost to learn.
    - Before fixing N findings one by one, check whether they share ONE cause —
      a wrong baseline, measurement conditions unlike production, a property
-     the gate cannot see. Repairing a gate that inflates its signal, or is
-     blind to a class of defect, is PART of the task, not a digression.
+     the gate cannot see. When the cause is not obvious, that search is the
+     `root-cause` skill, and it is also what you route the extra reasoning
+     effort to. Repairing a gate that inflates its signal, or is blind to a
+     class of defect, is PART of the task, not a digression.
      Changing the measurement method invalidates comparisons with every
      number taken before it; say so next to the numbers.
 4. **Deploy by the class in the configuration.** P1 branch or PR, a human
    merges. P2 autonomous to staging, production is human. P3 autonomous merge
    and deploy — but operations that are hard to reverse and visible to end
    users are STILL a gate. Never raise the class yourself.
+   - P1 is the DEFAULT, so the ordinary last step of an initiative is a human
+     reviewing a PR. When their comments come back, follow `pr-feedback`: all
+     three of GitHub's comment surfaces are read before any of them is
+     triaged, and every comment ends fixed, declined with a reason, or
+     ticketed. Reading one surface and reporting "all feedback addressed" is
+     true about what was read and false about what it claims.
 5. **Boundaries.** Do not change APIs, database schemas or pipelines outside
    your scope without the domain owner's consent — proposals go to `NOTES.md`.
    Secrets never enter the repo. Production data only through the accounts the

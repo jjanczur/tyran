@@ -12,9 +12,8 @@
  * the guard inspects the URL and a hand-written version in the LABEL slips
  * past it — the link would keep working and keep naming the wrong version.
  */
-import { DOCS, REPO, RELEASE } from './urls';
-
-const SITE = 'https://janczura.com';
+import { DOCS, REPO, RELEASE, AUTHOR } from './urls';
+import Icon from './Icon.astro';
 ---
 
 <footer class="l-footer">
@@ -32,9 +31,21 @@ const SITE = 'https://janczura.com';
       <a href={`${REPO}/blob/main/CONTRIBUTING.md`} rel="noopener">Contributing</a>
     </nav>
 
+    {/*
+      The profile link is icon-only and sits next to the name it belongs to.
+      `Icon` renders `aria-hidden` unconditionally — correct everywhere else on
+      this page, where every glyph sits beside the text it illustrates — so
+      here the link itself has to carry the accessible name, or a screen reader
+      announces an empty link. It is also the one FILLED mark in the set; see
+      the comment on `linkedin` in `Icon.astro`.
+    */}
     <p class="l-footer__made">
       From Berlin with <span class="l-footer__heart" role="img" aria-label="love">&hearts;</span> by
-      two buddies &mdash; <a href={SITE} rel="noopener">Jacek</a> and Piotr.
+      two buddies &mdash; <a href={AUTHOR.site} rel="noopener">Jacek</a><a
+        class="l-footer__li"
+        href={AUTHOR.linkedin}
+        rel="noopener"
+        aria-label="Jacek on LinkedIn"><Icon name="linkedin" size={14} /></a> and Piotr.
     </p>
   </div>
 </footer>

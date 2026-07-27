@@ -1363,6 +1363,26 @@ img {
   border-block-end-color: currentColor;
 }
 
+/* The profile link is a glyph sitting inside a sentence, so it needs the two
+ * things a bare inline <svg> does not do: sit on the text baseline rather than
+ * on the line box (`vertical-align` alone leaves it low next to a 0.85rem
+ * font), and keep a little air from the name it follows without introducing a
+ * word space — the markup deliberately has no whitespace between the two
+ * anchors, because a space there would be underlined on hover as part of
+ * neither link. The underline rule above is also cancelled: an underline under
+ * a 14px square reads as a rendering fault, not as a link affordance. */
+.l-footer__li {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 0.4em;
+  vertical-align: -0.15em;
+}
+
+.l-footer__made a.l-footer__li:hover {
+  border-block-end-color: transparent;
+  opacity: 0.72;
+}
+
 /* The heart is the one non-gold mark on the page and it earns the exception:
  * a gold heart on stone reads as another decorative glyph in the frieze
  * vocabulary, which is precisely what it must not read as. */

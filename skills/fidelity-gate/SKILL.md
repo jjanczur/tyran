@@ -92,6 +92,9 @@ implementer's taste.
 3. **Computed styles dumped to JSON** for the inventory's selectors and
    compared against the inventory's values. A disagreement about whether
    something is 9px or 10.5px is settled by the dump, never by looking.
+   `browser-check` carries how — the capture, the dump, the deterministic
+   waits, and the rule that a zero-size box is a failure rather than a pass.
+   This gate owns the inventory and the verdict; it does not own the browser.
 4. **The verdict is the filled-in checklist**, row by row, attached to the
    report. A narrative verdict — *"looks consistent"*, *"differences are
    data-only"* — is REJECTED without it. This is the single rule that decides

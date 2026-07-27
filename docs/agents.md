@@ -4,7 +4,7 @@
 
 Four agents ship in `agents/`. The conductor (`/tyran:run`) spawns them; you
 can also invoke one directly when you want just that mode of work. For what
-each agent assumes before it will work, and for the eight skills alongside
+each agent assumes before it will work, and for the fourteen skills alongside
 them, see [what Tyran ships](./skills.md).
 
 | Agent | Namespaced as | Tools | What it is for |

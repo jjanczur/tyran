@@ -36,6 +36,13 @@ with the reason, when the judgement is that this initiative has nothing worth
 changing. That is a correct outcome and it settles the gate exactly like any
 other. A retro that always finds something is not learning, it is padding.
 
+**When `kind` is `skill`, follow `skill-writing`.** New skills are AUTO class —
+you may commit one without asking — and that is only safe against a standard.
+It carries the admission test (a skill nothing already points at is a library
+entry), the description budget you are spending on every future session, and
+the activation test that proves the thing fires at all. A skill that never
+triggers costs its description on every turn and returns nothing.
+
 ## 3. Write down what is true about THIS repo
 
 Durable facts go to `.tyran/knowledge/<topic>.yaml`, which is AUTO class —

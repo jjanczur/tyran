@@ -46,13 +46,19 @@ candidates are logged — they protect future retros from re-litigating.
 
 | Class | Examples | Who decides |
 |---|---|---|
-| **AUTO** | knowledge facts, rule tweaks, new repo-specific skills (must pass an activation test) | retro commits autonomously; ledger entry; `git revert` rolls back |
+| **AUTO** | knowledge facts, rule tweaks, new repo-specific skills (written to the [`skill-writing`](../skills/skill-writing/SKILL.md) standard, including its activation test) | retro commits autonomously; ledger entry; `git revert` rolls back |
 | **GATED** | new/changed hooks, autonomy class, budgets, deleting safety rules | retro proposes, you approve |
 | **KERNEL** | the enforcement hooks, the rollback mechanism, this classification itself | humans only, by hand |
 
 The classification is a file in your repo (`.tyran/policies/autonomy.yaml`)
 and is enforced by a `PreToolUse` hook on write paths — the boundary does not
 depend on the model behaving.
+
+Note where the line falls for skills: writing one is AUTO, and raising the
+**description budget** to make room for it is GATED. That is deliberate. The
+budget is the number behind the claim that this plugin stays small, and a
+ceiling a retrospective could lift whenever it was inconvenient would measure
+nothing at all.
 
 Every AUTO entry carries `confidence` and usage/helpfulness counters; entries
 that stop earning their keep get degraded or retired by later retros. Two

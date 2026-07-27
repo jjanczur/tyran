@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectSkillDescriptions, DEFAULT_BUDGET } from '../../scripts/desc-budget.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const README = readFileSync(join(ROOT, 'README.md'), 'utf8');
@@ -81,4 +82,86 @@ test('the comparison table states the real number of skills and agents', () => {
   const [, s, a] = /(\d+)\s*(?:&middot;|·)\s*(\d+)/.exec(tyran);
   assert.equal(Number(s), skills.length, `README says ${s} skills, skills/ has ${skills.length}`);
   assert.equal(Number(a), agents.length, `README says ${a} agents, agents/ has ${agents.length}`);
+});
+
+/**
+ * The same count, spelled as a WORD.
+ *
+ * The test above anchors on digits, which is the whole reason this one is
+ * needed: the README and the two skills pages say "fourteen skills and four
+ * agents" in prose, and a digit-anchored guard is blind to every one of them.
+ * The count went from eight to fourteen in a single change and those sentences
+ * were the last thing anyone thought of — which is the definition of a claim
+ * that decays quietly.
+ *
+ * `roster.ts` solved this properly for the landing badge by counting the
+ * filesystem at build time. Prose cannot do that, so it gets a guard instead.
+ */
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+  'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen', 'twenty'];
+
+const PROSE_PAGES = ['README.md', 'docs/skills.md', 'docs/agents.md', 'site/src/content/docs/skills.mdx', 'site/src/content/docs/agents.mdx'];
+
+/**
+ * Two shapes, not every occurrence of a number next to a noun.
+ *
+ * A blanket `<word> (skills|agents)` match was written first and immediately
+ * flagged three sentences that are not inventory claims at all: a narrative
+ * "merged two agents that overlapped", a comparison "three times as many
+ * skills", and — the instructive one — the footnote's "the ceiling was 4000
+ * for the first eight skills", which is a HISTORICAL statement that must stay
+ * eight forever. A guard that forces those to track the current count would
+ * be corrupting correct prose to satisfy itself.
+ *
+ * So it matches only the two forms that are claims about what ships today:
+ * the paired "N skills and M agents", and the definite "the N skills".
+ */
+const PAIR = new RegExp(`\\b(${WORDS.join('|')})\\s+skills\\s+and\\s+(${WORDS.join('|')})\\s+agents\\b`, 'gi');
+const DEFINITE = new RegExp(`\\bthe\\s+(${WORDS.join('|')})\\s+(skills|agents)\\b`, 'gi');
+
+test('no page spells out a skill or agent count that has gone stale', () => {
+  const expected = { skills: WORDS[skills.length], agents: WORDS[agents.length] };
+  assert.ok(expected.skills && expected.agents, "the roster outgrew this test's number words — extend WORDS");
+
+  let checked = 0;
+  const check = (page, phrase, word, noun) => {
+    checked++;
+    assert.equal(
+      word.toLowerCase(),
+      expected[noun],
+      `${page} says "${phrase.trim()}" but ${noun}/ has ${noun === 'skills' ? skills.length : agents.length}`,
+    );
+  };
+
+  for (const page of PROSE_PAGES) {
+    const path = join(ROOT, page);
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, 'utf8');
+
+    for (const [phrase, s, a] of text.matchAll(PAIR)) {
+      check(page, phrase, s, 'skills');
+      check(page, phrase, a, 'agents');
+    }
+    for (const [phrase, word, noun] of text.matchAll(DEFINITE)) {
+      check(page, phrase, word, noun.toLowerCase());
+    }
+  }
+
+  // Guards the guard: a rewrite that drops the phrasing entirely would make
+  // every assertion above vacuous, and this test would keep passing green.
+  assert.ok(checked > 0, 'no page states a spelled-out count any more — did the phrasing change?');
+});
+
+test('the README states the real description budget, and the real total', () => {
+  // The footnote quotes both numbers as evidence for the "small curated core"
+  // row. A quoted measurement with nothing watching it is the exact failure
+  // this file was created for — and this one moved twice in one change.
+  const total = collectSkillDescriptions(ROOT).reduce((sum, r) => sum + r.length, 0);
+  const quoted = /\((\d[\d,]*) of (\d[\d,]*) characters/.exec(README);
+  assert.ok(quoted, 'the footnote no longer quotes the budget — if that was deliberate, delete this test in the same change');
+
+  const num = (s) => Number(s.replace(/,/g, ''));
+  assert.equal(num(quoted[1]), total, `README quotes ${quoted[1]} characters of descriptions, desc-budget measures ${total}`);
+  assert.equal(num(quoted[2]), DEFAULT_BUDGET, `README quotes a budget of ${quoted[2]}, the script enforces ${DEFAULT_BUDGET}`);
 });

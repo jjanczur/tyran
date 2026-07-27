@@ -15,13 +15,16 @@ ends up approving their own patch. This removes the easy path, not every path
 that keeps you.
 
 1. **Read the whole diff** plus the story file that holds the acceptance
-   criteria. Look for real defects: correctness, regressions, agreement with
-   the repo's conventions, missing tests, hardcoded values, anything touching
-   a shared zone.
+   criteria. **Follow the `code-review` skill for the sweep** — it carries the
+   dimensions a diff is read against and the rule that you try to refute your
+   own finding before reporting it. Two things it will not let you skip: the
+   first pass is against the acceptance criteria rather than your idea of the
+   feature, and a correct implementation of the wrong thing is a defect no
+   dimension sweep catches.
 2. **Run your OWN verification.** Do not believe the author's report — an
    author's report with no raw command output you reject on sight, without
-   reading further. Run the tests yourself; for UI, drive the browser
-   yourself. Paste what you got, with counts.
+   reading further. Run the tests yourself; for UI, drive the browser yourself
+   through `browser-check`. Paste what you got, with counts.
    - Settle disputed measurements (font size, padding, colour) by dumping
      computed styles to JSON, never by eye. An "it looks off" audit produces
      wrong findings at roughly the rate it produces right ones.

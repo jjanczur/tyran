@@ -64,7 +64,14 @@ export default defineConfig({
       // The mark reaches this header through the `SiteTitle` override below,
       // as a component, inheriting `currentColor`.
       favicon: '/favicon.svg',
-      social: [{ icon: 'github', label: 'GitHub', href: REPO }],
+      // Starlight ships its own `linkedin` glyph, so the docs header does NOT
+      // go through `landing/Icon.astro` — that component belongs to the
+      // landing page and importing it here would put the same mark on two
+      // different rendering paths, which is how the two drift apart.
+      social: [
+        { icon: 'github', label: 'GitHub', href: REPO },
+        { icon: 'linkedin', label: 'LinkedIn', href: 'https://www.linkedin.com/in/jacekjanczura/' },
+      ],
       editLink: {
         // Starlight builds this as `baseUrl + entry.filePath`, where filePath
         // is relative to the Astro project root (`site/`). Hence the trailing

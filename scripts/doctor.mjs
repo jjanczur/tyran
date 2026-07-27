@@ -25,12 +25,20 @@
  * CLI:
  *   node doctor.mjs --state [--dir <.tyran>] [--json]
  *                           [--now <iso>] [--stale-hours <n>]
+ *   node doctor.mjs --hooks [--plugin-root <dir>] [--json]
  * Exit: 0 healthy (info findings allowed) · 1 findings (error or warning)
  *       · 2 usage / I/O error
+ *
+ * The two modes answer different questions and are deliberately separate.
+ * `--state` asks whether the RECORD of the work is consistent. `--hooks` asks
+ * whether the gates that produce that record can fire at all — a question
+ * with no answer inside the state directory, because a plugin whose hooks are
+ * dead writes no state to be inconsistent with.
  */
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkHooks, DEFAULT_PLUGIN_ROOT } from './hooks-check.mjs';
 import { readJournal, validateJournal, pairSpawns, tail } from './journal.mjs';
 import {
   checkFile,
@@ -1073,8 +1081,30 @@ function summarize(dir, findings, checked) {
 
 // --------------------------------------------------------------- renderers
 
-export function renderText(result) {
-  const lines = ['tyran doctor · state', `dir: ${result.dir}`];
+/**
+ * The hook-liveness check, in doctor's own result shape.
+ *
+ * `hooks-check.mjs` owns the finding CODES and their severities; doctor does
+ * not merge them into `SEVERITY_BY_CODE`. Two tables, no merge, and a test
+ * asserts the two never define the same code — which is stronger than merging,
+ * because a merge would let a collision resolve silently in favour of whoever
+ * wrote the key last.
+ */
+export function runHookChecks({ root = DEFAULT_PLUGIN_ROOT, env = process.env } = {}) {
+  const result = checkHooks({ root, env });
+  return {
+    ok: result.ok,
+    dir: result.root,
+    platform: result.platform,
+    checked: result.checked,
+    counts: result.counts,
+    findings: result.findings,
+  };
+}
+
+export function renderText(result, mode = 'state') {
+  const lines = [`tyran doctor · ${mode}`, `dir: ${result.dir}`];
+  if (result.platform) lines.push(`platform modelled: ${result.platform} (re-measure after an upgrade)`);
   for (const line of result.checked) lines.push(`  ${line}`);
   lines.push('');
 
@@ -1111,8 +1141,8 @@ export function renderJson(result) {
 
 // --------------------------------------------------------------------- CLI
 
-const BOOLEAN_FLAGS = ['state', 'json'];
-const VALUE_FLAGS = ['dir', 'now', 'stale-hours'];
+const BOOLEAN_FLAGS = ['state', 'hooks', 'json'];
+const VALUE_FLAGS = ['dir', 'now', 'stale-hours', 'plugin-root'];
 
 export function parseArgs(argv) {
   const flags = {};
@@ -1130,10 +1160,10 @@ export function parseArgs(argv) {
       flags[name] = value;
     } else throw new Error(`unknown flag --${name}`);
   }
-  // --state is required rather than assumed: doctor grows --env and --config
+  // A mode is required rather than assumed: doctor grows --env and --config
   // in a later epic, and a bare `doctor.mjs` that silently means one of them
   // today would silently mean something else then.
-  if (flags.state !== true) throw new UsageError();
+  if (flags.state !== true && flags.hooks !== true) throw new UsageError();
 
   let now = null;
   if (flags.now !== undefined) {
@@ -1147,20 +1177,43 @@ export function parseArgs(argv) {
       throw new Error(`--stale-hours must be a non-negative number (got "${flags['stale-hours']}")`);
     }
   }
-  return { dir: flags.dir ?? '.tyran', json: flags.json === true, now, staleHours, dirGiven: flags.dir !== undefined };
+  return {
+    dir: flags.dir ?? '.tyran',
+    json: flags.json === true,
+    now,
+    staleHours,
+    dirGiven: flags.dir !== undefined,
+    state: flags.state === true,
+    hooks: flags.hooks === true,
+    pluginRoot: flags['plugin-root'] ?? DEFAULT_PLUGIN_ROOT,
+  };
 }
 
 function main() {
   try {
-    const { dir, json, now, staleHours, dirGiven } = parseArgs(process.argv.slice(2));
-    // An explicitly named directory that does not exist is a typo, and a
-    // clean bill of health for a path nobody checked is the one output a
-    // diagnostic tool must never produce. The DEFAULT `.tyran` being absent
-    // is just a repo that has not run /tyran:setup yet.
-    if (dirGiven && !existsSync(dir)) throw new IOError(`state directory not found: ${resolve(dir)}`);
-    const result = runStateChecks({ dir, now, staleHours });
-    process.stdout.write(json ? renderJson(result) : renderText(result));
-    if (!result.ok) process.exit(1);
+    const args = parseArgs(process.argv.slice(2));
+    const { dir, json, now, staleHours, dirGiven } = args;
+    let allOk = true;
+    // Both modes may be asked for at once. They are rendered as two reports
+    // rather than one merged list: the counts of "is the record consistent"
+    // and "can the gates fire" answer different questions, and adding them
+    // together would let a healthy state dilute a dead gate.
+    if (args.hooks) {
+      const result = runHookChecks({ root: args.pluginRoot });
+      process.stdout.write(json ? renderJson(result) : renderText(result, 'hooks'));
+      allOk = allOk && result.ok;
+    }
+    if (args.state) {
+      // An explicitly named directory that does not exist is a typo, and a
+      // clean bill of health for a path nobody checked is the one output a
+      // diagnostic tool must never produce. The DEFAULT `.tyran` being absent
+      // is just a repo that has not run /tyran:setup yet.
+      if (dirGiven && !existsSync(dir)) throw new IOError(`state directory not found: ${resolve(dir)}`);
+      const result = runStateChecks({ dir, now, staleHours });
+      process.stdout.write(json ? renderJson(result) : renderText(result));
+      allOk = allOk && result.ok;
+    }
+    if (!allOk) process.exit(1);
   } catch (err) {
     if (err instanceof UsageError) {
       console.error(

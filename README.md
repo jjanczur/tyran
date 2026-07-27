@@ -35,9 +35,6 @@ work is done, it will not let the initiative end until it has learned something 
 Four failures, all of them ordinary, all of them silent. You will recognise
 every one.
 
-<p align="center">
-  <img src="assets/scene-failures.jpg" alt="A jackal-headed engineer proudly holds up a glowing tablet covered in green tick marks; behind him the machine those ticks refer to sits cold, dust-covered and strung with cobwebs, plainly never run" width="100%">
-</p>
 
 | | What happens | What it costs you |
 |---|---|---|
@@ -89,9 +86,6 @@ flowchart TB
     class J store
 ```
 
-<p align="center">
-  <img src="assets/scene-roster.jpg" alt="A tall jackal-headed conductor at a raised console hands sealed golden tablets to three smaller workers, each at a separate workstation with its own screen; a heavy brass gate arm stands between them" width="100%">
-</p>
 
 Each of the four failures gets a mechanism, not a paragraph of advice:
 
@@ -119,10 +113,6 @@ flowchart LR
 ```
 
 ### And then it gets better on its own
-
-<p align="center">
-  <img src="assets/scene-compounding.jpg" alt="A jackal-headed figure sweeps an armful of redundant tools off a brass rack into a large discard pile; the three tools left hanging glow gold, perfectly spaced" width="100%">
-</p>
 
 An initiative that ends without a retrospective is **refused one turn** by a
 `Stop` hook. The retro reads the ledger, the notes and the agents' own

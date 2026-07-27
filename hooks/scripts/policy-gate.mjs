@@ -1,0 +1,963 @@
+#!/usr/bin/env node
+/**
+ * policy-gate — the autonomy classes stop being a description and become a
+ * refusal.
+ *
+ * ADR-06 splits every artefact into AUTO (the loop edits it itself), GATED
+ * (a human approves) and KERNEL (humans only, by hand). Until this file
+ * existed that split lived in `.tyran/policies/autonomy.yaml` and in prose:
+ * a policy nothing enforces is a comment. This gate enforces it on the
+ * PreToolUse event, plus the deployment class from `.tyran/config.yaml`
+ * (P1/P2/P3), which decides how far a `git push` may reach.
+ *
+ * ## What it is built out of, and what it deliberately does not re-derive
+ *
+ * Three answers already exist in this repository and this file asks them
+ * rather than re-spelling them. ADR-21 counted three spellings of one rule
+ * here once already; there is no fourth.
+ *
+ *  - **which class a path has** — `scripts/schema.mjs`: `classifyPath`,
+ *    `normalizePath`, and the unconditional `MANDATORY_KERNEL_PATHS` check
+ *    that runs BEFORE any rule, so no glob spelling can outrank it;
+ *  - **what a shell command line does** — `secrets-gate.mjs`'s lexer:
+ *    segmentation, transparent prefixes, the `cd`/`pushd`/`popd` working
+ *    directory model, and refusal on anything needing expansion. This gate
+ *    reads that lexer's OUTPUT and never looks at the command string itself;
+ *  - **how a refusal may be worded** — `hook-io.mjs` sanitizes every reason,
+ *    and `elideOpaqueRuns`/`safeRuleName` handle the repository-controlled
+ *    strings that reach the model's context.
+ *
+ * ## The two questions this gate had to answer out loud
+ *
+ * **1. A path no rule matches is a row of the matrix, not a fall-through.**
+ * It resolves to the policy's `default`, which the validator makes mandatory
+ * and the shipped template sets to GATED. The reasoning matters more than the
+ * value: a denylist over hostile input is structurally incomplete (ADR-19
+ * correction 1), so "unmatched means allowed" would mean the policy protects
+ * only what somebody remembered to list. Both directions were available and
+ * the third one — refuse everything unlisted — was rejected on measurement,
+ * not taste: a gate that refuses ordinary work is uninstalled, and then it
+ * protects nothing at all.
+ *
+ * **2. The highest class covers WRITES. Reads are guarded by a separate,
+ * narrower rule, and that boundary is stated rather than left to be found.**
+ * The trigger was real: a neighbouring project's `.env` was read whole into a
+ * conductor session — dozens of live credentials, nobody having asked for the
+ * read. The secrets gate defends PUBLICATION and would never have seen it.
+ * So a read is refused when the path is secret-SHAPED, for every actor, and
+ * AUTO/GATED/KERNEL are not consulted for reads at all. Extending KERNEL to
+ * reads instead would have made `hooks/**` unreadable — a gate whose own
+ * source cannot be read teaches its user to switch it off. The narrow rule is
+ * a denylist and therefore incomplete; `docs/policy-gate.md` says so in those
+ * words instead of implying otherwise.
+ *
+ * ## Failure is refusal
+ *
+ * Missing policy file, unparseable YAML, a policy the validator rejects, a
+ * budget overrun: all deny. A broken policy must never read as "anything
+ * goes" (ADR-22). The one exception is deliberate and documented: a repo with
+ * no `.tyran/` directory at all has not adopted Tyran, so the path classes
+ * have nothing to say there and the gate is silent — except for the secret
+ * read rule, which needs no configuration and is what the incident above
+ * actually called for.
+ */
+import { realpathSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { PASS, field, main, runGate } from './hook-io.mjs';
+import {
+  GIT_BUDGET_MS,
+  makeBudget,
+  planCommand,
+  runChild,
+  shortPath,
+} from './secrets-gate.mjs';
+import {
+  MANDATORY_KERNEL_PATHS,
+  classifyPath,
+  normalizePath,
+  validatePolicy,
+} from '../../scripts/schema.mjs';
+import { parse } from '../../scripts/yaml-lite.mjs';
+
+/** This gate's own budget, half the `timeout` its hooks.json entry declares. */
+export const DEADLINE_MS = 4000;
+
+/** Left unspent so a refusal can still be serialized after the last child. */
+export const DEADLINE_MARGIN_MS = 800;
+
+/**
+ * The most policy this gate will read. A `.tyran/` tree can come from a
+ * template someone else wrote, and ADR-22 correction 1 point D is explicit:
+ * every file a gate reads is size-checked, because the platform's timeout
+ * kills the process and never reads what it wrote.
+ */
+export const MAX_POLICY_BYTES = 256 * 1024;
+
+/** Where the two files this gate reads live, relative to the repo root. */
+export const POLICY_PATH = '.tyran/policies/autonomy.yaml';
+export const CONFIG_PATH = '.tyran/config.yaml';
+export const TYRAN_DIR = '.tyran';
+
+/** Deployment classes, in increasing order of reach. See ADR-06 / config.yaml. */
+export const DEPLOY_CLASSES = Object.freeze(['P1', 'P2', 'P3']);
+
+/**
+ * A `default:` that is not an artefact class, used to ask `classifyPath`
+ * "did any rule match at all?" without a second glob engine.
+ *
+ * Plain ASCII on purpose. The first spelling of this constant was a string
+ * beginning with a space, and the writing tool put a raw NUL byte there
+ * instead — after which `grep` reported ZERO matches in this file, with exit
+ * status 1 and no message, and `file` called it binary data. That is failure
+ * class 1 and ADR-19's opening example, reproduced inside the gate written to
+ * enforce them. A constant whose repertoire is `[A-Za-z_]` cannot do it again.
+ */
+const UNMATCHED = '__unmatched__';
+
+/**
+ * Tools that write a file. A tool named here with no readable path REFUSES:
+ * a write whose target the gate could not read is a write it did not classify.
+ */
+export const WRITE_TOOLS = Object.freeze(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update']);
+
+/**
+ * Tools that put file CONTENT into the model's context. `Grep` is here for a
+ * measured reason rather than for symmetry: with `output_mode: "content"` it
+ * prints matching lines, so it reads a file just as effectively as `Read`.
+ */
+export const READ_TOOLS = Object.freeze(['Read', 'NotebookRead', 'Grep']);
+
+/** Input keys that name a file. Read prototype-safely; see `field`. */
+export const PATH_FIELDS = Object.freeze(['file_path', 'notebook_path', 'path']);
+
+/**
+ * Permission modes in which the USER is still asked before a write lands.
+ *
+ * Measured on the live install (v2.1.116): `permission_mode` is present on
+ * every PreToolUse payload — `default` in the main loop, and whatever the
+ * session was started with otherwise, inherited by subagents. Anything not
+ * listed here (`acceptEdits`, `bypassPermissions`, an unknown future mode, or
+ * a missing field) counts as unsupervised, which is the fail-closed direction.
+ */
+export const SUPERVISED_MODES = Object.freeze(['default', 'ask', 'plan']);
+
+// ------------------------------------------------------------- the read rule
+
+/**
+ * Path shapes that carry credentials.
+ *
+ * This is a DENYLIST and is structurally incomplete — the same property
+ * ADR-19 correction 1 measured on the invisible-codepoint list, where 18
+ * added ranges still leaked. It is used anyway, and the reason is the shape
+ * of the alternative: the allowlist version of this rule is "refuse every
+ * read", which no user keeps installed for an hour. So the incompleteness is
+ * declared in `docs/policy-gate.md` rather than papered over.
+ *
+ * Matched on the BASENAME unless the id says otherwise, and always
+ * case-insensitively: on macOS and Windows `.ENV` and `.env` are one file,
+ * and a security classifier must not let casing pick the weaker answer (the
+ * same reasoning as `globMatches` in schema.mjs).
+ */
+export const SECRET_READ_RULES = Object.freeze([
+  // `.env`, `.env.local`, `.env.prod` — but not the checked-in samples, which
+  // are the documented way to tell an agent what the real file must contain.
+  {
+    id: 'dotenv',
+    on: 'basename',
+    match: (b) => /^\.env(\.[^/]*)?$/i.test(b) && !/\.(example|sample|template|dist|defaults?|schema)$/i.test(b),
+  },
+  { id: 'private-key-file', on: 'basename', match: (b) => /\.(pem|key|p12|pfx|jks|keystore|kdbx|asc|ppk)$/i.test(b) },
+  { id: 'ssh-private-key', on: 'basename', match: (b) => /^id_[a-z0-9]+$/i.test(b) },
+  { id: 'credentials-file', on: 'basename', match: (b) => /^\.?credentials(\.[a-z0-9]+)?$/i.test(b) },
+  { id: 'netrc', on: 'basename', match: (b) => /^_?\.?netrc$/i.test(b) },
+  { id: 'registry-auth', on: 'basename', match: (b) => /^\.(npmrc|pypirc|pgpass|dockercfg)$/i.test(b) },
+  { id: 'service-account-key', on: 'basename', match: (b) => /service[-_]?account.*\.json$/i.test(b) },
+  // Whole-path shapes: the directory is the secret, whatever the file inside
+  // is called. This is the shape the measured incident actually had.
+  { id: 'ssh-directory', on: 'path', match: (p) => /(^|\/)\.ssh\//i.test(p) },
+  { id: 'aws-credentials', on: 'path', match: (p) => /(^|\/)\.aws\//i.test(p) },
+  { id: 'gnupg-directory', on: 'path', match: (p) => /(^|\/)\.gnupg\//i.test(p) },
+  { id: 'gcloud-credentials', on: 'path', match: (p) => /(^|\/)\.config\/gcloud\//i.test(p) },
+  { id: 'kube-config', on: 'path', match: (p) => /(^|\/)\.kube\/config$/i.test(p) },
+]);
+
+/**
+ * The ids of every secret rule a path matches. Returns a LIST, not a boolean,
+ * so the refusal can name what it recognised without quoting the path's
+ * contents back at anyone.
+ */
+export function secretReadRules(rawPath) {
+  const text = String(rawPath).replace(/\\/g, '/');
+  const base = basename(text);
+  const hits = [];
+  for (const rule of SECRET_READ_RULES) {
+    const subject = rule.on === 'basename' ? base : text;
+    if (rule.match(subject)) hits.push(rule.id);
+  }
+  return hits;
+}
+
+// ---------------------------------------------------------------- the actor
+
+/**
+ * Which actor this call belongs to.
+ *
+ * Measured, and asymmetric — the asymmetry is the whole point. `agent_id`
+ * present means we are INSIDE a subagent; its absence does NOT mean the main
+ * loop is unattended, because a main thread started with `--agent` carries
+ * `agent_type` and still no `agent_id`. So the presence test is used in the
+ * direction it is sound in, and nothing is inferred from its absence beyond
+ * "not a subagent".
+ */
+export function actorOf(input) {
+  const agentId = field(input, 'agent_id');
+  return typeof agentId === 'string' && agentId.trim() !== '' ? 'subagent' : 'main';
+}
+
+/**
+ * True when nobody will be asked before this call takes effect.
+ *
+ * A subagent is unsupervised by construction: its tool calls do not surface a
+ * permission prompt to the user. The main loop is supervised only while the
+ * session's permission mode still prompts. This is what lets GATED mean what
+ * ADR-06 says it means — "the operator approves" — without this gate having to
+ * invent an approval channel it does not have: on PreToolUse the platform
+ * offers `deny` and silence, and no third answer.
+ */
+export function isUnsupervised(input) {
+  if (actorOf(input) === 'subagent') return true;
+  const mode = field(input, 'permission_mode');
+  return !(typeof mode === 'string' && SUPERVISED_MODES.includes(mode));
+}
+
+// --------------------------------------------------------------- the policy
+
+/** Thrown when the gate could not decide. Always becomes a refusal. */
+export class PolicyFailure extends Error {
+  constructor(what, remedy) {
+    super(what);
+    this.name = 'PolicyFailure';
+    this.remedy = remedy;
+  }
+}
+
+/** The repository this call is about. Explicit, never defaulted per call site. */
+export function repoRootOf(input, env = process.env) {
+  const fromEnv = env.CLAUDE_PROJECT_DIR;
+  if (typeof fromEnv === 'string' && fromEnv.trim() !== '') return fromEnv;
+  const cwd = field(input, 'cwd');
+  if (typeof cwd === 'string' && cwd.trim() !== '') return cwd;
+  return process.cwd();
+}
+
+/**
+ * Read a small file, or say why not. Size-checked BEFORE it is read, because
+ * a gate that blocks the thread on a large read is a gate the platform kills
+ * without ever reading its refusal (ADR-22 correction 2).
+ */
+async function readBounded(path, what) {
+  let info;
+  try {
+    info = await stat(path);
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    throw new PolicyFailure(
+      `${what} at ${JSON.stringify(shortPath(path))} could not be read (${err?.code ?? 'unknown error'})`,
+      'fix the file permissions, or remove the file if this repository is not meant to use Tyran',
+    );
+  }
+  if (!info.isFile()) {
+    throw new PolicyFailure(
+      `${what} at ${JSON.stringify(shortPath(path))} is not a regular file`,
+      'a directory or a device in the policy path means the gate cannot know what the policy says',
+    );
+  }
+  if (info.size > MAX_POLICY_BYTES) {
+    throw new PolicyFailure(
+      `${what} is ${info.size} bytes, past the ${MAX_POLICY_BYTES} this gate will read`,
+      'a policy file this large is not a policy; split it or shrink it',
+    );
+  }
+  return await readFile(path, 'utf8');
+}
+
+/**
+ * Load and validate the autonomy policy.
+ *
+ * Returns `null` — and only then — when the repository has no `.tyran/`
+ * directory at all. Every other outcome is either a valid policy or a
+ * refusal: absent while `.tyran/` exists, unparseable, or rejected by
+ * `validatePolicy` all mean the boundary is unknown, and an unknown boundary
+ * that lets writes through is the defect this whole epic is about.
+ */
+export async function loadPolicy(root) {
+  const text = await readBounded(join(root, POLICY_PATH), 'the autonomy policy');
+  if (text === null) {
+    let adopted = false;
+    try {
+      adopted = (await stat(join(root, TYRAN_DIR))).isDirectory();
+    } catch {
+      adopted = false;
+    }
+    if (!adopted) return null;
+    throw new PolicyFailure(
+      `this repository has a ${TYRAN_DIR}/ directory but no ${POLICY_PATH}`,
+      `restore it from the shipped template (templates/policies/autonomy.yaml) and validate it with ` +
+        `\`node scripts/schema.mjs validate policy ${POLICY_PATH}\`. A missing boundary is not an open one.`,
+    );
+  }
+  let doc;
+  try {
+    doc = parse(text);
+  } catch (err) {
+    throw new PolicyFailure(
+      `${POLICY_PATH} is not parseable YAML (${err?.name ?? 'error'})`,
+      `fix the file and check it with \`node scripts/schema.mjs validate policy ${POLICY_PATH}\`. ` +
+        'A policy the gate cannot read cannot mean "everything is allowed".',
+    );
+  }
+  const errors = validatePolicy(doc);
+  if (errors.length > 0) {
+    throw new PolicyFailure(
+      `${POLICY_PATH} is not a valid policy (${errors.length} finding(s); the first is ` +
+        `${JSON.stringify(safePolicyText(errors[0]))})`,
+      `run \`node scripts/schema.mjs validate policy ${POLICY_PATH}\` for the full list. ` +
+        'The validator is what stops a policy from downgrading its own enforcement paths.',
+    );
+  }
+  return doc;
+}
+
+/** Load the deployment class from config.yaml, or refuse. `null` = no config. */
+export async function loadDeployClass(root) {
+  const text = await readBounded(join(root, CONFIG_PATH), 'the Tyran config');
+  if (text === null) return null;
+  let doc;
+  try {
+    doc = parse(text);
+  } catch (err) {
+    throw new PolicyFailure(
+      `${CONFIG_PATH} is not parseable YAML (${err?.name ?? 'error'})`,
+      `fix the file and check it with \`node scripts/schema.mjs validate config ${CONFIG_PATH}\`.`,
+    );
+  }
+  const node = doc === null || typeof doc !== 'object' ? undefined : doc.autonomy;
+  // The field carries provenance when a scanner inferred it: `{value, source,
+  // confidence}`. Reading `.autonomy` raw would then compare an object against
+  // 'P1' and silently fall through to the widest class.
+  const value = node !== null && typeof node === 'object' && 'value' in node ? node.value : node;
+  if (!DEPLOY_CLASSES.includes(value)) {
+    throw new PolicyFailure(
+      `${CONFIG_PATH} does not declare a deployment class (autonomy: ${DEPLOY_CLASSES.join(' | ')})`,
+      `set \`autonomy: P1\` if you are unsure — it is the narrowest class, and setup picks it by ` +
+        'default. The gate refuses rather than assuming the widest one.',
+    );
+  }
+  return value;
+}
+
+// ------------------------------------------------------ quoting the decision
+
+/**
+ * The repertoire a policy string is allowed to contribute to a refusal.
+ *
+ * A refusal is republished into the model's context, so every string in it
+ * that came out of a file is attacker-controlled text (failure class 6, which
+ * happened four times in this initiative). Review of the secrets gate put an
+ * imperative sentence in a rule id and had it printed back verbatim.
+ *
+ * The mechanical answer used there was an allowlist that drops spaces, so a
+ * sentence stops being a sentence. That works for an identifier and destroys
+ * a prose `reason:` field. So this gate does not reproduce `reason:` AT ALL —
+ * the refusal quotes the rule's `path` glob and its `class`, and points the
+ * reader at the file. The guarantee is then exact and testable: the only
+ * bytes that travel from the policy file into the model's context are a glob
+ * in this repertoire and one of three enum members.
+ */
+export function safePolicyText(value, limit = 120) {
+  const kept = String(value).replace(/[^A-Za-z0-9._/*[\]{}?!-]/g, '');
+  return (kept === '' ? '(empty)' : kept).slice(0, limit);
+}
+
+/**
+ * The rule that decided, and a proof that it is the same rule the resolver
+ * used.
+ *
+ * `classifyPath` returns a class, not a rule, so a refusal that names the
+ * deciding rule has to select one — and selecting one means restating the
+ * precedence, which is exactly how a repository ends up with two spellings of
+ * one rule (ADR-21). It is restated here and then CHECKED: the caller
+ * compares this rule's class against `classifyPath`'s answer and refuses on
+ * disagreement rather than reporting the wrong reason. The check, not the
+ * code, is what keeps the two honest, and a test pins it over a corpus.
+ *
+ * Matching itself is delegated: a single-rule probe policy is handed to
+ * `classifyPath`, so the glob semantics are never re-implemented.
+ */
+export function decidingRule(policy, normalized) {
+  const strictness = { AUTO: 0, GATED: 1, KERNEL: 2 };
+  let best = null;
+  for (const rule of policy?.rules ?? []) {
+    if (rule === null || typeof rule !== 'object') continue;
+    if (typeof rule.path !== 'string' || rule.path.trim() === '') continue;
+    // A one-rule policy answers "does this rule match?" without a second glob
+    // engine. The unconditional kernel check inside classifyPath cannot make
+    // this a false positive: it returns KERNEL for kernel paths whatever the
+    // rule says, and a kernel path is refused by the caller regardless.
+    if (classifyPath({ rules: [rule], default: UNMATCHED }, normalized) === UNMATCHED) continue;
+    if (
+      best === null ||
+      rule.path.length > best.path.length ||
+      (rule.path.length === best.path.length && strictness[rule.class] > strictness[best.class])
+    ) {
+      best = rule;
+    }
+  }
+  return best;
+}
+
+/**
+ * The built-in protected glob covering this path, or null.
+ *
+ * `classifyPath` applies `MANDATORY_KERNEL_PATHS` unconditionally, before any
+ * rule is consulted, so a refusal that could only ever quote the policy file
+ * would name the wrong authority for exactly the paths that matter most. An
+ * EMPTY policy isolates that unconditional branch: whatever it still calls
+ * KERNEL, it calls KERNEL for a reason no policy can edit.
+ */
+export function protectedGlobFor(normalized) {
+  const EMPTY = { rules: [], default: UNMATCHED };
+  if (classifyPath(EMPTY, normalized) !== 'KERNEL') return null;
+  for (const glob of MANDATORY_KERNEL_PATHS) {
+    if (classifyPath({ rules: [{ path: glob, class: 'KERNEL' }], default: UNMATCHED }, normalized) === 'KERNEL') {
+      return glob;
+    }
+  }
+  return null;
+}
+
+/** How the refusal names the rule that decided. Never the `reason:` prose. */
+export function quoteRule(policy, normalized, cls) {
+  if (normalized === null) {
+    return 'no rule applies: the path is outside this repository, which is never autonomous';
+  }
+  const glob = protectedGlobFor(normalized);
+  if (glob !== null) {
+    return (
+      `the built-in protected path \`${safePolicyText(glob)}\` (class KERNEL). No policy can ` +
+      'downgrade it: the validator rejects the file whatever glob spelling is used.'
+    );
+  }
+  const rule = decidingRule(policy, normalized);
+  if (rule === null) {
+    return `no rule in \`${POLICY_PATH}\` matched, so its \`default:\` applies (class ${safePolicyText(cls)})`;
+  }
+  return (
+    `\`${POLICY_PATH}\`, rule \`path: ${safePolicyText(rule.path)}\` (class ${safePolicyText(rule.class)}). ` +
+    "The rule's `reason:` is deliberately not reproduced here — read it in the file"
+  );
+}
+
+// ----------------------------------------------------------- the path matrix
+
+/** Every path this tool call names. Prototype-safe, deduplicated, order-stable. */
+export function pathTargets(toolInput) {
+  if (toolInput === null || typeof toolInput !== 'object') return [];
+  const out = [];
+  for (const key of PATH_FIELDS) {
+    const value = field(toolInput, key);
+    if (typeof value === 'string' && value.trim() !== '') out.push(value);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * The decision for one classified path, given the class and the supervision.
+ *
+ * The full matrix, and every cell is a decision rather than a fall-through:
+ *
+ * | class    | supervised main loop | unsupervised (subagent, or prompts off) |
+ * |----------|----------------------|------------------------------------------|
+ * | AUTO     | pass                 | pass                                     |
+ * | GATED    | pass — the platform's own prompt IS the approval | **deny**      |
+ * | KERNEL   | **deny**             | **deny**                                 |
+ * | unmatched| = the policy's `default:` (GATED in the shipped template) |     |
+ *
+ * The GATED row is the one worth arguing. On PreToolUse the platform offers
+ * exactly two answers, `deny` and silence; there is no "ask" this runtime can
+ * emit, and inventing one means editing hook-io, which is a different
+ * decision than this story's. So GATED is delegated where an approval channel
+ * already exists — the user's own permission prompt — and enforced where it
+ * does not. That is why supervision, not just actor, is an axis: under
+ * `acceptEdits` the main loop has no prompt either, and treating it as
+ * supervised would have made the whole row decorative.
+ */
+export function verdictForClass(cls, unsupervised) {
+  if (cls === 'KERNEL') return 'deny';
+  if (cls === 'GATED') return unsupervised ? 'deny' : 'pass';
+  if (cls === 'AUTO') return 'pass';
+  // An unrecognised class cannot be resolved to a permission. validatePolicy
+  // rejects one, so reaching here means the resolver and the validator
+  // disagree — refuse rather than guess which of them is right.
+  return 'deny';
+}
+
+// ------------------------------------------------------- the deployment class
+
+/**
+ * Branch names that are production wherever they appear.
+ *
+ * An enumeration, and therefore incomplete — a repository whose production
+ * branch is called `ship` is not in it. It is the FLOOR, not the rule: the
+ * gate also resolves the remote's own default branch, and refuses under P1/P2
+ * when it cannot. Two criteria pointing the same way, so a miss in the list
+ * does not become a silent pass (ADR-19: an exclusion may never be quiet).
+ */
+export const PRODUCTION_BRANCHES = Object.freeze([
+  'main', 'master', 'production', 'prod', 'release', 'live', 'trunk', 'stable',
+]);
+
+/** Long-lived shared branches. P1 keeps an agent off these too; P2 allows them. */
+export const SHARED_BRANCHES = Object.freeze([
+  'testing', 'staging', 'stage', 'test', 'dev', 'develop', 'development',
+  'preview', 'next', 'qa', 'uat', 'integration', 'beta', 'canary',
+]);
+
+/** `refs/heads/main` -> `main`; `+main` -> `main`. Never a shell expansion. */
+export function refName(spec) {
+  const text = String(spec).replace(/^\+/, '');
+  return text.replace(/^refs\/(heads|remotes)\//, '');
+}
+
+/**
+ * What a `git push` in this segment would publish, from the LEXER's tokens.
+ *
+ * The command string is never re-read here. `planCommand` already segments the
+ * line, walks `cd`/`pushd`/`popd`, recognises the program through quoting
+ * tricks, and refuses anything needing expansion; this only interprets the
+ * argv it produced. Writing a second decomposition would have been the third
+ * spelling of one rule in this repository.
+ */
+export function readPush(argv) {
+  const flags = argv.filter((t) => t.startsWith('-'));
+  const words = argv.filter((t) => !t.startsWith('-'));
+  const has = (...names) => flags.some((f) => names.includes(f));
+  const deleteFlag = has('--delete', '-d');
+  const specs = words.slice(1); // words[0] is the remote, when present
+  const destinations = [];
+  let deletes = deleteFlag && specs.length > 0;
+  let forced = flags.some((f) => f.startsWith('--force') || (f.length >= 2 && f[1] !== '-' && f.includes('f')));
+  let tags = has('--tags', '--follow-tags') || specs.some((s) => s.includes('refs/tags/'));
+  for (const spec of specs) {
+    if (spec.startsWith('+')) forced = true;
+    const parts = spec.split(':');
+    if (parts.length > 1 && parts[0].replace(/^\+/, '') === '') deletes = true;
+    const dst = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+    if (dst !== '') destinations.push(refName(dst));
+  }
+  return {
+    remote: words[0] ?? null,
+    destinations,
+    deletes,
+    forced,
+    tags,
+    // `--all` and `--mirror` publish every local branch, which includes the
+    // default one whatever it is called, and `--mirror` also DELETES remote
+    // refs that are absent locally.
+    everything: has('--all', '--mirror'),
+    mirrors: has('--mirror'),
+    // No refspec and no wildcard flag: the destination is whatever branch is
+    // checked out, and only git can say which. Resolved by the caller.
+    impliesCurrentBranch: specs.length === 0 && !has('--all', '--mirror', '--tags'),
+  };
+}
+
+/**
+ * `git symbolic-ref --short`, or null.
+ *
+ * Every way of not getting an answer collapses to null — git absent, killed,
+ * non-zero, empty — because the CALLER turns null into a refusal with a
+ * one-command remedy. Distinguishing them here would only produce refusals
+ * that differ in wording and not in what the reader has to do.
+ */
+export async function symbolicRef(dir, ref, { runner, timeoutMs }) {
+  if (!(timeoutMs > 0)) return null;
+  const result = await runner('git', ['-C', dir, 'symbolic-ref', '--quiet', '--short', ref], {
+    cwd: dir,
+    timeoutMs,
+  });
+  if (result?.spawned !== true || result.timedOut === true || result.code !== 0) return null;
+  const line = String(result.stdout ?? '').trim().split('\n')[0] ?? '';
+  return line === '' ? null : line;
+}
+
+/**
+ * The decision for one `git push`, under the repo's deployment class.
+ *
+ * P1 keeps an agent on its own branch · P2 adds the shared/testing branches ·
+ * P3 adds production but still refuses the irreversible, user-visible
+ * operations, which is what "P3 passes" was always supposed to mean and never
+ * mechanically did.
+ */
+export function deployVerdict(deployClass, scope, irreversible) {
+  if (irreversible.length > 0) return { verdict: 'deny', because: 'irreversible' };
+  if (deployClass === 'P3') return { verdict: 'pass', because: 'P3' };
+  if (deployClass === 'P2') {
+    return scope === 'production' ? { verdict: 'deny', because: 'production' } : { verdict: 'pass', because: 'P2' };
+  }
+  return scope === 'feature' ? { verdict: 'pass', because: 'P1' } : { verdict: 'deny', because: scope };
+}
+
+// -------------------------------------------------------------- the decision
+
+const READ_REMEDY =
+  'If you need a value from this file, ask the operator for the single value rather than the file. ' +
+  'If this path is genuinely not a secret in this repository, the operator can add an explicit ' +
+  `\`class: AUTO\` rule for it in \`${POLICY_PATH}\` — a file only a human can edit, because the ` +
+  'policy protects itself (class KERNEL). This gate cannot be talked out of it from inside a session.';
+
+export async function decide({ input, runner = runChild, startedAt = Date.now(), env = process.env } = {}) {
+  const budget = makeBudget(startedAt, DEADLINE_MS, DEADLINE_MARGIN_MS);
+  const toolName = field(input, 'tool_name');
+  const toolInput = field(input, 'tool_input');
+  const root = repoRootOf(input, env);
+  const unsupervised = isUnsupervised(input);
+  const actor = actorOf(input);
+
+  if (toolName === 'Bash') return await decideBash({ input, toolInput, root, runner, budget });
+
+  const targets = pathTargets(toolInput);
+  const isWriteTool = typeof toolName === 'string' && WRITE_TOOLS.includes(toolName);
+  const isReadTool = typeof toolName === 'string' && READ_TOOLS.includes(toolName);
+
+  if (targets.length === 0) {
+    if (!isWriteTool) return PASS;
+    return {
+      decision: 'deny',
+      reason:
+        `tyran policy-gate: refused. \`${safePolicyText(String(toolName))}\` writes a file, but this ` +
+        'call carries no readable path, so the gate could not tell which autonomy class applies.\n' +
+        'A write the gate did not classify is a write it did not check (ADR-22).\n' +
+        'Reissue the call with an explicit file path.',
+    };
+  }
+
+  // --- reads: one narrow rule, and the write classes are NOT consulted -------
+  if (isReadTool) {
+    const policy = await loadPolicy(root).catch((err) => {
+      // A broken policy must not make reads MORE permissive, but it also must
+      // not make the secret rule unavailable: the rule needs no policy, only
+      // the exemption does. Rethrow for writes, degrade to "no exemptions" here.
+      if (err instanceof PolicyFailure) return { rules: [], default: 'GATED', degraded: err };
+      throw err;
+    });
+    for (const target of targets) {
+      const hits = secretReadRules(target);
+      if (hits.length === 0) continue;
+      const normalized = normalizePath(target, root);
+      const exempt =
+        normalized !== null &&
+        policy !== null &&
+        decidingRule(policy, normalized)?.class === 'AUTO';
+      if (exempt) continue;
+      return {
+        decision: 'deny',
+        reason:
+          `tyran policy-gate: refused. This read would put a credential-shaped file into the ` +
+          `model's context.\n` +
+          `path: ${JSON.stringify(shortPath(target))}\n` +
+          `matched: ${hits.map((h) => `\`${h}\``).join(', ')}\n` +
+          `actor: ${actor}${normalized === null ? ' · this path is OUTSIDE the repository' : ''}\n` +
+          'Why a read and not just a commit: the secrets gate defends PUBLICATION. A neighbouring ' +
+          "project's .env was read whole into a conductor session in this project's own history — " +
+          'dozens of live credentials, nobody having asked for the read, and no commit involved. ' +
+          'A transcript is storage.\n' +
+          `${READ_REMEDY}\n` +
+          'Declared limit: this rule is a denylist of path shapes and is therefore incomplete. ' +
+          'It is not a claim that no secret can reach the context by another name.',
+      };
+    }
+    return PASS;
+  }
+
+  // --- writes: the AUTO / GATED / KERNEL matrix ------------------------------
+  const policy = await loadPolicy(root);
+  if (policy === null) {
+    // No `.tyran/` at all: Tyran does not orchestrate this repository, so the
+    // path classes have nothing to say. Stated in docs/policy-gate.md as a
+    // boundary rather than left to be discovered.
+    return PASS;
+  }
+
+  for (const target of targets) {
+    // Normalized HERE, with the root this call is about, and only then handed
+    // to the resolver. `classifyPath` normalizes internally too, but against
+    // `CLAUDE_PROJECT_DIR ?? process.cwd()` — and a hook process's cwd is not
+    // reliably the session's repository. Feeding it the raw path would
+    // classify against one directory while the refusal talked about another,
+    // and the two would agree in every test that happened to run in the repo
+    // root. Normalization is idempotent, so the resolver's own call is a no-op.
+    const normalized = normalizePath(target, root);
+    // The one branch this cannot delegate: a path outside the repository makes
+    // `normalizePath` return null, which `classifyPath` answers with KERNEL.
+    // Restated in one line rather than reached by passing a null through, and
+    // pinned by a test that asserts both spellings still agree.
+    const cls = normalized === null ? 'KERNEL' : classifyPath(policy, normalized);
+    const verdict = verdictForClass(cls, unsupervised);
+
+    // ADR-21, applied as a check rather than as a refactor: the rule this
+    // refusal names and the class the resolver returned must agree. They are
+    // selected by two pieces of code, so the agreement is asserted at runtime
+    // and pinned by a test instead of being assumed.
+    const named = normalized === null ? null : decidingRule(policy, normalized);
+    if (named !== null && normalized !== null && classifyPath(policy, normalized) !== 'KERNEL' && named.class !== cls) {
+      throw new PolicyFailure(
+        'the rule this gate would quote and the class the resolver returned disagree',
+        'this is a bug in the gate, not in the policy. The gate refuses rather than reporting a ' +
+          'reason that is not the reason.',
+      );
+    }
+
+    if (verdict === 'pass') continue;
+    return {
+      decision: 'deny',
+      reason:
+        `tyran policy-gate: refused. ${describeTarget(target, normalized)}\n` +
+        `class: ${safePolicyText(cls)} · actor: ${actor} · ` +
+        `${unsupervised ? 'nobody is asked before this write lands' : 'the user is prompted for this write'}\n` +
+        `rule: ${quoteRule(policy, normalized ?? '', cls)}\n` +
+        `${escapeRoute(cls, unsupervised)}`,
+    };
+  }
+  return PASS;
+}
+
+function describeTarget(raw, normalized) {
+  if (normalized === null) {
+    return (
+      `${JSON.stringify(shortPath(raw))} is outside this repository, and a path outside the repo ` +
+      'is never autonomous.'
+    );
+  }
+  return `${JSON.stringify(shortPath(raw))} is not writable at this autonomy level.`;
+}
+
+function escapeRoute(cls, unsupervised) {
+  if (cls === 'KERNEL') {
+    return (
+      'What to do instead: KERNEL means a human edits this by hand, outside an agent session — ' +
+      'these are the files that enforce every other boundary, so a loop able to edit them has no ' +
+      'boundaries at all. Put the change in your report as a diff for the operator to apply. ' +
+      'Reclassifying it is not available: the validator rejects a policy that downgrades a ' +
+      'protected path, whatever glob spelling it uses.'
+    );
+  }
+  if (unsupervised) {
+    return (
+      'What to do instead: GATED means the operator approves this one. Stop, and put the exact ' +
+      'change in your report — path, diff, and why — so the conductor can apply it or run the same ' +
+      'edit in the main session, where the permission prompt is the approval. Do not look for a ' +
+      'path around this gate: writing the same bytes through `Bash` is outside what this gate ' +
+      'checks, and doing it deliberately is the one thing that turns a boundary into a decoration.'
+    );
+  }
+  return 'What to do instead: reclassify the path in the policy file, or write somewhere else.';
+}
+
+// --------------------------------------------------------------- Bash / push
+
+async function decideBash({ input, toolInput, root, runner, budget }) {
+  const command = field(toolInput, 'command');
+  if (typeof command !== 'string') {
+    return {
+      decision: 'deny',
+      reason:
+        'tyran policy-gate: refused. This Bash call carries no readable `command`, so the gate ' +
+        'could not tell whether it publishes anything.\n' +
+        'A check that cannot run must not read as approval (ADR-22).',
+    };
+  }
+  const startDir = (() => {
+    const cwd = field(input, 'cwd');
+    return typeof cwd === 'string' && cwd !== '' ? cwd : root;
+  })();
+
+  const plan = planCommand(command, startDir);
+  const pushes = plan.targets.filter((t) => t.scanPush === true && Array.isArray(t.pushArgv));
+  if (pushes.length === 0) return PASS;
+
+  const deployClass = await loadDeployClass(root);
+  if (deployClass === null) return PASS; // no config: Tyran does not run this repo
+
+  if (plan.unmodellable.length > 0) {
+    const what = [...new Set(plan.unmodellable.map((u) => u.what))];
+    throw new PolicyFailure(
+      `this command pushes, and ${what.length} part(s) of it decide WHERE in a way this gate ` +
+        `cannot follow:\n${what.map((w) => `  - ${w}`).join('\n')}`,
+      'Write the path literally, run the command from that directory, or split it into separate ' +
+        'tool calls so each one is unambiguous. The gate never expands variables or runs a shell ' +
+        'to find out where a command would land.',
+    );
+  }
+
+  for (const target of pushes) {
+    const push = readPush(target.pushArgv);
+    const dir = target.dir;
+
+    let destinations = [...push.destinations];
+    let assumedDefault = false;
+    if (push.impliesCurrentBranch) {
+      const current = await symbolicRef(dir, 'HEAD', { runner, timeoutMs: budget(GIT_BUDGET_MS) });
+      if (current === null) {
+        throw new PolicyFailure(
+          `this push names no refspec, so its destination is whatever branch is checked out in ` +
+            `${JSON.stringify(shortPath(dir))} — and the gate could not read that branch`,
+          'run the push with an explicit refspec (`git push origin my-branch`), or check out a ' +
+            'named branch. A detached HEAD has no branch name for a policy to reason about.',
+        );
+      }
+      destinations.push(current);
+    }
+
+    const remote = push.remote ?? 'origin';
+    let defaultBranch = null;
+    if (deployClass !== 'P3') {
+      defaultBranch = await symbolicRef(dir, `refs/remotes/${remote}/HEAD`, {
+        runner,
+        timeoutMs: budget(GIT_BUDGET_MS),
+      });
+      if (defaultBranch !== null) defaultBranch = refName(defaultBranch).replace(`${remote}/`, '');
+      if (defaultBranch === null) {
+        // Refusing here rather than falling back to the name list alone. The
+        // list is an enumeration and a repository whose production branch is
+        // called `ship` would sail through it silently. The remedy is one
+        // command and permanent, which is what makes a refusal honest rather
+        // than an obstacle.
+        throw new PolicyFailure(
+          `this repository does not record which branch \`${safePolicyText(remote)}\` treats as ` +
+            'default, and under ' + deployClass + ' the gate has to know that before it can tell a ' +
+            'feature branch from production',
+          `run \`git remote set-head ${safePolicyText(remote)} -a\` once in this repository. It ` +
+            'writes a local ref, changes nothing on the remote, and is the whole fix. The gate ' +
+            'refuses instead of guessing, because guessing here means guessing in the direction ' +
+            'of publishing.',
+        );
+      }
+    }
+
+    const isProduction = (b) =>
+      PRODUCTION_BRANCHES.includes(b.toLowerCase()) || (defaultBranch !== null && b === defaultBranch);
+    const isShared = (b) => SHARED_BRANCHES.includes(b.toLowerCase());
+
+    let scope = 'feature';
+    if (push.everything || push.tags || destinations.some(isProduction)) scope = 'production';
+    else if (destinations.some(isShared)) scope = 'shared';
+    if (destinations.length === 0 && !push.everything && !push.tags) {
+      throw new PolicyFailure(
+        'this push has no destination the gate could read',
+        'name the remote and the refspec explicitly (`git push origin my-branch`).',
+      );
+    }
+
+    const irreversible = [];
+    if (push.deletes) irreversible.push('it deletes a ref on the remote');
+    if (push.mirrors) irreversible.push('`--mirror` deletes every remote ref that is absent locally');
+    if (push.forced && scope !== 'feature') {
+      irreversible.push('it force-pushes over a shared branch, discarding published history');
+    }
+
+    const { verdict, because } = deployVerdict(deployClass, scope, irreversible);
+    if (verdict === 'pass') continue;
+
+    const named = destinations.map((d) => `\`${safePolicyText(d)}\``).join(', ') || '(every branch)';
+    return {
+      decision: 'deny',
+      reason:
+        `tyran policy-gate: refused. This push reaches further than deployment class ` +
+        `${deployClass} allows.\n` +
+        `destination: ${named} on remote \`${safePolicyText(remote)}\` · scope: ${scope}` +
+        `${defaultBranch === null ? '' : ` · this remote's default branch is \`${safePolicyText(defaultBranch)}\``}\n` +
+        `rule: \`${CONFIG_PATH}\`, \`autonomy: ${deployClass}\` — ` +
+        `${DEPLOY_CLASS_MEANING[deployClass]}\n` +
+        (irreversible.length > 0
+          ? `irreversible: ${irreversible.join('; ')}. These stay refused at every class, ` +
+            'including P3, because "autonomous" was never meant to include "unrecoverable".\n'
+          : '') +
+        `${DEPLOY_REMEDY[because] ?? DEPLOY_REMEDY.default}`,
+    };
+  }
+  return PASS;
+}
+
+const DEPLOY_CLASS_MEANING = Object.freeze({
+  P1: 'branch only; an agent pushes its own work and a human moves it further',
+  P2: 'staging and testing branches; production stays a human decision',
+  P3: 'production too, minus the operations that cannot be undone',
+});
+
+const DEPLOY_REMEDY = Object.freeze({
+  irreversible:
+    'What to do instead: push the branch without deleting or rewriting anything, and let the ' +
+    'operator do the destructive step. A deleted remote ref and an overwritten history are not ' +
+    'recoverable from this session, which is the whole reason they are outside every autonomy class.',
+  production:
+    'What to do instead: push to your own branch and open a pull request. Raising the class is an ' +
+    `deliberate operator decision in \`${CONFIG_PATH}\` (autonomy: P3), never one an agent makes ` +
+    'for itself mid-task.',
+  shared:
+    'What to do instead: push to your own branch and open a pull request. Under P1 an agent stays ' +
+    'on the branch it created; the shared branches are P2 and above.',
+  default:
+    'What to do instead: push to a branch of your own and open a pull request from it.',
+});
+
+/** Turn a PolicyFailure into the refusal it always has to be. */
+export async function handle({ input, runner, startedAt, env }) {
+  try {
+    return await decide({ input, runner, startedAt, env });
+  } catch (err) {
+    if (err instanceof PolicyFailure) {
+      return {
+        decision: 'deny',
+        reason:
+          `tyran policy-gate: refused because the check could not be completed.\n` +
+          `what happened: ${err.message}\n` +
+          `what to do: ${err.remedy}\n` +
+          'This is a refusal rather than a warning because the platform fails open (ADR-22): a ' +
+          'gate that lets the action through whenever it breaks is a gate you switch off by ' +
+          'breaking it.',
+      };
+    }
+    // Anything else is a bug here. hook-io turns a throw into a refusal naming
+    // the error class, which is the correct ending.
+    throw err;
+  }
+}
+
+/** See journal.mjs — both sides canonicalized, or a symlinked path no-ops. */
+function canonicalPath(path) {
+  const abs = resolvePath(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) {
+  await main(() =>
+    runGate({
+      event: 'PreToolUse',
+      deadlineMs: DEADLINE_MS,
+      handler: ({ input }) => handle({ input }),
+    }),
+  );
+}

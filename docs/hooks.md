@@ -332,9 +332,26 @@ fingerprint in a **tracked** `.gitleaksignore`, or agree a **tracked**
 
 - **No gitleaks means no commit.** A check that passes when its dependency is
   gone is a check you disable by uninstalling a package.
-- **The payload is capped at 8 MB** and a larger one refuses rather than being
-  scanned in part. A partial scan that reports nothing looks exactly like a
-  clean one.
+- **The payload is capped at 4 MiB** (`MAX_PAYLOAD_BYTES`, 4,194,304 bytes) and
+  a larger one refuses rather than being scanned in part. A partial scan that
+  reports nothing looks exactly like a clean one.
+
+  The number was **8 MB here for three rounds and it was never true**. It came
+  from timing `gitleaks stdin` alone and ignoring everything the gate spends
+  before the scan. Measured end to end on this machine, high-entropy base64
+  through the real hook: 1 MiB / 1.07 s, 2 MiB / 1.71 s, 3 MiB / 2.42 s,
+  4 MiB / 3.14 s against a 7 s deadline — so 4 MiB fits and 8 MiB never did.
+  The constant was corrected before this line was, which is the same defect as
+  the AWS miss rate above: the code told the truth and the documentation kept
+  publishing the flattering figure.
+
+  Its cost is real and is not a rounding error. The size is checked from
+  `cat-file --batch-check` BEFORE any object is read, so an oversized push is
+  refused with its true size and the remedy that narrows the refspec. A
+  refspec cannot split one commit, though, and a single commit past the ceiling
+  therefore has no smaller step: measured on a real project, one ordinary
+  commit of screenshots carried 43,816,053 bytes. For that case the gate has no
+  way forward to offer and says so.
 - **A scan that overruns refuses and does not read its partial report.**
 - **Every child runs in its own process group** and the group is killed on
   overrun. The earlier version killed only the direct child, and a surviving

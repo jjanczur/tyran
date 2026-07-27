@@ -26,7 +26,7 @@ const TEMPLATES = fileURLToPath(new URL('../../templates/', import.meta.url));
 const minimalConfig = () => ({
   profile: 'balanced',
   autonomy: 'P1',
-  tiers: { top: 'fable', work: 'opus', cheap: 'haiku' },
+  tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' },
 });
 
 // --- config ------------------------------------------------------------
@@ -35,14 +35,20 @@ test('accepts a minimal valid config', () => {
   assert.deepEqual(validateConfig(minimalConfig()), []);
 });
 
-test('requires profile, autonomy and all three tiers', () => {
+test('requires profile, autonomy and every tier', () => {
   const errors = validateConfig({});
   assert.ok(errors.some((e) => e.startsWith('profile:')));
   assert.ok(errors.some((e) => e.startsWith('autonomy:')));
   assert.ok(errors.some((e) => e.startsWith('tiers:')));
   const partial = validateConfig({ ...minimalConfig(), tiers: { top: 'fable' } });
-  assert.ok(partial.some((e) => e.includes('tiers.work')));
-  assert.ok(partial.some((e) => e.includes('tiers.cheap')));
+  for (const tier of ['cheap', 'work', 'deep']) {
+    assert.ok(partial.some((e) => e.includes(`tiers.${tier}`)), `missing tier ${tier} must be reported`);
+  }
+  // A config carrying only the three PRE-`deep` tiers is a real shape: it is
+  // what every repo configured before the tier was added still has on disk.
+  // It must fail loudly rather than resolve `deep` to undefined at spawn.
+  const legacy = validateConfig({ ...minimalConfig(), tiers: { top: 'fable', work: 'opus', cheap: 'haiku' } });
+  assert.ok(legacy.some((e) => e.includes('tiers.deep')));
 });
 
 test('rejects unknown enum values and unknown keys', () => {
@@ -261,7 +267,7 @@ test('the shipped policy template classifies the kernel paths it must', () => {
 test('CLI exits 0 for valid files and 1 with findings for invalid ones', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tyran-schema-cli-'));
   const good = join(dir, 'good.yaml');
-  writeFileSync(good, 'profile: eco\nautonomy: P1\ntiers:\n  top: fable\n  work: opus\n  cheap: haiku\n');
+  writeFileSync(good, 'profile: eco\nautonomy: P1\ntiers:\n  cheap: haiku\n  work: sonnet\n  deep: opus\n  top: fable\n');
   const out = execFileSync(process.execPath, [SCRIPT, 'validate', 'config', good], { encoding: 'utf8' });
   assert.match(out, /^ok /m);
 

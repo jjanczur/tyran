@@ -60,9 +60,14 @@ for (const slug of SLUGS) {
 
   // Every in-page link must resolve. This is where a route-relative
   // `../hooks/` would show up wrong if the base were mishandled.
-  const hrefs = await page.$$eval('.sl-markdown-content a[href], nav a[href]', (as) =>
-    as.map((a) => a.href),
-  );
+  //
+  // `a[href]`, not a list of containers. The previous selector named
+  // Starlight's own two regions, which was exactly right while every page was
+  // a Starlight page — and went blind the moment a standalone landing was
+  // added outside that chrome, checking 13 of its 24 links and reporting
+  // success. A gate scoped to the markup it was written against silently
+  // narrows as the site grows, and reports the narrowed number as a pass.
+  const hrefs = await page.$$eval('a[href]', (as) => as.map((a) => a.href));
   for (const href of new Set(hrefs)) {
     if (!href.startsWith('http://localhost:4399')) continue;
     const target = href.split('#')[0];

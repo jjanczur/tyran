@@ -1,0 +1,120 @@
+---
+title: Tyran documentation
+description: Reference documentation for Tyran, a task conductor for Claude Code whose evidence contract, execution state and self-improvement loop are enforced by hooks rather than requested by prompts.
+---
+
+import { Card, CardGrid, LinkCard, Aside } from '@astrojs/starlight/components';
+import Verdict from '../../components/Verdict.astro';
+
+Tyran is a task conductor for Claude Code: it interviews you, plans, drives a
+team of fresh-context agents through your work — and **refuses to believe any
+agent that can't show raw command output as proof**.
+
+<Aside type="note" title="What the badges on this page mean">
+Each page below carries the status **that page states about itself**. <Verdict
+state="shipped" /> means the mechanism exists and is tested; <Verdict
+state="designed" /> means it is a design contract whose epic has not landed.
+Nothing here is upgraded in the retelling — if a page says "design contract",
+its card says <Verdict state="designed" />.
+</Aside>
+
+## Start
+
+<CardGrid>
+  <LinkCard
+    title="Getting started"
+    href="./getting-started/"
+    description="Install, run setup, drive a first initiative, and stop a run from anywhere."
+  />
+  <LinkCard
+    title="Architecture"
+    href="./architecture/"
+    description="The three layers, the append-only journal, and the enforcement hooks."
+  />
+  <LinkCard
+    title="Configuration"
+    href="./configuration/"
+    description="config.yaml, cost profiles, autonomy classes, and the YAML subset Tyran parses."
+  />
+</CardGrid>
+
+## Concepts
+
+<CardGrid>
+  <LinkCard
+    title="The roster and model routing"
+    href="./agents/"
+    description="Four agents, two dials (model and effort), the floors an override cannot cross, and the brake."
+  />
+  <LinkCard
+    title="Self-improvement"
+    href="./self-improvement/"
+    description="How the retro agent learns your repo, behind a filter whose default answer is to change nothing."
+  />
+</CardGrid>
+
+## Gates
+
+The three pages that carry the most weight, because a control whose boundary is
+not stated gets read as a guarantee.
+
+<CardGrid>
+  <LinkCard
+    title="Hook runtime"
+    href="./hooks/"
+    description="Gates versus probes, what the deadline actually promises, and the secrets gate's measured limits."
+  />
+  <LinkCard
+    title="Evidence gate"
+    href="./evidence-gate/"
+    description="The criterion, who it binds, the recorded escape hatch, and the line between silence and forgery."
+  />
+  <LinkCard
+    title="Policy gate"
+    href="./policy-gate/"
+    description="Path classes, the deployment class, the one rule on reads, and where each stops."
+  />
+</CardGrid>
+
+## Reference
+
+<CardGrid>
+  <LinkCard
+    title="Journal"
+    href="./journal/"
+    description="The append-only event schema and the one-open-spawn-per-agent rule."
+  />
+  <LinkCard
+    title="Projections"
+    href="./projections/"
+    description="How STATE.md and PROGRESS.md are generated, and what --check compares."
+  />
+  <LinkCard
+    title="Doctor"
+    href="./doctor/"
+    description="Every finding code and severity, the journal-time clock, and dead policy rules."
+  />
+  <LinkCard
+    title="FAQ"
+    href="./faq/"
+    description="Trust, models, stopping a run, updates, and the name."
+  />
+</CardGrid>
+
+## Where each page stands
+
+<Card title="Status, as each page states it">
+| Page | Status |
+|---|---|
+| [Getting started](./getting-started/) | <Verdict state="shipped" /> for what it labels as working today |
+| [Architecture](./architecture/) | <Verdict state="designed" /> design contract for v2 |
+| [Configuration](./configuration/) | <Verdict state="designed" /> schema design-final, generator ships with the setup epic |
+| [The roster](./agents/) | <Verdict state="shipped" /> |
+| [Self-improvement](./self-improvement/) | <Verdict state="designed" /> design contract |
+| [Hook runtime](./hooks/) | <Verdict state="shipped" /> |
+| [Evidence gate](./evidence-gate/) | <Verdict state="shipped" /> |
+| [Policy gate](./policy-gate/) | <Verdict state="shipped" /> |
+| [Journal](./journal/) | <Verdict state="shipped" /> |
+| [Projections](./projections/) | <Verdict state="shipped" /> |
+| [Doctor](./doctor/) | <Verdict state="shipped" /> |
+</Card>

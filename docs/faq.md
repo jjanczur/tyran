@@ -1,18 +1,31 @@
 # FAQ
 
 **Is this usable today?**
-The skeleton is: install + `/tyran:hello` work and CI is green. The
-conductor, state layer, and enforcement hooks are landing epic by epic — the
-[roadmap](../README.md#roadmap) is honest and test-gated. Watch the repo.
+Yes, for real work. `/tyran:run` conducts an initiative end to end with the
+four-agent roster; the state layer and the enforcement hooks are shipped and
+tested. What is still missing is the automatic learning loop and
+`/tyran:setup` — see the [roadmap](../README.md#roadmap), which is honest and
+test-gated.
 
 **Why should I trust an autonomous agent with commits?**
 You configure how much it may do (`P1` branch-only is the default, detected
-conservatively), and the risky parts are designed as **hooks, not promises**
-(landing with the enforcement epic): gitleaks on every commit/push,
-`--no-verify` blocked, evidence required before anything is called done, and
-a self-improvement loop that is physically unable to touch its own
-enforcement (KERNEL class). Until those hooks ship, don't grant more
-autonomy than you'd grant a bare Claude Code session.
+conservatively), and the risky parts are **hooks, not promises**: gitleaks on
+every commit and push with the scan coverage verified, `--no-verify` and
+force-pushes blocked, evidence required before anything is called done, and
+the enforcement files themselves classified KERNEL so the loop cannot edit
+its own boundary. Read [the policy gate](policy-gate.md) for where each of
+those stops — including the one place the autonomy class itself is not
+protected as strongly as it reads.
+
+**How do I stop it mid-run?**
+`echo "reason" > .tyran/STOP`. The conductor checks before every spawn and
+every merge, halts, and reports where it got to. Delete the file to resume.
+It needs no session, so it works from a phone at 3am.
+
+**How do I control which models it uses?**
+One file. `.tyran/config.yaml` maps four tiers to model aliases; every skill,
+agent and policy is written in role names. `node scripts/tiers.mjs` prints
+the resolved map. See [the roster](agents.md).
 
 **Does Tyran phone home / need accounts / install anything globally?**
 No. Zero runtime dependencies, no build step, no external services. It never

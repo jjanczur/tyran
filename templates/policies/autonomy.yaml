@@ -34,11 +34,15 @@ rules:
 
   - path: .tyran/config.yaml
     class: GATED
-    reason: cost profile and autonomy class change what Tyran is allowed to spend and do
+    reason: autonomy class and model routing live here, so this file sets both what Tyran may do and what it may spend
 
   - path: .claude/agents/**
     class: GATED
     reason: overriding a core agent freezes it at the version it was copied from
+
+  - path: .tyran/STOP
+    class: KERNEL
+    reason: the brake an operator uses to halt a running initiative; a loop that can clear its own stop signal has none
 
   - path: .claude/settings.json
     class: KERNEL

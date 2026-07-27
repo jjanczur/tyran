@@ -22,7 +22,17 @@ const BASE = RAW.endsWith('/') ? RAW : `${RAW}/`;
 export const url = (path: string): string => BASE + path.replace(/^\/+/, '');
 
 export const REPO = 'https://github.com/jjanczur/tyran';
-export const RELEASE = `${REPO}/releases/tag/v0.1.0`;
+
+/**
+ * `releases/latest`, never a pinned tag.
+ *
+ * A hard-coded `releases/tag/v0.1.0` is correct on the day it is written and
+ * quietly wrong from the next release onward: the link keeps resolving — no
+ * 404, no broken-link check anywhere fires — while sending every visitor to
+ * an old version. A link that works and points at the wrong thing is worse
+ * than one that breaks, because nothing reports it. A test pins this.
+ */
+export const RELEASE = `${REPO}/releases/latest`;
 
 /** Documentation pages this landing links to, by the slug Starlight serves. */
 export const DOCS = {

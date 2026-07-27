@@ -3,14 +3,17 @@ title: 'The roster, and how models are chosen'
 description: 'The four shipped agents, how role names resolve to models and reasoning effort, the floors an override cannot cross, and the .tyran/STOP brake.'
 ---
 import { Aside } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
-import Measured from '../../components/Measured.astro';
 
-<Verdict state="shipped" />
+<Provenance state="shipped">
+`agents/` · routing in `scripts/tiers.mjs`
+</Provenance>
 
 Four agents ship in `agents/`. The conductor (`/tyran:run`) spawns them; you
-can also invoke one directly when you want just that mode of work.
+can also invoke one directly when you want just that mode of work. For what
+each agent assumes before it will work, and for the eight skills alongside
+them, see [what Tyran ships](../skills/).
 
 | Agent | Namespaced as | Tools | What it is for |
 |---|---|---|---|

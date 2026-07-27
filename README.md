@@ -369,20 +369,20 @@ underlying script does.
 **Everything below also reads as a site: [jjanczur.github.io/tyran](https://jjanczur.github.io/tyran/)**
 — same text, with search, rendered diagrams and per-page status badges.
 
-- 📖 [Getting started](docs/getting-started.md)
-- 🧰 [Skills and agents](docs/skills.md) — all fourteen skills and four agents, what each assumes, and who invokes it
-- ⚙️ [Configuration](docs/configuration.md) — `.tyran/config.yaml`, cost profiles, autonomy classes
-- 🎭 [The roster and model routing](docs/agents.md) — the four agents, the tier and effort table, dynamic overrides, the `.tyran/STOP` brake (shipped)
-- 🏛️ [Architecture](docs/architecture.md) — the three layers, the journal, the hooks
-- 📜 [Journal reference](docs/journal.md) — the append-only event schema (shipped)
-- 🧾 [Projections](docs/projections.md) — generated `STATE.md` / `PROGRESS.md` and `--check` (shipped)
-- 🩺 [Doctor](docs/doctor.md) — `--state` consistency check: drift, orphan leases, dead policy rules (shipped)
-- 🪝 [Hook runtime](docs/hooks.md) — gates vs probes, why hooks fail open, and what the deadline really promises (shipped)
-- 🧾 [Evidence gate](docs/evidence-gate.md) — the criterion, who it binds, the recorded escape hatch, and the line between silence and forgery (shipped)
-- 🛡️ [Policy gate](docs/policy-gate.md) — path classes, the deployment class, the one rule on reads, and where each stops (shipped)
-- 🧠 [Self-improvement](docs/self-improvement.md) — how Tyran learns your repo, and its guardrails
-- ❓ [FAQ](docs/faq.md)
-- 🤝 [Contributing](CONTRIBUTING.md)
+- 📖 [Getting started](https://jjanczur.github.io/tyran/getting-started/)
+- 🧰 [Skills and agents](https://jjanczur.github.io/tyran/skills/) — all fourteen skills and four agents, what each assumes, and who invokes it
+- ⚙️ [Configuration](https://jjanczur.github.io/tyran/configuration/) — `.tyran/config.yaml`, cost profiles, autonomy classes
+- 🎭 [The roster and model routing](https://jjanczur.github.io/tyran/agents/) — the four agents, the tier and effort table, dynamic overrides, the `.tyran/STOP` brake (shipped)
+- 🏛️ [Architecture](https://jjanczur.github.io/tyran/architecture/) — the three layers, the journal, the hooks
+- 📜 [Journal reference](https://jjanczur.github.io/tyran/journal/) — the append-only event schema (shipped)
+- 🧾 [Projections](https://jjanczur.github.io/tyran/projections/) — generated `STATE.md` / `PROGRESS.md` and `--check` (shipped)
+- 🩺 [Doctor](https://jjanczur.github.io/tyran/doctor/) — `--state` consistency check: drift, orphan leases, dead policy rules (shipped)
+- 🪝 [Hook runtime](https://jjanczur.github.io/tyran/hooks/) — gates vs probes, why hooks fail open, and what the deadline really promises (shipped)
+- 🧾 [Evidence gate](https://jjanczur.github.io/tyran/evidence-gate/) — the criterion, who it binds, the recorded escape hatch, and the line between silence and forgery (shipped)
+- 🛡️ [Policy gate](https://jjanczur.github.io/tyran/policy-gate/) — path classes, the deployment class, the one rule on reads, and where each stops (shipped)
+- 🧠 [Self-improvement](https://jjanczur.github.io/tyran/self-improvement/) — how Tyran learns your repo, and its guardrails
+- ❓ [FAQ](https://jjanczur.github.io/tyran/faq/)
+- 🤝 [Contributing](CONTRIBUTING.md) — not a docs-site page, so this one stays a repo link
 
 ## Strategic principles
 

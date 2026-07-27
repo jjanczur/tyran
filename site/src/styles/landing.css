@@ -432,7 +432,12 @@ img {
      * whose `width` is already resolved smaller. Measured: `max-width: 82rem`
      * alone changed nothing at all — the plate stayed at 556px. */
     width: min(100% - 2.5rem, 82rem);
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    /* 1.15fr -> 1.3fr: a deliberately small step. The scene illustrations
+       that used to carry visual weight elsewhere on the page are gone, so
+       the one remaining image gets a little more of it — not the "full-bleed
+       785px" this file's own history already measured and rejected as
+       crowding out the headline, lede and buttons above the fold. */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
     gap: 3rem;
     padding-block: 1.5rem 0;
   }

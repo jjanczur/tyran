@@ -917,7 +917,6 @@ test('THIS repository scans clean end to end', () => {
     'site/src/components/landing/Install.astro',
     'site/src/components/landing/Logo.astro',
     'site/src/components/landing/Nav.astro',
-    'site/src/components/landing/Scene.astro',
     'site/src/components/landing/SiteFooter.astro',
     'site/src/components/landing/Terminal.astro',
     'site/src/components/landing/roster.ts',
@@ -1005,14 +1004,9 @@ test('THIS repository scans clean end to end', () => {
   // Pinned by NAME, not by count. Every exemption is a file the content scan
   // never reads, so the list of them is the list of places a control character
   // could sit unexamined — and it has to be short enough to read and obvious
-  // enough to argue with. All four are images declared `binary` in
-  // .gitattributes; anything else appearing here is a finding.
-  assert.deepEqual(exempt.map((e) => e.file), [
-    'assets/banner.jpg',
-    'assets/scene-compounding.jpg',
-    'assets/scene-failures.jpg',
-    'assets/scene-roster.jpg',
-  ]);
+  // enough to argue with. It is an image declared `binary` in .gitattributes;
+  // anything else appearing here is a finding.
+  assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
 });
 
 test('a declared gap WINS over a forbidden range that covers it', () => {

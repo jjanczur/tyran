@@ -1,0 +1,16 @@
+# Build output and dependencies for the docs site.
+#
+# The repository root .gitignore already carries unanchored `node_modules/`
+# and `dist/` patterns, which match at any depth and therefore already cover
+# this directory. This file is deliberately duplicative: the root .gitignore
+# is a shared zone, and a site that depends on a rule living in someone
+# else's file breaks silently the day that rule is narrowed to `/node_modules`.
+node_modules/
+dist/
+
+# Astro's generated types and content-layer cache.
+.astro/
+
+# Local build tooling noise
+.DS_Store
+*.log

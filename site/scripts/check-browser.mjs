@@ -1,6 +1,6 @@
 /**
- * Browser pass over the built site: navigation, console, links, theme toggle,
- * search, and the presence of every custom component's rendered markup.
+ * Browser pass over the built site: navigation, console, links, the enforced
+ * dark theme, search, and every custom component's rendered markup.
  *
  * Prerequisite: a preview server on port 4399.
  *   npm run build && npm run preview -- --port 4399 &
@@ -88,16 +88,21 @@ const measured = await page.locator('.measured').count();
 await page.goto(`${BASE}/hooks/`, { waitUntil: 'load' });
 const mermaidOnHooks = await page.locator('svg[id^="mermaid-"]').count();
 
-// --- theme toggle ----------------------------------------------------------
+// --- theme is dark, and there is no way to leave it -------------------------
+// This check used to drive the theme select. The site is now dark by decision,
+// so the select is GONE — and the old check would fail on a working site while
+// passing on a broken one that quietly restored the picker. What replaces it
+// asserts the two halves of "enforced": no control renders, and the theme is
+// dark even for a visitor whose browser and stored preference both say light.
+//
+// `starlight-theme=light` is deliberately planted in storage first: a returning
+// visitor from before this change carries exactly that key, and a light-themed
+// page for them is the regression this line exists to catch.
 await page.goto(`${BASE}/architecture/`, { waitUntil: 'load' });
-const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme);
-// Starlight renders the theme select twice (desktop header + mobile menu).
-// Toggle to `dark`: headless Chromium reports a light colour scheme, so
-// selecting `light` would "pass" without the toggle doing anything at all.
-const select = page.locator('starlight-theme-select select').first();
-await select.selectOption('dark');
-await page.waitForTimeout(150);
+await page.evaluate(() => localStorage.setItem('starlight-theme', 'light'));
+await page.reload({ waitUntil: 'load' });
 const themeAfter = await page.evaluate(() => document.documentElement.dataset.theme);
+const themePickers = await page.locator('starlight-theme-select, [data-theme-toggle]').count();
 
 // --- search ----------------------------------------------------------------
 const searchBtn = page.locator('button[data-open-modal]');
@@ -125,7 +130,8 @@ console.log(`<Verdict> on evidence-gate : ${verdicts}`);
 console.log(`<Limit>   on evidence-gate : ${limits}`);
 console.log(`<Measured> on evidence-gate: ${measured}`);
 console.log(`mermaid svg on hooks       : ${mermaidOnHooks}`);
-console.log(`theme toggle               : ${themeBefore} -> ${themeAfter}`);
+console.log(`theme (stored pref=light)  : ${themeAfter}`);
+console.log(`theme pickers rendered     : ${themePickers}`);
 console.log(`search dialog opens        : ${searchOpened}`);
 
 const ok =
@@ -137,8 +143,8 @@ const ok =
   limits > 0 &&
   measured > 0 &&
   mermaidOnHooks === 1 &&
-  themeBefore !== themeAfter &&
   themeAfter === 'dark' &&
+  themePickers === 0 &&
   searchOpened;
 
 console.log(ok ? '\nBROWSER PASS: OK' : '\nBROWSER PASS: FAILED');

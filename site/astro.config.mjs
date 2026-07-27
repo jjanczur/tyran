@@ -57,7 +57,7 @@ export default defineConfig({
     starlight({
       title: 'Tyran',
       description:
-        'A task conductor for Claude Code that refuses to believe any agent which cannot show raw command output as proof.',
+        'A Claude Code plugin that runs agent teams for you, routes work to the cheapest model that can do it, and gets better at your repo the more you use it.',
       // `logo` is deliberately NOT set. It takes an image path and emits an
       // `<img>`, which would mean shipping the jackal a third time as a file
       // that nothing keeps in step with `Logo.astro` and `public/favicon.svg`.

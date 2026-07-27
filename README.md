@@ -21,17 +21,15 @@
 <h3 align="center">The more you use it, the better it gets.</h3>
 
 <p align="center">
-Tyran is a task conductor for Claude Code: it interviews you, plans, and drives a team of
-fresh-context agents through your work — <b>refusing to believe any agent that can't show
-raw command output as proof</b>, routing every subtask to the cheapest model that can do
-it, and keeping each agent in the context band where it still thinks clearly. When the
-work is done, it will not let the initiative end until it has learned something from it.
+Never written a skill, spun up a subagent, or run an agent team yourself? Tyran does all
+three automatically, on your behalf — and the retrospective it runs after every initiative
+means it keeps learning your repo's way of working instead of repeating a generic playbook.
 </p>
 
 <p align="center">
-Never written a skill, spun up a subagent, or run an agent team yourself? Tyran does all
-three automatically, on your behalf, and the retrospective it runs after every initiative
-means it keeps learning your repo's way of working instead of repeating a generic playbook.
+Under the hood: it interviews you, plans, and drives a team of fresh-context agents through
+your work, routing every subtask to the cheapest model that can actually do it — so a file
+rename doesn't burn through your subscription at top-tier rates.
 </p>
 
 ---

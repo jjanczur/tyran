@@ -16,12 +16,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const DOCS = join(ROOT, 'docs');
+
+/**
+ * BOTH surfaces that publish the same claims.
+ *
+ * `docs/*.md` is what GitHub renders; `site/src/content/docs/*.mdx` is what
+ * the documentation site renders. They were migrated from each other once and
+ * immediately diverged: every correction made to the markdown — a gate listed
+ * as registered when it is not, three status headers claiming their own
+ * subject was unbuilt, three stale test counts — came back through the MDX,
+ * because the migration had copied the older text.
+ *
+ * Two surfaces for one claim is two places to drift, and the second one drifts
+ * silently because nobody re-reads a page they already reviewed. So the guard
+ * covers both, and a claim that appears in one is checked in whichever it
+ * appears.
+ */
+const SURFACES = [
+  { label: 'docs', dir: join(ROOT, 'docs'), ext: '.md' },
+  { label: 'site', dir: join(ROOT, 'site', 'src', 'content', 'docs'), ext: '.mdx' },
+];
 
 /**
  * Which test file backs which document's count.
@@ -77,31 +96,44 @@ function countTests(testFile) {
   return Number(m[1]);
 }
 
-const docsWithClaims = readdirSync(DOCS)
-  .filter((f) => f.endsWith('.md'))
-  .map((f) => ({ file: f, text: readFileSync(join(DOCS, f), 'utf8') }))
-  .filter(({ text }) => CLAIM.test(text));
+/** Every page, on every surface that exists, that states a count. */
+const pagesWithClaims = SURFACES.filter((s) => existsSync(s.dir)).flatMap((s) =>
+  readdirSync(s.dir)
+    .filter((f) => f.endsWith(s.ext))
+    .map((f) => ({ surface: s.label, file: f, path: join(s.dir, f), stem: f.replace(s.ext, '') }))
+    .filter(({ path }) => CLAIM.test(readFileSync(path, 'utf8'))),
+);
 
-test('every document that claims a test count is mapped to the file it claims about', () => {
-  // Guards the guard. A new doc with an unmapped count would otherwise be
+test('every page that claims a test count is mapped to the file it claims about', () => {
+  // Guards the guard. A page with an unmapped count would otherwise be
   // silently exempt, which is the exact shape of hole this file exists to
-  // close.
-  for (const { file } of docsWithClaims) {
-    assert.ok(BACKED_BY[file], `docs/${file} claims a test count but is not mapped in BACKED_BY`);
+  // close — and the MDX surface is where an unmapped page would appear first.
+  for (const { surface, file, stem } of pagesWithClaims) {
+    assert.ok(BACKED_BY[`${stem}.md`], `${surface}/${file} claims a test count but is not mapped in BACKED_BY`);
   }
-  assert.ok(docsWithClaims.length > 0, 'no document claims a count — did the pattern stop matching?');
+  assert.ok(pagesWithClaims.length > 0, 'no page claims a count — did the pattern stop matching?');
 });
 
-for (const [doc, testFile] of Object.entries(BACKED_BY)) {
-  test(`docs/${doc} states the real number of tests in ${testFile}`, () => {
-    const text = readFileSync(join(DOCS, doc), 'utf8');
-    const claimed = Number(CLAIM.exec(text)[1]);
+test('both surfaces are checked when both exist', () => {
+  // The whole point. If the site is present and only the markdown gets
+  // verified, the MDX drifts unobserved — which is exactly what happened.
+  if (!existsSync(SURFACES[1].dir)) return;
+  const surfaces = new Set(pagesWithClaims.map((p) => p.surface));
+  assert.ok(surfaces.has('site'), 'the site surface exists but no page on it was checked');
+  assert.ok(surfaces.has('docs'), 'the docs surface exists but no page on it was checked');
+});
+
+for (const { surface, file, path, stem } of pagesWithClaims) {
+  const testFile = BACKED_BY[`${stem}.md`];
+  if (!testFile) continue; // reported by the mapping test above, not swallowed here
+  test(`${surface}/${file} states the real number of tests in ${testFile}`, () => {
+    const claimed = Number(CLAIM.exec(readFileSync(path, 'utf8'))[1]);
     const actual = countTests(testFile);
     assert.equal(
       claimed,
       actual,
-      `docs/${doc} says ${claimed} unit tests, ${testFile} has ${actual}. ` +
-        'Update the document — a number in prose that nothing checks is how the last three drifted.',
+      `${surface}/${file} says ${claimed} unit tests, ${testFile} has ${actual}. ` +
+        'Update it — a number in prose that nothing checks is how the last three drifted, twice.',
     );
   });
 }

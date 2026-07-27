@@ -21,10 +21,10 @@ Layer 3 — LOCAL EVOLUTION (.claude/skills/tyran-local/ in YOUR repo)
   core and the data layer. Loaded natively by Claude Code.`;
 
 <Aside type="caution" title="Status">
-<Verdict state="designed" /> this page is the design contract for v2 — schemas and hook
-behavior are final, but the state layer, hooks, and agents land with their
-epics (see the [roadmap](https://github.com/jjanczur/tyran#roadmap)). Today the repo ships the
-plugin skeleton and CI. Present tense below describes the target design.
+<Verdict state="shipped" /> the state layer, the enforcement hooks, the conductor and the
+agent roster are **shipped and tested**. Rows below that are still design carry an explicit
+marker; everything unmarked exists in code with tests behind it. See the
+[roadmap](https://github.com/jjanczur/tyran#roadmap) for what is still outstanding.
 </Aside>
 
 ## The three layers
@@ -77,8 +77,9 @@ reader discards. No database, no build step, git-friendly diffs.
 | `SubagentStop` | evidence gate: implementer/reviewer reports must contain raw command output — otherwise the report is rejected with a reason | **yes** |
 | `PreToolUse` (Bash) | secrets gate: staged diff through gitleaks before commit/push; `--no-verify`, bare force-push blocked | **yes** |
 | `PreToolUse` (Write/Edit/Bash) | policy gate: autonomy classes (P1/P2/P3) and self-improvement path classes (AUTO/GATED/KERNEL) | **yes** |
-| `TaskCompleted` | no completion without a matching evidence event in the journal | **yes** |
-| `SubagentStart` / `PreCompact` | telemetry events; checkpoint archive before compaction | no |
+| `Stop` | retro gate: an initiative whose tickets are all merged and which has no retrospective recorded since the last merge refuses ONE turn | **yes** |
+| `PreCompact` | writes a checkpoint before compaction — and refuses a **manual** `/compact` it could not write. An **automatic** compaction is never refused, because refusing one would end the session | **manual only** |
+| `TaskCompleted` | 🎯 **DESIGNED, NOT REGISTERED.** The runtime knows the event and would let a gate block on it, but `hooks.json` registers nothing there, so nothing runs. Listed because the type scaffolding exists and reads as shipped otherwise | — |
 
 <Aside type="danger" title="Design rule">
 Design rule: **critical gates fail loudly.** If a gate itself breaks, it

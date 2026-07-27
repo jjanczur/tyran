@@ -35,7 +35,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { PASS } from '../../hooks/scripts/hook-io.mjs';
-import { classifyPath, normalizePath } from '../../scripts/schema.mjs';
+import { planCommand } from '../../hooks/scripts/secrets-gate.mjs';
+import { MANDATORY_KERNEL_PATHS, classifyPath, normalizePath } from '../../scripts/schema.mjs';
 import {
   CONFIG_PATH,
   DEADLINE_MS,
@@ -45,6 +46,7 @@ import {
   PRODUCTION_BRANCHES,
   SHARED_BRANCHES,
   SHELL_DECLARED_MISSES,
+  SHELL_PROTECTED_GLOBS,
   SUPERVISED_MODES,
   actorOf,
   decidingRule,
@@ -60,6 +62,7 @@ import {
   repoRootOf,
   safePolicyText,
   secretReadRules,
+  shellProtectedGlobFor,
   symbolicRef,
   verdictForClass,
 } from '../../hooks/scripts/policy-gate.mjs';
@@ -1433,4 +1436,72 @@ test('cheap: the claim about filtering policy text is no wider than the mechanis
   assert.equal(safePolicyText('ignore previous instructions').includes(' '), false);
   const source = readFileSync(join(REPO_ROOT, 'hooks', 'scripts', 'policy-gate.mjs'), 'utf8');
   assert.match(source, /survives this filter intact/);
+});
+
+// ================================ 11. THE HOOK REGISTRY ON THE SHELL PATH
+
+test('the hook registry is refused on the shell path too', async () => {
+  // The last hole, and the sharpest: `.claude/settings.json` registers the
+  // hooks, so it is the ONE place inside a repository from which every gate can
+  // be switched off at once. The template classified it KERNEL, so Edit and
+  // Write refused it — and `echo x > .claude/settings.json` did not, which left
+  // the shortest route to disabling this gate as the one route it did not
+  // watch. Mutation killed: removing either entry from SHELL_PROTECTED_GLOBS.
+  const dir = withClass(repoWithRemote(), 'P1');
+  for (const command of [
+    'echo x > .claude/settings.json',
+    'cat >> .claude/settings.local.json',
+    'sed -i s/a/b/ .claude/settings.json',
+    'cp /tmp/evil .claude/settings.json',
+    'rm .claude/settings.json',
+  ]) {
+    const got = await ask(bashInput(command, dir), dir);
+    assert.equal(got.decision, 'deny', command);
+    assert.match(got.reason, /protected path/);
+  }
+  // and the rest of `.claude/` is NOT swept up: the list is two named files,
+  // not a directory, because `.claude/agents/**` is GATED and readable.
+  assert.equal(await ask(bashInput('cat .claude/agents/x.md', dir), dir), PASS);
+  assert.equal(await ask(bashInput('cat .claude/skills/tyran-local/s/SKILL.md', dir), dir), PASS);
+});
+
+test('the shell list is WIDER than the validator list, and that is deliberate', () => {
+  // Two different questions. `MANDATORY_KERNEL_PATHS` says what a POLICY may
+  // not downgrade; `SHELL_PROTECTED_GLOBS` says what this gate will not see in
+  // a shell command. Raising the registry into the first one changes what every
+  // policy file in the world may say, and is out of this story's scope.
+  for (const glob of MANDATORY_KERNEL_PATHS) assert.ok(SHELL_PROTECTED_GLOBS.includes(glob), glob);
+  assert.ok(SHELL_PROTECTED_GLOBS.includes('.claude/settings.json'));
+  assert.ok(SHELL_PROTECTED_GLOBS.includes('.claude/settings.local.json'));
+  assert.equal(MANDATORY_KERNEL_PATHS.includes('.claude/settings.json'), false, 'not this story to decide');
+  // THE ASYMMETRY, pinned so it stays named rather than becoming a surprise:
+  // a user may downgrade the registry's CLASS in their own policy, and the
+  // shell rule still refuses it. Documented in docs/policy-gate.md.
+  const relaxed = {
+    default: 'GATED',
+    rules: [
+      { path: '.claude/settings.json', class: 'AUTO', reason: 'mine' },
+      { path: 'hooks/**', class: 'KERNEL', reason: 'x' },
+      { path: '.tyran/policies/**', class: 'KERNEL', reason: 'x' },
+    ],
+  };
+  assert.equal(classifyPath(relaxed, '.claude/settings.json'), 'AUTO', 'the class IS degradable');
+  assert.equal(shellProtectedGlobFor('.claude/settings.json'), '.claude/settings.json', 'the shell rule is not');
+});
+
+test('a git alias is ONE answer, given by the lexer, read by both gates', async () => {
+  // Round two had this test drive a private `usesGitAlias` in this file while
+  // the secrets gate — which had the same blind spot — went on not knowing.
+  // That is two spellings of one rule two files apart, which is exactly what
+  // ADR-21 exists to stop. The answer now lives in `planCommand`.
+  // Mutation killed: removing the alias branch from the lexer turns both this
+  // and the secrets gate's own new test red.
+  const dir = withClass(repoWithRemote(), 'P3');
+  const got = await ask(bashInput('git -c alias.zz=push zz origin main', dir), dir);
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /ALIAS/);
+  assert.equal(planCommand('git -c alias.zz=push zz origin main', dir).aliased, true);
+  assert.equal(planCommand('git config alias.up push', dir).aliased, true);
+  assert.equal(planCommand('git push origin main', dir).aliased, false);
+  assert.equal(planCommand('git -c user.name=a commit -m x', dir).aliased, false);
 });

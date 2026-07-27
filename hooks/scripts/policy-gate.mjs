@@ -1035,6 +1035,44 @@ export function stripMessageArguments(command) {
  * runtime, or written by a program the command launches, cannot be seen
  * without running the command — the same ceiling `write-guard` states.
  */
+/**
+ * The globs the SHELL rule protects. Wider than the validator's list, on purpose.
+ *
+ * `MANDATORY_KERNEL_PATHS` is the validator's business: a policy may not
+ * downgrade those two, and changing that list is a decision about what a
+ * policy file is allowed to say. This list is a different question — which
+ * paths this gate refuses to see in a shell command — and it has one more
+ * entry for one reason:
+ *
+ * **`.claude/settings.json` is the hook registry. It is the only place inside
+ * a repository from which every gate can be switched off at once.** The
+ * template classifies it KERNEL, so `Edit` and `Write` refuse it — and until
+ * now `echo x > .claude/settings.json` did not, which left the shortest path
+ * to disabling this gate as the one route it did not watch.
+ *
+ * THE ASYMMETRY THIS LEAVES, named rather than hidden: the registry is
+ * protected from a shell write by THIS list, which no policy can edit, but its
+ * CLASS comes from a template rule, which a user can downgrade to AUTO. So a
+ * user who rewrites their own policy can make `Edit .claude/settings.json`
+ * allowed while `echo > .claude/settings.json` stays refused. Raising it into
+ * the validator's list would close that, and is deliberately out of scope here
+ * — it changes what every policy file in the world is allowed to say.
+ */
+export const SHELL_PROTECTED_GLOBS = Object.freeze([
+  ...MANDATORY_KERNEL_PATHS,
+  '.claude/settings.json',
+  '.claude/settings.local.json',
+]);
+
+/** The shell-protected glob covering this path, or null. */
+export function shellProtectedGlobFor(normalized) {
+  if (normalized === null || normalized === undefined) return null;
+  for (const glob of SHELL_PROTECTED_GLOBS) {
+    if (globMatches(glob, normalized)) return glob;
+  }
+  return null;
+}
+
 export const SHELL_DECLARED_MISSES = Object.freeze([
   'a path assembled at runtime — from a variable, a command substitution, a glob, or a file ' +
     'already on disk. The gate never expands anything, so it never sees the result',
@@ -1042,7 +1080,7 @@ export const SHELL_DECLARED_MISSES = Object.freeze([
     'rather than the directory a `cd` moved to: the answer is then stricter, not looser, but it ' +
     'is a different path from the one the shell would use',
   'anything a script writes once it is running — this reads the COMMAND, never its effect',
-  'a KERNEL path declared by the POLICY rather than built in; only the two mandatory globs are ' +
+  'a KERNEL path declared by the POLICY rather than built in; only SHELL_PROTECTED_GLOBS is ' +
     'checked here, so that a broken policy cannot stop the operator repairing it',
 ]);
 
@@ -1059,20 +1097,6 @@ export function commandTokens(command) {
   return out;
 }
 
-/** True when a git alias makes the subcommand of this line undecidable. */
-export function usesGitAlias(command) {
-  for (const segment of splitSegments(command)) {
-    const tokens = tokensOf(segment);
-    if (!tokens.some(isGitProgram)) continue;
-    // `git -c alias.zz=push zz origin main` pushed to main for real: the word
-    // `push` never appears in the subcommand slot, so the push was not seen at
-    // all and the target list came back empty. An alias can rename ANY
-    // subcommand, so the honest answer is that this line is unreadable.
-    if (tokens.some((t) => t.toLowerCase().startsWith('alias.') || t.toLowerCase().includes('=alias.'))) return true;
-  }
-  return false;
-}
-
 /** The protected paths a command names. Empty is the ordinary case. */
 export function shellPathFindings(command, startDir, root) {
   const findings = [];
@@ -1084,7 +1108,7 @@ export function shellPathFindings(command, startDir, root) {
       continue;
     }
     const rel = repoRelative(abs, root);
-    const glob = rel === null ? null : protectedGlobFor(rel);
+    const glob = rel === null ? null : shellProtectedGlobFor(rel);
     if (glob !== null) findings.push({ kind: 'kernel', token, detail: glob });
   }
   return findings;
@@ -1159,7 +1183,11 @@ async function decideBash({ input, toolInput, root, runner, budget }) {
 
   const plan = planCommand(command, startDir);
   const pushes = plan.targets.filter((t) => t.scanPush === true && Array.isArray(t.pushArgv));
-  if (usesGitAlias(command)) {
+  // Asked of the LEXER, not spelled again here. The first version of this gate
+  // carried its own alias test, which was a second spelling of one rule two
+  // files apart — and the secrets gate, which had the same blind spot, went on
+  // not knowing. It is one answer now, in `planCommand`, and both gates read it.
+  if (plan.aliased) {
     throw new PolicyFailure(
       'this git command defines or uses an ALIAS, so which subcommand it runs is not readable ' +
         'from the command line',

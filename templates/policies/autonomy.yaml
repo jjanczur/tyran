@@ -40,6 +40,14 @@ rules:
     class: GATED
     reason: overriding a core agent freezes it at the version it was copied from
 
+  - path: .claude/settings.json
+    class: KERNEL
+    reason: this file registers the hooks; anything that can edit it can switch every gate off
+
+  - path: .claude/settings.local.json
+    class: KERNEL
+    reason: the local override of the hook registry, with exactly the same reach
+
   - path: hooks/**
     class: KERNEL
     reason: enforcement hooks are the mechanism; a system that can disable its own gates has none

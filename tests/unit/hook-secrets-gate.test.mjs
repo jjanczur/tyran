@@ -1268,3 +1268,69 @@ test('BL-4: the payload ceiling the documentation publishes is the one the code 
   assert.match(doc, new RegExp(String(MAX_PAYLOAD_BYTES).replace(/\B(?=(\d{3})+(?!\d))/g, ',')));
   assert.equal(/capped at 8 ?MB/.test(doc), false, 'the retired figure is back');
 });
+
+// ==================================== 5. THE ALIAS HOLE (found while building
+//                                         the policy gate, closed here)
+
+test('a git ALIAS cannot zero this gate: the scan is forced, or the push is refused', async () => {
+  // This is the one failure of this gate that is IRREVERSIBLE, and it was not a
+  // scanner problem — it was a spelling.
+  //
+  //     git -c alias.zz=push zz origin main
+  //
+  // pushes for real. The word `push` never reaches the subcommand slot, so no
+  // target was noted, `needsScan` came back false, and `decide` returned PASS
+  // before assembling a single byte. **A push carrying a key was published
+  // without being scanned at all**, while every liveness guard in this file
+  // stayed green — the exact shape of the round-1 finding that "did the scan
+  // break?" is the wrong question.
+  //
+  // Two mutations are killed here. Removing the alias branch from
+  // `planCommand` turns the first assertions red; removing `|| aliased` from
+  // `needsScan` turns them red too, because an unmodellable entry that nothing
+  // needs to scan is discarded by the filter at the end of `planCommand` —
+  // which is precisely how the hole stayed open while the entry existed.
+  for (const command of [
+    'git -c alias.zz=push zz origin main',
+    'git -c alias.p=push p origin main',
+    'git config alias.up push',
+    'git config alias.up push && git up origin main',
+  ]) {
+    const plan = planCommand(command, '/tmp');
+    assert.equal(plan.aliased, true, command);
+    assert.equal(plan.needsScan, true, `${command}: an alias must not zero the scan`);
+    assert.ok(plan.unmodellable.length > 0, `${command}: and must survive the needsScan filter`);
+  }
+
+  // End to end on a real repository: the gate refuses rather than passing.
+  const dir = repo();
+  writeFileSync(join(dir, 'a.txt'), 'x\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'a');
+  const verdict = await handle({
+    input: bashInput('git -c alias.zz=push zz origin main', dir),
+    cwd: dir,
+    runner: fakeScanner(clean),
+  });
+  assert.equal(verdict.decision, 'deny');
+  assert.match(reasonOf({ hookSpecificOutput: { permissionDecisionReason: verdict.reason } }) || verdict.reason, /alias/);
+});
+
+test('the alias rule costs two commands in fourteen, not a working day', async () => {
+  // The cost side, measured rather than asserted, because this gate's declared
+  // way of dying is refusing ordinary work until someone removes it. Only a
+  // command that DEFINES or USES an alias is affected; `-c` for anything else
+  // is untouched.
+  const flagged = [];
+  for (const command of [
+    'npm test', 'git status', 'git push origin main', 'git commit -m x',
+    'git -c user.name=a commit -m x', 'git -c core.pager=cat log',
+    'git config user.email a@b.c', 'git config --get remote.origin.url',
+    'git -c alias.zz=push zz origin main', 'git config alias.up push',
+    'git log --oneline -5', 'gh pr create', 'git diff --stat',
+    'git -c protocol.file.allow=always submodule add x',
+  ]) {
+    if (planCommand(command, '/tmp').aliased) flagged.push(command);
+  }
+  assert.deepEqual(flagged, ['git -c alias.zz=push zz origin main', 'git config alias.up push']);
+});

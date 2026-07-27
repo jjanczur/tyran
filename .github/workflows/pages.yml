@@ -1,0 +1,76 @@
+name: Pages
+
+# The documentation site is built from `site/` and published to
+# https://jjanczur.github.io/tyran.
+#
+# Only `site/**` and this workflow trigger a deploy: the plugin itself has no
+# build step and no runtime dependencies, and a docs deploy on every plugin
+# commit would make the one signal that matters here — "did the docs build
+# break?" — indistinguishable from noise.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  # A manual run exists so the site can be republished without an empty commit
+  # (e.g. after enabling Pages for the first time).
+  workflow_dispatch:
+
+# Least privilege: the build job needs nothing but a checkout, and only the
+# deploy job is granted the two permissions Pages requires.
+permissions:
+  contents: read
+
+# One deploy at a time. `cancel-in-progress: false` because cancelling a
+# half-finished deploy is how a site ends up serving a partial build.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Install the browser rehype-mermaid renders diagrams with
+        # Mermaid is rendered to inline SVG at BUILD time, which needs a real
+        # browser for layout. `--with-deps` pulls the system libraries the
+        # runner image does not ship. Without this step every diagram fails to
+        # render and the build fails loudly, which is the intended direction:
+        # a missing diagram must not reach the site as an empty box.
+        run: npx playwright install --with-deps chromium
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Build
+        run: npm run build
+      - name: Fail if a generated link lost the /tyran base prefix
+        # A project site is served from a sub-path. A missing `base` builds
+        # clean and 404s only in production, so the prefix is asserted here
+        # rather than trusted.
+        run: node scripts/check-base-prefix.mjs
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

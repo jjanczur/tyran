@@ -1,0 +1,80 @@
+---
+/**
+ * Verdict — the four states this project allows a capability to be in.
+ *
+ * The roadmap, the comparison table and every page's status banner all answer
+ * the same question ("does this exist yet?") and they answered it in four
+ * different prose spellings. This component makes the answer a value rather
+ * than a sentence, so a page cannot quietly upgrade itself from `designed` to
+ * `shipped` in the retelling.
+ *
+ * `designed` deliberately does NOT read as a promise: it is the state the
+ * README describes as "committed in the v2 design, ships test-gated".
+ */
+interface Props {
+  state: 'shipped' | 'partial' | 'designed' | 'absent';
+  /** Optional label override. Defaults to the state's own name. */
+  label?: string;
+}
+
+const STATES = {
+  shipped: { icon: '✅', text: 'shipped' },
+  partial: { icon: '⚠️', text: 'partial' },
+  designed: { icon: '\u{1F3AF}', text: 'designed' },
+  absent: { icon: '❌', text: 'absent' },
+} as const;
+
+const { state, label } = Astro.props;
+const meta = STATES[state];
+---
+
+<span class:list={['verdict', `verdict--${state}`]}>
+  <span class="verdict__icon" aria-hidden="true">{meta.icon}</span>
+  <span class="verdict__label">{label ?? meta.text}</span>
+</span>
+
+<style>
+  .verdict {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35em;
+    padding: 0.1em 0.6em 0.15em;
+    border: 1px solid var(--verdict-border);
+    border-radius: 999px;
+    background: var(--verdict-bg);
+    color: var(--verdict-fg);
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+    vertical-align: baseline;
+  }
+
+  .verdict__icon {
+    font-size: 0.95em;
+  }
+
+  /* `-low` is the surface tint and `-high` the readable accent; Starlight
+     swaps both under [data-theme='light'], so light and dark are covered by
+     the same two declarations rather than by a second rule set. */
+  .verdict--shipped {
+    --verdict-bg: var(--sl-color-green-low);
+    --verdict-fg: var(--sl-color-green-high);
+    --verdict-border: var(--sl-color-green);
+  }
+  .verdict--partial {
+    --verdict-bg: var(--sl-color-orange-low);
+    --verdict-fg: var(--sl-color-orange-high);
+    --verdict-border: var(--sl-color-orange);
+  }
+  .verdict--designed {
+    --verdict-bg: var(--sl-color-purple-low);
+    --verdict-fg: var(--sl-color-purple-high);
+    --verdict-border: var(--sl-color-purple);
+  }
+  .verdict--absent {
+    --verdict-bg: var(--sl-color-red-low);
+    --verdict-fg: var(--sl-color-red-high);
+    --verdict-border: var(--sl-color-red);
+  }
+</style>

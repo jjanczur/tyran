@@ -1,0 +1,111 @@
+---
+/**
+ * Measured — a number that came from running something, shown with the thing
+ * that was run.
+ *
+ * This is the documentation counterpart of the evidence gate: the gate refuses
+ * an agent report that carries no raw command output, and this component
+ * refuses to render a number without the command, corpus or run that produced
+ * it. `from` is required for exactly that reason — an optional provenance prop
+ * would be omitted first and most often on the figures that matter.
+ */
+interface Props {
+  /** The command, corpus or run that produced the number. Required. */
+  from: string;
+  /** Render inside a sentence instead of as a block. */
+  inline?: boolean;
+}
+
+const { from, inline = false } = Astro.props;
+---
+
+{
+  inline ? (
+    <span class="measured measured--inline" title={`measured: ${from}`}>
+      <span class="measured__value">
+        <slot />
+      </span>
+      <span class="measured__from measured__from--inline">{from}</span>
+    </span>
+  ) : (
+    <div class="measured measured--block">
+      <p class="measured__eyebrow">Measured</p>
+      <div class="measured__value">
+        <slot />
+      </div>
+      <p class="measured__from">
+        <span class="measured__caret" aria-hidden="true">
+          {'▸'}
+        </span>
+        <code>{from}</code>
+      </p>
+    </div>
+  )
+}
+
+<style>
+  .measured--block {
+    margin: 1rem 0;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-inline-start: 0.25rem solid var(--sl-color-blue);
+    border-radius: 0.25rem;
+    background: var(--sl-color-blue-low);
+  }
+
+  .measured__eyebrow {
+    margin: 0 0 0.35rem;
+    font-size: var(--sl-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sl-color-blue-high);
+  }
+
+  .measured--block .measured__value {
+    color: var(--sl-color-white);
+  }
+
+  /* Inline variant: the number stays in the sentence, the provenance follows
+     it in smaller type. Nothing is hidden behind a hover — a receipt that only
+     appears on a pointing device is not a receipt on a phone. */
+  .measured--inline {
+    white-space: normal;
+  }
+
+  .measured--inline .measured__value {
+    font-weight: 600;
+    color: var(--sl-color-white);
+    border-bottom: 1px dotted var(--sl-color-blue);
+  }
+
+  .measured__from {
+    margin: 0.4rem 0 0;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+
+  .measured__from--inline {
+    display: inline;
+    margin: 0 0 0 0.35em;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+
+  .measured__from--inline::before {
+    content: '(measured: ';
+  }
+
+  .measured__from--inline::after {
+    content: ')';
+  }
+
+  .measured__caret {
+    margin-inline-end: 0.35em;
+    color: var(--sl-color-blue);
+  }
+
+  .measured__from code {
+    font-size: inherit;
+  }
+</style>

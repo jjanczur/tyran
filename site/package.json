@@ -1,0 +1,24 @@
+{
+  "name": "tyran-docs-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Documentation site for the Tyran plugin. Isolated from the plugin itself: the plugin has zero runtime dependencies and no build step, and this package.json must never change that.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "check:base": "node scripts/check-base-prefix.mjs",
+    "check:browser": "node scripts/check-browser.mjs",
+    "check:contrast": "node scripts/check-mermaid-contrast.mjs"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.4",
+    "astro": "^7.1.4"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0",
+    "rehype-mermaid": "^3.0.0"
+  }
+}

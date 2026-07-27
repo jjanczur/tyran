@@ -1,0 +1,132 @@
+/* Site-wide overrides.
+ *
+ * Kept deliberately small. Starlight already ships a dark/light theme, a
+ * working colour system and Pagefind search; the only things adjusted here are
+ * the ones this documentation actually needs.
+ */
+
+/* No accent override is set here. `--sl-hue-accent` looks like the knob for it
+   and is NOT: Starlight writes `--sl-color-accent: hsl(224, 100%, 60%)` as a
+   concrete value in props.css, so setting the hue changes nothing at all. That
+   version of this file shipped briefly and was caught by measuring the
+   rendered stroke colour rather than by reading the stylesheet. Changing the
+   accent means overriding `--sl-color-accent{,-low,-high}` directly, and
+   picking a brand colour is a visual decision this story does not own. */
+
+/* Tables in this documentation are frequently wide (routing tables, the
+   deployment-class matrix, the doctor finding codes). Let them scroll inside
+   their own box rather than pushing the page into a horizontal scroll. */
+.sl-markdown-content table {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Status banners at the top of each page are blockquotes carrying a Verdict
+   badge; give the badge room to sit on the same line as the text. */
+.sl-markdown-content blockquote p {
+  display: block;
+}
+
+/* ---------------------------------------------------------------------------
+   Mermaid
+   ---------------------------------------------------------------------------
+   Diagrams are rendered to inline SVG at build time, which means exactly one
+   SVG exists for both themes. Mermaid bakes its palette into an internal
+   `<style>` block keyed by the diagram's own id (`#mermaid-0 .label { ... }`),
+   so the overrides below are id-prefixed too and carry `!important`: an
+   id selector inside the SVG outweighs anything a class selector can say.
+
+   Every colour resolves to a Starlight custom property, and Starlight
+   redefines those under `:root[data-theme='light']`. That is what makes the
+   diagram follow the site's MANUAL theme toggle. A `prefers-color-scheme`
+   solution would follow the operating system instead and show a dark diagram
+   to a reader who had switched the site to light.
+
+   One of these rules is a bug fix, not a preference: mermaid derived its
+   cluster-label colour from the transparent background it was given and
+   emitted `color: rgba(242.25, 242.25, 242.25, 0)` — alpha zero. Every
+   subgraph title was invisible in both themes until this block existed.
+   --------------------------------------------------------------------------- */
+
+svg[id^='mermaid-'] {
+  --mm-text: var(--sl-color-white);
+  --mm-line: var(--sl-color-gray-3);
+  --mm-node-stroke: var(--sl-color-accent);
+  --mm-node-fill: var(--sl-color-gray-6);
+  --mm-cluster-stroke: var(--sl-color-hairline);
+
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.5rem auto;
+}
+
+/* Text: node labels, edge labels and subgraph titles. */
+svg[id^='mermaid-'] .label,
+svg[id^='mermaid-'] .label text,
+svg[id^='mermaid-'] .label span,
+svg[id^='mermaid-'] .nodeLabel,
+svg[id^='mermaid-'] .nodeLabel p,
+svg[id^='mermaid-'] .edgeLabel,
+svg[id^='mermaid-'] .edgeLabel p,
+svg[id^='mermaid-'] .edgeLabel span,
+svg[id^='mermaid-'] .cluster-label,
+svg[id^='mermaid-'] .cluster-label text,
+svg[id^='mermaid-'] .cluster-label span,
+svg[id^='mermaid-'] .cluster-label p,
+svg[id^='mermaid-'] span {
+  color: var(--mm-text) !important;
+  fill: var(--mm-text) !important;
+}
+
+/* Node outlines and surfaces. */
+svg[id^='mermaid-'] .node rect,
+svg[id^='mermaid-'] .node circle,
+svg[id^='mermaid-'] .node ellipse,
+svg[id^='mermaid-'] .node polygon,
+svg[id^='mermaid-'] .node path {
+  fill: var(--mm-node-fill) !important;
+  stroke: var(--mm-node-stroke) !important;
+}
+
+/* Subgraph containers sit behind the nodes, so they get the page background
+   and a hairline rather than the node surface. */
+svg[id^='mermaid-'] .cluster rect,
+svg[id^='mermaid-'] .cluster path {
+  fill: var(--sl-color-bg) !important;
+  stroke: var(--mm-cluster-stroke) !important;
+}
+
+/* Edges and their arrowheads. */
+svg[id^='mermaid-'] .edgePath .path,
+svg[id^='mermaid-'] .flowchart-link,
+svg[id^='mermaid-'] .messageLine0,
+svg[id^='mermaid-'] .messageLine1 {
+  stroke: var(--mm-line) !important;
+}
+
+svg[id^='mermaid-'] .marker,
+svg[id^='mermaid-'] .marker path,
+svg[id^='mermaid-'] marker path {
+  fill: var(--mm-line) !important;
+  stroke: var(--mm-line) !important;
+}
+
+/* An edge label sits on top of its edge and needs to occlude it. */
+svg[id^='mermaid-'] .edgeLabel,
+svg[id^='mermaid-'] .edgeLabel p,
+svg[id^='mermaid-'] .edgeLabel rect {
+  background-color: var(--sl-color-bg) !important;
+  fill: var(--sl-color-bg) !important;
+}
+
+svg[id^='mermaid-'] .edgeLabel .labelBkg {
+  background-color: var(--sl-color-bg) !important;
+}
+
+/* Wide diagrams scroll inside their own box rather than widening the page. */
+.sl-markdown-content p:has(> svg[id^='mermaid-']) {
+  overflow-x: auto;
+}

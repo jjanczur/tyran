@@ -1,0 +1,94 @@
+---
+/**
+ * Limit — where a mechanism stops.
+ *
+ * Every gate in this project ships with a section naming what it does not
+ * catch, and those sections are the most load-bearing prose on the site: a
+ * control whose boundary is not stated gets read as a guarantee, and a false
+ * guarantee in documentation is the one defect class this project treats as
+ * blocking.
+ *
+ * So the boundary gets a visual weight of its own rather than being a heading
+ * a reader skims past on the way to the feature list. A `floor` is the
+ * stronger variant: a denylist over hostile input, incomplete by construction,
+ * which must never be read as a ceiling.
+ */
+interface Props {
+  /** Heading for this boundary. */
+  title: string;
+  /**
+   * `floor` marks an enumeration that is structurally incomplete — read it as
+   * a minimum, never as coverage.
+   */
+  kind?: 'limit' | 'floor';
+}
+
+const { title, kind = 'limit' } = Astro.props;
+---
+
+<aside class:list={['limit', `limit--${kind}`]} aria-label={title}>
+  <p class="limit__eyebrow">
+    {kind === 'floor' ? 'Declared floor, not a ceiling' : 'Where this stops'}
+  </p>
+  <p class="limit__title">{title}</p>
+  <div class="limit__body">
+    <slot />
+  </div>
+</aside>
+
+<style>
+  .limit {
+    margin: 1.25rem 0;
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--limit-border);
+    border-inline-start: 0.3rem solid var(--limit-rule);
+    border-radius: 0.25rem;
+    background: var(--limit-bg);
+  }
+
+  .limit--limit {
+    --limit-bg: var(--sl-color-orange-low);
+    --limit-rule: var(--sl-color-orange);
+    --limit-border: var(--sl-color-hairline);
+    --limit-accent: var(--sl-color-orange-high);
+  }
+
+  .limit--floor {
+    --limit-bg: var(--sl-color-red-low);
+    --limit-rule: var(--sl-color-red);
+    --limit-border: var(--sl-color-hairline);
+    --limit-accent: var(--sl-color-red-high);
+  }
+
+  .limit__eyebrow {
+    margin: 0;
+    font-size: var(--sl-text-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--limit-accent);
+  }
+
+  .limit__title {
+    margin: 0.15rem 0 0;
+    font-size: var(--sl-text-h5);
+    font-weight: 600;
+    line-height: var(--sl-line-height-headings);
+    color: var(--sl-color-white);
+  }
+
+  .limit__body {
+    margin-top: 0.6rem;
+    color: var(--sl-color-white);
+  }
+
+  /* The body is authored content, so its first and last block must not add
+     margin the padding has already provided. */
+  .limit__body > :global(:first-child) {
+    margin-top: 0;
+  }
+
+  .limit__body > :global(:last-child) {
+    margin-bottom: 0;
+  }
+</style>

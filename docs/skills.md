@@ -1,6 +1,6 @@
 # What Tyran ships: eight skills and four agents
 
-✅ **shipped** · `skills/` · `agents/`
+`skills/` · `agents/`
 
 Tyran is usually described as a conductor, which undersells it. Installing the
 plugin also installs **eight skills** and **four agents** — and the skills are

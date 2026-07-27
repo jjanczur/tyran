@@ -1,6 +1,6 @@
 # The policy gate
 
-✅ **shipped** · `hooks/scripts/policy-gate.mjs`, on `PreToolUse` for every
+`hooks/scripts/policy-gate.mjs`, on `PreToolUse` for every
 tool
 
 This gate turns two pieces of configuration into refusals: the autonomy

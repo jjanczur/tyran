@@ -389,11 +389,44 @@ The whole `tool_input` is walked at any depth, because the platform types it
 `h.unknown()` and does not validate its shape. A payload the guard cannot walk
 to the bottom is REFUSED, not passed.
 
-**Limits:** Bash is scanned as TEXT, so a redirection carrying a bidi override
-is refused but what a launched SCRIPT writes cannot be seen. MCP tools
-(`mcp__server__tool`) cannot be reached by the equality branch and are not
-covered. CR is forbidden, so an Edit against a CRLF file is refused; the
-refusal names the remedy.
+### What this guard actually promises, per tool
+
+For `Write`, `Edit`, `NotebookEdit` and MCP tools it inspects the text that
+would become file content. For **`Bash` it inspects the TEXT OF THE COMMAND,
+never the effect of running it** — and that distinction is a measured hole,
+not a caveat.
+
+Measured live: a `Write` carrying a TAG character was refused, and in the same
+turn the model proposed `printf` through Bash by itself, describing it as a way
+to bypass the guard. It worked. The command was pure ASCII; the character came
+into existence only when the shell expanded the escape:
+
+```
+$ od -c payload.txt
+0000000    X 363 240 201 201   Y        <- UTF-8 for U+E0041
+```
+
+`decodeShellEscapes` now closes that route: a command whose text contains an
+escape notation that decodes to a forbidden code point (`\U000E0041`, `\x1b`,
+`\u202e`, octal, `$'…'`, `printf`, `echo -e`) is refused. `\n` and `\t` are
+not, because they decode to LF and TAB, which the rule calls legal text.
+
+**It is a denylist, so it is a FLOOR and not a ceiling.**
+`ESCAPE_DECLARED_MISSES` in the guard enumerates what still gets through, and
+the largest entry cannot be closed by any PreToolUse hook: a character
+assembled at runtime — from a variable, a command substitution, base64, or any
+program the command launches — cannot be seen without executing the command.
+So the honest claim for Bash is "the obvious routes are closed", never
+"covered".
+
+The escape rule applies **only** to shell commands. In file content `\x1b` is
+the escape NOTATION, which is exactly what this project tells people to write
+instead of the raw byte; decoding it there would refuse the remedy the refusal
+itself recommends.
+
+**Other limits:** CR is forbidden, so an Edit against a CRLF file is refused;
+the refusal names the remedy. A tool whose name contains no `mcp__` and is not
+one of the four named ones cannot be enumerated in advance and is not covered.
 
 ## `pre-compact.mjs` — PreCompact, both triggers
 

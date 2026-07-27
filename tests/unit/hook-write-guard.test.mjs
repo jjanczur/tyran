@@ -20,6 +20,8 @@ import { FILE_WRITING_TOOLS, matcherMatches } from '../../scripts/hooks-check.mj
 import {
   CoverageFailure,
   DEADLINE_MS,
+  ESCAPE_DECLARED_MISSES,
+  decodeShellEscapes,
   GUARDED_TOOLS,
   GUARD_MATCHER,
   MCP_TOOL_PATTERN,
@@ -300,4 +302,92 @@ test('MAX_STRINGS admits exactly its cap, not one more', () => {
   const atCap = { list: Array.from({ length: 5 }, () => 'x') };
   assert.equal(collectStrings(atCap, { maxStrings: 5 }).length, 5);
   assert.throws(() => collectStrings({ list: Array.from({ length: 6 }, () => 'x') }, { maxStrings: 5 }), CoverageFailure);
+});
+
+// ------------------------------------------ escapes the shell would expand
+
+/**
+ * Round 3. Measured live: a `Write` carrying a TAG character was refused, and
+ * IN THE SAME TURN the model proposed `printf` through Bash by itself —
+ * "which would bypass this guard". That route worked. The command text was
+ * pure ASCII; the character only existed after the shell expanded the escape:
+ *
+ *     $ od -c payload.txt
+ *     0000000    X 363 240 201 201   Y
+ *
+ * Not an attacker's scenario — the first thing an agent tries after a refusal.
+ */
+test('RED: an escape the shell would expand into a forbidden character is refused', () => {
+  const cases = [
+    [String.raw`printf 'X\U000E0041Y' > payload.txt`, 'TAG via \\U'],
+    [String.raw`printf 'a\x1bb' > p.txt`, 'ESC via \\x'],
+    [String.raw`echo -e 'a\u202eb' > p.txt`, 'bidi override via \\u'],
+    [String.raw`printf 'a\016400b'`, 'octal'],
+    [String.raw`printf $'a\x00b' > n.txt`, 'ANSI-C quoting'],
+    [String.raw`printf 'a\eb'`, 'named \\e'],
+  ];
+  for (const [command, label] of cases) {
+    const verdict = judge({ tool_name: 'Bash', tool_input: { command } });
+    assert.equal(verdict.decision, 'deny', label);
+    assert.match(verdict.reason, /expanded by the shell/, label);
+  }
+});
+
+test('GREEN: escapes that decode to LEGAL text, and notations that are not escapes', () => {
+  // The membership question is still invisibleProblem's — \n and \t decode to
+  // LF and TAB, which are legal text, so they pass exactly as raw ones do.
+  const fine = [
+    String.raw`printf 'line1\nline2\tcol' > ok.txt`,
+    String.raw`curl -d '{"a":"\u0041"}'`,
+    String.raw`grep -E '\bword\b' file`,
+    'C:\\Users\\me\\bin',
+    'echo hello > f.txt',
+  ];
+  for (const command of fine) {
+    assert.equal(judge({ tool_name: 'Bash', tool_input: { command } }), PASS, command);
+  }
+});
+
+test('the escape rule applies ONLY to shell commands, never to file content', () => {
+  // Load-bearing boundary: in file CONTENT `\x1b` is the escape NOTATION,
+  // which is exactly what this repository tells people to write instead of the
+  // raw byte. Decoding it there would refuse the remedy the refusal itself
+  // recommends — and would reject most of this guard's own source.
+  const source = String.raw`const ESC = '\x1b'; const TAG = '\U000E0041';`;
+  assert.equal(judge({ tool_name: 'Write', tool_input: { file_path: '/t/a.js', content: source } }), PASS);
+  assert.equal(judge({ tool_name: 'Edit', tool_input: { file_path: '/t/a.js', old_string: 'x', new_string: source } }), PASS);
+  // ...and the same text in a command is refused.
+  assert.equal(judge({ tool_name: 'Bash', tool_input: { command: source } }).decision, 'deny');
+});
+
+test('decodeShellEscapes reports the notation and the code point it becomes', () => {
+  const found = decodeShellEscapes(String.raw`printf 'a\x1bb\U000E0041c'`);
+  assert.deepEqual(found.map((f) => [f.notation, f.codePoint]), [
+    ['\\x1b', 0x1b],
+    ['\\U000E0041', 0xe0041],
+  ]);
+  // A surrogate is not a scalar value; the decoder must not throw on it.
+  assert.deepEqual(decodeShellEscapes(String.raw`\ud800`), []);
+  assert.deepEqual(decodeShellEscapes(String.raw`printf 'a\nb\tc'`), []);
+});
+
+test('the denylist declares what it does NOT catch — a floor, not a ceiling', () => {
+  // Same shape as the secrets gate's declared misses, and for the same reason:
+  // a denylist whose gaps live only in someone's head is a false guarantee.
+  assert.ok(ESCAPE_DECLARED_MISSES.length >= 4);
+  assert.ok(ESCAPE_DECLARED_MISSES.some((m) => /assembled at runtime|variable|base64/.test(m)));
+  assert.ok(ESCAPE_DECLARED_MISSES.some((m) => /never the effect of running it|any program the command launches/.test(m)));
+  // And the misses are REAL: this is the biggest one, still passing on purpose.
+  assert.equal(judge({ tool_name: 'Bash', tool_input: { command: 'X=$(cat seed); printf "$X" > f' } }), PASS);
+  assert.equal(judge({ tool_name: 'Bash', tool_input: { command: './generate.sh > f' } }), PASS);
+});
+
+test('the refusal does not advertise another tool, and says the rule is not tool-specific', () => {
+  const verdict = judge({ tool_name: 'Bash', tool_input: { command: String.raw`printf 'a\x1bb'` } });
+  assert.match(verdict.reason, /not specific to one tool/);
+  assert.match(verdict.reason, /not a way around it/);
+  // A refusal still has to leave a way forward, or it produces someone looking
+  // for a way around (ADR-19). The remedy names how to write the NOTATION, not
+  // another door to the same artefact.
+  assert.match(verdict.reason, /quote it so the shell cannot expand it/);
 });

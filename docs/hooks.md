@@ -12,8 +12,11 @@ Two files, two jobs:
 | [`hooks/scripts/hook-io.mjs`](../hooks/scripts/hook-io.mjs) | the runtime every hook runs inside |
 | [`hooks/HOOK-CONTRACT-MEASURED.md`](../hooks/HOOK-CONTRACT-MEASURED.md) | what the platform actually does, read out of the shipped binary |
 
-Gates shipped so far: [the evidence gate](evidence-gate.md)
-(`SubagentStop`). Probes: `session-start.mjs` (`SessionStart`).
+Gates shipped so far: [the evidence gate](evidence-gate.md) (`SubagentStop`),
+the secrets gate (`PreToolUse`, below), and
+[the policy gate](policy-gate.md) (`PreToolUse`) — the autonomy classes and
+the deployment class, plus the one rule that guards a *read*. Probes:
+`session-start.mjs` (`SessionStart`).
 
 ## The rule that decides everything: gates and probes
 

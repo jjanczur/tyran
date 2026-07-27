@@ -29,14 +29,31 @@ English regardless.
    3-4 agents and at most 2 heavy phases; above 32 GB, up to 6 agents.
    **Write the result to the journal as a `decision` event** — numbers, not
    prose. The ceiling then binds mechanically instead of from memory.
-2. **Models.** Read the routing map once:
-   `node ${CLAUDE_PLUGIN_ROOT}/scripts/tiers.mjs` prints every role's tier
-   and model for the repo's profile. Pass the resolved alias as the `model`
-   parameter when you spawn. Never write a model name anywhere else — role
-   names only, so a deprecation is a one-line edit in `.tyran/config.yaml`.
-   Map per SUBTASK, not per role: a reviewer checking a mechanical sweep can
-   be cheap; a reviewer checking a security boundary never is. Escalate with
-   `--risk high` rather than by hand-picking a model.
+2. **Models and reasoning effort.** Read the routing map once:
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/tiers.mjs` prints every role's tier,
+   model and effort for the repo's profile. Pass the resolved values as the
+   `model` and effort parameters when you spawn. Never write a model name
+   anywhere else — role names only, so a deprecation is a one-line edit in
+   `.tyran/config.yaml`.
+   - **Map per SUBTASK, not per role.** The table is a starting point, not a
+     prediction of the task in front of you. You are expected to adjust it
+     when you can see it does not fit: a reviewer checking a mechanical sweep
+     can be cheap; a reviewer checking a security boundary never is.
+     `--risk high` shifts one step; `--tier`/`--effort` set one explicitly.
+   - **Model and effort are separate dials.** "Same model, think harder" is
+     the most common adjustment there is —
+     `--tier work --effort xhigh` — and reaching for a stronger model to buy
+     reasoning wastes the budget on the wrong axis.
+   - **Raise effort when the work is subtle**: root-cause diagnosis, a
+     failure nobody can reproduce, an arbitration between two agents who
+     disagree, anything where the first plausible answer is likely wrong.
+     **Lower it** for mechanical sweeps, bookkeeping, and re-runs of a
+     recipe that already worked.
+   - **Record every deviation from the default** as a `decision` event
+     naming the subtask, the default, what you used and why. An override you
+     cannot justify later is indistinguishable from a habit.
+   - Some roles have a FLOOR the tool will not let you go below, and it will
+     tell you when it corrects you. That is not the tool malfunctioning.
 3. **Teams.** Check whether Agent Teams are available. If not, use ordinary
    subagents — none of the rules change.
 4. **Environment hygiene** — an executable checklist, not advice; each line
@@ -112,12 +129,13 @@ open one.
 
 ## The iron rules — all sizes
 
-1. **State in files, not in memory.** The journal is the source of truth:
-   `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs append .tyran/journal.jsonl
-   <event> <initiative> --actor conductor --data '{...}'`. Regenerate the
-   readable views with `scripts/project.mjs`; `STATE.md` and `PROGRESS.md` are
-   GENERATED — never hand-edit them. Authored, per initiative:
-   `.tyran/initiatives/<slug>/PLAN.md` (decomposition plus the **manifest of
+1. **State in files, not in memory.** The journal is the source of truth, at
+   `.tyran/state/<initiative>/journal.jsonl`:
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs append <journal> <event>
+   <initiative> --actor conductor --data '{...}'`. Regenerate the readable
+   views with `scripts/project.mjs`; `STATE.md` and `PROGRESS.md` are
+   GENERATED — never hand-edit them. Authored, alongside the journal:
+   `PLAN.md` (decomposition plus the **manifest of
    shared zones**) and `NOTES.md` (side observations, defaults you adopted,
    and **signals about the PROCESS itself**: what slowed the work, what the
    handoff was missing, what a gate let through — this is the raw material
@@ -230,8 +248,16 @@ open one.
   a reply unless it is a gate.
 - Final report: what was built · how it was verified · everything in
   `NOTES.md` · the list of things the operator should check by hand.
-- **Close an M/L/XL initiative by spawning `tyran:retro`.** It reads the
-  ledger, the notes and the agents' reports and improves Tyran itself. Its
-  filter throws out one-off and already-covered changes — "I changed nothing"
-  is a correct outcome. This is the only loop through which Tyran learns from
-  an initiative instead of repeating it.
+- **The retrospective is not optional and not on your memory.** When every
+  ticket in an initiative is merged and no retrospective has been recorded
+  since the last merge, the `Stop` gate refuses one turn and says so. Run
+  `tyran:retro` — it reads the ledger, the notes and the agents' reports and
+  improves Tyran itself, never product code. Its filter throws out one-off
+  and already-covered changes, so "I changed nothing" is a correct outcome;
+  so is judging the work too small to be worth one. Either way, record a
+  `retro.entry` — `kind: skipped` with a reason is a complete answer — and
+  the gate is satisfied. You will not be blocked twice.
+- **Leases you took, you release.** Before you finish, check the ledger for
+  a lease still held by an agent that has already reported. An orphaned lease
+  blocks the next initiative from a resource nobody is using, and the person
+  who hits it has no way to know it is stale.

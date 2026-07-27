@@ -8,6 +8,14 @@
   <img src="https://img.shields.io/badge/dependencies-0-success" alt="Zero dependencies">
   <img src="https://img.shields.io/badge/Claude_Code-plugin-d4a017" alt="Claude Code plugin">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/jjanczur/tyran/releases/latest"><img src="https://img.shields.io/github/v/release/jjanczur/tyran?color=d4a017" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <b><a href="https://jjanczur.github.io/tyran/">📖 Documentation</a></b> ·
+  <a href="https://jjanczur.github.io/tyran/getting-started/">Getting started</a> ·
+  <a href="https://jjanczur.github.io/tyran/architecture/">Architecture</a> ·
+  <a href="https://github.com/jjanczur/tyran/releases/latest">Releases</a>
 </p>
 
 <h3 align="center">The more you use it, the better it gets.</h3>
@@ -105,6 +113,15 @@ Then `/tyran` interviews you, sizes the work, and either does it itself
 (small changes) or drives the roster — `tyran:scout`, `tyran:implementer`,
 `tyran:reviewer`, `tyran:retro` — through it. Also: `/tyran:status`,
 `/tyran:doctor`, `/tyran:retro`.
+
+Two more skills carry protocols the conductor invokes rather than restates:
+[`fidelity-gate`](skills/fidelity-gate/SKILL.md) for building against a
+frozen visual reference without drift, and
+[`prompt-tuning`](skills/prompt-tuning/SKILL.md) for iterating on anything
+whose quality is a non-deterministic model output. Both exist because the
+rule alone was not enough — the first was inlined into three sentences and
+lost the inventory step that does the work; the second kept its principle
+and lost everything the principle was distilled from.
 
 Hit the brake at any time, from anywhere, without killing the session:
 
@@ -210,7 +227,29 @@ filter is enforced in the agent's own contract, but what it decides to record
 is a judgement, not a mechanism — and the gate deliberately accepts "I am
 skipping this" as a complete answer.</sub>
 
+## Command-line use (outside Claude Code)
+
+`npx tyran <command>` exposes the same scripts the plugin's hooks and skills
+already call — `doctor`, `scan-repo`, `tiers`, `journal`, `schema`,
+`stop-check`, `scan-control-chars`, `desc-budget` — for a shell or a CI job
+with no Claude Code session. Zero dependencies; `tyran --help` lists them.
+
+```bash
+npx tyran doctor --hooks     # is any gate installed but unable to fire?
+npx tyran scan-repo --dir .  # what this repo looks like, with provenance
+```
+
+Exit codes propagate to the digit, so a CI step reddens exactly when the
+underlying script does.
+
+> **This does NOT install the Claude Code plugin.** For that, run
+> `/plugin marketplace add jjanczur/tyran` inside Claude Code. The npm
+> package is the tooling, not the conductor.
+
 ## Documentation
+
+**Everything below also reads as a site: [jjanczur.github.io/tyran](https://jjanczur.github.io/tyran/)**
+— same text, with search, rendered diagrams and per-page status badges.
 
 - 📖 [Getting started](docs/getting-started.md)
 - ⚙️ [Configuration](docs/configuration.md) — `.tyran/config.yaml`, cost profiles, autonomy classes

@@ -396,47 +396,83 @@ img {
  * at the bottom of any other clipped container will hit this same deadlock. */
 .hero {
   position: relative;
-  padding-block: 0 2rem;
+  /* The art used to run edge to edge under the nav, so the section opened at
+     zero. Inside a column it needs air above it, or it reads as having been
+     pushed up against the header by accident. */
+  padding-block: clamp(1rem, 2.5vw, 2rem) 2rem;
   overflow: hidden;
 }
 
-/* The banner, full-bleed, FIRST.
+/* The hero: two columns above 64rem, stacked below it.
  *
- * It used to sit after the headline, the lede, the buttons and the proof line,
- * which put it entirely below the fold: measured at 1440x900 the top of the
- * image was at y=1006, and at 1280x800 at y=1046. Neither viewport ever saw
- * it without scrolling.
+ * `align-items: center` rather than `start` because the art is a single tall
+ * block and the text is five stacked ones — aligned at the top, the text
+ * column ends 200px above the picture and the whole hero reads as lopsided.
  *
- * The band is height-capped rather than left at its own 1.83:1 aspect. At full
- * aspect a 1440-wide viewport would spend 785px on the picture and push
- * everything else out of the first screen; the cap keeps the image first AND
- * the headline, lede, buttons and proof line inside 800px of viewport. The
- * crop is `object-position: 50% 38%` — measured against the art, that is what
- * keeps the conductor's head and the lit screens in frame while losing floor.
+ * The gap is generous on purpose. At anything under 3rem the headline's
+ * descenders sit close enough to the picture's frame that the two read as one
+ * object, and the picture stops being a picture. */
+.hero__inner {
+  display: grid;
+  gap: 2rem;
+  align-items: center;
+}
+
+@media (min-width: 64rem) {
+  /* The hero, and ONLY the hero, is allowed past the 68rem text measure.
+   *
+   * Two columns inside 68rem gave the picture 503px, which is a 1.83:1 plate
+   * rendered 275px tall next to a 570px column of text — whole, as asked, and
+   * visibly outweighed by the paragraph beside it. 82rem buys the art another
+   * 170px without touching the measure anywhere else on the page, where long
+   * lines are a readability problem rather than a composition one. */
+  .hero__inner {
+    /* `width`, not `max-width`: `.l-wrap` already sets a computed `width` of
+     * `min(100% - 2.5rem, 68rem)`, and a larger `max-width` cannot widen a box
+     * whose `width` is already resolved smaller. Measured: `max-width: 82rem`
+     * alone changed nothing at all — the plate stayed at 556px. */
+    width: min(100% - 2.5rem, 82rem);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 3rem;
+    padding-block: 1.5rem 0;
+  }
+
+  /* Art SECOND on wide screens, FIRST in the document.
+   *
+   * Source order is the stacked order, and on a phone the picture opening the
+   * page is the point. On a desktop the eye lands top-left, so the claim
+   * should be there and the art beside it. `order` moves the box without
+   * moving it in the accessibility tree — the two orders genuinely differ
+   * here, and reading order following the DOM is the correct one. */
+  .hero__banner {
+    order: 2;
+  }
+}
+
+/* The whole plate, never a crop.
  *
- * The mask fades the bottom edge into the page instead of stopping at a line:
- * the art is an illustration, not product UI, and a hard edge under it reads
- * as a screenshot. */
+ * `height: auto` with no `object-fit` is deliberate and load-bearing: any
+ * fixed height reintroduces `cover`, and `cover` is what cut two thirds off
+ * the picture. The aspect ratio comes from the image itself.
+ *
+ * No bottom mask either. The mask existed to fade a full-bleed band into the
+ * page; inside a column the art has a frame, and a fade would read as the
+ * image failing to load rather than as a soft edge. */
 .hero__banner {
   position: relative;
   width: 100%;
-  height: clamp(10rem, 25vh, 18rem);
   z-index: 0;
 }
 
 .hero__banner img {
   display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  /* Crop from near the TOP of the plate, not the middle. Measured against the
-     art at 1440 wide: the source is 1600x872, `cover` scales it to 784.8px
-     tall, and a 225px band centred at 38% showed 26%-58% of the picture — the
-     conductor's console and none of his head. 8% frames the head, the lash and
-     the lit sign, which is the half of the scene the page is about. */
-  object-position: 50% 8%;
-  mask-image: linear-gradient(to bottom, black 52%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, black 52%, transparent 100%);
+  height: auto;
+  border-radius: 0.75rem;
+  /* Same low-strength gold hairline as the section art. The plate is
+     near-black at its edges and a dark page behind it makes the boundary
+     disappear, which reads as a broken image rather than as a dark one. */
+  border: 1px solid color-mix(in srgb, var(--l-gold) 26%, transparent);
 }
 
 /* Stage lighting under the banner, in the banner's own two sources: the gold
@@ -1053,6 +1089,70 @@ img {
   .install__grid {
     grid-template-columns: 1.1fr 0.9fr;
   }
+
+  /* Full width under both columns. The prompt is an ALTERNATIVE to the four
+     steps above it, not a third sidebar item — put in a column it reads as
+     one more thing to do rather than as the thing you do instead. */
+  .prompt {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The paste-this-to-Claude card.
+ *
+ * Deliberately quieter than the numbered steps: dashed rather than solid,
+ * unfilled, and below them. Someone who wants to type four commands should
+ * not have to scroll past a louder box telling them not to. */
+.prompt {
+  padding: 1.25rem 1.35rem 1.4rem;
+  border: 1px dashed color-mix(in srgb, var(--l-gold) 34%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--l-gold) 4%, transparent);
+}
+
+.prompt__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.prompt__head h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  font-size: 0.95rem;
+  font-family: var(--l-mono);
+  letter-spacing: 0.02em;
+  color: var(--l-heading);
+}
+
+.prompt__head h3 svg {
+  flex: none;
+}
+
+.prompt > p {
+  margin: 0.6rem 0 0.9rem;
+  max-width: 62ch;
+}
+
+.prompt pre {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--l-surface-sunk, rgb(0 0 0 / 0.28));
+  border: 1px solid var(--l-hairline-soft);
+  /* The prompt is nine lines of instruction with meaningful indentation.
+     `pre-wrap` keeps the line breaks the copy carries while still letting a
+     narrow viewport wrap rather than scroll sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--l-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--l-text);
 }
 
 .steps {
@@ -1156,6 +1256,21 @@ img {
   margin-top: 0.85rem;
 }
 
+/* A copy button with no command inside it: the text it copies is in the
+   `<pre>` below, so the button is the hint alone and needs its own padding
+   rather than inheriting the command-row geometry.
+   `width: auto` undoes `.copy`'s full-width command row — inherited, it drew
+   a 1040px empty bar across the card with the word "copy prompt" stranded at
+   its right end.
+   Declared AFTER `.copy` on purpose: same specificity, so source order is the
+   whole tiebreak. Placed above it the override lost silently and the bar came
+   back looking exactly like a styling choice. */
+.copy--solo {
+  width: auto;
+  flex: none;
+  padding: 0.35rem 0.8rem;
+}
+
 .linklist {
   display: grid;
   gap: 0.4rem;
@@ -1216,6 +1331,44 @@ img {
 .l-footer a:hover {
   color: var(--l-heading);
   text-decoration: underline;
+}
+
+/* The signature line.
+ *
+ * `flex-basis: 100%` drops it out of the licence/nav row onto its own line
+ * rather than competing with them for horizontal space — at 1440px the row
+ * has room and the credit would sit beside the nav, reading as one more
+ * navigation item. It is not one. It is centred, quieter than everything
+ * above it, and separated by a hairline so the eye registers it as an
+ * ending. */
+.l-footer__made {
+  flex-basis: 100%;
+  margin-block-start: 2rem;
+  padding-block-start: 1.25rem;
+  border-block-start: 1px solid var(--l-hairline-soft);
+  text-align: center;
+  color: var(--l-muted);
+  letter-spacing: 0.01em;
+}
+
+.l-footer__made a {
+  color: var(--l-gold);
+  text-decoration: none;
+  border-block-end: 1px solid transparent;
+}
+
+.l-footer__made a:hover {
+  color: var(--l-gold);
+  text-decoration: none;
+  border-block-end-color: currentColor;
+}
+
+/* The heart is the one non-gold mark on the page and it earns the exception:
+ * a gold heart on stone reads as another decorative glyph in the frieze
+ * vocabulary, which is precisely what it must not read as. */
+.l-footer__heart {
+  color: #c1442e;
+  font-style: normal;
 }
 
 /* ================================================================ motion ==

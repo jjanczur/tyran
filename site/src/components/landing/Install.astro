@@ -36,6 +36,32 @@ const STEPS = [
 ];
 
 const BRAKE = 'echo "wrong branch - hold everything" > .tyran/STOP';
+
+/**
+ * The same install, handed to Claude instead of typed.
+ *
+ * `/plugin` is a slash command, which only a human can enter — so a prompt
+ * saying "install yourself" would be an instruction the assistant cannot
+ * carry out, and this page would open with a promise that fails on contact.
+ * The `claude plugin ...` CLI is the same operation through a shell, which
+ * Claude Code CAN run, and that is what the prompt asks for.
+ *
+ * It also asks for the restart and for a review of what setup inferred,
+ * because both are real steps and a prompt that skips them leaves the reader
+ * with hooks that are installed and not loaded.
+ */
+const PROMPT = [
+  'Install the Tyran plugin in this repository and set it up for me.',
+  '',
+  '1. Run: claude plugin marketplace add jjanczur/tyran',
+  '2. Run: claude plugin install tyran@tyran',
+  '3. Tell me to restart Claude Code, so the hooks and agents load.',
+  '4. After the restart, run /tyran:setup. It scans this repo and writes',
+  '   .tyran/config.yaml. Walk me through what it inferred - especially the',
+  '   validation commands and the deployment autonomy class - before we commit it.',
+  '',
+  'Docs: https://jjanczur.github.io/tyran/getting-started/',
+].join('\n');
 ---
 
 <section class="l-section" id="install">
@@ -86,9 +112,23 @@ const BRAKE = 'echo "wrong branch - hold everything" > .tyran/STOP';
           <li><a href={DOCS.configuration}>Configuration and cost profiles</a></li>
           <li><a href={DOCS.faq}>FAQ &mdash; trust, models, updates, the name</a></li>
           <li><a href={REPO} rel="noopener">Source on GitHub</a></li>
-          <li><a href={RELEASE} rel="noopener">Release v0.1.0</a></li>
+          <li><a href={RELEASE} rel="noopener">Latest release</a></li>
         </ul>
       </aside>
+
+      <div class="prompt reveal" style="--l-delay: 60ms">
+        <div class="prompt__head">
+          <h3><Icon name="cartouche" size={18} />Or do not type any of it</h3>
+          <button class="copy copy--solo" type="button" data-copy={PROMPT}>
+            <span class="copy__hint" data-copy-hint>copy prompt</span>
+          </button>
+        </div>
+        <p>
+          Paste this into Claude Code and let it do the install, the restart prompt and the first
+          setup pass with you.
+        </p>
+        <pre>{PROMPT}</pre>
+      </div>
     </div>
   </div>
 </section>

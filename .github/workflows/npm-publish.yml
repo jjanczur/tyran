@@ -1,0 +1,75 @@
+name: Publish to npm
+
+# The package is built, versioned and tested; the only thing standing between
+# it and the registry is a credential this repository does not have. This
+# workflow is that last step, made into one click:
+#
+#   1. Create an npm automation token (npmjs.com -> Access Tokens -> Granular
+#      or Automation; it must be allowed to publish).
+#   2. gh secret set NPM_TOKEN --repo jjanczur/tyran
+#   3. Run this workflow, or publish a GitHub release.
+#
+# Nothing here reads a token at any other time, and the token never reaches a
+# step that runs repository code: `npm publish` is the last thing to execute
+# and the tests run before it, under no auth at all.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Pack and validate without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Provenance: npm records WHICH workflow, at which commit, built this
+      # tarball, and shows it on the package page. It costs one permission and
+      # it is the difference between "trust the author" and "check the build".
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: The version being published must match the tag that triggered it
+        # A release tagged v0.2.0 that publishes 0.1.0 is not a build error —
+        # it succeeds, and the registry quietly carries the wrong thing under
+        # the right name. Only meaningful on the `release` trigger; a manual
+        # run has no tag to disagree with.
+        if: github.event_name == 'release'
+        run: |
+          PKG=$(jq -r .version package.json)
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package.json=$PKG  tag=$TAG"
+          test "$PKG" = "$TAG"
+
+      - name: Tests
+        # This repository's entire argument is that nothing ships on a claim.
+        # Publishing without running them would be the loudest possible
+        # exception to it.
+        run: node --test "tests/**/*.test.mjs"
+
+      - name: Plugin manifest validation
+        run: node scripts/desc-budget.mjs
+
+      - name: What the tarball would contain
+        # Printed rather than trusted: `files` in package.json is an allow-list
+        # and a missing entry produces a package that installs and then fails
+        # at the first require.
+        run: npm pack --dry-run
+
+      - name: Publish
+        if: github.event_name == 'release' || inputs.dry_run == false
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

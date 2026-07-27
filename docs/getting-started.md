@@ -2,6 +2,27 @@
 
 ## Install
 
+**Paste this into Claude Code and let it install itself.** `/plugin` is a
+slash command a human has to type, so this asks for the same steps through
+the `claude` CLI instead, which Claude Code can run on its own — followed by
+the restart those steps require, and a walkthrough of what setup inferred
+before it is trusted:
+
+```text
+Install the Tyran plugin in this repository and set it up for me.
+
+1. Run: claude plugin marketplace add jjanczur/tyran
+2. Run: claude plugin install tyran@tyran
+3. Tell me to restart Claude Code, so the hooks and agents load.
+4. After the restart, run /tyran:setup. It scans this repo and writes
+   .tyran/config.yaml. Walk me through what it inferred - especially the
+   validation commands and the deployment autonomy class - before we commit it.
+
+Docs: https://jjanczur.github.io/tyran/getting-started/
+```
+
+Or type the same three steps yourself:
+
 ```text
 /plugin marketplace add jjanczur/tyran
 /plugin install tyran@tyran

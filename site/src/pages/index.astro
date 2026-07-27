@@ -25,10 +25,6 @@ import Gates from '../components/landing/Gates.astro';
 import Capabilities from '../components/landing/Capabilities.astro';
 import Install from '../components/landing/Install.astro';
 import SiteFooter from '../components/landing/SiteFooter.astro';
-import Scene from '../components/landing/Scene.astro';
-import sceneFailures from '../../../assets/scene-failures.jpg';
-import sceneRoster from '../../../assets/scene-roster.jpg';
-import sceneCompounding from '../../../assets/scene-compounding.jpg';
 import { url } from '../components/landing/urls';
 
 const TITLE = 'Tyran - the more you use it, the better it gets';
@@ -110,23 +106,8 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <Nav />
     <main id="main" tabindex="-1">
       <Hero />
-      <Scene
-        src={sceneFailures}
-        alt="A jackal-headed engineer proudly holds up a glowing tablet covered in green tick marks; behind him the machine those ticks refer to sits cold, dust-covered and strung with cobwebs, plainly never run."
-        caption="The report was cheaper to write than the work."
-      />
       <Compounding />
-      <Scene
-        src={sceneCompounding}
-        alt="A jackal-headed figure sweeps an armful of redundant tools off a brass rack into a large discard pile; the three tools left hanging glow gold, perfectly spaced."
-        caption="A retrospective that only ever adds is not learning. This one deletes."
-      />
       <Gates />
-      <Scene
-        src={sceneRoster}
-        alt="A tall jackal-headed conductor at a raised console hands sealed golden tablets to three smaller workers, each at a separate workstation with its own screen; a heavy brass gate arm stands between them."
-        caption="One brief each, one context each, and a gate on the way back."
-      />
       <Capabilities />
       <Install />
     </main>

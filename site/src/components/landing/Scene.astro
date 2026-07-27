@@ -50,8 +50,10 @@ const { src, alt, caption } = Astro.props;
     height: auto;
     border-radius: 0.75rem;
     /* The art is near-black at the edges; a hairline keeps it from bleeding
-       into a dark page background and looking like a rendering failure. */
-    border: 1px solid var(--l-border, rgb(255 255 255 / 0.08));
+       into a dark page background and looking like a rendering failure. The
+       frame is gold at low strength rather than white — a neutral hairline was
+       the one edge left on the page that did not belong to the palette. */
+    border: 1px solid color-mix(in srgb, var(--l-gold, #d4a017) 26%, transparent);
   }
 
   .scene figcaption {

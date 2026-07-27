@@ -6,31 +6,23 @@
  * chrome, and reusing an internal component of the theme would couple the
  * landing to a package path that is not in Starlight's `exports` map.
  *
- * The theme toggle writes the SAME localStorage key Starlight uses
- * (`starlight-theme`), which is what makes a reader who flips the landing to
- * light land on light documentation one click later.
+ * There is no theme control here any more. The site is dark everywhere by
+ * decision, so the toggle is deleted rather than left offering a choice that
+ * no longer exists — and with it goes the second copy of the `starlight-theme`
+ * localStorage contract that used to live in this file's sibling script.
+ *
+ * The mark is `Logo.astro`, the same silhouette as `public/favicon.svg`. It
+ * inherits `currentColor`, so the brand link colours the jackal and the
+ * wordmark with one declaration and they can never drift apart.
  */
+import Logo from './Logo.astro';
 import { DOCS, REPO } from './urls';
 ---
 
 <header class="l-nav">
   <div class="l-wrap l-nav__inner">
     <a class="l-brand" href="#top">
-      {/* A generic terminal glyph, not a logo. Inventing a brand mark is a
-          visual decision this page does not own; `assets/banner.jpg` is the
-          only artwork the project has committed to so far. */}
-      <svg class="l-brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="currentColor" stroke-width="1.6"
-        ></rect>
-        <path
-          d="M7.5 8.75 10.75 12 7.5 15.25"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"></path>
-        <path d="M13.5 15.6h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-        ></path>
-      </svg>
+      <Logo size={26} class="l-brand__mark" />
       Tyran
     </a>
 
@@ -40,27 +32,5 @@ import { DOCS, REPO } from './urls';
       <a href={DOCS.gettingStarted}>Docs</a>
       <a href={REPO} rel="noopener">GitHub</a>
     </nav>
-
-    <button
-      class="l-themetoggle"
-      type="button"
-      id="theme-toggle"
-      aria-label="Switch between dark and light theme">
-      <svg class="l-themetoggle__moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"
-          stroke="currentColor"
-          stroke-width="1.7"
-          stroke-linejoin="round"></path>
-      </svg>
-      <svg class="l-themetoggle__sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"></circle>
-        <path
-          d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"
-          stroke="currentColor"
-          stroke-width="1.7"
-          stroke-linecap="round"></path>
-      </svg>
-    </button>
   </div>
 </header>

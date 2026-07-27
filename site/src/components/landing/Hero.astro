@@ -1,6 +1,18 @@
 ---
 /**
- * The first screen. One claim, one qualifier, one action.
+ * The first screen. The picture, then one claim, one qualifier, one action.
+ *
+ * The banner used to sit UNDER the headline, the lede, the buttons and the
+ * proof line — which put it below the fold on every laptop, measured at
+ * 1440x900 and 1280x800. It is now the first element in the document body
+ * after the nav, full-bleed, and the headline follows it. That order is the
+ * whole point: the art is the argument this page opens with, and an argument
+ * you have to scroll for is not the one you made.
+ *
+ * The band is height-constrained rather than free-flowing, so that the
+ * headline, the lede, the buttons AND the proof line still land inside the
+ * first screen at 800px of viewport height. Trading the whole hero for the
+ * image would have swapped one thing below the fold for four.
  *
  * The headline is the README's own `<h3 align="center">`, word for word, and
  * the lede is compressed from the paragraph under it. Nothing on this page is
@@ -13,9 +25,36 @@ import { DOCS, REPO, RELEASE } from './urls';
 ---
 
 <section class="hero" id="top">
-  <div class="l-wrap">
+  {/*
+    The one image on the page. `Picture` emits AVIF and WebP with the JPEG as
+    the fallback and a `sizes` hint, because the source is a 1600x872 JPEG of
+    477 kB and shipping that untouched would cost more than everything else on
+    this page put together.
+
+    `loading="eager"` with `fetchpriority="high"`: it is now the FIRST element
+    on the page as well as the largest, so lazy-loading it would delay the
+    Largest Contentful Paint it is.
+
+    This band is deliberately NOT wrapped in `.reveal`. Everything else here
+    fades in on scroll; the thing the reader is supposed to see before they do
+    anything at all must not be waiting on an observer.
+  */}
+  <div class="hero__banner">
+    <Picture
+      src={banner}
+      formats={['avif', 'webp']}
+      fallbackFormat="jpg"
+      widths={[640, 1024, 1600]}
+      sizes="100vw"
+      loading="eager"
+      fetchpriority="high"
+      alt="A jackal-headed conductor standing before a hall of agent workstations, each screen showing its own status: code optimization at 65 percent, a critical logic failure, data gathering stalled, self-improvement required."
+    />
+  </div>
+
+  <div class="l-wrap hero__body">
     <div class="hero__badges reveal">
-      <span class="badge badge--amber badge--dot">v2 &mdash; under construction, in public</span>
+      <span class="badge badge--gold badge--dot">v2 &mdash; under construction, in public</span>
       <span class="badge">Claude Code plugin</span>
       <span class="badge">Apache-2.0</span>
     </div>
@@ -42,30 +81,11 @@ import { DOCS, REPO, RELEASE } from './urls';
       <span>0 runtime dependencies</span>
       <span>867 tests green at v0.1.0</span>
       <span>never writes into your ~/.claude</span>
-      <span><a href={REPO} rel="noopener">GitHub</a> &middot; <a href={RELEASE} rel="noopener">v0.1.0</a></span>
+      <span
+        ><a href={REPO} rel="noopener">GitHub</a> &middot; <a href={RELEASE} rel="noopener"
+          >v0.1.0</a
+        ></span
+      >
     </p>
-  </div>
-
-  <div class="l-wrap hero__banner reveal" style="--l-delay: 360ms">
-    {/*
-      The one image on the page. `Picture` emits AVIF and WebP with the JPEG as
-      the fallback and a `sizes` hint, because the source is a 1600x872 JPEG of
-      477 kB and shipping that untouched would cost more than everything else
-      on this page put together.
-
-      `loading="eager"` with `fetchpriority="high"`: it is the largest element
-      above the fold on a wide screen, so lazy-loading it would only delay the
-      Largest Contentful Paint it IS.
-    */}
-    <Picture
-      src={banner}
-      formats={['avif', 'webp']}
-      fallbackFormat="jpg"
-      widths={[640, 1024, 1440]}
-      sizes="(min-width: 70rem) 68rem, 100vw"
-      loading="eager"
-      fetchpriority="high"
-      alt="A jackal-headed conductor standing before a hall of agent workstations, each screen showing its own status: code optimization at 65 percent, a critical logic failure, data gathering stalled, self-improvement required."
-    />
   </div>
 </section>

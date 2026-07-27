@@ -1,0 +1,127 @@
+---
+/**
+ * The icon set. Inline SVG, `currentColor`, no library, no dependency.
+ *
+ * Every mark is Egyptian in origin and chosen for MEANING rather than
+ * decoration — the section it labels should be recallable from the icon alone.
+ * They share one grid (24 units), one stroke weight and one joint style with
+ * `Logo.astro`, which is the only reason a stroked set sits next to a
+ * silhouetted mark without looking like two projects.
+ *
+ *   djed      a pillar whose courses widen as they stack — the thesis is that
+ *             each initiative leaves a layer behind. Djed literally reads
+ *             "stability" and is drawn as stacked bars, so the hieroglyph and
+ *             the section argue the same thing.
+ *   scales    the weighing of the heart against the feather of Ma'at. The
+ *             gates section is a judgement that ends in a refusal, which is
+ *             the scene this glyph has meant for four thousand years.
+ *   eye       the wedjat. Its fractions were Egypt's measuring system, so it
+ *             carries both halves of the capabilities section: watched, and
+ *             measured.
+ *   obelisk   a raised stone. Install is the section where the thing goes up.
+ *   feather   Ma'at's feather — truth. Used where the page states what is
+ *             actually shipped.
+ *   lash      the whip from the logo, redrawn on this grid. Used where a gate
+ *             states its own limit.
+ *   scroll    papyrus, for the append-only journal.
+ *   cartouche a sealed ring, for the gate on the irreversible step.
+ *   rod       a graduated cubit rod, for cost tiers that resolve from config.
+ *   divide    two forms kept apart by a bar, for the reviewer that is never
+ *             the author.
+ *   strokes   three tally strokes — the Egyptian plural determinative, which
+ *             is as close to a hieroglyph for "in parallel" as exists.
+ *   pyramid   three courses, for the three-layer update model. It is the one
+ *             capability that is drawn and not yet built, so it gets the shape
+ *             that is famously a plan before it is a building.
+ *
+ * `aria-hidden` is unconditional: every icon on this page sits beside the text
+ * it illustrates, so announcing it would make a screen reader say the same
+ * thing twice.
+ */
+const PATHS = {
+  /* Courses that widen as they rise off a full-width plinth. An earlier
+     version tapered to a short base and read as an antenna. */
+  djed: [
+    'M12 3.4v15.8',
+    'M9.4 6.8h5.2',
+    'M8.2 10.2h7.6',
+    'M7 13.6h10',
+    'M5.8 17h12.4',
+    'M4.6 20.6h14.8',
+  ],
+  scales: [
+    'M12 3.2v16.4',
+    'M8.4 19.6h7.2',
+    'M4 7.2h16',
+    'M4 7.2v3.6',
+    'M20 7.2v3.6',
+    'M1 10.8h6a3 3 0 0 1-6 0Z',
+    'M17 10.8h6a3 3 0 0 1-6 0Z',
+  ],
+  /* The wedjat needs four parts or it is not one: brow, almond, pupil, and the
+     two markings that fall from the outer corner. The first draft had the lids
+     and nothing else and read as a mushroom. */
+  eye: [
+    'M5.6 6.4C9.4 4.4 14.2 4.9 17.4 7.8',
+    'M2.4 13.2C5.4 8.1 12.4 6.5 16.8 9.9',
+    'M2.4 13.2c2.7 3.7 8.6 4.5 12.5 1.2',
+    'M7.2 11.9a2.1 2.1 0 1 0 4.2 0 2.1 2.1 0 1 0-4.2 0',
+    'M9.5 15.9 8.3 21.2',
+    'M13.4 15.4c1.1 3 3.5 4.1 5.4 2.9 1.5-1 1.3-3.3-.7-3.5',
+  ],
+  obelisk: ['M9.5 20.8V8.2L12 3l2.5 5.2v12.6', 'M7 21.4h10', 'M10 12h4', 'M9.8 15.6h4.4'],
+  feather: [
+    'M12 2.6c3.6 4.2 4.6 9.6 3 15.8H9c-1.6-6.2-.6-11.6 3-15.8Z',
+    'M12 4.4v17',
+    'M9.6 9.6h4.8',
+    'M9 14h6',
+  ],
+  /* The logo's own lash curve, scaled from the 64-grid to this one so the two
+     marks are the same gesture. No arrowhead at the tip: the first draft had
+     one and the whole glyph read as a trend arrow. */
+  lash: [
+    'M2.4 22 5.2 19',
+    'M3.2 20.2 4.4 21.4',
+    'M4.9 19.4C7.9 17.1 10.1 20.5 13.5 18.3S18 15.6 20.6 17.1',
+  ],
+  scroll: [
+    'M6.4 4.4h11.2a1.8 1.8 0 0 1 1.8 1.8v11.4a1.8 1.8 0 0 0 1.8 1.8H8.2a1.8 1.8 0 0 1-1.8-1.8Z',
+    'M6.4 4.4a1.8 1.8 0 0 0 0 3.6h1.8',
+    'M9.6 9.2h6.4',
+    'M9.6 12.6h6.4',
+    'M9.6 16h3.8',
+  ],
+  cartouche: ['M4 7h13.4a5 5 0 0 1 0 10H4a5 5 0 0 1 0-10Z', 'M20.6 6.4v11.2', 'M8.2 12h6.4'],
+  rod: ['M2.6 9.6h18.8v4.8H2.6Z', 'M6.4 9.6v3', 'M9.8 9.6v2', 'M13.2 9.6v3', 'M16.6 9.6v2'],
+  divide: ['M12 3v18', 'M8.6 19.6 3 19.6 8.6 7.4Z', 'M15.4 19.6 21 19.6 15.4 7.4Z'],
+  strokes: ['M6 4.6v14.8', 'M12 4.6v14.8', 'M18 4.6v14.8', 'M4.4 21h3.2', 'M10.4 21h3.2', 'M16.4 21h3.2'],
+  pyramid: ['M12 3 21.4 20.4H2.6Z', 'M8.6 12.6h6.8', 'M5.6 16.5h12.8'],
+} as const;
+
+export type IconName = keyof typeof PATHS;
+
+interface Props {
+  name: IconName;
+  size?: number;
+  class?: string;
+}
+
+const { name, size = 24, class: className } = Astro.props;
+const paths = PATHS[name];
+---
+
+<svg
+  class={className}
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.5"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  focusable="false"
+>
+  {paths.map((d) => <path d={d} />)}
+</svg>

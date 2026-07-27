@@ -5,54 +5,76 @@
  * documentation pages, and nothing in `custom.css` is loaded here — the
  * landing renders outside Starlight's chrome, so it carries its own tokens.
  *
- * The tokens below are COPIES of Starlight's, not imports. `@astrojs/starlight`
- * exports only `./style/markdown.css` in its package `exports` map (checked in
- * node_modules/@astrojs/starlight/package.json), so `style/props.css` is not
- * importable without reaching past the package boundary — which would break
- * silently on a minor upgrade. Copying the values keeps the two themes visually
- * identical to the docs and makes the coupling a thing you can see.
+ * DARK ONLY. There is no light theme here and no toggle anywhere on the site.
+ * The previous version carried a full second palette under
+ * `:root[data-theme='light']` plus a toggle button, an icon pair and a
+ * localStorage contract duplicated between this page and Starlight; all of it
+ * is deleted rather than left unreachable, because a dead palette is a palette
+ * that silently rots and then ships the day someone re-adds the button.
  *
- * Two colours are added on top of Starlight's palette, and neither is invented
- * here: the amber is `#d4a017` from the README's "Claude Code plugin" badge,
- * used for everything about LEARNING; red is Starlight's own `--sl-color-red`,
- * used for everything about REFUSAL. The landing has exactly two ideas and they
- * get one colour each.
+ * ------------------------------------------------------------------ palette
+ *
+ * The colours are read off `assets/banner.jpg`, which is the only artwork this
+ * project has committed to, and they are the three light sources in it:
+ *
+ *   stone   near-black, warm rather than blue — the hall the scene is set in.
+ *   gold    #d4a017, the lash and the hieroglyphs. The ONE accent: every
+ *           interactive and every brand surface on this page is gold, and
+ *           nothing else is.
+ *   glow    the cold light off the agents' screens. It is a LIGHT SOURCE, not
+ *           an accent: it appears in washes, in the terminal chrome and on
+ *           command echoes, and never as a button or a link. That distinction
+ *           is what keeps "gold is the only accent" true while the page still
+ *           has the banner's two-source lighting.
+ *
+ * Two more colours survive, and neither is decoration: red is REFUSAL and
+ * green is a ledger `+`. They carry meaning the page's argument depends on —
+ * a refusal terminal printed in gold would be a landing that softened its own
+ * product's denial — so they are signals, deliberately outside the accent
+ * rule, and are used nowhere else.
+ *
+ * Every value below was measured against its own background with WCAG 2.1
+ * contrast; the ratios are in the story report, not asserted here.
  */
 
 /* ------------------------------------------------------------------ tokens */
 
 :root {
-  /* Dark is the default, as in Starlight: the theme script writes
-     data-theme="light" for the other one and never data-theme="dark". */
-  --l-white: hsl(0, 0%, 100%);
-  --l-gray-1: hsl(224, 20%, 94%);
-  --l-gray-2: hsl(224, 6%, 77%);
-  --l-gray-3: hsl(224, 6%, 56%);
-  --l-gray-4: hsl(224, 7%, 36%);
-  --l-gray-5: hsl(224, 10%, 23%);
-  --l-gray-6: hsl(224, 14%, 16%);
-  --l-black: hsl(224, 10%, 10%);
+  /* --- stone ------------------------------------------------------------ */
+  --l-bg: #12100e;
+  --l-bg-raised: #1c1917;
+  --l-bg-sunken: #0d0c0a;
 
-  --l-accent: hsl(224, 100%, 60%);
-  --l-accent-high: hsl(224, 100%, 85%);
-  --l-accent-low: hsl(224, 54%, 20%);
+  --l-text: #d9d2c6;
+  --l-heading: #f5efe3;
+  --l-muted: #a29788;
 
-  --l-amber: hsl(41, 82%, 63%);
-  --l-amber-low: hsl(41, 39%, 22%);
-  --l-red: hsl(339, 82%, 63%);
-  --l-red-low: hsl(339, 39%, 22%);
-  --l-green: hsl(101, 82%, 63%);
+  --l-hairline: #3b342c;
+  --l-hairline-soft: #29241f;
 
-  --l-bg: var(--l-black);
-  --l-bg-raised: var(--l-gray-6);
-  --l-bg-sunken: hsl(224, 12%, 8%);
-  --l-text: var(--l-gray-2);
-  --l-heading: var(--l-white);
-  --l-muted: var(--l-gray-3);
-  --l-hairline: var(--l-gray-5);
-  --l-hairline-soft: var(--l-gray-6);
-  --l-shadow: 0 1px 2px hsla(0, 0%, 0%, 0.4), 0 12px 32px hsla(0, 0%, 0%, 0.35);
+  /* --- gold: the only accent -------------------------------------------- */
+  --l-gold: #d4a017;
+  --l-gold-bright: #e8bc4d;
+  --l-gold-dim: #6d5410;
+  --l-gold-low: #2a2110;
 
+  /* --- the cold screen glow: a light source, never an accent ------------ */
+  --l-glow: #8fd8ea;
+  --l-glow-dim: #1e3a44;
+
+  /* --- signals ---------------------------------------------------------- */
+  --l-red: #f2665e;
+  --l-red-low: #35191a;
+  --l-green: #8fce6a;
+
+  --l-shadow: 0 1px 2px rgb(0 0 0 / 0.55), 0 14px 36px rgb(0 0 0 / 0.45);
+
+  /* Headings get a serif with real weight to it. No web font is loaded: an
+     Egyptian character bought with a network request and 40 kB of WOFF2 on a
+     page whose whole boast is that it is light would be the wrong trade, and
+     every platform in the support matrix ships something monumental. */
+  --l-display: ui-serif, 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia,
+    'Times New Roman', serif;
   --l-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
   --l-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
@@ -61,41 +83,6 @@
   --l-radius: 0.75rem;
 
   color-scheme: dark;
-}
-
-:root[data-theme='light'] {
-  --l-white: hsl(224, 10%, 10%);
-  --l-gray-1: hsl(224, 14%, 16%);
-  --l-gray-2: hsl(224, 10%, 23%);
-  --l-gray-3: hsl(224, 7%, 36%);
-  --l-gray-4: hsl(224, 6%, 56%);
-  --l-gray-5: hsl(224, 6%, 77%);
-  --l-gray-6: hsl(224, 20%, 94%);
-  --l-black: hsl(0, 0%, 100%);
-
-  --l-accent: hsl(234, 90%, 60%);
-  --l-accent-high: hsl(234, 80%, 30%);
-  --l-accent-low: hsl(234, 88%, 90%);
-
-  /* The light theme darkens every hue Starlight darkens, for the same reason:
-     a 63%-lightness amber on white is unreadable body text. */
-  --l-amber: hsl(41, 80%, 33%);
-  --l-amber-low: hsl(41, 90%, 90%);
-  --l-red: hsl(339, 80%, 38%);
-  --l-red-low: hsl(339, 80%, 93%);
-  --l-green: hsl(101, 80%, 22%);
-
-  --l-bg: var(--l-black);
-  --l-bg-raised: hsl(224, 19%, 97%);
-  --l-bg-sunken: hsl(224, 20%, 94%);
-  --l-text: var(--l-gray-2);
-  --l-heading: var(--l-white);
-  --l-muted: var(--l-gray-3);
-  --l-hairline: var(--l-gray-5);
-  --l-hairline-soft: var(--l-gray-6);
-  --l-shadow: 0 1px 2px hsla(0, 0%, 0%, 0.06), 0 12px 32px hsla(0, 0%, 0%, 0.08);
-
-  color-scheme: light;
 }
 
 /* -------------------------------------------------------------------- base */
@@ -122,9 +109,29 @@ main:focus-visible {
   outline: none;
 }
 
+/* The stone.
+ *
+ * Two washes and a fibre, all in CSS: an image would be another request and
+ * another 40 kB on the page that claims to be light, and a tiled JPEG of
+ * granite is exactly the kind of decoration that outlives the design it was
+ * chosen for.
+ *
+ * It lives on the BODY BACKGROUND rather than in a fixed overlay, which is the
+ * important part. An overlay sits on top of the text and moves every measured
+ * contrast ratio by an amount nobody remembers to re-check. Behind everything,
+ * it touches only the gutters — every card, terminal and callout on this page
+ * paints its own opaque surface over it.
+ *
+ * The fibre is 1px at a 4px pitch and 1.4% white: at that strength it reads as
+ * a surface rather than as stripes, and it disappears entirely on a display
+ * that cannot resolve it, which is the correct failure. */
 body {
   margin: 0;
-  background: var(--l-bg);
+  background-color: var(--l-bg);
+  background-image:
+    radial-gradient(90% 44% at 14% 0%, rgb(212 160 23 / 0.07), transparent 62%),
+    radial-gradient(70% 34% at 88% 8%, rgb(143 216 234 / 0.05), transparent 62%),
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.014) 0 1px, transparent 1px 4px);
   color: var(--l-text);
   font-family: var(--l-font);
   font-size: 1rem;
@@ -137,8 +144,10 @@ h1,
 h2,
 h3 {
   color: var(--l-heading);
-  line-height: 1.15;
-  letter-spacing: -0.02em;
+  font-family: var(--l-display);
+  font-weight: 600;
+  line-height: 1.13;
+  letter-spacing: -0.015em;
   margin: 0;
   text-wrap: balance;
 }
@@ -149,12 +158,8 @@ p {
 }
 
 a {
-  color: var(--l-accent-high);
+  color: var(--l-gold-bright);
   text-underline-offset: 0.2em;
-}
-
-:root[data-theme='light'] a {
-  color: var(--l-accent-high);
 }
 
 code,
@@ -170,7 +175,7 @@ img {
 }
 
 :focus-visible {
-  outline: 2px solid var(--l-accent);
+  outline: 2px solid var(--l-gold-bright);
   outline-offset: 3px;
   border-radius: 4px;
 }
@@ -217,9 +222,58 @@ img {
   min-width: 0;
 }
 
+/* The frieze.
+ *
+ * Sections used to be separated by a 1px hairline. They are separated now by a
+ * course of gold teeth over that hairline — the block border that runs above
+ * every register in an Egyptian wall painting. Two repeating gradients and no
+ * markup, so it costs a declaration rather than an element, and it is the one
+ * ornament on this page that repeats often enough to become the page's own
+ * punctuation.
+ *
+ * The teeth are `--l-gold-dim`, not `--l-gold`. At full strength a repeating
+ * band across the full width read as a warning stripe. */
 .l-section {
+  position: relative;
   padding-block: clamp(3.5rem, 9vw, 6.5rem);
-  border-top: 1px solid var(--l-hairline-soft);
+}
+
+.l-section::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background-image:
+    repeating-linear-gradient(90deg, var(--l-gold-dim) 0 5px, transparent 5px 16px),
+    linear-gradient(var(--l-hairline-soft), var(--l-hairline-soft));
+  background-size:
+    16px 3px,
+    100% 1px;
+  background-position:
+    0 0,
+    0 4px;
+  background-repeat: repeat-x;
+  pointer-events: none;
+}
+
+/* The section mark: an icon in a gold-edged tile, above the eyebrow.
+ *
+ * It is the memory hook the whole icon pass exists for, so it is given real
+ * size and its own frame rather than being tucked into the eyebrow line at
+ * 12px where nothing is recognisable. */
+.l-sectmark {
+  display: inline-grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-bottom: 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--l-gold) 42%, transparent);
+  border-radius: 0.6rem;
+  color: var(--l-gold);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--l-gold) 12%, transparent), transparent 70%),
+    var(--l-bg-raised);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.35);
 }
 
 .l-eyebrow {
@@ -238,7 +292,7 @@ img {
   content: '';
   width: 1.75rem;
   height: 1px;
-  background: currentColor;
+  background: var(--l-gold-dim);
 }
 
 .l-lede {
@@ -270,20 +324,27 @@ img {
   min-height: 3.5rem;
 }
 
+/* The wordmark takes the display face and the gold, and the jackal inherits
+   both through `currentColor` — one declaration colours the mark and the name,
+   so they cannot drift apart. */
 .l-brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--l-heading);
+  gap: 0.6rem;
+  font-family: var(--l-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--l-gold);
   text-decoration: none;
   margin-right: auto;
 }
 
+.l-brand:hover {
+  color: var(--l-gold-bright);
+}
+
 .l-brand__mark {
-  width: 1.5rem;
-  height: 1.5rem;
   flex: none;
 }
 
@@ -312,63 +373,91 @@ img {
   }
 }
 
-.l-themetoggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: 1px solid var(--l-hairline-soft);
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--l-text);
-  cursor: pointer;
-}
-
-.l-themetoggle:hover {
-  color: var(--l-heading);
-  border-color: var(--l-hairline);
-}
-
-.l-themetoggle svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-/* One icon is shown per theme; the other is removed from the accessibility
-   tree as well as the layout, so a screen reader is never offered both. */
-:root:not([data-theme='light']) .l-themetoggle__sun,
-:root[data-theme='light'] .l-themetoggle__moon {
-  display: none;
-}
+/* The theme toggle used to live here. The site is dark everywhere now, so the
+   button, its two icons and the per-theme display rules are gone rather than
+   left as unreachable CSS. */
 
 /* -------------------------------------------------------------------- hero */
 
+/* `overflow: hidden` clips the light wash below, which reaches 30% past both
+   edges. The bottom padding is NOT spacing — it is what stops that clip from
+   eating the section's last child.
+ *
+ * The trap, measured: `.tyran-anim .reveal` starts at `translateY(1.25rem)`,
+ * so an unrevealed element paints 20px BELOW its layout box. When the last
+ * child of this section was the banner that never mattered. With the banner
+ * moved to the top, `.hero__proof` became last, its painted box crossed the
+ * clip edge, and the IntersectionObserver saw an intersectionRect of 2.4px
+ * against a 22.4px element — ratio 0.108 against a 0.15 threshold. The line
+ * could never reveal itself, so it stayed at opacity 0 forever, at every
+ * viewport height tested (800, 900, 1000).
+ *
+ * 2rem clears the 1.25rem translate with room to spare. A reveal element added
+ * at the bottom of any other clipped container will hit this same deadlock. */
 .hero {
   position: relative;
-  padding-block: clamp(3rem, 8vw, 5.5rem) 0;
+  padding-block: 0 2rem;
   overflow: hidden;
 }
 
-/* A single radial wash instead of an image: it costs no bytes, it reads as
-   stage lighting above the banner, and it is the one place the accent and the
-   amber (the two ideas of this page) touch. */
-.hero::before {
-  content: '';
-  position: absolute;
-  inset: -30% -10% auto;
-  height: 46rem;
-  background:
-    radial-gradient(60% 50% at 30% 40%, color-mix(in srgb, var(--l-accent) 22%, transparent), transparent 70%),
-    radial-gradient(45% 45% at 78% 25%, color-mix(in srgb, var(--l-amber) 14%, transparent), transparent 70%);
-  pointer-events: none;
+/* The banner, full-bleed, FIRST.
+ *
+ * It used to sit after the headline, the lede, the buttons and the proof line,
+ * which put it entirely below the fold: measured at 1440x900 the top of the
+ * image was at y=1006, and at 1280x800 at y=1046. Neither viewport ever saw
+ * it without scrolling.
+ *
+ * The band is height-capped rather than left at its own 1.83:1 aspect. At full
+ * aspect a 1440-wide viewport would spend 785px on the picture and push
+ * everything else out of the first screen; the cap keeps the image first AND
+ * the headline, lede, buttons and proof line inside 800px of viewport. The
+ * crop is `object-position: 50% 38%` — measured against the art, that is what
+ * keeps the conductor's head and the lit screens in frame while losing floor.
+ *
+ * The mask fades the bottom edge into the page instead of stopping at a line:
+ * the art is an illustration, not product UI, and a hard edge under it reads
+ * as a screenshot. */
+.hero__banner {
+  position: relative;
+  width: 100%;
+  height: clamp(10rem, 25vh, 18rem);
   z-index: 0;
 }
 
-.hero > * {
+.hero__banner img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Crop from near the TOP of the plate, not the middle. Measured against the
+     art at 1440 wide: the source is 1600x872, `cover` scales it to 784.8px
+     tall, and a 225px band centred at 38% showed 26%-58% of the picture — the
+     conductor's console and none of his head. 8% frames the head, the lash and
+     the lit sign, which is the half of the scene the page is about. */
+  object-position: 50% 8%;
+  mask-image: linear-gradient(to bottom, black 52%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 52%, transparent 100%);
+}
+
+/* Stage lighting under the banner, in the banner's own two sources: the gold
+   of the lash and the cold glow off the agents' screens. It costs no bytes and
+   it is the only place the two light sources meet outside the picture. */
+.hero__body {
   position: relative;
   z-index: 1;
+  padding-top: clamp(1.25rem, 3vw, 2.25rem);
+}
+
+.hero__body::before {
+  content: '';
+  position: absolute;
+  inset: -18rem -30% auto;
+  height: 40rem;
+  background:
+    radial-gradient(46% 42% at 24% 46%, rgb(212 160 23 / 0.16), transparent 70%),
+    radial-gradient(40% 40% at 76% 30%, rgb(143 216 234 / 0.09), transparent 70%);
+  pointer-events: none;
+  z-index: -1;
 }
 
 .hero__badges {
@@ -393,10 +482,10 @@ img {
   white-space: nowrap;
 }
 
-.badge--amber {
-  color: var(--l-amber);
-  border-color: color-mix(in srgb, var(--l-amber) 45%, transparent);
-  background: color-mix(in srgb, var(--l-amber-low) 55%, transparent);
+.badge--gold {
+  color: var(--l-gold-bright);
+  border-color: color-mix(in srgb, var(--l-gold) 45%, transparent);
+  background: var(--l-gold-low);
 }
 
 .badge--dot::before {
@@ -408,20 +497,20 @@ img {
 }
 
 .hero h1 {
-  font-size: clamp(2.4rem, 1.6rem + 3.6vw, 4.25rem);
+  font-size: clamp(2.25rem, 1.5rem + 3.2vw, 3.9rem);
   max-width: 18ch;
 }
 
 .hero h1 em {
   font-style: normal;
-  color: var(--l-amber);
+  color: var(--l-gold);
 }
 
 .hero__lede {
-  margin-top: 1.35rem;
-  font-size: clamp(1.05rem, 1rem + 0.4vw, 1.25rem);
+  margin-top: 1.1rem;
+  font-size: clamp(1rem, 0.97rem + 0.35vw, 1.18rem);
   color: var(--l-text);
-  max-width: 44rem;
+  max-width: 42rem;
 }
 
 .hero__lede strong {
@@ -433,7 +522,7 @@ img {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
-  margin-top: 2rem;
+  margin-top: 1.6rem;
 }
 
 .btn {
@@ -454,13 +543,16 @@ img {
   transform: translateY(-1px);
 }
 
+/* Gold on stone. The dark text is the page background, not black: a pure-black
+   label on gold is the one combination on this page that looks printed rather
+   than lit. */
 .btn--primary {
-  background: var(--l-accent);
-  color: hsl(0, 0%, 100%);
+  background: var(--l-gold);
+  color: var(--l-bg);
 }
 
 .btn--primary:hover {
-  background: color-mix(in srgb, var(--l-accent) 85%, var(--l-white));
+  background: var(--l-gold-bright);
 }
 
 .btn--ghost {
@@ -470,33 +562,18 @@ img {
 }
 
 .btn--ghost:hover {
-  border-color: var(--l-accent);
+  border-color: var(--l-gold);
+  color: var(--l-gold-bright);
 }
 
 .hero__proof {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 1.5rem;
-  margin-top: 1.75rem;
+  margin-top: 1.15rem;
   font-size: 0.85rem;
   color: var(--l-muted);
   font-family: var(--l-mono);
-}
-
-.hero__banner {
-  margin-top: clamp(2.5rem, 6vw, 4rem);
-  position: relative;
-}
-
-.hero__banner img {
-  display: block;
-  width: 100%;
-  border-radius: var(--l-radius);
-  border: 1px solid var(--l-hairline-soft);
-  /* The banner is an illustration, not a screenshot: it bleeds into the page
-     rather than sitting in a frame that pretends it is product UI. */
-  mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
 }
 
 /* ------------------------------------------------------- compounding rail */
@@ -530,7 +607,22 @@ img {
 /* The rail: a hairline track with a fill that grows as stages activate. The
    fill height is `--l-fill`, a number between 0 and 1 written by the page
    script. Its DEFAULT IS 1 — a reader with no JavaScript, or with reduced
-   motion, sees a finished rail rather than an empty one. */
+   motion, sees a finished rail rather than an empty one.
+
+   `z-index: 0` on both is the DEFECT FIX, not tidying.
+
+   Both pseudo-elements are `position: absolute` with `z-index: auto`, so they
+   paint in tree order among the positioned boxes of the same stacking context.
+   `::after` comes after the `<li>` children in that order, which put the fill
+   line ON TOP of the numbered dots: the rail ran straight through "01", "05"
+   and "20" and struck the numbers out. It was invisible in the dev server on
+   the first stage only, because the fill starts at scaleY(0) and grows past
+   the dots as you scroll — the bug arrived with the reader.
+
+   Painting order, not opacity, is the fix: the dot already had an opaque
+   background and it did not help, because opacity cannot beat something drawn
+   after you. Explicit indices state the intent instead of relying on where a
+   selector happens to sit in the document. */
 .compound__rail::before,
 .compound__rail::after {
   content: '';
@@ -540,6 +632,7 @@ img {
   bottom: 0.5rem;
   width: 2px;
   border-radius: 2px;
+  z-index: 0;
 }
 
 .compound__rail::before {
@@ -547,7 +640,7 @@ img {
 }
 
 .compound__rail::after {
-  background: linear-gradient(to bottom, var(--l-accent), var(--l-amber));
+  background: linear-gradient(to bottom, var(--l-gold-dim), var(--l-gold));
   transform-origin: top;
   transform: scaleY(var(--l-fill, 1));
 }
@@ -560,11 +653,15 @@ img {
   position: absolute;
   left: -3.25rem;
   top: 0.35rem;
+  z-index: 1;
   width: 2.15rem;
   height: 2.15rem;
   display: grid;
   place-items: center;
   border-radius: 50%;
+  /* Opaque, and opaque against the TEXTURE too: the body carries a background
+     image, so a token that is only a colour would let the fibre show through
+     the disc and the rail behind it would still be faintly visible. */
   background: var(--l-bg);
   border: 2px solid var(--l-hairline);
   font-family: var(--l-mono);
@@ -574,8 +671,8 @@ img {
 }
 
 .stage.is-visible .stage__dot {
-  border-color: var(--l-amber);
-  color: var(--l-amber);
+  border-color: var(--l-gold);
+  color: var(--l-gold);
 }
 
 .stage__card {
@@ -591,7 +688,7 @@ img {
   font-size: 0.72rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--l-amber);
+  color: var(--l-gold);
 }
 
 .stage__card h3 {
@@ -618,9 +715,9 @@ img {
   font-size: 0.75rem;
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
-  border: 1px dashed color-mix(in srgb, var(--l-amber) 45%, transparent);
-  color: var(--l-amber);
-  background: color-mix(in srgb, var(--l-amber-low) 40%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--l-gold) 45%, transparent);
+  color: var(--l-gold-bright);
+  background: var(--l-gold-low);
 }
 
 /* A learned rule that the retro later DELETED. The strike-through is the whole
@@ -667,24 +764,44 @@ img {
 .callout {
   margin-top: 2rem;
   border: 1px solid var(--l-hairline-soft);
-  border-left: 3px solid var(--l-accent);
+  border-left: 3px solid var(--l-gold);
   border-radius: 0 var(--l-radius) var(--l-radius) 0;
   background: var(--l-bg-raised);
   padding: 1.1rem 1.25rem;
 }
 
 .callout--warn {
-  border-left-color: var(--l-amber);
+  border-left-color: var(--l-gold);
 }
 
 .callout--red {
   border-left-color: var(--l-red);
 }
 
+/* The callout headings and the aside headings each carry one icon inline. The
+   icon takes the heading's own colour, so the warn callout's feather is gold
+   and the red callout's lash is red without either being coloured twice. */
+.callout h3,
+.install__aside h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.callout h3 svg,
+.install__aside h3 svg {
+  flex: none;
+}
+
 .callout h3 {
   font-size: 0.95rem;
   font-family: var(--l-mono);
   letter-spacing: 0.02em;
+  color: var(--l-gold-bright);
+}
+
+.callout--red h3 {
+  color: var(--l-red);
 }
 
 .callout p {
@@ -725,12 +842,17 @@ img {
   }
 }
 
+/* The terminals are the page's screens, so they get the banner's second light
+   source: a cold rim on the frame, the same glow the agents' monitors throw in
+   the artwork. It is a light, not an accent — nothing here is clickable. */
 .term {
   border: 1px solid var(--l-hairline-soft);
   border-radius: var(--l-radius);
   background: var(--l-bg-sunken);
   overflow: hidden;
-  box-shadow: var(--l-shadow);
+  box-shadow:
+    var(--l-shadow),
+    inset 0 1px 0 rgb(143 216 234 / 0.09);
 }
 
 .term--refusal {
@@ -782,7 +904,7 @@ img {
 }
 
 .term__line[data-kind='cmd'] {
-  color: var(--l-accent-high);
+  color: var(--l-glow);
 }
 
 .term__line[data-kind='refuse'] {
@@ -806,7 +928,7 @@ img {
   width: 0.55em;
   height: 1.05em;
   vertical-align: text-bottom;
-  background: var(--l-amber);
+  background: var(--l-gold);
 }
 
 .gates__aside {
@@ -855,8 +977,31 @@ img {
   gap: 0.6rem;
 }
 
+/* Icon left, status right, on one line above the title. The pairing is the
+   point: the icon says what the card is ABOUT and the badge says whether it
+   exists, and putting them on the same baseline makes both scannable in a
+   sweep down the grid. */
+.cap__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cap__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--l-gold) 30%, transparent);
+  border-radius: 0.5rem;
+  color: var(--l-gold);
+  background: var(--l-gold-low);
+}
+
 .cap h3 {
-  font-size: 1.02rem;
+  font-size: 1.06rem;
 }
 
 .cap p {
@@ -873,7 +1018,8 @@ img {
 }
 
 .verdict {
-  align-self: flex-start;
+  align-self: center;
+  flex: none;
   font-family: var(--l-mono);
   font-size: 0.68rem;
   letter-spacing: 0.08em;
@@ -890,9 +1036,9 @@ img {
 }
 
 .verdict--designed {
-  color: var(--l-amber);
-  border-color: color-mix(in srgb, var(--l-amber) 45%, transparent);
-  background: color-mix(in srgb, var(--l-amber) 10%, transparent);
+  color: var(--l-gold-bright);
+  border-color: color-mix(in srgb, var(--l-gold) 45%, transparent);
+  background: color-mix(in srgb, var(--l-gold) 10%, transparent);
 }
 
 /* ---------------------------------------------------------------- install */
@@ -965,7 +1111,7 @@ img {
 }
 
 .copy:hover {
-  border-color: var(--l-accent);
+  border-color: var(--l-gold);
 }
 
 .copy code {
@@ -996,6 +1142,7 @@ img {
 
 .install__aside h3 {
   font-size: 1rem;
+  color: var(--l-gold-bright);
 }
 
 .install__aside p {
@@ -1020,11 +1167,31 @@ img {
 
 /* ----------------------------------------------------------------- footer */
 
+/* The footer closes the page with the same frieze that opens every section, so
+   the last band on the page is the one the reader has already learned. */
 .l-footer {
-  border-top: 1px solid var(--l-hairline-soft);
+  position: relative;
   padding-block: 2.5rem 3.5rem;
   color: var(--l-muted);
   font-size: 0.85rem;
+}
+
+.l-footer::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background-image:
+    repeating-linear-gradient(90deg, var(--l-gold-dim) 0 5px, transparent 5px 16px),
+    linear-gradient(var(--l-hairline-soft), var(--l-hairline-soft));
+  background-size:
+    16px 3px,
+    100% 1px;
+  background-position:
+    0 0,
+    0 4px;
+  background-repeat: repeat-x;
+  pointer-events: none;
 }
 
 .l-footer__inner {
@@ -1096,7 +1263,7 @@ img {
   }
 
   .tyran-anim .stage.is-visible .stage__dot {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--l-amber) 12%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--l-gold) 14%, transparent);
   }
 
   .tyran-anim .chips li {

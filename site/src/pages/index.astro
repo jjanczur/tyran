@@ -77,36 +77,26 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <meta name="twitter:title" content={TITLE} />
     <meta name="twitter:description" content={DESCRIPTION} />
     <meta name="twitter:image" content={ogUrl} />
-    <meta name="theme-color" content="#1a1c20" />
+    <meta name="theme-color" content="#12100e" />
 
     <!--
-      Two decisions taken before the first paint, both of which look wrong if
-      taken later:
+      One decision taken before the first paint: whether this page is allowed
+      to animate. The class is the ONLY thing that lets the stylesheet hide
+      anything, and it is added only when a script runs AND the reader has not
+      asked for reduced motion. With scripting off, or with reduced motion, no
+      rule in landing.css hides or moves a single element.
 
-      1. The theme. The key is `starlight-theme`, the same one Starlight's own
-         provider reads and writes, so a reader who picks light here lands on
-         light documentation one click later instead of a flash of the other
-         one.
-      2. Whether this page is allowed to animate. The class is the ONLY thing
-         that lets the stylesheet hide anything, and it is added only when a
-         script runs AND the reader has not asked for reduced motion. With
-         scripting off, or with reduced motion, no rule in landing.css hides or
-         moves a single element.
+      There used to be a second decision here — reading `starlight-theme` out
+      of localStorage and writing `data-theme`. The site is dark everywhere by
+      decision now, so `data-theme="dark"` is a literal on <html> above: it is
+      correct before any script runs, correct with scripting off, and cannot be
+      talked out of it by a stale storage key left over from the old toggle.
     -->
     <script is:inline>
       (() => {
-        const root = document.documentElement;
-        try {
-          const stored = localStorage.getItem('starlight-theme');
-          const theme =
-            stored || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-          root.dataset.theme = theme === 'light' ? 'light' : 'dark';
-        } catch (e) {
-          /* private mode, or no storage: the default attribute already says dark */
-        }
         try {
           if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            root.classList.add('tyran-anim');
+            document.documentElement.classList.add('tyran-anim');
           }
         } catch (e) {
           /* no matchMedia: stay static, which is the safe direction */
@@ -143,10 +133,10 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <SiteFooter />
 
     <!--
-      The page's only behaviour, inline for weight: one `IntersectionObserver`,
-      one clipboard handler, one theme toggle. Inline rather than a bundled
-      module because at this size the request costs more than the bytes, and
-      because none of it is on the critical path for reading the page.
+      The page's only behaviour, inline for weight: one `IntersectionObserver`
+      and one clipboard handler. Inline rather than a bundled module because at
+      this size the request costs more than the bytes, and because none of it
+      is on the critical path for reading the page.
 
       The whole body is wrapped in a try/catch that REMOVES the animation class
       on any error. Without it, a runtime failure in this script would leave
@@ -156,19 +146,6 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
     <script is:inline>
       (() => {
         const root = document.documentElement;
-
-        const toggle = document.getElementById('theme-toggle');
-        if (toggle) {
-          toggle.addEventListener('click', () => {
-            const next = root.dataset.theme === 'light' ? 'dark' : 'light';
-            root.dataset.theme = next;
-            try {
-              localStorage.setItem('starlight-theme', next);
-            } catch (e) {
-              /* the toggle still works for this page view */
-            }
-          });
-        }
 
         for (const btn of document.querySelectorAll('[data-copy]')) {
           btn.addEventListener('click', () => {

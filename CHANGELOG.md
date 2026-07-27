@@ -2,6 +2,44 @@
 
 ## 0.1.0 — unreleased
 
+### The conductor and its roster ship: `/tyran:run` plus four agents
+
+`agents/` is no longer empty. `scout`, `implementer`, `reviewer` and `retro`
+are real files, carrying the playbook that has been conducting this project's
+own initiatives for months — the evidence contract, the lease protocol, the
+seven-point handoff, the delta rule for numeric gates, the explicit "NO
+INDEPENDENT REVIEW" stamp when review had to be skipped, and the anti-bloat
+filter whose correct answer is often *"I changed nothing"*. Two tool grants
+are load-bearing rather than incidental: the reviewer gets no editing tools,
+so it cannot patch what it is grading, and the scout is read-only apart from
+the `Bash` reconnaissance needs. Neither is presented as airtight — `Bash` can
+write, and the agent files say so.
+
+`scripts/tiers.mjs` makes model choice a one-line decision. Model names now
+appear in exactly ONE file; skills, agents and policies are written in role
+names, so a deprecation is an edit rather than a sweep. Four tiers replace
+three, because "expensive" was never one thing: `deep` buys harder reasoning,
+`top` is for calls where being wrong is both costly and hard to notice. The
+default routes everyday work to the middle tier. **Security review and
+arbitration carry a floor** that no profile and no risk flag can push them
+below — without it, `--profile eco --risk low` would have been a one-flag
+downgrade of the two judgements everything downstream trusts. A missing alias
+throws instead of falling back to the session default, because routing that
+silently does nothing is indistinguishable from routing that works.
+
+`scripts/stop-check.mjs` gives the operator a brake that needs no session:
+`echo reason > .tyran/STOP` and the conductor halts before its next spawn or
+merge. It is the one reader in this codebase that **fails closed** — an
+unreadable STOP, a STOP that is a directory, an empty STOP all stop — because
+a brake that releases itself when damaged is not a brake. `.tyran/STOP` is
+KERNEL in the shipped policy, and the docs name the hole that leaves. The idea
+is adapted from pro-workflow's file kill-switch; the code and semantics are
+ours.
+
+The README stops under-claiming in three places and over-claiming in one: the
+principle that read *"autonomy … never self-escalated"* now says what was
+measured instead.
+
 ### The enforcement epic is complete: five hooks, and a doctor that catches a dead one
 
 `policy-gate.mjs` turns the autonomy classes into a refusal: path classes

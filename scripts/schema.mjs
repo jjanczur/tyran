@@ -21,7 +21,15 @@ import { escapeInvisible } from './invisible.mjs';
 
 export const PROFILES = Object.freeze(['eco', 'balanced', 'full']);
 export const AUTONOMY_CLASSES = Object.freeze(['P1', 'P2', 'P3']);
-export const TIER_KEYS = Object.freeze(['top', 'work', 'cheap']);
+/**
+ * Capability tiers, cheapest first. Four rather than three because "expensive"
+ * is not one thing: `deep` buys harder reasoning for root-cause work, `top`
+ * is reserved for the calls where being wrong is expensive AND hard to notice
+ * (security review, arbitration, acceptance). Collapsing them into one tier
+ * means every escalation pays the top price, which is how a cost mode stops
+ * being used at all.
+ */
+export const TIER_KEYS = Object.freeze(['cheap', 'work', 'deep', 'top']);
 export const ARTIFACT_CLASSES = Object.freeze(['AUTO', 'GATED', 'KERNEL']);
 export const KNOWLEDGE_KINDS = Object.freeze(['fact', 'convention', 'gotcha', 'command', 'decision']);
 
@@ -81,7 +89,7 @@ export function validateConfig(doc) {
     });
   }
 
-  if (!('tiers' in doc)) errors.push('tiers: required (top, work, cheap)');
+  if (!('tiers' in doc)) errors.push(`tiers: required (${TIER_KEYS.join(', ')})`);
   else if (!isPlainObject(doc.tiers)) errors.push('tiers: must be a mapping');
   else {
     for (const key of TIER_KEYS) {

@@ -15,15 +15,24 @@
 profile: balanced
 
 # Deployment autonomy: P1 branch-only · P2 staging · P3 merge to main.
-# Never self-escalated. When in doubt, setup picks P1.
+# The gate enforces this downward; it does not stop an agent that can edit
+# this file from raising it. When in doubt, setup picks P1.
 autonomy: P1
 
-# The ONLY place model names appear. Policy elsewhere is written in role
-# names, so a model deprecation is a one-line change here.
+# The ONLY place model names appear. Every other file — skills, agents,
+# policies — is written in ROLE names, so a model deprecation is a one-line
+# change here and nothing else moves.
+#
+# Resolve a role to a model:  node scripts/tiers.mjs --role reviewer
+#
+# The default deliberately puts the everyday work on `work`. A strong model
+# on a mechanical sweep buys nothing and spends the budget that the two calls
+# below actually need.
 tiers:
-  top: fable
-  work: opus
-  cheap: haiku
+  cheap: haiku # scout, mechanical sweeps, ledger bookkeeping
+  work: sonnet # DEFAULT: implementation and ordinary review
+  deep: opus # root-cause diagnosis, hard implementation, risky review
+  top: fable # security review, arbitration, final acceptance
 
 # Repo validation commands, run before anything is called done.
 validation:

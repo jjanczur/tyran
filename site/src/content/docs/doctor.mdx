@@ -2,15 +2,15 @@
 title: 'Doctor reference'
 description: 'doctor --state and --hooks: every finding code with its severity, the journal-time clock, dead policy rules, and the limits each check declares.'
 ---
-import { Aside } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 
-<Aside type="note" title="Status">
-<Verdict state="shipped" /> `scripts/doctor.mjs --state` with 76 unit tests.
-It **diagnoses, it never repairs.** Every finding carries a severity, a
+<Provenance state="shipped">
+`scripts/doctor.mjs --state` · 76 unit tests
+</Provenance>
+
+Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
-</Aside>
 
 The journal is append-only and the projections are generated, so most of
 Tyran's state is self-consistent by construction. The gaps are the places

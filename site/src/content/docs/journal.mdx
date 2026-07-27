@@ -2,15 +2,15 @@
 title: 'Journal reference'
 description: 'The append-only JSONL event schema: the envelope, the closed set of 14 event types, the one-open-spawn-per-agent rule and its measured gaps.'
 ---
-import { Aside, FileTree } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
-import Limit from '../../components/Limit.astro';
-import Measured from '../../components/Measured.astro';
+import { FileTree } from '@astrojs/starlight/components';
+import Provenance from '../../components/Provenance.astro';
 
-<Aside type="note" title="Status">
-<Verdict state="shipped" /> `scripts/journal.mjs` with 47 unit tests. This file
-is the schema contract; extending the event set is a reviewed core change.
-</Aside>
+<Provenance state="shipped">
+`scripts/journal.mjs` · 47 unit tests
+</Provenance>
+
+This page is the schema contract; extending the event set is a reviewed core
+change.
 
 The journal is the append-only source of truth for an initiative:
 `.tyran/state/<initiative>/journal.jsonl`, one JSON event per line.

@@ -1,10 +1,11 @@
 # The policy gate
 
-> **Status:** shipped — `hooks/scripts/policy-gate.mjs`, registered on
-> `PreToolUse` for every tool.
-> It turns two pieces of configuration into refusals: the autonomy classes in
-> `.tyran/policies/autonomy.yaml`, and the deployment class in
-> `.tyran/config.yaml`.
+✅ **shipped** · `hooks/scripts/policy-gate.mjs`, on `PreToolUse` for every
+tool
+
+This gate turns two pieces of configuration into refusals: the autonomy
+classes in `.tyran/policies/autonomy.yaml`, and the deployment class in
+`.tyran/config.yaml`.
 
 Read [`hooks.md`](hooks.md) first. Everything there about the platform failing
 open applies here, and this gate inherits its runtime from it.

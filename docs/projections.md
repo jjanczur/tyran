@@ -1,8 +1,10 @@
 # Projections reference
 
-> **Status:** shipped — `scripts/project.mjs` with 48 unit tests, including
-> byte-exact golden files. The journal stays the only source of truth;
-> everything on this page is a disposable view of it.
+✅ **shipped** · `scripts/project.mjs` · 48 unit tests, including byte-exact
+golden files
+
+The journal stays the only source of truth; everything on this page is a
+disposable view of it.
 
 Humans do not read JSONL. `scripts/project.mjs` folds a journal into two
 Markdown documents that are **generated, never hand-written**:

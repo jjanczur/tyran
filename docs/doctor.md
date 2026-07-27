@@ -1,8 +1,9 @@
 # Doctor reference
 
-> **Status:** shipped — `scripts/doctor.mjs --state` with 76 unit tests.
-> It **diagnoses, it never repairs.** Every finding carries a severity, a
-> location and a command you can paste.
+✅ **shipped** · `scripts/doctor.mjs --state` · 76 unit tests
+
+Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
+location and a command you can paste.
 
 The journal is append-only and the projections are generated, so most of
 Tyran's state is self-consistent by construction. The gaps are the places

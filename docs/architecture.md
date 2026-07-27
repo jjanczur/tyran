@@ -1,10 +1,12 @@
 # Architecture
 
-> **Status:** the state layer, the enforcement hooks, the conductor and the
-> agent roster are **shipped and tested**. Rows in the tables below that are
-> still design carry an explicit marker; everything unmarked exists in code
-> with tests behind it. See the [roadmap](../README.md#roadmap) for what is
-> still outstanding.
+✅ **shipped** · the state layer, the enforcement hooks, the conductor and the
+agent roster, all with tests behind them
+
+This is the design contract for v2. Everything in the tables below exists in
+code unless the row says otherwise: a row that is still design carries an
+explicit marker, and there is no unmarked aspiration on this page. The
+[roadmap](../README.md#roadmap) is where the outstanding work is tracked.
 
 ## The three layers
 

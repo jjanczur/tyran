@@ -2,14 +2,14 @@
 title: 'Projections reference'
 description: 'How STATE.md and PROGRESS.md are generated from the journal, the determinism, atomicity and escaping guarantees, and what --check compares.'
 ---
-import { Aside } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import Provenance from '../../components/Provenance.astro';
 
-<Aside type="note" title="Status">
-<Verdict state="shipped" /> `scripts/project.mjs` with 48 unit tests, including
-byte-exact golden files. The journal stays the only source of truth;
-everything on this page is a disposable view of it.
-</Aside>
+<Provenance state="shipped">
+`scripts/project.mjs` · 48 unit tests, including byte-exact golden files
+</Provenance>
+
+The journal stays the only source of truth; everything on this page is a
+disposable view of it.
 
 Humans do not read JSONL. `scripts/project.mjs` folds a journal into two
 Markdown documents that are **generated, never hand-written**:

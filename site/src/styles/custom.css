@@ -45,11 +45,12 @@
   overflow-x: auto;
 }
 
-/* Status banners at the top of each page are blockquotes carrying a Verdict
-   badge; give the badge room to sit on the same line as the text. */
-.sl-markdown-content blockquote p {
-  display: block;
-}
+/* A rule for the status blockquote used to live here. It is gone with the
+   banner it served: pages open with `<Provenance>` now, and the blockquotes
+   that remain (doctor, hooks) are ordinary pull-quotes that never carried a
+   badge. The declaration was `display: block` on a `<p>`, which is the initial
+   value — it stopped doing anything the moment the badge left, and a rule that
+   does nothing is a rule the next reader has to disprove. */
 
 /* ---------------------------------------------------------------------------
    Mermaid

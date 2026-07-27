@@ -2,21 +2,20 @@
 title: 'The policy gate'
 description: 'Path classes, the deployment class, the one rule that guards a read, and the declared boundary of each, including where a shell command still gets past.'
 ---
-import { Aside } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 import Measured from '../../components/Measured.astro';
 
-<Aside type="note" title="Status">
-<Verdict state="shipped" /> `hooks/scripts/policy-gate.mjs`, registered on
-`PreToolUse` for every tool.
-It turns two pieces of configuration into refusals: the autonomy classes in
-`.tyran/policies/autonomy.yaml`, and the deployment class in
-`.tyran/config.yaml`.
-</Aside>
+<Provenance state="shipped">
+`hooks/scripts/policy-gate.mjs`, on `PreToolUse` for every tool
+</Provenance>
 
-Read [`hooks.md`](../hooks/) first. Everything there about the platform failing
-open applies here, and this gate inherits its runtime from it.
+This gate turns two pieces of configuration into refusals: the autonomy
+classes in `.tyran/policies/autonomy.yaml`, and the deployment class in
+`.tyran/config.yaml`.
+
+Read [the hook runtime](../hooks/) first. Everything there about the platform
+failing open applies here, and this gate inherits its runtime from it.
 
 ## What it enforces
 

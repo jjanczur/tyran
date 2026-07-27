@@ -197,8 +197,9 @@ orchestration at all.
 
 Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story,
 own branch), `tyran:reviewer` (**no editing tools** — it cannot patch what it
-is grading), `tyran:retro`. Roles, assumptions and who invokes each are in
-[the roster](docs/agents.md).
+is grading), `tyran:retro`. What each one assumes, and who is expected to
+invoke it, is in [skills and agents](docs/skills.md); the tier and effort
+routing behind them is in [the roster](docs/agents.md).
 
 The two standalone protocols exist because the rule alone was not enough —
 `fidelity-gate` had been inlined into three sentences and lost the inventory
@@ -349,6 +350,7 @@ underlying script does.
 — same text, with search, rendered diagrams and per-page status badges.
 
 - 📖 [Getting started](docs/getting-started.md)
+- 🧰 [Skills and agents](docs/skills.md) — all eight skills and four agents, what each assumes, and who invokes it
 - ⚙️ [Configuration](docs/configuration.md) — `.tyran/config.yaml`, cost profiles, autonomy classes
 - 🎭 [The roster and model routing](docs/agents.md) — the four agents, the tier and effort table, dynamic overrides, the `.tyran/STOP` brake (shipped)
 - 🏛️ [Architecture](docs/architecture.md) — the three layers, the journal, the hooks

@@ -351,3 +351,27 @@ also matches `TaskOutput` — whose alias `BashOutputTool` contains `Bash` — a
 cost. Any matcher meant to be exact should be anchored even when it looks like
 a plain list, because one non-alphanumeric character anywhere in it moves the
 whole string into this branch.
+
+## 16. A refused tool call teaches the model the next route (S-E3-5 round 3)
+
+Not a platform fact, but a behavioural one measured on the live product, and
+it changes how a gate has to be scoped.
+
+A `PreToolUse` refusal on `Write` was followed, **in the same turn and with no
+prompting**, by the model offering:
+
+> "Would you like me to: 1. Use Bash (`printf` or `echo`) to write the file
+> instead, which would bypass this guard?"
+
+That route was then measured and it worked, because the command text was pure
+ASCII and the forbidden character only existed after the shell expanded the
+escape (`od -c` showed `363 240 201 201`, UTF-8 for U+E0041).
+
+Two consequences worth carrying into every later gate:
+
+1. **The first thing tried after a refusal is another entrance.** Scoping a
+   gate to one tool is not a partial control; it is an advertisement.
+2. **The text of a command is not the effect of a command.** Any gate reading
+   `Bash` input is reading a program, and a program's output cannot be known
+   without running it. Escape decoding closes the obvious spelling; the class
+   stays open by construction and must be declared, not implied.

@@ -1,8 +1,9 @@
 # The evidence gate
 
-> **Status:** shipped — `hooks/scripts/evidence-gate.mjs`, registered on
-> `SubagentStop`. Read [`docs/hooks.md`](./hooks.md) first for the runtime it
-> sits inside.
+✅ **shipped** · `hooks/scripts/evidence-gate.mjs`, on `SubagentStop`
+
+This gate inherits its runtime from [`hooks.md`](./hooks.md); read that first
+if you have not.
 
 An agent finishes and reports *"tests are green, everything works"*. Under v1
 that went through, because the evidence contract was a sentence in prose and

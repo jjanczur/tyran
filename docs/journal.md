@@ -1,7 +1,9 @@
 # Journal reference
 
-> **Status:** shipped — `scripts/journal.mjs` with 47 unit tests. This file
-> is the schema contract; extending the event set is a reviewed core change.
+✅ **shipped** · `scripts/journal.mjs` · 47 unit tests
+
+This page is the schema contract; extending the event set is a reviewed core
+change.
 
 The journal is the append-only source of truth for an initiative:
 `.tyran/state/<initiative>/journal.jsonl`, one JSON event per line.

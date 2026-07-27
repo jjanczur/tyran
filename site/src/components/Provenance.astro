@@ -1,0 +1,101 @@
+---
+/**
+ * Provenance — what implements this page, and what tests it.
+ *
+ * These facts used to open every page inside an `<Aside>`: a full-width tinted
+ * box with an icon and the heading "Status". Three of them were `type="caution"`
+ * — a warning frame whose content was the word **shipped**. Measured on the
+ * built site at 1280px, the box was the largest and highest-contrast element
+ * below the title on every page, and on `self-improvement` it pushed the first
+ * sentence of actual content past 700px down the page.
+ *
+ * That form was right when the repository was half-built and "what is missing"
+ * was the most useful thing a page could say first. It is wrong now: the most
+ * useful thing a page can say first is the page. A reader who meets a warning
+ * frame before the opening sentence learns to discount warning frames, which
+ * also costs the ONE banner on this site that is genuinely a warning.
+ *
+ * So the facts stay and the alarm goes. This is a metadata strip in the
+ * register of a footnote — secondary text, a hairline, no icon, no fill.
+ *
+ * `<Verdict>` survives inside it deliberately. The state of a capability is a
+ * VALUE in this project, never a sentence, because four prose spellings of
+ * "does this exist yet" is how the answer drifted the first time. Demoting the
+ * banner must not quietly restore prose.
+ *
+ * What does NOT belong here:
+ *   - reading order ("read hooks.md first") — that is the first line of the
+ *     page's own prose, where reading actually starts;
+ *   - a thing that is not built — that belongs at the section it concerns, not
+ *     as a page-wide banner. A page that is 90% shipped must not open with the
+ *     other 10%.
+ */
+import Verdict from './Verdict.astro';
+
+interface Props {
+  /** The machine-readable state. Omit only on a page whose subject has none. */
+  state?: 'shipped' | 'partial' | 'designed' | 'absent';
+  /** Passed through to `<Verdict>`; see its own contract. */
+  label?: string;
+}
+
+const { state, label } = Astro.props;
+---
+
+{/*
+  `div`, not `p`, and the same for the slot wrapper. MDX renders block children
+  into a `<p>`, and a `<p>` inside a `<p>` is not nesting the HTML parser
+  performs — it closes the outer one. Measured on the first build of this
+  component: the badge ended up ABOVE the hairline as its own paragraph and the
+  metadata text below it as a sibling, which read as a broken rule across the
+  page rather than as one line.
+*/}
+<div class="provenance">
+  {state ? <Verdict state={state} label={label} /> : null}
+  <div class="provenance__text"><slot /></div>
+</div>
+
+<style>
+  .provenance {
+    /* Block with INLINE children, not a flex row. As a flex container the
+       badge and the text are two items, so a long fact list cannot share the
+       badge's line — measured on `self-improvement`, whose three paths pushed
+       themselves to a second row and left the badge sitting alone on the
+       first. Inline flow lets the run break wherever it needs to. */
+    display: block;
+    /* Pulled up under the title, and separated from the prose by a hairline
+       rather than by a border of its own: the strip belongs to the heading,
+       not to the first paragraph. */
+    margin: -0.35rem 0 1.6rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--sl-color-hairline);
+    font-size: var(--sl-text-sm);
+    line-height: 1.6;
+    /* Secondary contrast, on purpose. This is metadata; the page is the
+       content. `gray-2` stays comfortably readable on the dark surface while
+       sitting visibly below body text in the hierarchy. */
+    color: var(--sl-color-gray-2);
+  }
+
+  /* The badge is the only element that must not be broken away from what
+     follows it, so it carries its own trailing space rather than relying on
+     the template's whitespace surviving the compiler. */
+  .provenance > :global(.verdict) {
+    margin-inline-end: 0.5em;
+  }
+
+  /* The slot's wrapper and the paragraph MDX puts inside it both join the
+     run. The container's padding already provides the spacing the paragraph
+     margin would otherwise add. */
+  .provenance__text,
+  .provenance__text :global(p) {
+    display: inline;
+    margin: 0;
+  }
+
+  /* Inline code inside a footnote-weight line: the default `--sl-text-code`
+     would render it larger than the sentence around it. */
+  .provenance__text :global(code) {
+    font-size: 0.9em;
+  }
+</style>

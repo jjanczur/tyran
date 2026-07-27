@@ -1,7 +1,7 @@
 # Configuration
 
-> **Status:** shipped. `/tyran:setup` writes this file via
-> `scripts/scan-repo.mjs`, and `scripts/schema.mjs` validates it.
+✅ **shipped** · written by `scripts/scan-repo.mjs` · validated by
+`scripts/schema.mjs`
 
 All per-repo configuration lives in `.tyran/config.yaml` — committed, human
 reviewable, written by `/tyran:setup` and editable by hand.

@@ -1,10 +1,8 @@
 # Getting started
 
-> **Status:** Tyran v2 is under active construction. This page documents what
-> works **today** and clearly marks what is coming. Nothing here is
-> aspirational without a label.
+✅ **shipped** · every command on this page works today
 
-## Install (works today)
+## Install
 
 ```text
 /plugin marketplace add jjanczur/tyran

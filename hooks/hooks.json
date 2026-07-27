@@ -22,6 +22,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "^(Write|Edit|NotebookEdit|Bash|mcp__.*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/write-guard.mjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SubagentStop": [
@@ -31,6 +41,18 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/evidence-gate.mjs\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pre-compact.mjs\"",
             "timeout": 20
           }
         ]

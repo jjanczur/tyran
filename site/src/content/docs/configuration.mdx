@@ -7,8 +7,8 @@ import Verdict from '../../components/Verdict.astro';
 import Limit from '../../components/Limit.astro';
 
 <Aside type="caution" title="Status">
-<Verdict state="designed" /> schema is design-final (see [architecture](../architecture/));
-the setup epic ships the generator. Field names below are the contract.
+<Verdict state="shipped" /> `/tyran:setup` writes this file via `scripts/scan-repo.mjs`,
+and `scripts/schema.mjs` validates it.
 </Aside>
 
 All per-repo configuration lives in `.tyran/config.yaml` — committed, human

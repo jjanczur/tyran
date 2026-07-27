@@ -1,9 +1,10 @@
 # Architecture
 
-> **Status:** this page is the design contract for v2 — schemas and hook
-> behavior are final, but the state layer, hooks, and agents land with their
-> epics (see the [roadmap](../README.md#roadmap)). Today the repo ships the
-> plugin skeleton and CI. Present tense below describes the target design.
+> **Status:** the state layer, the enforcement hooks, the conductor and the
+> agent roster are **shipped and tested**. Rows in the tables below that are
+> still design carry an explicit marker; everything unmarked exists in code
+> with tests behind it. See the [roadmap](../README.md#roadmap) for what is
+> still outstanding.
 
 ## The three layers
 
@@ -23,9 +24,46 @@ Layer 3 — LOCAL EVOLUTION (.claude/skills/tyran-local/ in YOUR repo)
   core and the data layer. Loaded natively by Claude Code.
 ```
 
+```mermaid
+flowchart TB
+    subgraph L1["Layer 1 — CORE (the plugin)"]
+        direction LR
+        C1["skills/ · agents/<br/>hooks/ · scripts/"]
+    end
+    subgraph L2["Layer 2 — REPO DATA (.tyran/, committed)"]
+        direction LR
+        C2["config.yaml · knowledge/*.yaml<br/>policies/*.yaml · state/&lt;initiative&gt;/"]
+    end
+    subgraph L3["Layer 3 — LOCAL EVOLUTION (.claude/skills/tyran-local/)"]
+        direction LR
+        C3["repo-specific skills<br/>agent variants · extra hooks"]
+    end
+
+    UPD(["/plugin update"]) -->|"replaces wholesale"| L1
+    L1 -->|"reads as an override layer"| L2
+    RETRO(["tyran:retro"]) -->|"writes"| L2
+    RETRO -->|"writes"| L3
+    L1 -.->|"never writes"| L2
+    L1 -.->|"never writes"| L3
+
+    classDef core fill:#1f2937,stroke:#d4a017,stroke-width:2px,color:#f9fafb
+    classDef data fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ecfdf5
+    classDef local fill:#3b0764,stroke:#c084fc,stroke-width:2px,color:#faf5ff
+    class C1 core
+    class C2 data
+    class C3 local
+```
+
+**Read the dotted arrows first.** The core never writes into layers 2 and 3,
+which is the entire reason a plugin update cannot destroy what your repo has
+learned: the update replaces layer 1 wholesale, and layer 1 owns nothing your
+repo produced.
+
 After a core update, a delta-review agent compares the new version's
 changelog against layers 2–3 and proposes reconciliation (e.g. "the core
 absorbed a rule your repo learned locally — delete the local duplicate").
+🎯 **Designed, not built** — the layout is real and the layers are separate
+today; the reconciling agent does not exist yet.
 
 ## State: the journal
 
@@ -41,6 +79,34 @@ projections** with a `GENERATED — do not edit` header (see
 crash mid-write can at worst produce one truncated final line, which the
 reader discards. No database, no build step, git-friendly diffs.
 
+An initiative, end to end — every arrow below is an event in that journal:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Op as Operator
+    participant C as Conductor<br/>(/tyran)
+    participant J as journal.jsonl
+    participant A as implementer
+    participant R as reviewer
+
+    Op->>C: describes the work
+    C->>J: init.created · plan.accepted
+    Note over C,J: the plan gate is the last<br/>question until something breaks
+    C->>J: ticket.created ×N
+    C->>A: spawn (worktree + lease)
+    C->>J: spawn · lease.acquired
+    A-->>C: report with RAW command output
+    Note right of A: SubagentStop gate REFUSES<br/>a report with no evidence
+    C->>J: report · lease.released
+    C->>R: spawn (never the author)
+    R-->>C: APPROVE / CHANGES-REQUESTED
+    C->>J: review
+    C->>J: merge
+    Note over C,J: Stop gate REFUSES to end<br/>an initiative with no retrospective
+    C->>J: retro.entry
+```
+
 ## Enforcement: the hooks
 
 | Event | What Tyran does | Blocking |
@@ -49,11 +115,52 @@ reader discards. No database, no build step, git-friendly diffs.
 | `SubagentStop` | evidence gate: implementer/reviewer reports must contain raw command output — otherwise the report is rejected with a reason | **yes** |
 | `PreToolUse` (Bash) | secrets gate: staged diff through gitleaks before commit/push; `--no-verify`, bare force-push blocked | **yes** |
 | `PreToolUse` (Write/Edit/Bash) | policy gate: autonomy classes (P1/P2/P3) and self-improvement path classes (AUTO/GATED/KERNEL) | **yes** |
-| `TaskCompleted` | no completion without a matching evidence event in the journal | **yes** |
-| `SubagentStart` / `PreCompact` | telemetry events; checkpoint archive before compaction | no |
+| `Stop` | retro gate: an initiative whose tickets are all merged and which has no retrospective recorded since the last merge refuses ONE turn | **yes** |
+| `PreCompact` | checkpoint archive before compaction | no |
+| `TaskCompleted` | **🎯 DESIGNED, NOT REGISTERED.** The runtime in `hook-io.mjs` knows the event and would let a gate block on it, but `hooks.json` registers nothing there, so nothing runs. Listed here because the type scaffolding exists and misreads as shipped otherwise. | — |
+
+```mermaid
+flowchart LR
+    subgraph P["Claude Code emits"]
+        E1["SessionStart"]
+        E2["PreToolUse<br/>Bash"]
+        E3["PreToolUse<br/>Write · Edit · MCP"]
+        E4["SubagentStop"]
+        E5["Stop"]
+        E6["PreCompact"]
+    end
+
+    E1 --> H1["session-start<br/>re-inject checkpoint"]
+    E2 --> H2["secrets-gate"]
+    E3 --> H3["write-guard"]
+    E2 & E3 --> H4["policy-gate"]
+    E4 --> H5["evidence-gate"]
+    E5 --> H6["retro-gate"]
+    E6 --> H7["pre-compact<br/>archive checkpoint"]
+
+    H2 --> B{{"BLOCKS"}}
+    H3 --> B
+    H4 --> B
+    H5 --> B
+    H6 --> B
+    H1 --> N{{"reports only"}}
+    H7 --> N
+
+    classDef blocks fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#fef2f2
+    classDef probe fill:#1e3a5f,stroke:#60a5fa,stroke-width:2px,color:#eff6ff
+    class B blocks
+    class N probe
+```
 
 Design rule: **critical gates fail loudly.** If a gate itself breaks, it
 denies with an explanation — it never silently allows.
+
+The exception, stated because it is the one that matters: hooks **fail open**
+at the platform level. A gate whose file is missing or whose matcher can
+never match does not become a weaker check — the action simply proceeds, with
+nothing printed anywhere. That is why `tyran doctor --hooks` exists, and why
+a dead gate and a healthy gate are indistinguishable from inside a session
+without it.
 
 ## Agents
 

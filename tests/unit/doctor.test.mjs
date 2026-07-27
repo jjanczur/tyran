@@ -26,7 +26,13 @@ import {
   SEVERITY_BY_CODE,
   severityFor,
   DEFAULT_STALE_HOURS,
+  runHookChecks,
 } from '../../scripts/doctor.mjs';
+import {
+  DEFAULT_PLUGIN_ROOT,
+  HOOK_SEVERITY_BY_CODE,
+  hookSeverityFor,
+} from '../../scripts/hooks-check.mjs';
 import { append } from '../../scripts/journal.mjs';
 
 const DOCTOR = fileURLToPath(new URL('../../scripts/doctor.mjs', import.meta.url));
@@ -1325,9 +1331,43 @@ test('parseArgs defaults match the documented contract', () => {
     now: null,
     staleHours: DEFAULT_STALE_HOURS,
     dirGiven: false,
+    state: true,
+    hooks: false,
+    // Not a literal: the default is derived from where doctor.mjs sits, so
+    // pinning an absolute path here would pin this machine rather than the
+    // contract.
+    pluginRoot: DEFAULT_PLUGIN_ROOT,
   });
   assert.equal(parseArgs(['--state', '--stale-hours', '0']).staleHours, 0);
   assert.equal(parseArgs(['--state', '--now', '2026-01-01T00:00:00.000Z']).now, '2026-01-01T00:00:00.000Z');
+});
+
+test('a mode is required, and either one satisfies it', () => {
+  // The point of requiring a mode is that a bare `doctor.mjs` never silently
+  // acquires a meaning. Adding --hooks must not have weakened that.
+  assert.throws(() => parseArgs([]));
+  assert.throws(() => parseArgs(['--json']));
+  assert.equal(parseArgs(['--hooks']).hooks, true);
+  assert.equal(parseArgs(['--hooks']).state, false);
+  const both = parseArgs(['--state', '--hooks']);
+  assert.equal(both.state, true);
+  assert.equal(both.hooks, true);
+});
+
+test('no finding code is defined by BOTH severity tables', () => {
+  // Doctor and hooks-check keep separate tables and are never merged. A code
+  // living in both would resolve to whichever table its renderer happened to
+  // consult, which is the silent divergence this repo removes everywhere
+  // else. Cheaper to forbid the collision than to define a winner.
+  const collisions = Object.keys(HOOK_SEVERITY_BY_CODE).filter((code) => code in SEVERITY_BY_CODE);
+  assert.deepEqual(collisions, []);
+});
+
+test('every hook finding code carries a severity, including the built ones', () => {
+  for (const code of Object.keys(HOOK_SEVERITY_BY_CODE)) {
+    assert.ok(SEVERITIES.includes(hookSeverityFor(code)), `${code} has a severity doctor can render`);
+  }
+  assert.throws(() => hookSeverityFor('no-such-code'), /has no severity/);
 });
 
 test('the text report is greppable: every finding shows code, place and fix', () => {

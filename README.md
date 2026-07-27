@@ -142,18 +142,10 @@ Initiative 20  Has written repo-specific skills for your recurring work and
                merged two agents that overlapped. You mostly approve gates.
 ```
 
-> **Status — what is shipped, and what is not.** Built epic by epic, in public.
-> **Shipped and tested:** the plugin skeleton and CI; the `.tyran/` state
-> layer (append-only journal, schema, generated projections, doctor); the
-> enforcement hooks — evidence gate, secrets gate, policy gate, write guard,
-> state re-injection, and a doctor check that catches a gate which cannot
-> fire; the **conductor with its four-agent roster**, config-driven
-> role-to-model-and-effort routing, and the `/tyran:setup`, `/tyran:status`,
-> `/tyran:doctor`, `/tyran:retro` commands; and a `Stop` gate that makes the
-> retrospective fire on its own rather than on someone remembering.
-> **Not built yet:** the update delta-review, cost-profile benchmark
-> receipts, and overnight mode. Every capability ships with tests before it
-> is claimed, and the roadmap below says which is which.
+> **Three things are not built yet:** the update delta-review, cost-profile
+> benchmark receipts, and overnight mode. Everything else on this page exists
+> in code with tests behind it — nothing here is claimed before it ships, and
+> the [roadmap](#roadmap) says which is which.
 
 ## Quick Start
 

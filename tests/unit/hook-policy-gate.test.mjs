@@ -49,6 +49,7 @@ import {
   decidingRule,
   deployVerdict,
   handle,
+  isGoverned,
   isUnsupervised,
   pathTargets,
   protectedGlobFor,
@@ -58,6 +59,7 @@ import {
   repoRootOf,
   safePolicyText,
   secretReadRules,
+  symbolicRef,
   verdictForClass,
 } from '../../hooks/scripts/policy-gate.mjs';
 
@@ -93,6 +95,16 @@ function unadopted() {
   return tempDir('tyran-policy-bare-');
 }
 
+/**
+ * Measured on the live install: `file_path` is ALWAYS ABSOLUTE in a real
+ * payload. The first version of this file drove the matrix with repo-relative
+ * paths — a shape the platform never sends — and mutant M17 (classify against
+ * the default root instead of this call's) survived the whole suite because of
+ * it. `abs()` is applied wherever a matrix row names a path, so the tests bind
+ * to the payload rather than to a convenient spelling of it.
+ */
+const abs = (root, path) => (path.startsWith('/') ? path : join(root, path));
+
 const writeInput = (path, { agentId = null, mode = 'default', tool = 'Write', cwd = undefined } = {}) => ({
   hook_event_name: 'PreToolUse',
   tool_name: tool,
@@ -120,6 +132,11 @@ const bashInput = (command, cwd) => ({
 
 /** Drive the gate the way the runtime does, with an explicit project root. */
 const ask = (input, root) => handle({ input, env: { CLAUDE_PROJECT_DIR: root } });
+
+/** A write of `path` (relative names are made absolute, as the platform does). */
+const askWrite = (root, path, opts) => ask(writeInput(abs(root, path), opts), root);
+/** A read of `path`, same rule. */
+const askRead = (root, path, opts) => ask(readInput(abs(root, path), opts), root);
 
 /** Run the REAL script as the platform runs it, and read the platform payload. */
 function runScript(input, root) {
@@ -152,11 +169,20 @@ const MATRIX = [
   { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny' },
   { cls: 'KERNEL', path: 'hooks/scripts/secrets-gate.mjs', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'KERNEL', path: '.tyran/policies/autonomy.yaml', supervised: 'deny', unsupervised: 'deny' },
-  // The unmatched row. NOT a fall-through: it resolves to the policy's
-  // `default:`, which the validator makes mandatory and the template sets to
-  // GATED, so it behaves exactly like the GATED rows above.
-  { cls: 'default (GATED)', path: 'src/anything/at/all.ts', supervised: 'pass', unsupervised: 'deny' },
-  { cls: 'default (GATED)', path: 'README.md', supervised: 'pass', unsupervised: 'deny' },
+  // The unmatched row, which is TWO rows. Neither is a fall-through.
+  //
+  // Inside the governed namespace — Tyran's own artefacts, which the policy is
+  // meant to enumerate — an unmatched path takes the policy's `default:`,
+  // GATED in the shipped template, and behaves exactly like the GATED rows.
+  { cls: 'default (GATED), governed', path: '.tyran/something-new.yaml', supervised: 'pass', unsupervised: 'deny' },
+  { cls: 'default (GATED), governed', path: '.claude/settings.json', supervised: 'pass', unsupervised: 'deny' },
+  { cls: 'default (GATED), governed', path: 'hooks/notes.md', supervised: 'deny', unsupervised: 'deny' },
+  // Outside it the policy has nothing to say and the gate is silent. Measured
+  // before choosing: with the other reading, 65 of 65 tracked files in this
+  // repository match no rule, so an implementer subagent would be refused on
+  // every write it makes.
+  { cls: 'ungoverned', path: 'src/anything/at/all.ts', supervised: 'pass', unsupervised: 'pass' },
+  { cls: 'ungoverned', path: 'README.md', supervised: 'pass', unsupervised: 'pass' },
 ];
 
 for (const row of MATRIX) {
@@ -165,13 +191,13 @@ for (const row of MATRIX) {
     // verdictForClass (so GATED always denies) turns every `pass` cell here
     // red; hard-coding it to `pass` turns the KERNEL cells red.
     const root = adopted();
-    const got = await ask(writeInput(row.path, { mode: 'default' }), root);
+    const got = await askWrite(root, row.path, { mode: 'default' });
     assert.equal(got === PASS || got.decision === 'pass' ? 'pass' : got.decision, row.supervised);
   });
 
   test(`matrix: ${row.cls} · ${row.path} · subagent -> ${row.unsupervised}`, async () => {
     const root = adopted();
-    const got = await ask(writeInput(row.path, { agentId: 'a1b2c3' }), root);
+    const got = await askWrite(root, row.path, { agentId: 'a1b2c3' });
     assert.equal(got === PASS || got.decision === 'pass' ? 'pass' : got.decision, row.unsupervised);
   });
 
@@ -180,7 +206,7 @@ for (const row of MATRIX) {
     // main loop has no prompt either, so treating actor as the whole story
     // would make the GATED row decorative in the mode agents actually run in.
     const root = adopted();
-    const got = await ask(writeInput(row.path, { mode: 'acceptEdits' }), root);
+    const got = await askWrite(root, row.path, { mode: 'acceptEdits' });
     assert.equal(got === PASS || got.decision === 'pass' ? 'pass' : got.decision, row.unsupervised);
   });
 }
@@ -192,7 +218,7 @@ test('matrix: every write tool travels the same path, not just Write', async () 
   // (ADR-19's opening finding).
   const root = adopted();
   for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Update']) {
-    const got = await ask(writeInput('hooks/x.mjs', { tool, agentId: 'a1' }), root);
+    const got = await askWrite(root, 'hooks/x.mjs', { tool, agentId: 'a1' });
     assert.equal(got.decision, 'deny', `${tool} was not classified`);
   }
   // NotebookEdit names its file differently, and a gate that only knows
@@ -203,7 +229,7 @@ test('matrix: every write tool travels the same path, not just Write', async () 
       tool_name: 'NotebookEdit',
       permission_mode: 'default',
       agent_id: 'a1',
-      tool_input: { notebook_path: 'hooks/analysis.ipynb', new_source: 'x' },
+      tool_input: { notebook_path: join(root, 'hooks/analysis.ipynb'), new_source: 'x' },
     },
     root,
   );
@@ -221,7 +247,7 @@ test('matrix: an UNKNOWN tool that names a path is classified as a write', async
       tool_name: 'mcp__somewhere__put_file',
       permission_mode: 'default',
       agent_id: 'a1',
-      tool_input: { path: 'hooks/scripts/hook-io.mjs' },
+      tool_input: { path: join(root, 'hooks/scripts/hook-io.mjs') },
     },
     root,
   );
@@ -257,11 +283,11 @@ test('matrix: a path OUTSIDE the repository is KERNEL, for both actors', async (
   // never autonomous, and the refusal has to say which case it is.
   const root = adopted();
   for (const mode of [{ mode: 'default' }, { agentId: 'a1' }]) {
-    const got = await ask(writeInput('/etc/hosts', mode), root);
+    const got = await askWrite(root, '/etc/hosts', mode);
     assert.equal(got.decision, 'deny');
     assert.match(got.reason, /outside this repository/);
   }
-  const escape = await ask(writeInput('../sibling-project/src/x.ts', { mode: 'default' }), root);
+  const escape = await ask(writeInput(join(root, '..', 'sibling-project', 'src', 'x.ts'), { mode: 'default' }), root);
   assert.equal(escape.decision, 'deny');
 });
 
@@ -271,7 +297,7 @@ test('matrix: the KERNEL answer does not depend on how the glob is spelled', asy
   // `./` prefix must not either.
   const root = adopted();
   for (const spelling of ['hooks/scripts/x.mjs', './hooks/scripts/x.mjs', 'HOOKS/scripts/x.mjs', 'hooks/a/b/c.yaml']) {
-    const got = await ask(writeInput(spelling, { mode: 'default' }), root);
+    const got = await askWrite(root, spelling, { mode: 'default' });
     assert.equal(got.decision, 'deny', spelling);
   }
 });
@@ -314,7 +340,7 @@ test('ADR-22: a repo with .tyran/ but NO policy file refuses every write', async
   // probe, i.e. treating a deleted policy as "no policy needed". Deleting one
   // file would then disable the boundary, which is the attack ADR-22 names.
   const root = adopted({ policy: null });
-  const got = await ask(writeInput('src/x.ts', { agentId: 'a1' }), root);
+  const got = await askWrite(root, 'src/x.ts', { agentId: 'a1' });
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /no \.tyran\/policies\/autonomy\.yaml/);
   assert.match(got.reason, /restore it from the shipped template/);
@@ -322,7 +348,7 @@ test('ADR-22: a repo with .tyran/ but NO policy file refuses every write', async
 
 test('ADR-22: unparseable YAML refuses, and says how to check it', async () => {
   const root = adopted({ policy: 'default: GATED\nrules:\n  - path: [unclosed\n' });
-  const got = await ask(writeInput('src/x.ts', { mode: 'default' }), root);
+  const got = await askWrite(root, 'src/x.ts', { mode: 'default' });
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /not parseable YAML|not a valid policy/);
   assert.match(got.reason, /schema\.mjs validate policy/);
@@ -335,7 +361,7 @@ test('ADR-22: a policy the VALIDATOR rejects refuses, rather than being used', a
   const root = adopted({
     policy: 'default: AUTO\nrules:\n  - path: hooks/**\n    class: AUTO\n    reason: nope\n',
   });
-  const got = await ask(writeInput('src/x.ts', { mode: 'default' }), root);
+  const got = await askWrite(root, 'src/x.ts', { mode: 'default' });
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /not a valid policy/);
 });
@@ -345,7 +371,7 @@ test('ADR-22: an oversized policy refuses instead of being read', async () => {
   // FIRST, because the platform's timeout kills the process and never reads
   // what it wrote, so a slow synchronous read is an approval.
   const root = adopted({ policy: `default: GATED\nrules: []\n# ${'x'.repeat(MAX_POLICY_BYTES + 10)}\n` });
-  const got = await ask(writeInput('src/x.ts', { mode: 'default' }), root);
+  const got = await askWrite(root, 'src/x.ts', { mode: 'default' });
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /past the 262144 this gate will read/);
 });
@@ -353,7 +379,7 @@ test('ADR-22: an oversized policy refuses instead of being read', async () => {
 test('ADR-22: a directory where the policy file belongs refuses', async () => {
   const root = adopted({ policy: null });
   mkdirSync(join(root, POLICY_PATH), { recursive: true });
-  const got = await ask(writeInput('src/x.ts', { mode: 'default' }), root);
+  const got = await askWrite(root, 'src/x.ts', { mode: 'default' });
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /not a regular file/);
 });
@@ -364,7 +390,7 @@ test('ADR-22: the real script exits 0 and emits a well-formed DENY, not a crash'
   // JSON, hookEventName equal to the event that fired, permissionDecision
   // 'deny'. Mutation killed: any change that makes the gate throw outward.
   const root = adopted();
-  const payload = runScript(writeInput('hooks/scripts/hook-io.mjs', { agentId: 'a1' }), root);
+  const payload = runScript(writeInput(join(root, 'hooks/scripts/hook-io.mjs'), { agentId: 'a1' }), root);
   assert.equal(verdictOf(payload), 'deny');
   assert.equal(payload.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.match(reasonOf(payload), /KERNEL/);
@@ -375,7 +401,7 @@ test('ADR-22: the real script emits SILENCE for a pass, never `allow`', () => {
   // permission prompt. A gate emitting it on "no objection" raises privilege
   // instead of guarding it, in one line nobody would notice in review.
   const root = adopted();
-  const payload = runScript(writeInput('.tyran/knowledge/facts.yaml', { agentId: 'a1' }), root);
+  const payload = runScript(writeInput(join(root, '.tyran/knowledge/facts.yaml'), { agentId: 'a1' }), root);
   assert.deepEqual(payload, {});
   // Mechanical, not aspirational: the string cannot appear in the source.
   const source = readFileSync(SCRIPT, 'utf8');
@@ -390,7 +416,7 @@ test('a repository with no .tyran/ at all is left alone — the declared boundar
   // — refusing every write in every repository that has not adopted Tyran —
   // is a plugin nobody keeps installed, and the detection belongs to doctor.
   const root = unadopted();
-  assert.equal(await ask(writeInput('hooks/scripts/secrets-gate.mjs', { agentId: 'a1' }), root), PASS);
+  assert.equal(await askWrite(root, 'hooks/scripts/secrets-gate.mjs', { agentId: 'a1' }), PASS);
 });
 
 test('the secret READ rule needs no policy at all', async () => {
@@ -653,7 +679,7 @@ test('hygiene: a refusal never reproduces a long opaque run from a path', () => 
   const root = adopted();
   const key = 'A'.repeat(40);
   return handle({
-    input: writeInput(`hooks/backup_${key}.txt`, { agentId: 'a1' }),
+    input: writeInput(join(root, `hooks/backup_${key}.txt`), { agentId: 'a1' }),
     env: { CLAUDE_PROJECT_DIR: root },
   }).then((got) => {
     assert.equal(got.decision, 'deny');
@@ -669,7 +695,7 @@ test('hygiene: every refusal carries a class, a rule and a way out', async () =>
   // matrix rather than for one example.
   const root = adopted();
   for (const row of MATRIX) {
-    const got = await ask(writeInput(row.path, { agentId: 'a1' }), root);
+    const got = await askWrite(root, row.path, { agentId: 'a1' });
     if (got === PASS || got.decision !== 'deny') continue;
     assert.match(got.reason, /class: /, row.path);
     assert.match(got.reason, /rule: /, row.path);
@@ -682,7 +708,7 @@ test('hygiene: the KERNEL way out does not pretend reclassification is available
   // policy that downgrades a protected path, so telling an agent to edit the
   // policy would send it into a refusal loop.
   const root = adopted();
-  return ask(writeInput('hooks/scripts/x.mjs', { agentId: 'a1' }), root).then((got) => {
+  return askWrite(root, 'hooks/scripts/x.mjs', { agentId: 'a1' }).then((got) => {
     assert.match(got.reason, /a human edits this by hand/);
     assert.match(got.reason, /Reclassifying it is not available/);
   });
@@ -761,7 +787,7 @@ test('read: a credential-shaped path is refused for BOTH actors', async () => {
   // MAIN loop.
   const root = adopted();
   for (const actor of [{ mode: 'default' }, { agentId: 'a1' }, { mode: 'bypassPermissions' }]) {
-    const got = await ask(readInput('/Users/x/other/.env', actor), root);
+    const got = await askRead(root, '/Users/x/other/.env', actor);
     assert.equal(got.decision, 'deny', JSON.stringify(actor));
     assert.match(got.reason, /dotenv/);
   }
@@ -776,7 +802,7 @@ test('read: the shapes the rule covers, and the ones it deliberately does not', 
     '/Users/x/.gnupg/secring.gpg', '/Users/x/.config/gcloud/credentials.db',
   ];
   for (const path of refused) {
-    const got = await ask(readInput(path), root);
+    const got = await askRead(root, path);
     assert.equal(got.decision, 'deny', path);
   }
   // Allowed on purpose: the checked-in samples are how a repo TELLS an agent
@@ -784,7 +810,7 @@ test('read: the shapes the rule covers, and the ones it deliberately does not', 
   // most common legitimate read of a file named like this.
   const allowed = ['.env.example', '.env.sample', '.env.template', 'README.md', 'src/env.ts', 'public.pem.md'];
   for (const path of allowed) {
-    assert.equal(await ask(readInput(path), root), PASS, path);
+    assert.equal(await askRead(root, path), PASS, path);
   }
 });
 
@@ -792,7 +818,7 @@ test('read: Grep reaches file CONTENT, so it travels the read rule too', async (
   // Not symmetry: with `output_mode: "content"` Grep prints matching lines,
   // which is a read by any measure. Mutation killed: `READ_TOOLS = ["Read"]`.
   const root = adopted();
-  const got = await ask(readInput('/Users/x/other/.env', { tool: 'Grep' }), root);
+  const got = await askRead(root, '/Users/x/other/.env', { tool: 'Grep' });
   assert.equal(got.decision, 'deny');
 });
 
@@ -807,10 +833,30 @@ test('read: an explicit AUTO rule is the operator escape hatch, and only that', 
         'rules:\n  - path: fixtures/.env.fake\n    class: AUTO\n    reason: a fixture, not a credential\n',
       ),
   });
-  assert.equal(await ask(readInput('fixtures/.env.fake'), root), PASS);
+  assert.equal(await askRead(root, 'fixtures/.env.fake'), PASS);
   // and nothing else moved
-  const other = await ask(readInput('.env'), root);
+  const other = await askRead(root, '.env');
   assert.equal(other.decision, 'deny');
+});
+
+test('read: only an AUTO rule exempts — any OTHER rule must not', async () => {
+  // Mutant M30 survived round two here: the exemption tested that an AUTO rule
+  // opens the path and never that a non-AUTO one does not, so
+  // `decidingRule(...) !== null` passed the whole suite. That mutation INVERTS
+  // the feature — a rule written to make a credential file stricter would
+  // instead be the thing that unlocks reading it, which is the worst possible
+  // direction for a rule an operator wrote to protect something.
+  for (const cls of ['GATED', 'KERNEL']) {
+    const root = adopted({
+      policy: TEMPLATE.replace(
+        'rules:',
+        `rules:\n  - path: fixtures/.env.fake\n    class: ${cls}\n    reason: still a credential\n`,
+      ),
+    });
+    const got = await askRead(root, 'fixtures/.env.fake');
+    assert.equal(got.decision, 'deny', cls);
+    assert.match(got.reason, /credential-shaped/);
+  }
 });
 
 test('read: a broken policy does not disable the read rule', async () => {
@@ -818,7 +864,7 @@ test('read: a broken policy does not disable the read rule', async () => {
   // path. A corrupt policy would then turn the credential guard OFF, which is
   // precisely the "break it to bypass it" shape ADR-22 exists for.
   const root = adopted({ policy: 'this: [is not: valid' });
-  const got = await ask(readInput('.env'), root);
+  const got = await askRead(root, '.env');
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /credential-shaped/);
 });
@@ -828,7 +874,7 @@ test('read: the refusal states its own limit rather than implying completeness',
   // limit, because the reader stops checking. Same rule as the secrets gate's
   // "what this refusal does NOT contain".
   const root = adopted();
-  return ask(readInput('.env'), root).then((got) => {
+  return askRead(root, '.env').then((got) => {
     assert.match(got.reason, /denylist of path shapes and is therefore incomplete/);
   });
 });
@@ -838,7 +884,7 @@ test('read: an ORDINARY read is not slowed down or refused', async () => {
   // common case has to be a pass.
   const root = adopted();
   for (const path of ['src/index.ts', 'hooks/scripts/hook-io.mjs', '.tyran/policies/autonomy.yaml']) {
-    assert.equal(await ask(readInput(path), root), PASS, path);
+    assert.equal(await askRead(root, path), PASS, path);
   }
 });
 
@@ -859,7 +905,7 @@ test('BOUNDARY (declared, not closed): Bash writes are NOT path-classified', asy
     assert.equal(await ask(bashInput(command, dir), dir), PASS, command);
   }
   const refusal = await handle({
-    input: writeInput('.tyran/config.yaml', { agentId: 'a1' }),
+    input: writeInput(join(dir, '.tyran/config.yaml'), { agentId: 'a1' }),
     env: { CLAUDE_PROJECT_DIR: dir },
   });
   assert.match(refusal.reason, /through `Bash` is outside what this gate checks/);
@@ -946,4 +992,173 @@ test('the registered timeout leaves the internal deadline room to refuse first',
 test('the branch-name lists are disjoint, or a branch would have two scopes', () => {
   const overlap = PRODUCTION_BRANCHES.filter((b) => SHARED_BRANCHES.includes(b));
   assert.deepEqual(overlap, []);
+});
+
+// ============================== 8. THE FOUR MUTANTS THAT SURVIVED ROUND ONE
+//
+// Each of these exists because a mutation ran the whole suite green. ADR-20
+// correction 1 forbids calling that "equivalent" without answering which of
+// three things it is, and three of the four turned out to be findings.
+
+test('M11: an INHERITED path field is not a path (the guard, at its source)', () => {
+  // Category 2 — redundancy of defence. `toolInput[key]` and
+  // `field(toolInput, key)` agree for every input JSON.parse can produce,
+  // because none of PATH_FIELDS names a member of Object.prototype. That is a
+  // property of today's field list, not of the code, so the guard is asserted
+  // where it lives instead of being trusted to stay unobservable.
+  const inherited = Object.create({ file_path: '/etc/hosts', path: '/etc/shadow' });
+  assert.deepEqual(pathTargets(inherited), []);
+  const own = Object.create({ file_path: '/etc/hosts' });
+  own.notebook_path = '/repo/a.ipynb';
+  assert.deepEqual(pathTargets(own), ['/repo/a.ipynb']);
+});
+
+test('M17: an ABSOLUTE path is classified against THIS call\'s root', async () => {
+  // Category 3 — the test measured the wrong thing. Measured on the live
+  // install, `file_path` is always absolute; the matrix was written with
+  // relative paths, so classifying against the process default agreed with
+  // classifying against the session root in every single case.
+  const root = adopted();
+  // AUTO through an absolute path: the mutant answers KERNEL here, because
+  // resolving against the wrong root makes an in-repo file look outside.
+  assert.equal(await ask(writeInput(join(root, '.tyran/knowledge/a.yaml'), { agentId: 'a1' }), root), PASS);
+  // and the class still comes from the policy, not from the path being long
+  const denied = await ask(writeInput(join(root, '.tyran/config.yaml'), { agentId: 'a1' }), root);
+  assert.equal(denied.decision, 'deny');
+});
+
+test('M31: two spellings of one directory resolve to ONE class', async () => {
+  // The reason `repoRelative` canonicalizes both sides rather than trusting
+  // the strings. On macOS `/tmp` and `/var` are symlinks, so a project root
+  // and a `file_path` routinely name the same directory two ways — and
+  // "outside the repository, class KERNEL" for an ordinary source file is a
+  // refusal on the commonest write there is.
+  const root = adopted();
+  const viaLink = tempDir('tyran-policy-link-');
+  const link = join(viaLink, 'root');
+  execFileSync('ln', ['-s', root, link]);
+  // Same file, named through the symlink; the root is named directly.
+  assert.equal(await ask(writeInput(join(link, '.tyran/knowledge/a.yaml'), { agentId: 'a1' }), root), PASS);
+  // And the reverse direction: a symlink OUT of the repo is still outside it.
+  const outside = tempDir('tyran-policy-outside-');
+  execFileSync('ln', ['-s', outside, join(root, 'escape')]);
+  const got = await ask(writeInput(join(root, 'escape/x.ts'), { mode: 'default' }), root);
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /outside this repository/);
+});
+
+test('M20: with two matching rules, the refusal names the one that DECIDED', () => {
+  // Category 3 again. The round-one corpus had no path matched by two rules of
+  // different specificity, so "first match" and "most specific match" agreed
+  // everywhere and the quoted rule could have been the wrong one in exactly
+  // the case where a reader needs it to be right.
+  const policy = {
+    default: 'GATED',
+    rules: [
+      { path: 'src/**', class: 'GATED', reason: 'x' },
+      { path: 'src/generated/**', class: 'AUTO', reason: 'x' },
+      { path: 'docs/**', class: 'AUTO', reason: 'x' },
+      { path: 'docs/adr/**', class: 'GATED', reason: 'x' },
+      { path: 'hooks/**', class: 'KERNEL', reason: 'x' },
+      { path: '.tyran/policies/**', class: 'KERNEL', reason: 'x' },
+    ],
+  };
+  for (const [path, cls, glob] of [
+    ['src/generated/api.ts', 'AUTO', 'src/generated/**'],
+    ['src/hand/written.ts', 'GATED', 'src/**'],
+    ['docs/adr/001.md', 'GATED', 'docs/adr/**'],
+    ['docs/readme.md', 'AUTO', 'docs/**'],
+  ]) {
+    assert.equal(classifyPath(policy, path), cls, path);
+    assert.equal(decidingRule(policy, path).path, glob, path);
+    assert.match(quoteRule(policy, path, cls), new RegExp(`path: ${glob.replace(/\*/g, '\\*')}`), path);
+  }
+});
+
+test('M24: symbolicRef treats a child that never ran as no answer', async () => {
+  // Category 1/2 boundary, and worth being precise about. Dropping the
+  // `spawned`/`timedOut` checks is unobservable ONLY because `runChild` never
+  // returns `code === 0` alongside them — i.e. the guarantee rests on another
+  // module's contract, not on this one. Asserted here at the source so it
+  // rests on a test instead.
+  const cases = [
+    [{ spawned: false, error: new Error('ENOENT'), code: 0, stdout: 'main' }, 'git could not start'],
+    [{ spawned: true, timedOut: true, code: 0, stdout: 'main' }, 'git was killed'],
+    [{ spawned: true, timedOut: false, code: 0, stdout: '' }, 'git said nothing'],
+  ];
+  for (const [result, why] of cases) {
+    assert.equal(await symbolicRef('/x', 'HEAD', { runner: async () => result, timeoutMs: 100 }), null, why);
+  }
+  assert.equal(
+    await symbolicRef('/x', 'HEAD', {
+      runner: async () => ({ spawned: true, timedOut: false, code: 0, stdout: 'main\n' }),
+      timeoutMs: 100,
+    }),
+    'main',
+  );
+  // A spent budget asks nothing at all rather than passing a zero timeout down.
+  let called = false;
+  assert.equal(
+    await symbolicRef('/x', 'HEAD', { runner: async () => ((called = true), {}), timeoutMs: 0 }),
+    null,
+  );
+  assert.equal(called, false);
+});
+
+// ============================ 9. THE GOVERNED NAMESPACE (corrected premise)
+
+test('governed: an EXPLICIT rule still reaches outside the namespace', async () => {
+  // The correction narrows the DEFAULT, not the rules. A user who wants their
+  // source tree gated writes the rule and gets exactly that — otherwise the
+  // narrowing would be a cap on what the policy can express, which is a
+  // different and much worse change.
+  const root = adopted({
+    policy: TEMPLATE.replace('rules:', 'rules:\n  - path: src/**\n    class: KERNEL\n    reason: generated, do not touch\n'),
+  });
+  const got = await askWrite(root, 'src/generated/api.ts', { agentId: 'a1' });
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /path: src\/\*\*/);
+  // and a sibling the rule does not name is still silence
+  assert.equal(await askWrite(root, 'lib/other.ts', { agentId: 'a1' }), PASS);
+});
+
+test('governed: the namespace boundary is where the decision changes, not the class', async () => {
+  // Mutation killed: dropping `!isGoverned(normalized)` from the skip, which
+  // restores the "refuse every write in the repository" behaviour that the
+  // 65-of-65 measurement rejected; and dropping the `decidingRule === null`
+  // half, which would silence paths an explicit rule DOES name.
+  const root = adopted();
+  for (const [path, want] of [
+    ['.tyran/anything.yaml', 'deny'],
+    ['.claude/anything.json', 'deny'],
+    ['hooks/anything.md', 'deny'],
+    ['.tyranosaurus/anything', 'pass'],
+    ['src/.tyran-lookalike/x', 'pass'],
+    ['docs/x.md', 'pass'],
+    ['package.json', 'pass'],
+  ]) {
+    const got = await askWrite(root, path, { agentId: 'a1' });
+    assert.equal(got === PASS ? 'pass' : got.decision, want, path);
+  }
+});
+
+test('governed: casing cannot pick the weaker answer', () => {
+  // Same reasoning as globMatches in schema.mjs: on macOS and Windows
+  // `.TYRAN/x` and `.tyran/x` are one file.
+  for (const path of ['.tyran/x', '.TYRAN/x', '.Tyran/policies/x', 'HOOKS/x', '.claude/x', '.tyran', 'hooks']) {
+    assert.equal(isGoverned(path), true, path);
+  }
+  for (const path of ['src/x', 'tyran/x', '.tyranosaurus/x', 'a/.tyran/x', '', 'README.md']) {
+    assert.equal(isGoverned(path), false, path);
+  }
+});
+
+test('governed: the outside-the-repo answer is NOT affected by the narrowing', async () => {
+  // The one case where "the policy has nothing to say" must not mean silence.
+  const root = adopted();
+  const got = await askWrite(root, '/etc/hosts', { agentId: 'a1' });
+  assert.equal(got.decision, 'deny');
+  // and the refusal names the right authority — the branch that `normalized ??
+  // ''` made unreachable until the sink audit found it.
+  assert.match(got.reason, /outside this repository, which is never autonomous/);
 });

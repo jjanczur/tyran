@@ -415,3 +415,26 @@ matches, and the state goes back into the fresh context.
 through top-level `decision` + `reason`; emitting `hookSpecificOutput` there
 fails the platform's schema, discards the whole output, and turns the refusal
 into an approval.
+
+## What hooks may write to the journal, and why it is only two event types
+
+A hook writes `checkpoint` (pre-compact) and `gate` (evidence gate). It does
+**not** write `spawn` or `report`, and that boundary is deliberate rather than
+unfinished.
+
+`spawn` and `report` are the two halves of one pairing rule (ADR-18), and their
+only correlator is the agent NAME the conductor chose when it spawned the
+agent. A hook does not have that name and cannot invent it: the platform gives
+it `agent_id` (a UUID) and `agent_type`. Measured both ways on a real journal:
+
+- a hook writing only `spawn` leaves it open forever, because the conductor's
+  `report` closes a differently-named spawn — doctor then reports
+  `spawn-stale` for every agent that has ever run;
+- a hook writing `spawn` **and** `report` pairs cleanly and makes the
+  projection list every agent twice, once as `impl-1` and once as
+  `agent_01H9XYZ`.
+
+So spawn/report pairing belongs to the conductor's bookkeeping, and hooks
+record only event types that carry no pairing semantics. The same conclusion
+was reached independently while building the evidence gate; it is written here
+so it stops being rediscovered, which is how a rule acquires a fourth spelling.

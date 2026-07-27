@@ -181,6 +181,20 @@ export const TOOL_ALIASES = Object.freeze(
     KillShell: 'TaskStop',
     AgentOutputTool: 'TaskOutput',
     BashOutputTool: 'TaskOutput',
+    // The fifth entry, missed on the first pass and caught in review. The
+    // table is built as
+    //     { Task: …, KillShell: …, AgentOutputTool: …, BashOutputTool: …,
+    //       ...(BRIEF_TOOL_NAME ? { Brief: BRIEF_TOOL_NAME } : {}) }
+    // and BRIEF_TOOL_NAME is an imported constant equal to "SendUserMessage",
+    // never a runtime flag — so the spread is ALWAYS active and the table
+    // always has five entries.
+    //
+    // Worth stating why a missing row mattered rather than just fixing it: a
+    // matcher of "Brief" fires on the live platform, and this check called it
+    // dead. A LIVE gate reported as dead is the direction this module's own
+    // header calls inadmissible, and it happened in the one file whose entire
+    // value is fidelity of transcription.
+    Brief: 'SendUserMessage',
   }),
 );
 
@@ -331,8 +345,14 @@ export const HOOK_SEVERITY_BY_CODE = Object.freeze(
     'hook-interpreter-absent': 'error',
     'hook-type-unchecked': 'info',
     'hook-duplicate-command': 'warning',
+    // keys on the ENTRY that disarm a gate while everything else looks right
+    'hook-async-on-gate': 'error',
+    'hook-once-on-gate': 'error',
+    'hook-conditional-gate': 'error',
+    'hook-foreign-shell': 'error',
     // the timeout
     'hook-no-timeout': 'warning',
+    'hook-timeout-implausible': 'warning',
     // the matcher
     'matcher-invalid-regex': 'error',
     'matcher-comma-separated': 'error',
@@ -361,6 +381,144 @@ export function hookSeverityFor(code) {
 
 function finding(code, where, message, fix = null) {
   return { severity: hookSeverityFor(code), code, where, message, fix };
+}
+
+// ------------------------------------------------- keys on the hook entry
+
+/**
+ * Events on which a hook is a GATE — i.e. the platform will read a refusal
+ * from it. Kept here rather than imported from `hook-io.EVENTS` on purpose:
+ * this module is the one that models the PLATFORM, and `hook-io` models what
+ * OUR runtime is willing to answer. They agree today and a test asserts it,
+ * but they are answers to different questions and merging them would make the
+ * next disagreement invisible.
+ */
+export const BLOCKING_EVENTS = Object.freeze([
+  'PreToolUse',
+  'UserPromptSubmit',
+  'Stop',
+  'SubagentStop',
+  'PreCompact',
+  'TaskCreated',
+  'TaskCompleted',
+  'TeammateIdle',
+  'PermissionRequest',
+  'ConfigChange',
+  'PostToolBatch',
+]);
+
+/** The platform's default `shell` for a command hook. */
+export const DEFAULT_SHELL = 'bash';
+
+/**
+ * The largest `timeout` that can plausibly be a number of SECONDS.
+ *
+ * The platform's own default is 600 and the field is documented as seconds.
+ * A value above that is almost always a millisecond figure pasted into a
+ * seconds field — `10000` reads as ten seconds to the author and buys the
+ * hook two hours and 46 minutes, during which a hung gate holds the tool call.
+ */
+export const MAX_PLAUSIBLE_TIMEOUT_S = 600;
+
+/**
+ * Keys on a hook ENTRY that turn a gate into decoration.
+ *
+ * This is the fifth failure variant, and it is the worst of them, because
+ * every earlier check passes: the file exists, is executable, has a shebang,
+ * the matcher is correct and the event is real. Measured live by review, same
+ * payload, one key changed:
+ *
+ *     bare entry              -> refused, the file was never written
+ *     + "async": true         -> PASSED, raw TAG characters landed on disk
+ *     + "if": "Bash(git *)"   -> PASSED
+ *     + "shell": "powershell" -> PASSED
+ *
+ * and in every case a logger on the same matcher fired normally, so dispatch
+ * and matching were both working. `doctor --hooks` printed `healthy`.
+ *
+ * That is a false guarantee produced by the tool built to detect false
+ * guarantees, so these are ERRORS rather than warnings — with one shared
+ * justification, taken from the schema's own descriptions:
+ *
+ *  - `async` / `asyncRewake`: "hook runs in background without blocking".
+ *    A backgrounded hook has no channel to return a decision through. The
+ *    gate cannot refuse. There is no severity below error for that.
+ *  - `once`: "hook runs once and is removed after execution". A gate that
+ *    guards the first write and nothing after it is worse than no gate,
+ *    because the first run is the one people test with.
+ *  - `shell`: the command is handed to a different interpreter than the one
+ *    it was written for; our hooks are `#!`-dispatched POSIX invocations and
+ *    the failure under pwsh is the silent 127 kind.
+ *  - `if`: the condition is a language this check does not evaluate, so the
+ *    gate's coverage is UNKNOWN. Unknown coverage on a control is treated as
+ *    failure everywhere else in this repository — the secrets gate refuses
+ *    rather than scanning a prefix — and this is the same call.
+ *
+ * On a NON-blocking event none of these is an error: a probe that runs in the
+ * background, once, or conditionally is a legitimate design. The severity is
+ * a property of the pair (key, event), which is why this takes the event.
+ */
+export function entryKeyFindings(event, hook, where) {
+  const findings = [];
+  if (!BLOCKING_EVENTS.includes(event)) return findings;
+
+  if (hook.async === true || hook.asyncRewake === true) {
+    const key = hook.async === true ? 'async' : 'asyncRewake';
+    findings.push(
+      finding(
+        'hook-async-on-gate',
+        where,
+        `"${key}": true on ${q(event)}, which is an event the platform reads a REFUSAL from. The schema ` +
+          'describes the key as "hook runs in background without blocking" (asyncRewake implies async), and ' +
+          'a backgrounded hook has no channel to return a decision — measured live: the identical gate ' +
+          'refused without this key and PASSED with it, writing the payload to disk. Every other check ' +
+          'here still passes, which is what makes this the dangerous one.',
+        `remove "${key}" from this entry, or move the hook to a non-blocking event`,
+      ),
+    );
+  }
+  if (hook.once === true) {
+    findings.push(
+      finding(
+        'hook-once-on-gate',
+        where,
+        `"once": true on ${q(event)}. The schema describes it as "hook runs once and is removed after ` +
+          'execution", so this gate guards the first occurrence and nothing after it — and the first ' +
+          'occurrence is the one anybody testing the installation will use.',
+        'remove "once" from this entry',
+      ),
+    );
+  }
+  if (hook.if !== undefined && hook.if !== null && hook.if !== '') {
+    findings.push(
+      finding(
+        'hook-conditional-gate',
+        where,
+        `"if": ${JSON.stringify(q(String(hook.if)))} on ${q(event)}. The condition is evaluated by the ` +
+          'platform in a language this check does not interpret, so what this gate actually covers is ' +
+          'UNKNOWN — it is narrower than its matcher claims by an unknown amount. Measured live: a gate ' +
+          'whose matcher covered the call PASSED the payload because the condition did not match. Unknown ' +
+          'coverage on a control is treated as failure everywhere else here (the secrets gate refuses ' +
+          'rather than scanning a prefix); this is the same call.',
+        'drop the condition and narrow inside the hook, where the reasoning is testable',
+      ),
+    );
+  }
+  if (hook.shell !== undefined && hook.shell !== DEFAULT_SHELL) {
+    findings.push(
+      finding(
+        'hook-foreign-shell',
+        where,
+        `"shell": ${JSON.stringify(q(String(hook.shell)))} on ${q(event)}. The command is handed to an ` +
+          `interpreter other than the default ${DEFAULT_SHELL}, and these hooks are POSIX invocations ` +
+          'dispatched through a shebang. Measured live: the gate PASSED the payload under pwsh, in the ' +
+          'silent way — the interpreter fails, the platform records a non-blocking error, the action ' +
+          'proceeds.',
+        `remove "shell", or provide a command the named interpreter can run`,
+      ),
+    );
+  }
+  return findings;
 }
 
 // -------------------------------------------------------------- the command
@@ -521,11 +679,21 @@ function checkHookFile(path, where, { env }) {
     return findings;
   }
 
-  let executable = true;
-  try {
-    accessSync(path, constants.X_OK);
-  } catch {
-    executable = false;
+  // TWO tests, and the mode bits come first deliberately. `accessSync(X_OK)`
+  // answers "may THIS process execute it", which depends on who is running —
+  // and under uid 0 in a container the answer can be yes for a file the shell
+  // still cannot dispatch. The mode bits answer "is this file executable at
+  // all", which is the property the platform's `shell: true` spawn depends on
+  // and is the same on every machine. Raised in review as a CI hazard that
+  // would have disarmed the mutant for this guard; measuring the bits removes
+  // the dependency instead of hoping about the runner.
+  let executable = (stat.mode & 0o111) !== 0;
+  if (executable) {
+    try {
+      accessSync(path, constants.X_OK);
+    } catch {
+      executable = false;
+    }
   }
   if (!executable) {
     findings.push(
@@ -585,7 +753,7 @@ function checkHookFile(path, where, { env }) {
  * difference between an error and a warning here, and it is why the two are
  * separate finding codes rather than one code with a variable severity.
  */
-export function analyzeMatcher(event, matcher, where, { subjects, closed }) {
+export function analyzeMatcher(event, matcher, where, { subjects, closed, namespace = null }) {
   const findings = [];
   const hasQuery = Object.hasOwn(MATCH_QUERY_FIELD, event);
 
@@ -698,6 +866,32 @@ export function analyzeMatcher(event, matcher, where, { subjects, closed }) {
           : `anchor it: "^${q(matcher)}$"`,
       ),
     );
+  }
+
+  // The namespace check, which this module's header promised and the first
+  // pass never emitted — a declared severity with no code behind it is a line
+  // no mutant can kill, i.e. exactly the decoration this file exists to find.
+  //
+  // Measured: an agent's `agent_type` is `<name from plugin.json>:<agent>`,
+  // and the namespace comes from the MANIFEST, not the install directory. So
+  // renaming the plugin silently disarms every matcher that spells the old
+  // name, and nothing else in the system notices.
+  if (namespace !== null && (event === 'SubagentStart' || event === 'SubagentStop')) {
+    for (const [, spelled] of matcher.matchAll(/([A-Za-z0-9_-]+):/g)) {
+      if (spelled === namespace) continue;
+      findings.push(
+        finding(
+          'hook-namespace-drift',
+          where,
+          `matcher "${q(matcher)}" spells the namespace "${q(spelled)}:", but this plugin's manifest says ` +
+            `its name is "${q(namespace)}" — so its agents present as "${q(namespace)}:<agent>". A plugin ` +
+            'rename changes every agent_type at once and leaves the matchers behind; the hook then never ' +
+            'fires and nothing reports it.',
+          `spell it "${q(namespace)}:", or change "name" in .claude-plugin/plugin.json back`,
+        ),
+      );
+      break;
+    }
   }
 
   if (subjects.length === 0) return findings;
@@ -924,6 +1118,7 @@ export function checkHooks({ root = DEFAULT_PLUGIN_ROOT, env = process.env } = {
       continue;
     }
     const { subjects, closed } = subjectsFor(event, pluginRoot);
+    const namespace = readPluginName(pluginRoot);
     const seenCommands = new Map();
 
     groups.forEach((group, gi) => {
@@ -932,7 +1127,7 @@ export function checkHooks({ root = DEFAULT_PLUGIN_ROOT, env = process.env } = {
         findings.push(finding('hook-entry-malformed', at, 'a matcher group must be an object with a "hooks" array'));
         return;
       }
-      findings.push(...analyzeMatcher(event, group.matcher, at, { subjects, closed }));
+      findings.push(...analyzeMatcher(event, group.matcher, at, { subjects, closed, namespace }));
 
       group.hooks.forEach((hook, hi) => {
         const where = `${at}.hooks[${hi}]`;
@@ -967,7 +1162,24 @@ export function checkHooks({ root = DEFAULT_PLUGIN_ROOT, env = process.env } = {
               'add "timeout": <seconds>, larger than the gate\'s own deadline and far below 600',
             ),
           );
+        } else if (typeof hook.timeout === 'number' && hook.timeout > MAX_PLAUSIBLE_TIMEOUT_S) {
+          // Checking only for ABSENCE was the gap: a present-but-nonsensical
+          // value passed silently, and the commonest nonsense is a
+          // milliseconds figure in a field documented as seconds.
+          const days = (hook.timeout / 86400).toFixed(1);
+          findings.push(
+            finding(
+              'hook-timeout-implausible',
+              where,
+              `"timeout": ${hook.timeout} is in SECONDS — that is ${days} day(s). The platform's own ` +
+                `default is ${MAX_PLAUSIBLE_TIMEOUT_S} s, so a value above it is almost always a ` +
+                'millisecond figure pasted into a seconds field. Until the hook exits, the tool call it ' +
+                'guards is held.',
+              `set "timeout" to the number of SECONDS this hook may take (e.g. ${Math.max(1, Math.round(hook.timeout / 1000))})`,
+            ),
+          );
         }
+        findings.push(...entryKeyFindings(event, hook, where));
 
         const previous = seenCommands.get(hook.command);
         if (previous !== undefined) {

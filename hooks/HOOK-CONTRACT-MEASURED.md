@@ -294,3 +294,60 @@ check report a live gate as dead, so both directions are pinned by a test.
 Two entries carrying the identical command string on one event run **once** —
 including the second entry's matcher, which is what usually makes this a
 mistake rather than a harmless redundancy.
+
+## 13. Keys on a hook ENTRY that disarm a gate (S-E3-5 round 2)
+
+The entry schema, transcribed:
+
+```
+h.object({
+  type: h.literal("command"),
+  command: h.string(),
+  if: <condition>,
+  shell: h.enum(["bash","powershell"]).optional(),   // default bash
+  timeout: h.number().positive().optional(),          // SECONDS
+  statusMessage: h.string().optional(),
+  once: h.boolean().optional(),        // "runs once and is removed after execution"
+  async: h.boolean().optional(),       // "runs in background without blocking"
+  asyncRewake: h.boolean().optional(), // "…wakes the model on exit code 2. Implies async."
+  rewakeMessage: h.string().min(1).optional(),
+})
+```
+
+Verified live, same payload, one key changed each time, on a BLOCKING event:
+
+| entry | result |
+|---|---|
+| bare | refused; the file was never written |
+| `+ "async": true` | **passed** — raw TAG characters landed on disk |
+| `+ "if": "Bash(git *)"` | **passed** |
+| `+ "shell": "powershell"` | **passed** |
+
+In every case a logger registered on the same matcher fired normally, so this
+is neither a matcher nor a dispatch failure — it is the entry. Every other
+liveness property (file present, executable, shebang, matcher correct, event
+real) still holds, which is what makes this the hardest variant to see.
+
+## 14. Correction to §11 — the alias table has FIVE rows, not four
+
+```
+{ Task: "Agent", KillShell: "TaskStop", AgentOutputTool: "TaskOutput",
+  BashOutputTool: "TaskOutput", ...(BRIEF_TOOL_NAME ? { Brief: BRIEF_TOOL_NAME } : {}) }
+```
+
+`BRIEF_TOOL_NAME` is an imported constant equal to `"SendUserMessage"`, not a
+runtime flag, so the spread is always active. The first transcription dropped
+the row, and the consequence ran in the dangerous direction: a matcher of
+`Brief` fires on the live platform while a check built on the four-row table
+called it dead. **A live gate reported as dead** — in a file whose only value
+is fidelity.
+
+## 15. The regex branch retries against the query's ALIASES, and it widens matchers
+
+Because of the `for (const alias of aliasesOf(query))` retry, an UNANCHORED
+alternation matches more than it reads as. Measured: `Write|Edit|NotebookEdit|Bash|mcp__.*`
+also matches `TaskOutput` — whose alias `BashOutputTool` contains `Bash` — and
+`WriteSomething`. Anchoring the whole alternation, `^(…)$`, removes both at no
+cost. Any matcher meant to be exact should be anchored even when it looks like
+a plain list, because one non-alphanumeric character anywhere in it moves the
+whole string into this branch.

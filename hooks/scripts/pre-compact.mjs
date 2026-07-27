@@ -57,7 +57,7 @@
  * no `hookSpecificOutput` appears on the wire.
  */
 import { realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { append } from '../../scripts/journal.mjs';
@@ -150,6 +150,12 @@ export function decide(input, { locate = locateJournal, write = append, warn = (
     return PASS;
   } catch (err) {
     const detail = String(err?.message ?? err);
+    // Contention and damage need OPPOSITE advice, and telling a user to
+    // validate a healthy journal is a false remedy — the failure class this
+    // project calls "a refusal with no reachable way forward". journal.mjs
+    // throws a distinct message when the cross-process mutex times out, which
+    // means another writer holds it right now and the file itself is fine.
+    const contended = /journal lock timeout/.test(detail);
     if (!isManual(trigger)) {
       // Never refuse an automatic compaction — see reason 2 in the header.
       // Loud on stderr, which reaches the transcript, instead of silent.
@@ -167,10 +173,12 @@ export function decide(input, { locate = locateJournal, write = append, warn = (
         'tyran pre-compact: refusing this /compact because the checkpoint could not be written ' +
         `(${detail}).\n\n` +
         'Compacting now would discard the part of this session that is not in the journal, and ' +
-        'nothing would say that it happened. You asked for this compaction, so you can act on ' +
-        'this: fix the journal and run it again.\n\n' +
-        `  node scripts/journal.mjs validate ${journal.file}\n\n` +
-        'An AUTOMATIC compaction is never refused for this reason — stopping one would end the ' +
+        'nothing would say that it happened. You asked for this compaction, so you can act on it.\n\n' +
+        (contended
+          ? '  Another agent holds the journal lock right now. The journal is HEALTHY — it is busy.\n' +
+            '  Wait a moment and run /compact again; there is nothing to repair.\n'
+          : `  node scripts/journal.mjs validate ${journal.file}\n`) +
+        '\nAn AUTOMATIC compaction is never refused for this reason — stopping one would end the ' +
         'session rather than protect it.',
     };
   }

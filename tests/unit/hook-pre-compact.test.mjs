@@ -199,3 +199,33 @@ test('the registration matches the CLOSED trigger set and leaves the gate room t
   // the gate's own deadline has to be strictly shorter or it can only be killed.
   assert.ok(hook.timeout * 1000 > DEADLINE_MS, `${hook.timeout}s must exceed ${DEADLINE_MS}ms`);
 });
+
+test('lock CONTENTION and journal DAMAGE get opposite advice (mutant M36)', () => {
+  // Round 2. The advice was corrected and nothing pinned it, so a mutant that
+  // reverted the diagnosis survived — the fix was in the code and the test was
+  // next to it, not on it.
+  //
+  // The two cases need opposite remedies and the wrong one is actively false:
+  // under contention the journal is HEALTHY and the answer is to retry, so
+  // "validate the journal" sends the user to repair a file that is fine. A
+  // refusal with no reachable way forward is the ADR-19 failure.
+  const contended = decide(
+    { trigger: 'manual', cwd: '/x' },
+    {
+      locate: () => found('/x/j.jsonl'),
+      write: () => { throw new Error('journal lock timeout (held by a live writer?): /x/j.jsonl.lock'); },
+    },
+  );
+  assert.equal(contended.decision, 'deny', 'state would still be lost, so it still refuses');
+  assert.match(contended.reason, /HEALTHY/);
+  assert.match(contended.reason, /Wait a moment/);
+  assert.doesNotMatch(contended.reason, /journal\.mjs validate/);
+
+  // Damage keeps the repair advice.
+  const damaged = decide(
+    { trigger: 'manual', cwd: '/x' },
+    { locate: () => found('/x/j.jsonl'), write: throwing },
+  );
+  assert.match(damaged.reason, /journal\.mjs validate/);
+  assert.doesNotMatch(damaged.reason, /Wait a moment/);
+});

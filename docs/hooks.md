@@ -1,6 +1,6 @@
 # Hook runtime reference
 
-✅ **shipped** · `hooks/scripts/hook-io.mjs`
+`hooks/scripts/hook-io.mjs`
 
 Read this page before writing a gate. The platform's default failure mode is
 to **let the action through**, so most of the ways a gate can be wrong end in

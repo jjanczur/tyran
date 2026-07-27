@@ -1,7 +1,5 @@
 # Getting started
 
-✅ **shipped** · every command on this page works today
-
 ## Install
 
 ```text

@@ -33,6 +33,35 @@
   --sl-color-accent-low: #2a2110;
   --sl-color-accent: #d4a017;
   --sl-color-accent-high: #e8bc4d;
+
+  /* The stone, taken from the landing so the two halves of the site are the
+     same site.
+     Measured before this block: the landing's body painted rgb(18, 16, 14) —
+     a warm near-black read off `assets/banner.jpg` — and every documentation
+     page painted Starlight's default rgb(23, 24, 28), which is cool and blue.
+     Clicking "Docs" changed the temperature of the page, which reads as
+     leaving the product rather than as entering its manual.
+     The greys are shifted the same way. Starlight derives the sidebar, the
+     header, code blocks and every raised surface from this ramp, so leaving
+     them blue while only the body turned warm would have moved the seam
+     rather than closed it. */
+  --sl-color-bg: #12100e;
+  --sl-color-bg-nav: #17140f;
+  --sl-color-bg-sidebar: #17140f;
+  --sl-color-bg-inline-code: #241f19;
+  --sl-color-bg-accent: #d4a017;
+
+  --sl-color-black: #12100e;
+  --sl-color-gray-6: #17140f;
+  --sl-color-gray-5: #241f19;
+  --sl-color-gray-4: #3b342c;
+  --sl-color-gray-3: #978b78;
+  --sl-color-gray-2: #a29788;
+  --sl-color-gray-1: #ece5d8;
+  --sl-color-white: #f5efe3;
+
+  --sl-color-hairline: #29241f;
+  --sl-color-hairline-shade: #29241f;
 }
 
 /* Tables in this documentation are frequently wide (routing tables, the

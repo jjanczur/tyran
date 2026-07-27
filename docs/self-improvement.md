@@ -1,6 +1,6 @@
 # Self-improvement — how Tyran learns your repo
 
-✅ **shipped** · `agents/retro.md` · `skills/retro/SKILL.md` ·
+`agents/retro.md` · `skills/retro/SKILL.md` ·
 `hooks/scripts/retro-gate.mjs`
 
 This is Tyran's centerpiece: **you bring the harness, it does the

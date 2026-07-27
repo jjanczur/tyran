@@ -1,6 +1,6 @@
 # The evidence gate
 
-✅ **shipped** · `hooks/scripts/evidence-gate.mjs`, on `SubagentStop`
+`hooks/scripts/evidence-gate.mjs`, on `SubagentStop`
 
 This gate inherits its runtime from [`hooks.md`](./hooks.md); read that first
 if you have not.

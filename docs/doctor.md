@@ -1,6 +1,6 @@
 # Doctor reference
 
-✅ **shipped** · `scripts/doctor.mjs --state` · 76 unit tests
+`scripts/doctor.mjs --state` · 76 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.

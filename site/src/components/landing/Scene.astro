@@ -1,0 +1,64 @@
+---
+/**
+ * A full-width illustration band between sections.
+ *
+ * These carry MOOD, not information. Everything a reader has to be able to act
+ * on — the routing table, the refusal text, the event flow — is text or a
+ * rendered diagram, because an image of a fact goes stale silently and cannot
+ * be diffed. An illustration that tried to be a diagram would be the same
+ * defect this project keeps removing, drawn instead of written.
+ *
+ * So each one is a single legible idea in the banner's own visual language,
+ * `loading="lazy"` because none of them is above the fold, and the alt text
+ * describes the picture rather than restating the section next to it — a
+ * screen-reader user gets the argument from the prose either way, and hearing
+ * it twice is worse than not hearing the artwork described at all.
+ */
+import { Picture } from 'astro:assets';
+
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  caption?: string;
+}
+
+const { src, alt, caption } = Astro.props;
+---
+
+<figure class="l-wrap scene reveal">
+  <Picture
+    src={src}
+    formats={['avif', 'webp']}
+    fallbackFormat="jpg"
+    widths={[640, 1024, 1440]}
+    sizes="(min-width: 70rem) 68rem, 100vw"
+    loading="lazy"
+    decoding="async"
+    alt={alt}
+  />
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<style>
+  .scene {
+    margin: 0 auto;
+    padding: 0 var(--l-gutter, 1.25rem);
+  }
+
+  .scene :global(img) {
+    width: 100%;
+    height: auto;
+    border-radius: 0.75rem;
+    /* The art is near-black at the edges; a hairline keeps it from bleeding
+       into a dark page background and looking like a rendering failure. */
+    border: 1px solid var(--l-border, rgb(255 255 255 / 0.08));
+  }
+
+  .scene figcaption {
+    margin-top: 0.75rem;
+    text-align: center;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--l-muted, rgb(255 255 255 / 0.6));
+  }
+</style>

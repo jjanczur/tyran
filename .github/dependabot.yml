@@ -9,10 +9,24 @@ version: 2
 # renderer) and the pinned action SHAs in the workflows. Both are build-time
 # surfaces, and both are exactly where an unattended project rots.
 updates:
+  # A week between a version being published and Dependabot proposing it.
+  #
+  # The npm supply chain's worst days all look the same: a maintainer account
+  # is taken over, a malicious patch release goes out, and the automation that
+  # exists to keep projects current is what installs it — within the hour,
+  # everywhere, before anyone has looked. Seven days is long enough that
+  # somebody else finds it first, and short enough that this repo is never
+  # meaningfully behind on a build-time dependency.
+  #
+  # This block is here because the repo's own semgrep gate refused the PR that
+  # added the file without it. Worth recording: the gate was right, and it was
+  # cheaper to be told by CI than by an incident.
   - package-ecosystem: github-actions
     directory: '/'
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     # Every action in this repo is pinned to a commit SHA with a version
     # comment. Dependabot understands that form and updates both halves; a
     # human re-pinning by hand updates the comment and forgets the SHA.
@@ -23,6 +37,8 @@ updates:
     directory: '/site'
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: 'chore(site)'
     groups:

@@ -906,6 +906,7 @@ test('THIS repository scans clean end to end', () => {
     'tests/pressure/.gitkeep',
     'tests/unit/agents.test.mjs',
     'tests/unit/desc-budget.test.mjs',
+    'tests/unit/docs-claims.test.mjs',
     'tests/unit/doctor.test.mjs',
     'tests/unit/hook-evidence-gate.test.mjs',
     'tests/unit/hook-io.test.mjs',

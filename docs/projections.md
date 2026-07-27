@@ -1,6 +1,6 @@
 # Projections reference
 
-> **Status:** shipped — `scripts/project.mjs` with 46 unit tests, including
+> **Status:** shipped — `scripts/project.mjs` with 48 unit tests, including
 > byte-exact golden files. The journal stays the only source of truth;
 > everything on this page is a disposable view of it.
 

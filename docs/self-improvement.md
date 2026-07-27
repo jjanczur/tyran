@@ -1,8 +1,10 @@
 # Self-improvement — how Tyran learns your repo
 
-> **Status:** design contract — the retro agent and its guardrails land with
-> the self-improvement epic (after the state layer and enforcement hooks
-> exist, deliberately in that order). Present tense describes the target.
+> **Status:** shipped. `agents/retro.md` carries the curator and its filter,
+> `skills/retro/SKILL.md` runs it, and a `Stop` gate
+> (`hooks/scripts/retro-gate.mjs`) refuses one turn when an initiative ends
+> without a retrospective. Still outstanding: the update delta-review that
+> reconciles a new core version with what your repo has learned.
 
 This is Tyran's centerpiece: **you bring the harness, it does the
 improving.** The more initiatives you run, the better it fits your repo and

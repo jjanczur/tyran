@@ -18,13 +18,17 @@ import { OUTPUT_LIMIT } from '../../hooks/scripts/hook-io.mjs';
 import {
   CONTEXT_BUDGET,
   DEADLINE_MS,
+  buildContext,
   fitBudget,
   hardwareLine,
+  hookHealth,
   readInitiatives,
   renderContext,
+  renderHookWarning,
   resolveRepoRoot,
   runDoctor,
 } from '../../hooks/scripts/session-start.mjs';
+import { checkHooks } from '../../scripts/hooks-check.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = join(REPO_ROOT, 'hooks', 'scripts', 'session-start.mjs');
@@ -441,4 +445,75 @@ test('the working budget is measured AFTER sanitization, so it still binds', () 
   );
   // The value that actually ships expands no further downstream.
   assert.equal(INVISIBLE_CP(fitted).length, 0);
+});
+
+// --------------------------------------------- the dead-gate warning
+
+/**
+ * These tests exist because mutant M23 — `renderHookWarning` returning the
+ * empty string unconditionally — SURVIVED the first campaign. The detection
+ * half of this story was covered from both sides and the WARNING half had no
+ * test at all, so the probe could have been silent in production while every
+ * doctor test stayed green. That is the exact shape the story is about, one
+ * level up: a control that looks installed and says nothing.
+ */
+const unhealthy = (counts = { error: 1, warning: 0, info: 0 }) => ({
+  ok: false,
+  counts,
+  findings: [
+    { severity: 'error', code: 'hook-file-absent', where: 'hooks.json -> SubagentStop[0]', message: 'x', fix: 'y' },
+    { severity: 'info', code: 'hooks-ok', where: 'hooks.json', message: 'ignored', fix: null },
+  ],
+});
+
+test('the probe WARNS when a gate cannot fire, naming the code and the place', () => {
+  const text = renderHookWarning(unhealthy());
+  assert.match(text, /^### WARNING: this plugin has gates that cannot fire$/m);
+  assert.match(text, /\[hook-file-absent\]/);
+  assert.match(text, /doctor --hooks/);
+  // It must say it cannot enforce, or the reader over-trusts it.
+  assert.match(text, /no way to refuse/);
+});
+
+test('the probe is SILENT when the gates are healthy — info alone is not a warning', () => {
+  assert.equal(renderHookWarning({ ok: true, counts: { error: 0, warning: 0, info: 2 }, findings: [
+    { severity: 'info', code: 'hooks-ok', where: 'x', message: 'y', fix: null },
+  ] }), '');
+  assert.equal(renderHookWarning(null), '');
+});
+
+test('a warning reaches the injected context even with no .tyran directory', async () => {
+  // The claim being corrected is about the installed PLUGIN, not about this
+  // repository, so a user whose gates are dead has to hear it wherever they
+  // are working.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-plain-'));
+  const text = await buildContext({
+    input: { cwd: dir },
+    health: () => unhealthy(),
+  });
+  assert.match(text, /gates that cannot fire/);
+});
+
+test('the warning survives the budget: it is never the section that gets dropped', async () => {
+  const dir = tempRepo();
+  const text = await buildContext({ input: { cwd: dir }, health: () => unhealthy() });
+  assert.ok(text.length <= CONTEXT_BUDGET + 400, `budget respected, got ${text.length}`);
+  // fitBudget drops whole sections from the END. The warning is placed first
+  // precisely so that the repos with the most state cannot lose it.
+  assert.match(text, /gates that cannot fire/);
+  assert.ok(text.indexOf('gates that cannot fire') < 200, 'the warning is at the top');
+});
+
+test('a check that throws must not cost the user their session', () => {
+  assert.equal(hookHealth({ check: () => { throw new Error('boom'); } }), null);
+});
+
+test('the hooks.json this repository SHIPS is healthy', () => {
+  // Names a property that was until now only accidental: two end-to-end tests
+  // above pass partly because the shipped registration is sound. If someone
+  // breaks it, this is the test that says so in one line instead of making an
+  // unrelated assertion fail for a reason nobody can see.
+  const result = checkHooks();
+  assert.equal(result.counts.error, 0, JSON.stringify(result.findings, null, 2));
+  assert.equal(result.counts.warning, 0, JSON.stringify(result.findings, null, 2));
 });

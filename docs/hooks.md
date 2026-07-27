@@ -366,3 +366,108 @@ of tests that break the runtime on purpose — thrown handler, exceeded
 deadline, corrupt JSON, missing dependency, failed stdout write — and assert
 that the result is a **refusal, not silence**. Per ADR-20, a guard is finished
 only once you have shown it red by removing the mechanism it defends.
+
+## `write-guard.mjs` — PreToolUse, every tool that writes a file
+
+Refuses a tool call whose input carries a raw control, bidi or invisible
+character. The second layer of ADR-19: the CI scanner catches these AFTER the
+write, on another machine; this catches them at the moment of the write.
+
+Registered for `Write|Edit|NotebookEdit|Bash`. The first three are the
+platform's OWN enumeration of the tools whose input adds file content,
+imported as `FILE_WRITING_TOOLS` rather than maintained here. **A gate on one
+entrance is not a gate** — in this repository's construction, editing tools
+replaced the text of an escape with the character itself nine times in one
+session, twice inside the code written to prevent it.
+
+The membership question goes to `scanText` -> `invisibleProblem`. There is no
+list of code points in the guard, deliberately: three spellings of that rule
+once disagreed on 456 code points, with the weakest standing closest to the
+reader.
+
+The whole `tool_input` is walked at any depth, because the platform types it
+`h.unknown()` and does not validate its shape. A payload the guard cannot walk
+to the bottom is REFUSED, not passed.
+
+### What this guard actually promises, per tool
+
+For `Write`, `Edit`, `NotebookEdit` and MCP tools it inspects the text that
+would become file content. For **`Bash` it inspects the TEXT OF THE COMMAND,
+never the effect of running it** — and that distinction is a measured hole,
+not a caveat.
+
+Measured live: a `Write` carrying a TAG character was refused, and in the same
+turn the model proposed `printf` through Bash by itself, describing it as a way
+to bypass the guard. It worked. The command was pure ASCII; the character came
+into existence only when the shell expanded the escape:
+
+```
+$ od -c payload.txt
+0000000    X 363 240 201 201   Y        <- UTF-8 for U+E0041
+```
+
+`decodeShellEscapes` now closes that route: a command whose text contains an
+escape notation that decodes to a forbidden code point (`\U000E0041`, `\x1b`,
+`\u202e`, octal, `$'…'`, `printf`, `echo -e`) is refused. `\n` and `\t` are
+not, because they decode to LF and TAB, which the rule calls legal text.
+
+**It is a denylist, so it is a FLOOR and not a ceiling.**
+`ESCAPE_DECLARED_MISSES` in the guard enumerates what still gets through, and
+the largest entry cannot be closed by any PreToolUse hook: a character
+assembled at runtime — from a variable, a command substitution, base64, or any
+program the command launches — cannot be seen without executing the command.
+So the honest claim for Bash is "the obvious routes are closed", never
+"covered".
+
+The escape rule applies **only** to shell commands. In file content `\x1b` is
+the escape NOTATION, which is exactly what this project tells people to write
+instead of the raw byte; decoding it there would refuse the remedy the refusal
+itself recommends.
+
+**Other limits:** CR is forbidden, so an Edit against a CRLF file is refused;
+the refusal names the remedy. A tool whose name contains no `mcp__` and is not
+one of the four named ones cannot be enumerated in advance and is not covered.
+
+## `pre-compact.mjs` — PreCompact, both triggers
+
+Writes a `checkpoint` to the initiative journal and passes. It does **not**
+refuse a compaction that has no checkpoint, and the reasoning is in the file's
+header — briefly: compaction is lossy rather than dangerous, so the answer is
+to persist rather than forbid; and refusing an `auto` compaction removes the
+mechanism that lets the session continue at all.
+
+It refuses in exactly one case: a journal exists, the checkpoint could not be
+written, and the trigger is `manual` — where the user is present and can act.
+On `auto` it never refuses and says so on stderr instead.
+
+The loop closes on its own: after the compaction the platform raises
+`SessionStart` with `source: "compact"`, which the session-start probe already
+matches, and the state goes back into the fresh context.
+
+**Shape:** `PreCompact` has no `hookSpecificOutput` variant. A refusal goes
+through top-level `decision` + `reason`; emitting `hookSpecificOutput` there
+fails the platform's schema, discards the whole output, and turns the refusal
+into an approval.
+
+## What hooks may write to the journal, and why it is only two event types
+
+A hook writes `checkpoint` (pre-compact) and `gate` (evidence gate). It does
+**not** write `spawn` or `report`, and that boundary is deliberate rather than
+unfinished.
+
+`spawn` and `report` are the two halves of one pairing rule (ADR-18), and their
+only correlator is the agent NAME the conductor chose when it spawned the
+agent. A hook does not have that name and cannot invent it: the platform gives
+it `agent_id` (a UUID) and `agent_type`. Measured both ways on a real journal:
+
+- a hook writing only `spawn` leaves it open forever, because the conductor's
+  `report` closes a differently-named spawn — doctor then reports
+  `spawn-stale` for every agent that has ever run;
+- a hook writing `spawn` **and** `report` pairs cleanly and makes the
+  projection list every agent twice, once as `impl-1` and once as
+  `agent_01H9XYZ`.
+
+So spawn/report pairing belongs to the conductor's bookkeeping, and hooks
+record only event types that carry no pairing semantics. The same conclusion
+was reached independently while building the evidence gate; it is written here
+so it stops being rediscovered, which is how a rule acquires a fourth spelling.

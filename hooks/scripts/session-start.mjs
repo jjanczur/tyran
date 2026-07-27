@@ -22,6 +22,7 @@ import { cpus, totalmem } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { checkHooks } from '../../scripts/hooks-check.mjs';
 import { readJournal } from '../../scripts/journal.mjs';
 import { fold, inlinePlain, progressLine } from '../../scripts/project.mjs';
 import { field, main, runProbe } from './hook-io.mjs';
@@ -236,6 +237,58 @@ export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso 
 }
 
 /**
+ * The plugin's own gates, checked at session start — the ONE thing this probe
+ * says even in a repository that has no Tyran state at all.
+ *
+ * Silent when healthy, and that is the whole design. A note on every session
+ * saying "your gates are fine" is noise that trains the reader to skip the
+ * section, and this text has to be read on the one day it is not fine.
+ *
+ * It goes FIRST in the injected context on purpose: `fitBudget` drops whole
+ * sections from the END, so anything placed after the initiative summaries
+ * would be the first thing lost in exactly the repositories that have the
+ * most state — and a warning that disappears when the report gets long is a
+ * warning that is absent when it matters.
+ *
+ * This is DETECTION, not enforcement, and the text says so to the reader as
+ * well as to us: `SessionStart` has no refusal channel (ADR-22), so the probe
+ * cannot stop a session whose gates are dead. It can only make sure that the
+ * person and the agent both know.
+ */
+export function renderHookWarning(result) {
+  if (result === null) return '';
+  const loud = result.findings.filter((f) => f.severity !== 'info');
+  if (loud.length === 0) return '';
+  const lines = [
+    '### WARNING: this plugin has gates that cannot fire',
+    '',
+    `\`tyran doctor --hooks\` finds ${result.counts.error} error(s) and ${result.counts.warning} warning(s) ` +
+      'in the hook registration. A hook whose file is missing, is not executable, or whose matcher can ' +
+      'never match is not a weaker control — the platform fails OPEN, so the action it was meant to ' +
+      'check simply proceeds, with nothing printed anywhere.',
+    '',
+  ];
+  lines.push(...rows(loud, (f) => `- [${inlinePlain(f.code)}] ${inlinePlain(f.where)}`));
+  lines.push('');
+  lines.push('Run `node scripts/doctor.mjs --hooks` for the full reason and the fix for each one.');
+  lines.push(
+    'This probe can only REPORT it: SessionStart has no way to refuse, so nothing here stops a session ' +
+      'whose gates are dead.',
+  );
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** Never let a broken check break a session — it is a probe (ADR-22). */
+export function hookHealth({ check = checkHooks } = {}) {
+  try {
+    return check();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Trim to the working budget on a SECTION boundary, keeping the header and
  * saying what was dropped. The runtime enforces the platform's hard 10 000
  * ceiling on top of this; this one exists so the injection stays short
@@ -256,13 +309,19 @@ export function fitBudget(text, budget = CONTEXT_BUDGET) {
   return `${out}\n\n[tyran session-start: ${dropped} further section(s) omitted to stay inside the ${budget}-character working budget; read .tyran/state/ for the rest]`;
 }
 
-export async function buildContext({ input, now = new Date(), env = process.env } = {}) {
+export async function buildContext({ input, now = new Date(), env = process.env, health = hookHealth } = {}) {
+  // Said even in a repository that has nothing to do with Tyran: the claim
+  // being corrected is about the PLUGIN the user installed, not about this
+  // project's state, and a user whose gates are dead needs to hear it in the
+  // session where they are relying on them.
+  const warning = renderHookWarning(health());
   const repoRoot = resolveRepoRoot(input, env);
-  if (repoRoot === null) return '';
+  if (repoRoot === null) return fitBudget(warning);
   const stateDir = join(repoRoot, '.tyran');
-  if (!existsSync(stateDir)) return ''; // not a Tyran repo — say nothing at all
+  if (!existsSync(stateDir)) return fitBudget(warning); // not a Tyran repo — but a dead gate still counts
   const nowIso = now.toISOString();
   return fitBudget(
+    warning +
     renderContext({
       repoRoot,
       initiatives: readInitiatives(stateDir),

@@ -190,3 +190,188 @@ Consequences the documented table does not state:
   anything.
 - `permissionDecision: "defer"` is print-mode only; in an interactive session
   it is ignored with a warning.
+
+---
+
+# Second pass (S-E3-5, 2026-07-27, still v2.1.116)
+
+Read out of the same binary while building `scripts/hooks-check.mjs`. Nothing
+below contradicts the sections above; it fills in the parts that were marked
+unknown, and one of them changes what a matcher means on five events.
+
+## 7. The matcher is not consulted at all when the event has no match query
+
+The dispatcher builds a query per event with a `switch`, then filters:
+
+```
+let z = ($ ? T.filter(k => !k.matcher || UB5($, k.matcher)) : T)
+```
+
+The ternary is the whole story, and it has **two** consequences that are
+documented nowhere:
+
+1. On `Stop`, `UserPromptSubmit`, `TaskCreated`, `TaskCompleted` and
+   `TeammateIdle` the switch assigns nothing, so `$` is `undefined` and the
+   matcher list is **not filtered**. A matcher on those events is inert: the
+   hook fires for every occurrence, whatever the matcher says.
+2. It is also the mechanism behind the empty-`agent_type` case S-E3-2 had to
+   work around. An empty string is falsy, so a `SubagentStop` carrying
+   `agent_type: ""` takes the same branch and runs **every** hook registered
+   for the event. It is not a special case for agents; it is one ternary.
+
+Note also `!k.matcher` inside the filter: an absent or empty matcher always
+matches, independently of `UB5`.
+
+## 8. The match query, per event
+
+| event | field used as the match query |
+|---|---|
+| `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `PermissionDenied` | `tool_name` |
+| `SessionStart`, `ConfigChange` | `source` |
+| `Setup`, `PreCompact`, `PostCompact` | `trigger` |
+| `SubagentStart`, `SubagentStop` | `agent_type` |
+| `UserPromptExpansion` | `command_name` |
+| `Notification` | `notification_type` |
+| `SessionEnd` | `reason` |
+| `StopFailure` | `error` |
+| `Elicitation`, `ElicitationResult` | `mcp_server_name` |
+| `InstructionsLoaded` | `load_reason` |
+| `FileChanged` | `basename(file_path)` |
+| `Stop`, `UserPromptSubmit`, `TaskCreated`, `TaskCompleted`, `TeammateIdle` | **none — see §7** |
+
+## 9. Input schemas that S-E3-5 needed
+
+- **`PreCompact`**: `{ hook_event_name, trigger: "manual" | "auto",
+  custom_instructions: string | null }`. The trigger is a closed enum, which
+  is what lets `doctor --hooks` call a matcher on this event dead rather than
+  merely unrecognised. `PostCompact` adds `compact_summary`.
+- **`SubagentStart`**: `{ hook_event_name, agent_id, agent_type }` — both
+  strings, both required.
+- **`SubagentStop`**: `{ hook_event_name, stop_hook_active, agent_id,
+  agent_transcript_path, agent_type, last_assistant_message? }`.
+- **`PreToolUse`**: `{ hook_event_name, tool_name, tool_input, tool_use_id }`,
+  where `tool_input` is typed **`h.unknown()`**. The platform does not validate
+  its shape at all, so a hook that reads three known field names out of it is
+  correct for exactly today's tools. This is why `write-guard.mjs` walks every
+  string in the payload instead.
+
+## 10. The tools that write file content, as the platform enumerates them
+
+For its own diff statistics the binary keeps a set of the tools whose input
+ADDS content, and reads a different field from each:
+
+```
+if (tool === Edit)         return { added: count(q.new_string), removed: count(q.old_string) }
+if (tool === Write)        return { added: count(q.content),    removed: 0 }
+if (tool === NotebookEdit) return { added: count(q.new_source), removed: 0 }
+```
+
+with the three constants resolving to `"Edit"`, `"Write"` and
+`"NotebookEdit"`. That set — **not a judgement call, and not a list we
+maintain** — is `FILE_WRITING_TOOLS` in `scripts/hooks-check.mjs`.
+
+`MultiEdit` survives only in a legacy display-name table next to
+`FileWriteTool` and `FileEditTool`; it is not a live tool in this build.
+
+Related: `filePatternTools` is `["Read","Write","Edit","Glob","NotebookRead",
+"NotebookEdit"]` and `bashPrefixTools` is `["Bash"]`.
+
+## 11. The tool alias table, and which way it is applied
+
+```
+aliases = { Task: "Agent", KillShell: "TaskStop",
+            AgentOutputTool: "TaskOutput", BashOutputTool: "TaskOutput" }
+```
+
+`normalise` is applied to the **matcher** and compared against the **raw
+query**, so a `hooks.json` written against the old name `Task` still fires for
+a query of `Agent`. In the regex branch the expression is additionally retried
+against every alias **of the query**. Getting the direction backwards makes a
+check report a live gate as dead, so both directions are pinned by a test.
+
+## 12. Deduplication is by (pluginRoot, command)
+
+Two entries carrying the identical command string on one event run **once** —
+including the second entry's matcher, which is what usually makes this a
+mistake rather than a harmless redundancy.
+
+## 13. Keys on a hook ENTRY that disarm a gate (S-E3-5 round 2)
+
+The entry schema, transcribed:
+
+```
+h.object({
+  type: h.literal("command"),
+  command: h.string(),
+  if: <condition>,
+  shell: h.enum(["bash","powershell"]).optional(),   // default bash
+  timeout: h.number().positive().optional(),          // SECONDS
+  statusMessage: h.string().optional(),
+  once: h.boolean().optional(),        // "runs once and is removed after execution"
+  async: h.boolean().optional(),       // "runs in background without blocking"
+  asyncRewake: h.boolean().optional(), // "…wakes the model on exit code 2. Implies async."
+  rewakeMessage: h.string().min(1).optional(),
+})
+```
+
+Verified live, same payload, one key changed each time, on a BLOCKING event:
+
+| entry | result |
+|---|---|
+| bare | refused; the file was never written |
+| `+ "async": true` | **passed** — raw TAG characters landed on disk |
+| `+ "if": "Bash(git *)"` | **passed** |
+| `+ "shell": "powershell"` | **passed** |
+
+In every case a logger registered on the same matcher fired normally, so this
+is neither a matcher nor a dispatch failure — it is the entry. Every other
+liveness property (file present, executable, shebang, matcher correct, event
+real) still holds, which is what makes this the hardest variant to see.
+
+## 14. Correction to §11 — the alias table has FIVE rows, not four
+
+```
+{ Task: "Agent", KillShell: "TaskStop", AgentOutputTool: "TaskOutput",
+  BashOutputTool: "TaskOutput", ...(BRIEF_TOOL_NAME ? { Brief: BRIEF_TOOL_NAME } : {}) }
+```
+
+`BRIEF_TOOL_NAME` is an imported constant equal to `"SendUserMessage"`, not a
+runtime flag, so the spread is always active. The first transcription dropped
+the row, and the consequence ran in the dangerous direction: a matcher of
+`Brief` fires on the live platform while a check built on the four-row table
+called it dead. **A live gate reported as dead** — in a file whose only value
+is fidelity.
+
+## 15. The regex branch retries against the query's ALIASES, and it widens matchers
+
+Because of the `for (const alias of aliasesOf(query))` retry, an UNANCHORED
+alternation matches more than it reads as. Measured: `Write|Edit|NotebookEdit|Bash|mcp__.*`
+also matches `TaskOutput` — whose alias `BashOutputTool` contains `Bash` — and
+`WriteSomething`. Anchoring the whole alternation, `^(…)$`, removes both at no
+cost. Any matcher meant to be exact should be anchored even when it looks like
+a plain list, because one non-alphanumeric character anywhere in it moves the
+whole string into this branch.
+
+## 16. A refused tool call teaches the model the next route (S-E3-5 round 3)
+
+Not a platform fact, but a behavioural one measured on the live product, and
+it changes how a gate has to be scoped.
+
+A `PreToolUse` refusal on `Write` was followed, **in the same turn and with no
+prompting**, by the model offering:
+
+> "Would you like me to: 1. Use Bash (`printf` or `echo`) to write the file
+> instead, which would bypass this guard?"
+
+That route was then measured and it worked, because the command text was pure
+ASCII and the forbidden character only existed after the shell expanded the
+escape (`od -c` showed `363 240 201 201`, UTF-8 for U+E0041).
+
+Two consequences worth carrying into every later gate:
+
+1. **The first thing tried after a refusal is another entrance.** Scoping a
+   gate to one tool is not a partial control; it is an advertisement.
+2. **The text of a command is not the effect of a command.** Any gate reading
+   `Bash` input is reading a program, and a program's output cannot be known
+   without running it. Escape decoding closes the obvious spelling; the class
+   stays open by construction and must be declared, not implied.

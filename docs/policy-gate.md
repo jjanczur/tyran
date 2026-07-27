@@ -175,6 +175,25 @@ finds by itself is a boundary it learns to prefer.
    deployment class always comes from the **session** root's config, not from
    the repository the command walked into.
 
+## The cost, measured
+
+This gate is registered for **every tool call**, because the alternative — a
+matcher listing the tools it knows — makes any tool it has never heard of an
+unclassified write, and the platform's list is not frozen. The price of that
+choice, measured on this machine (12 runs each, median / slowest):
+
+| call | median | slowest |
+|---|---|---|
+| a tool naming no path (`WebFetch`) | 47 ms | 82 ms |
+| a write outside the governed namespace | 49 ms | 68 ms |
+| a write refused inside it | 50 ms | 53 ms |
+| a read that passes | 45 ms | 60 ms |
+| a `Bash` call with no push | 42 ms | 59 ms |
+
+Almost all of it is Node process startup, and none of it approaches the 4 s
+internal deadline or the 8 s registered timeout. A `git push` costs more,
+because it runs one or two `git symbolic-ref` calls, each with its own budget.
+
 ## Failure is refusal
 
 Everything below denies, because the platform fails open and a gate you can

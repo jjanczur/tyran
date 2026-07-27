@@ -51,6 +51,13 @@ jobs:
         # a missing diagram must not reach the site as an empty box.
         run: npx playwright install --with-deps chromium
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Type-check the site
+        # `npm run check` was declared in package.json and could not run: the
+        # dependencies it needs were never installed, so the script existed
+        # and nobody had ever executed it. A validation command that fails to
+        # start is worse than an absent one — it appears in the list of
+        # checks and contributes nothing.
+        run: npm run check
       - name: Build
         run: npm run build
       - name: Fail if a generated link lost the /tyran base prefix

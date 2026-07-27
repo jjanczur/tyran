@@ -962,6 +962,7 @@ test('THIS repository scans clean end to end', () => {
     'tests/unit/hooks-check.test.mjs',
     'tests/unit/journal.test.mjs',
     'tests/unit/landing-refusals.test.mjs',
+    'tests/unit/landing-urls.test.mjs',
     'tests/unit/one-answer.test.mjs',
     'tests/unit/project.test.mjs',
     'tests/unit/projection-fuzz.test.mjs',

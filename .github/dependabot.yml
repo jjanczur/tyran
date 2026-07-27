@@ -1,0 +1,36 @@
+version: 2
+
+# Two ecosystems, and only two, because only two exist here.
+#
+# The plugin itself has ZERO runtime dependencies — that is a property the
+# README claims and a CI check enforces, so there is nothing for Dependabot to
+# bump in the root `package.json` and no entry for it below. What does have
+# dependencies is the documentation site (Astro, Starlight, the Mermaid
+# renderer) and the pinned action SHAs in the workflows. Both are build-time
+# surfaces, and both are exactly where an unattended project rots.
+updates:
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: monthly
+    # Every action in this repo is pinned to a commit SHA with a version
+    # comment. Dependabot understands that form and updates both halves; a
+    # human re-pinning by hand updates the comment and forgets the SHA.
+    commit-message:
+      prefix: 'chore(actions)'
+
+  - package-ecosystem: npm
+    directory: '/site'
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'chore(site)'
+    groups:
+      # One PR for the doc-site toolchain instead of five. These move together
+      # and are validated by one command (`npm run build`), so splitting them
+      # buys nothing but five review cycles.
+      astro:
+        patterns:
+          - 'astro'
+          - '@astrojs/*'
+          - 'sharp'

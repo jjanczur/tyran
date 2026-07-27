@@ -30,8 +30,8 @@ const { src, alt, caption } = Astro.props;
     src={src}
     formats={['avif', 'webp']}
     fallbackFormat="jpg"
-    widths={[640, 1024, 1440]}
-    sizes="(min-width: 70rem) 68rem, 100vw"
+    widths={[320, 480, 640]}
+    sizes="(min-width: 48rem) 19rem, 60vw"
     loading="lazy"
     decoding="async"
     alt={alt}
@@ -40,9 +40,42 @@ const { src, alt, caption } = Astro.props;
 </figure>
 
 <style>
+  /* An aside, not a band.
+   *
+   * These shipped full-width inside the 68rem wrap, which at 1440x900 made
+   * each one taller than the viewport: three separate full-screen images
+   * between four sections of text, on a page whose job is to explain a
+   * developer tool. Art at that scale stops supporting the argument and
+   * starts interrupting it, and the reader who came to find out what this
+   * does has to scroll past a painting to keep reading.
+   *
+   * Now: a 19rem plate with the caption beside it, the pair centred and no
+   * wider than 46rem. It reads as a margin illustration — noticed, enjoyed,
+   * stepped over in about a second, which is the correct weight for something
+   * that carries mood rather than information. */
   .scene {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    max-width: 46rem;
     margin: 0 auto;
     padding: 0 var(--l-gutter, 1.25rem);
+  }
+
+  /* The flex item is the `<picture>`, NOT the `<img>`.
+   *
+   * `<Picture>` emits `<picture><source ...><img></picture>`, so sizing the
+   * img alone leaves the real flex child free to shrink. Measured: the plate
+   * rendered 165px against the 304px it was told to be, because `<picture>`
+   * had collapsed around a shrunken img and the img's own width resolved
+   * against that. `flex: none` on the wrapper is what actually holds the
+   * width; without it the three plates come out three different sizes,
+   * each one fitted to its caption's longest word. */
+  .scene :global(picture) {
+    display: block;
+    flex: none;
+    width: 19rem;
+    max-width: 55%;
   }
 
   .scene :global(img) {
@@ -57,10 +90,26 @@ const { src, alt, caption } = Astro.props;
   }
 
   .scene figcaption {
-    margin-top: 0.75rem;
-    text-align: center;
-    font-size: 0.875rem;
-    line-height: 1.5;
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    font-style: italic;
     color: var(--l-muted, rgb(255 255 255 / 0.6));
+  }
+
+  /* Under 34rem the pair stops working side by side: a 55% plate leaves the
+     caption a column four words wide. Stack, and keep the plate small — the
+     failure to avoid on a phone is an illustration that fills the screen. */
+  @media (max-width: 34rem) {
+    .scene {
+      flex-direction: column;
+      gap: 0.85rem;
+      text-align: center;
+    }
+
+    .scene :global(picture) {
+      width: min(16rem, 70vw);
+      max-width: none;
+    }
   }
 </style>

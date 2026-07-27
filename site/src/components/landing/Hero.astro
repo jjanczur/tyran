@@ -2,17 +2,22 @@
 /**
  * The first screen. The picture, then one claim, one qualifier, one action.
  *
- * The banner used to sit UNDER the headline, the lede, the buttons and the
- * proof line — which put it below the fold on every laptop, measured at
- * 1440x900 and 1280x800. It is now the first element in the document body
- * after the nav, full-bleed, and the headline follows it. That order is the
- * whole point: the art is the argument this page opens with, and an argument
- * you have to scroll for is not the one you made.
+ * Three layouts were measured, and the first two each broke a requirement:
  *
- * The band is height-constrained rather than free-flowing, so that the
- * headline, the lede, the buttons AND the proof line still land inside the
- * first screen at 800px of viewport height. Trading the whole hero for the
- * image would have swapped one thing below the fold for four.
+ *  - Banner LAST (the original) put the art at y=1006 on a 1440x900 viewport.
+ *    Below the fold on every laptop; nobody ever saw it.
+ *  - Banner FIRST, full-bleed and height-capped, fixed that and introduced a
+ *    worse problem: `object-fit: cover` on a 225px band showed about a third
+ *    of a 1600x872 plate. The picture was visible and cropped to pieces.
+ *  - Full-bleed at its OWN aspect shows all of it — and costs 785px of a
+ *    900px viewport, which puts the headline, the lede and both buttons back
+ *    below the fold. That trades four things away to save one.
+ *
+ * So: two columns above 64rem. The art keeps its full 1.83:1 frame at a
+ * width that fits beside the text, and the headline, lede, buttons and proof
+ * line sit next to it rather than under it — everything in the first screen,
+ * nothing cropped. Below 64rem it stacks, art first, at full aspect: a phone
+ * has no second column to give it and the picture is the better opening.
  *
  * The headline is the README's own `<h3 align="center">`, word for word, and
  * the lede is compressed from the paragraph under it. Nothing on this page is
@@ -22,6 +27,7 @@
 import { Picture } from 'astro:assets';
 import banner from '../../../../assets/banner.jpg';
 import { DOCS, REPO, RELEASE } from './urls';
+import { SKILLS, AGENTS } from './roster';
 ---
 
 <section class="hero" id="top">
@@ -39,22 +45,23 @@ import { DOCS, REPO, RELEASE } from './urls';
     fades in on scroll; the thing the reader is supposed to see before they do
     anything at all must not be waiting on an observer.
   */}
+  <div class="l-wrap hero__inner">
   <div class="hero__banner">
     <Picture
       src={banner}
       formats={['avif', 'webp']}
       fallbackFormat="jpg"
       widths={[640, 1024, 1600]}
-      sizes="100vw"
+      sizes="(min-width: 64rem) 46vw, 100vw"
       loading="eager"
       fetchpriority="high"
       alt="A jackal-headed conductor standing before a hall of agent workstations, each screen showing its own status: code optimization at 65 percent, a critical logic failure, data gathering stalled, self-improvement required."
     />
   </div>
 
-  <div class="l-wrap hero__body">
+  <div class="hero__body">
     <div class="hero__badges reveal">
-      <span class="badge badge--gold badge--dot">v2 &mdash; under construction, in public</span>
+      <span class="badge badge--gold badge--dot">{SKILLS} skills &middot; {AGENTS} agents</span>
       <span class="badge">Claude Code plugin</span>
       <span class="badge">Apache-2.0</span>
     </div>
@@ -79,13 +86,14 @@ import { DOCS, REPO, RELEASE } from './urls';
 
     <p class="hero__proof reveal" style="--l-delay: 300ms">
       <span>0 runtime dependencies</span>
-      <span>867 tests green at v0.1.0</span>
+      <span>every gate ships with its tests</span>
       <span>never writes into your ~/.claude</span>
       <span
         ><a href={REPO} rel="noopener">GitHub</a> &middot; <a href={RELEASE} rel="noopener"
-          >v0.1.0</a
+          >latest release</a
         ></span
       >
     </p>
+  </div>
   </div>
 </section>

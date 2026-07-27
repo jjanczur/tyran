@@ -1,0 +1,129 @@
+---
+/**
+ * The rest of the mechanism, in six cards.
+ *
+ * Each card carries the status the DOCUMENTATION states about it, using the
+ * same two words the docs index uses - shipped / designed. The one that is
+ * only designed says so in the same size type as the ones that are not, which
+ * is the whole reason the badge exists.
+ *
+ * Every card also carries its limit. The README states each of these in the
+ * same breath as the claim, because a control whose boundary is not stated
+ * gets read as a guarantee.
+ */
+import { DOCS } from './urls';
+
+interface Cap {
+  title: string;
+  state: 'shipped' | 'designed';
+  body: string;
+  limit: string;
+  href: string;
+  linkText: string;
+}
+
+const CAPS: Cap[] = [
+  {
+    title: 'Survives restarts and compaction',
+    state: 'shipped',
+    body:
+      'Execution state lives in an append-only journal inside your repo, and a session hook ' +
+      're-injects it after every compaction or resume. The team forgets where it was; the journal ' +
+      'does not.',
+    limit: 'STATE.md and PROGRESS.md are generated from it, and --check compares them.',
+    href: DOCS.journal,
+    linkText: 'Journal reference',
+  },
+  {
+    title: 'A gate on the irreversible step',
+    state: 'shipped',
+    body:
+      'Every commit and push is scanned for secrets before it happens, and the gate assembles the ' +
+      'payload itself and verifies the scanner covered all of it. --no-verify and force-pushes are ' +
+      'refused; at the strictest autonomy class, so is a push to your production branch.',
+    limit:
+      'Not a firewall. It also does not stop an agent from raising its own autonomy class - that ' +
+      'file is GATED, not KERNEL. Measured, not supposed.',
+    href: DOCS.policyGate,
+    linkText: 'Policy gate',
+  },
+  {
+    title: 'Cost modes that resolve from config, not habit',
+    state: 'shipped',
+    body:
+      'Model names appear in exactly ONE file. Skills, agents and policies are written in role ' +
+      'names, so a model deprecation is a one-line edit. Security review and arbitration have a ' +
+      'floor that no cost profile or risk flag can push them below.',
+    limit:
+      'A missing alias throws rather than falling back to the session default: routing that ' +
+      'silently does nothing looks exactly like routing that works.',
+    href: DOCS.agents,
+    linkText: 'Roster and routing',
+  },
+  {
+    title: 'A reviewer that never grades its own homework',
+    state: 'shipped',
+    body:
+      'The reviewer agent is a different agent from the one that wrote the code, and it is granted ' +
+      'no editing tools at all - it cannot patch what it is grading.',
+    limit:
+      'It keeps Bash in order to run the tests, and Bash can write. This raises the price of ' +
+      'self-approval; it does not make it impossible.',
+    href: DOCS.agents,
+    linkText: 'The four agents',
+  },
+  {
+    title: 'Parallelism that does not corrupt itself',
+    state: 'shipped',
+    body:
+      'A worktree per agent, a lease per worktree, and a merge order that is sequential rather ' +
+      'than hopeful. Lease events land in the journal, so a lease released by a non-holder shows ' +
+      'up in STATE.md.',
+    limit:
+      'Detection, not prevention: nothing physically stops a second agent from entering a held ' +
+      'worktree.',
+    href: DOCS.architecture,
+    linkText: 'Architecture',
+  },
+  {
+    title: 'Updates that do not delete what it learned',
+    state: 'designed',
+    body:
+      'Three layers: the immutable core plugin, your repo data in .tyran/, and locally evolved ' +
+      'skills. The layout is real - .tyran/ exists and the plugin never writes into it.',
+    limit:
+      'The delta-review agent that reconciles a new core version with what your repo has learned ' +
+      'does not exist yet. This card is the one on the page that is a promise.',
+    href: DOCS.selfImprovement,
+    linkText: 'Self-improvement',
+  },
+];
+---
+
+<section class="l-section" id="mechanism">
+  <div class="l-wrap">
+    <div class="compound__head reveal">
+      <p class="l-eyebrow">The rest of it</p>
+      <h2>Six mechanisms, five of them running</h2>
+      <p class="l-lede">
+        Each card says which. The limits are not fine print &mdash; a control whose boundary is not
+        stated gets read as a guarantee, and this project treats that as the failure it is.
+      </p>
+    </div>
+
+    <div class="caps__grid">
+      {
+        CAPS.map((cap, i) => (
+          <article class="cap reveal" style={`--l-delay: ${(i % 3) * 80}ms`}>
+            <span class={`verdict verdict--${cap.state}`}>{cap.state}</span>
+            <h3>{cap.title}</h3>
+            <p>{cap.body}</p>
+            <p class="cap__limit">
+              {cap.limit} <a href={cap.href}>{cap.linkText}</a>
+            </p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>

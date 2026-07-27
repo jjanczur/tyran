@@ -1,0 +1,155 @@
+---
+/**
+ * The thesis, and the reason this page exists: Tyran adapts to YOUR repo, and
+ * the adaptation accumulates.
+ *
+ * The three stage bodies are the README's "What compounding looks like" block,
+ * word for word (typographic apostrophes aside). That block is a description of
+ * the arc, not a log of a real repository, so the callout under the rail says so
+ * IN THE PAGE and then draws the same line the README's status box draws -
+ * which half of the loop is shipped and which is not. A landing for a tool whose whole argument is "verification must be
+ * mechanical" does not get to round its own status up.
+ *
+ * The chips and the ledger are not decoration: they are what "it learns" means
+ * concretely, including the entries a later retrospective DELETES. Deleting its
+ * own rules is the least believable claim on this page and therefore the one
+ * that gets drawn rather than asserted.
+ */
+import { DOCS } from './urls';
+
+interface Stage {
+  n: string;
+  label: string;
+  title: string;
+  body: string;
+  chips: { text: string; struck?: boolean }[];
+  ledger: { op: '+' | '-'; text: string }[];
+}
+
+const STAGES: Stage[] = [
+  {
+    n: '01',
+    label: 'Initiative 1',
+    title: 'It reads the repo instead of asking you to describe it',
+    body:
+      'Tyran scans your repo, infers your validation commands, your commit style, your ' +
+      'deployment policy. Asks once.',
+    chips: [
+      { text: 'validation commands' },
+      { text: 'commit style' },
+      { text: 'deployment policy' },
+    ],
+    ledger: [
+      { op: '+', text: 'validate: npm run typecheck && node --test' },
+      { op: '+', text: 'deploy class: preview auto, prod gated' },
+    ],
+  },
+  {
+    n: '05',
+    label: 'Initiative 5',
+    title: 'It knows where this repo burns people',
+    body:
+      'It knows your shared-file hot zones, your flaky tests, your review taste. Its retro has ' +
+      'already deleted two of its own rules that weren’t earning their keep.',
+    chips: [
+      { text: 'shared-file hot zones' },
+      { text: 'flaky tests' },
+      { text: 'review taste' },
+      { text: 'always re-run the browser check', struck: true },
+    ],
+    ledger: [
+      { op: '+', text: 'hot zone: locales/*.json - append only, merge serially' },
+      { op: '-', text: 'rule retired: never earned a catch in 4 initiatives' },
+    ],
+  },
+  {
+    n: '20',
+    label: 'Initiative 20',
+    title: 'It has written its own tooling for your recurring work',
+    body:
+      'It has written repo-specific skills for your recurring work, tuned its own agent prompts ' +
+      'to your stack, and its cost profile routes every subtask to the cheapest model that can ' +
+      'do the job. You mostly just approve gates.',
+    chips: [
+      { text: 'repo-specific skills' },
+      { text: 'tuned agent prompts' },
+      { text: 'cheapest model that can do the job' },
+    ],
+    ledger: [
+      { op: '+', text: 'skill: migration + backfill, the way this repo does it' },
+      { op: '+', text: 'route: reviewer -> mid tier, security -> floor held' },
+    ],
+  },
+];
+---
+
+<section class="l-section" id="compounding">
+  <div class="l-wrap">
+    <div class="compound__head reveal">
+      <p class="l-eyebrow">The thesis</p>
+      <h2>It adapts to your repo. Every initiative leaves it fitting better.</h2>
+      <p class="l-lede">
+        Most agent setups start from zero every time you open them. Tyran ends every closed
+        initiative with a retrospective that reads the journal, the decision ledger and the agents&rsquo;
+        own reports, and then changes <strong>Tyran</strong> &mdash; never your product code. Here is
+        what that looks like from the outside.
+      </p>
+    </div>
+
+    <ol class="compound__rail" id="compound-rail">
+      {
+        STAGES.map((stage, s) => (
+          <li class="stage reveal" style={`--l-delay: ${s * 90}ms`}>
+            <span class="stage__dot" aria-hidden="true">
+              {stage.n}
+            </span>
+            <div class="stage__card">
+              <p class="stage__label">{stage.label}</p>
+              <h3>{stage.title}</h3>
+              <p>{stage.body}</p>
+              <ul class="chips">
+                {stage.chips.map((chip, i) => (
+                  <li style={`--i: ${i}`} data-struck={chip.struck ? '' : undefined}>
+                    {chip.text}
+                  </li>
+                ))}
+              </ul>
+              <div class="stage__ledger">
+                {stage.ledger.map((entry, i) => (
+                  <span style={`--i: ${i}`} data-op={entry.op}>
+                    {entry.text}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+
+    <div class="callout callout--warn reveal">
+      <h3>What of that is shipped, exactly</h3>
+      <p>
+        <strong>The three stages above are an illustration of the trajectory</strong> &mdash; the
+        README&rsquo;s own &ldquo;what compounding looks like&rdquo; block, not a log of a real
+        repository. The loop underneath them is not an illustration, so here is where it stands.
+      </p>
+      <p>
+        <strong>Shipped:</strong> the <code>tyran:retro</code> agent and its anti-bloat filter &mdash;
+        four questions, a hard cap of three edits per retrospective, and a stated preference for
+        deleting rules over adding them &mdash; plus a <code>Stop</code> hook that refuses one turn
+        when an initiative&rsquo;s tickets are all merged with no retrospective recorded since the
+        last merge. A retro that changes nothing is a correct outcome, and declining it entirely is a
+        correct outcome; you are never blocked twice either way.
+      </p>
+      <p>
+        <strong>Not shipped:</strong> the update delta-review that reconciles a new core version with
+        what your repo has already learned. The three-layer layout it needs is real &mdash; <code
+          >.tyran/</code
+        > exists and the plugin&rsquo;s own files never write into it &mdash; but the agent that does the
+        reconciling does not exist yet. <a href={DOCS.selfImprovement}>The self-improvement page</a> carries
+        the whole loop, its guardrails, and where each one stops.
+      </p>
+    </div>
+  </div>
+</section>

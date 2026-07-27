@@ -1,0 +1,20 @@
+---
+import { DOCS, REPO, RELEASE } from './urls';
+---
+
+<footer class="l-footer">
+  <div class="l-wrap l-footer__inner">
+    <p>
+      Tyran &mdash; a task conductor for Claude Code. Apache-2.0. Built epic by epic, in public.
+    </p>
+    <nav aria-label="Footer">
+      <a href={DOCS.gettingStarted}>Docs</a>
+      <a href={DOCS.evidenceGate}>Evidence gate</a>
+      <a href={DOCS.selfImprovement}>Self-improvement</a>
+      <a href={REPO} rel="noopener">GitHub</a>
+      <a href={RELEASE} rel="noopener">Release v0.1.0</a>
+      <a href={`${REPO}/blob/main/LICENSE`} rel="noopener">License</a>
+      <a href={`${REPO}/blob/main/CONTRIBUTING.md`} rel="noopener">Contributing</a>
+    </nav>
+  </div>
+</footer>

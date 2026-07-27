@@ -1,0 +1,163 @@
+---
+/**
+ * The second pillar: the difference between a prompt that asks and a hook that
+ * refuses.
+ *
+ * EVERY word inside the two refusal terminals is copied from the running code -
+ * `REFUSALS[DENY.NO_EVIDENCE]` in `hooks/scripts/evidence-gate.mjs` and
+ * `buildReason()` in `hooks/scripts/retro-gate.mjs`. Nothing is shortened,
+ * softened or improved for the page. A landing that paraphrased its own
+ * product's refusal text would be doing the exact thing the evidence gate
+ * exists to refuse.
+ *
+ * The only invented text on this page is the AGENT'S report in the first panel:
+ * it is an illustration of the input, labelled as such, not output of anything.
+ *
+ * The limits under each terminal are not fine print bolted on afterwards. The
+ * README states them in the same breath as the claim, and so does this.
+ */
+import Terminal from './Terminal.astro';
+import { DOCS } from './urls';
+
+/** The report that gets refused. Illustrative input, not product output. */
+const REPORT = `tyran:implementer - final report
+
+Refactored the earnings pipeline into a single query and
+removed the N+1 in the holdings loop.
+
+Ran the suite - everything is green. Typecheck is clean.
+Ready to merge.`;
+
+/**
+ * `hooks/scripts/evidence-gate.mjs`, REFUSALS[DENY.NO_EVIDENCE], verbatim.
+ * The angle-bracket placeholders carry no digits ON PURPOSE: an agent that
+ * pastes this refusal back is refused again rather than let through by its own
+ * citation. That property is pinned by a test in the repo, and it survives the
+ * trip onto this page because the text was copied rather than retyped.
+ */
+const EVIDENCE_REFUSAL = `REFUSED by the tyran evidence gate: this report carries no raw command output.
+
+The evidence contract is mechanical, not stylistic. "tests are green" is
+not evidence; the unedited output of a command you actually ran is. Add at
+least one line of it. Any ONE of these forms is enough:
+
+  exit code      EXIT=<code>        or  "exit code <code>", "exit status <code>"
+  test counter   <N> passed         or  "<N> failed", "# pass <N>", "ok <N>"
+  labelled count Tests: <N>         or  "Suites: <N>", "checks = <N>"
+
+If there was genuinely nothing to measure - a scouting pass, an analysis,
+an answer to a question - say so, with a reason, on a line that starts at
+the FIRST COLUMN and is not inside a code block:
+
+EVIDENCE: none-required <why there was nothing to run>
+
+Replace the angle brackets with your own words; a line that is still all
+placeholder does not count as a reason. That line is not a formality
+either: every use of it is recorded in the initiative journal, so
+exemptions are counted rather than assumed.
+
+What this gate does NOT do: it cannot tell real output from invented
+output. It blocks silence, not forgery.`;
+
+/**
+ * `hooks/scripts/retro-gate.mjs`, buildReason(), verbatim - with the two
+ * interpolated values filled in by an example initiative, which is what the
+ * function's own template placeholders are for. The paragraphs are NOT
+ * hard-wrapped in the source, so this block is rendered with `wrap`.
+ */
+const RETRO_REFUSAL = `tyran: initiative "earnings-recap" has all 7 of its tickets merged and no retrospective recorded since the last merge.
+
+Run it before you finish: spawn the \`tyran:retro\` agent over this initiative. It reads the ledger, the notes and the agents reports, and improves Tyran itself — never product code.
+
+This is the only loop through which Tyran learns from an initiative instead of repeating it, and it is the step most easily skipped, which is why it is a gate rather than a sentence in a skill.
+
+Deciding NOT to run one is a legitimate answer — a retro that finds nothing worth changing is a correct outcome, and so is judging the work too small to be worth one. Record that decision in the journal as a \`retro.entry\` with kind "skipped" and the reason, and this will not ask again. You will not be blocked twice either way.`;
+---
+
+<section class="l-section" id="gates">
+  <div class="l-wrap">
+    <div class="gates__head reveal">
+      <p class="l-eyebrow">The second pillar</p>
+      <h2>A prompt asks. A hook refuses.</h2>
+      <p class="l-lede">
+        &ldquo;Always show your test output&rdquo; in a system prompt is a request, and a request is
+        something a model can be too helpful to honour. In Tyran it is a process that runs at
+        <code>SubagentStop</code> and exits with a denial. Below is the report, and below that is the
+        exact text the agent gets back &mdash; not a summary of it.
+      </p>
+    </div>
+
+    <div class="gates__grid">
+      <div class="gates__aside">
+        <Terminal
+          title={"the agent\u2019s report"}
+          source="illustrative input"
+          text={REPORT}
+          caret={false}
+        />
+        <div class="stat reveal">
+          <p class="stat__n">53 / 55</p>
+          <p>
+            Real reports from this project&rsquo;s own agents that clear the gate. Both misses turned
+            out not to be reports at all &mdash; one was a leaked prompt fragment, the other the
+            platform&rsquo;s weekly-limit notice.
+          </p>
+        </div>
+        <div class="stat reveal">
+          <p class="stat__n">1 turn</p>
+          <p>
+            The cost ceiling. <code>stop_hook_active</code> is the anti-loop fuse: an agent is never
+            bounced twice for the same report, because a gate that can bounce forever gets deleted by
+            whoever is watching it.
+          </p>
+        </div>
+      </div>
+
+      <Terminal
+        title={"SubagentStop \u2192 REFUSED"}
+        source="hooks/scripts/evidence-gate.mjs"
+        text={EVIDENCE_REFUSAL}
+        tone="refusal"
+      />
+    </div>
+
+    <div class="callout callout--red reveal">
+      <h3>The limit, stated by the gate itself</h3>
+      <p>
+        <strong>This gate blocks silence, not forgery.</strong> An agent that invents the text
+        <code>232 passed / 0 failed</code> walks straight through it. The gate raises the price of a
+        lie &mdash; it has to be deliberately fabricated rather than simply waved away &mdash; and it
+        does not remove it. Nor is the criterion really &ldquo;raw command output&rdquo;: mechanically
+        it is <em>a digit next to one of seven test-runner keywords</em>, so a build log with no exit
+        code is refused and a sentence containing <code>6 / 6 passed</code> is not.
+        <a href={DOCS.evidenceGate}>The evidence gate page</a> carries the numbers in both directions.
+      </p>
+    </div>
+
+    <div class="gates__head reveal" style="margin-top: 3.5rem; margin-bottom: 1.5rem">
+      <h2 style="font-size: clamp(1.4rem, 1.1rem + 1.2vw, 1.9rem)">
+        And one gate whose whole job is to make it learn
+      </h2>
+      <p class="l-lede">
+        The retrospective is the step most easily skipped: it happens after the merge, when the
+        interesting part is over. So it is not a sentence in a skill either. When an initiative&rsquo;s
+        tickets are all merged with nothing recorded since, the <code>Stop</code> hook refuses exactly
+        one turn and names what is owed &mdash; including how to decline.
+      </p>
+    </div>
+
+    <Terminal
+      title={"Stop \u2192 REFUSED (once)"}
+      source="hooks/scripts/retro-gate.mjs"
+      text={RETRO_REFUSAL}
+      tone="refusal"
+      wrap
+    />
+
+    <p class="l-note reveal" style="margin-top: 1rem">
+      Hooks fail open by design, and <a href={DOCS.hooks}>the hook runtime page</a> says what the
+      deadline actually promises. Path classes, the deployment class and where the secrets gate stops
+      are on <a href={DOCS.policyGate}>the policy gate page</a>.
+    </p>
+  </div>
+</section>

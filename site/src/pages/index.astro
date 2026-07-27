@@ -1,0 +1,208 @@
+---
+/**
+ * The landing page.
+ *
+ * It takes `/` away from Starlight. Until this file existed, the root was
+ * served by `src/content/docs/index.mdx` through Starlight's injected
+ * catch-all route; a file in `src/pages/` is a static route and wins over an
+ * injected dynamic one, so the docs index was deleted in the same commit
+ * rather than left to lose a race. Every documentation page keeps its own URL
+ * (`/tyran/architecture/` and the rest) - asserted after the build, not
+ * assumed, because "the landing quietly ate the docs" is exactly the class of
+ * failure this project refuses to take on faith.
+ *
+ * This page renders outside Starlight's chrome on purpose: a splash template
+ * inside the docs would still carry the sidebar, the docs header and the
+ * Pagefind bundle, none of which a landing wants.
+ */
+import { getImage } from 'astro:assets';
+import banner from '../../../assets/banner.jpg';
+import '../styles/landing.css';
+import Nav from '../components/landing/Nav.astro';
+import Hero from '../components/landing/Hero.astro';
+import Compounding from '../components/landing/Compounding.astro';
+import Gates from '../components/landing/Gates.astro';
+import Capabilities from '../components/landing/Capabilities.astro';
+import Install from '../components/landing/Install.astro';
+import SiteFooter from '../components/landing/SiteFooter.astro';
+import { url } from '../components/landing/urls';
+
+const TITLE = 'Tyran - the more you use it, the better it gets';
+const DESCRIPTION =
+  'A task conductor for Claude Code that adapts to your repo and refuses to believe any agent ' +
+  'which cannot show raw command output as proof. Zero dependencies, Apache-2.0.';
+
+/**
+ * Open Graph needs an ABSOLUTE url and a scraper that will not run an image
+ * pipeline, so the banner is rendered once at build time as a plain JPEG at
+ * the size the cards actually use. `getImage` returns a base-prefixed path
+ * (`/tyran/_astro/...`), and `new URL(..., Astro.site)` turns it into the
+ * absolute form every crawler requires. Getting this wrong is invisible until
+ * someone pastes the link somewhere public, which is where this project is
+ * going.
+ */
+const og = await getImage({ src: banner, width: 1200, format: 'jpeg', quality: 82 });
+const ogUrl = new URL(og.src, Astro.site).href;
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+---
+
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{TITLE}</title>
+    <meta name="description" content={DESCRIPTION} />
+    <link rel="canonical" href={canonical} />
+    <link rel="shortcut icon" href={url('favicon.svg')} type="image/svg+xml" />
+    <link rel="sitemap" href={url('sitemap-index.xml')} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Tyran" />
+    <meta property="og:title" content={TITLE} />
+    <meta property="og:description" content={DESCRIPTION} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogUrl} />
+    <meta property="og:image:width" content={String(og.attributes.width ?? 1200)} />
+    <meta property="og:image:height" content={String(og.attributes.height ?? 654)} />
+    <meta
+      property="og:image:alt"
+      content="A jackal-headed conductor before a hall of agent workstations, each screen showing its own status."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={TITLE} />
+    <meta name="twitter:description" content={DESCRIPTION} />
+    <meta name="twitter:image" content={ogUrl} />
+    <meta name="theme-color" content="#1a1c20" />
+
+    <!--
+      Two decisions taken before the first paint, both of which look wrong if
+      taken later:
+
+      1. The theme. The key is `starlight-theme`, the same one Starlight's own
+         provider reads and writes, so a reader who picks light here lands on
+         light documentation one click later instead of a flash of the other
+         one.
+      2. Whether this page is allowed to animate. The class is the ONLY thing
+         that lets the stylesheet hide anything, and it is added only when a
+         script runs AND the reader has not asked for reduced motion. With
+         scripting off, or with reduced motion, no rule in landing.css hides or
+         moves a single element.
+    -->
+    <script is:inline>
+      (() => {
+        const root = document.documentElement;
+        try {
+          const stored = localStorage.getItem('starlight-theme');
+          const theme =
+            stored || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+          root.dataset.theme = theme === 'light' ? 'light' : 'dark';
+        } catch (e) {
+          /* private mode, or no storage: the default attribute already says dark */
+        }
+        try {
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            root.classList.add('tyran-anim');
+          }
+        } catch (e) {
+          /* no matchMedia: stay static, which is the safe direction */
+        }
+      })();
+    </script>
+  </head>
+
+  <body>
+    <a class="l-skip" href="#main">Skip to content</a>
+    <Nav />
+    <main id="main" tabindex="-1">
+      <Hero />
+      <Compounding />
+      <Gates />
+      <Capabilities />
+      <Install />
+    </main>
+    <SiteFooter />
+
+    <!--
+      The page's only behaviour, inline for weight: one `IntersectionObserver`,
+      one clipboard handler, one theme toggle. Inline rather than a bundled
+      module because at this size the request costs more than the bytes, and
+      because none of it is on the critical path for reading the page.
+
+      The whole body is wrapped in a try/catch that REMOVES the animation class
+      on any error. Without it, a runtime failure in this script would leave
+      every `.reveal` element hidden by CSS that was waiting on a class this
+      script was supposed to manage - a blank page caused by decoration.
+    -->
+    <script is:inline>
+      (() => {
+        const root = document.documentElement;
+
+        const toggle = document.getElementById('theme-toggle');
+        if (toggle) {
+          toggle.addEventListener('click', () => {
+            const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+            root.dataset.theme = next;
+            try {
+              localStorage.setItem('starlight-theme', next);
+            } catch (e) {
+              /* the toggle still works for this page view */
+            }
+          });
+        }
+
+        for (const btn of document.querySelectorAll('[data-copy]')) {
+          btn.addEventListener('click', () => {
+            const hint = btn.querySelector('[data-copy-hint]');
+            const done = (ok) => {
+              if (!hint) return;
+              hint.textContent = ok ? 'copied' : 'select it';
+              btn.dataset.copied = ok ? 'true' : 'false';
+              setTimeout(() => {
+                hint.textContent = 'copy';
+                delete btn.dataset.copied;
+              }, 1800);
+            };
+            const text = btn.getAttribute('data-copy') || '';
+            if (!navigator.clipboard) {
+              done(false);
+              return;
+            }
+            navigator.clipboard.writeText(text).then(
+              () => done(true),
+              () => done(false),
+            );
+          });
+        }
+
+        try {
+          if (!root.classList.contains('tyran-anim') || !('IntersectionObserver' in window)) return;
+
+          const rail = document.getElementById('compound-rail');
+          const stages = rail ? Array.prototype.slice.call(rail.querySelectorAll('.stage')) : [];
+          let reached = 0;
+
+          const io = new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                entry.target.classList.add('is-visible');
+                io.unobserve(entry.target);
+                const at = stages.indexOf(entry.target);
+                if (at !== -1 && rail) {
+                  reached = Math.max(reached, at + 1);
+                  rail.style.setProperty('--l-fill', String(reached / stages.length));
+                }
+              }
+            },
+            { threshold: 0.15, rootMargin: '0px 0px -10% 0px' },
+          );
+
+          for (const el of document.querySelectorAll('.reveal')) io.observe(el);
+        } catch (e) {
+          root.classList.remove('tyran-anim');
+        }
+      })();
+    </script>
+  </body>
+</html>

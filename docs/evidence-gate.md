@@ -237,7 +237,7 @@ One end-to-end run on v2.1.116, project agent `tyran-implementer`, task
 designed to produce an evidence-free report:
 
 ```text
-[assistant] Zrobione, testy zielone, wszystko dziala.
+[assistant] Done, all tests green, all works.
 [user]      Stop hook feedback:
             REFUSED by the tyran evidence gate: this report carries no raw
             command output. ...

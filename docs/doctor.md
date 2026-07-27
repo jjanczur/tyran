@@ -248,3 +248,76 @@ is protected.
 - **Doctor reads; it does not take the journal write lock.** On a journal
   being appended to right now, a finding can describe a state one event old.
   `journal-lock-present` is how you find out that this happened.
+
+## `--hooks`: can the gates fire at all?
+
+```bash
+node scripts/doctor.mjs --hooks [--plugin-root <dir>] [--json]
+```
+
+A separate mode from `--state`, because the two answer different questions.
+`--state` asks whether the RECORD of the work is consistent. `--hooks` asks
+whether the gates that produce that record can run — a question with no answer
+inside the state directory, because a plugin whose hooks are dead writes no
+state to be inconsistent with.
+
+**This is DETECTION, not ENFORCEMENT.** Nothing in this mode can make a gate
+run. `doctor --hooks` reports and the `SessionStart` probe warns; neither can
+refuse anything, because `SessionStart` has no refusal channel at all. Any
+claim that the plugin "guarantees" its gates fire would be a false guarantee.
+
+### Why it exists
+
+Measured on the shipped binary: a hook file that is missing, or present
+without the execute bit, is spawned through a shell, exits 127/126 with empty
+stdout, and lands in the platform's non-blocking-error branch — **the action
+proceeds and nothing is printed**. `hooks.json` still lists the gate. The
+manifest still validates. There is a state in which the plugin is installed,
+every document says it guards, and it guards nothing.
+
+### What it checks
+
+For every command hook declared in `hooks.json`:
+
+- the event key is one this platform build dispatches (a one-character typo
+  removes every gate under it, silently);
+- the file exists, is a file, is executable, has a shebang, and the
+  interpreter that shebang names is reachable;
+- `${CLAUDE_PLUGIN_ROOT}` is quoted — hooks are spawned with `shell: true`, so
+  an unquoted path with a space in it word-splits and every gate under it is
+  dead on that machine and alive everywhere else;
+- a `timeout` is declared (the default is 600 seconds);
+- the command is not a shell program whose real target this check would have
+  to guess at;
+- no two entries on one event share a command (the platform deduplicates by
+  `(pluginRoot, command)`, so the second never runs).
+
+And for every matcher, using a transcription of the platform's own predicate:
+
+- an invalid regex matches nothing, forever, with only a debug log line;
+- a comma-separated matcher (`Edit, Write`) is an **error**: the exact-match
+  branch is guarded by `/^[a-zA-Z0-9_|]+$/`, which a comma fails, so it
+  becomes an unanchored regex matching a tool name that will never exist;
+- an unanchored regex matches anywhere inside the subject
+  (`tyran-implementer` also matches `evil-tyran-implementer-nope`);
+- a matcher matching none of the values the event can carry is an **error**
+  where that set is closed by the platform's input schema (`SessionStart`,
+  `PreCompact`) and a **warning** where it is open (tool names, agent types);
+- the alphanumeric branch is EQUALITY, not a substring test, so `implementer`
+  can never match `tyran:implementer` — the check names the value it cannot
+  match rather than saying only that something is wrong.
+
+### Known limits, stated rather than implied
+
+- **The matcher analysis duplicates platform logic on purpose.** There is no
+  other way to answer "will this matcher ever fire?". The transcription is
+  pinned to one build, printed in the report as `platform modelled: <version>`,
+  and a platform upgrade can make it stale without anything noticing.
+- **Open subject sets can only ever produce warnings.** MCP tools arrive as
+  `mcp__server__tool` and a project may define its own agents, so "matches
+  nothing I know about" is not the same as "matches nothing".
+- **Only `command` hooks are checked.** `prompt`, `http`, `agent` and
+  `callback` hooks are reported as unchecked rather than skipped quietly.
+- **The declared-event cross-check is textual.** It greps the hook script for
+  `event: 'X'`; a script that computes its event would trip it wrongly, and
+  the finding says so.

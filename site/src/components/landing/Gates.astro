@@ -16,6 +16,7 @@
  * The limits under each terminal are not fine print bolted on afterwards. The
  * README states them in the same breath as the claim, and so does this.
  */
+import Icon from './Icon.astro';
 import Terminal from './Terminal.astro';
 import { DOCS } from './urls';
 
@@ -77,11 +78,15 @@ Deciding NOT to run one is a legitimate answer — a retro that finds nothing wo
 <section class="l-section" id="gates">
   <div class="l-wrap">
     <div class="gates__head reveal">
+      {/* The scales: the heart weighed against Ma'at's feather. A judgement
+          that ends in a refusal is the scene this glyph has meant for four
+          thousand years, and it is exactly what a gate does. */}
+      <span class="l-sectmark"><Icon name="scales" size={30} /></span>
       <p class="l-eyebrow">The second pillar</p>
       <h2>A prompt asks. A hook refuses.</h2>
       <p class="l-lede">
         &ldquo;Always show your test output&rdquo; in a system prompt is a request, and a request is
-        something a model can be too helpful to honour. In Tyran it is a process that runs at
+        something a model can be too helpful to honour. In Tyran it is a process that runs at{' '}
         <code>SubagentStop</code> and exits with a denial. Below is the report, and below that is the
         exact text the agent gets back &mdash; not a summary of it.
       </p>
@@ -122,9 +127,9 @@ Deciding NOT to run one is a legitimate answer — a retro that finds nothing wo
     </div>
 
     <div class="callout callout--red reveal">
-      <h3>The limit, stated by the gate itself</h3>
+      <h3><Icon name="lash" size={18} />The limit, stated by the gate itself</h3>
       <p>
-        <strong>This gate blocks silence, not forgery.</strong> An agent that invents the text
+        <strong>This gate blocks silence, not forgery.</strong> An agent that invents the text{' '}
         <code>232 passed / 0 failed</code> walks straight through it. The gate raises the price of a
         lie &mdash; it has to be deliberately fabricated rather than simply waved away &mdash; and it
         does not remove it. Nor is the criterion really &ldquo;raw command output&rdquo;: mechanically

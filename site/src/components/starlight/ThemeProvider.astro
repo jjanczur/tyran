@@ -1,0 +1,36 @@
+---
+/**
+ * Starlight override: the theme is dark, and there is nothing to provide.
+ *
+ * Starlight's own `ThemeProvider` reads `localStorage['starlight-theme']`,
+ * falls back to `prefers-color-scheme`, and writes `data-theme` on <html>.
+ * That is exactly the behaviour being removed: the site is dark everywhere by
+ * decision, and a reader whose OS reports light was getting light
+ * documentation.
+ *
+ * This is an override rather than a CSS patch on purpose. Starlight's palette
+ * lives in `:root` (dark) with a `:root[data-theme='light']` block on top, so
+ * forcing dark in the stylesheet would mean out-shouting every one of those
+ * declarations and would break the moment the theme adds one. Removing the
+ * thing that WRITES the attribute leaves Starlight's own default — dark —
+ * standing, which is the same result with none of the specificity war.
+ *
+ * The attribute is still written explicitly, for two reasons. A visitor who
+ * used the toggle before it was removed has `light` sitting in localStorage;
+ * nothing reads it now, but stating `dark` makes that unambiguous rather than
+ * merely unread. And `custom.css` recolours Mermaid through tokens that key
+ * off this attribute, so it should say what it means.
+ *
+ * `updatePickers` is kept as a no-op. Starlight calls it from `ThemeSelect`,
+ * which this site also overrides to render nothing — so nothing calls it
+ * today. It costs one line and it means a future Starlight that calls the
+ * global from somewhere else fails silently instead of throwing a
+ * ReferenceError over the whole page.
+ */
+---
+
+{/* Inlined to avoid a flash of the wrong theme, as Starlight's own is. */}
+<script is:inline>
+  document.documentElement.dataset.theme = 'dark';
+  window.StarlightThemeProvider = { updatePickers() {} };
+</script>

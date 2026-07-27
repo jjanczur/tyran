@@ -11,6 +11,7 @@
  * a `<button>`, so with scripting off it is selectable and readable; the script
  * only adds the clipboard write and the "copied" state.
  */
+import Icon from './Icon.astro';
 import { DOCS, REPO, RELEASE } from './urls';
 
 const STEPS = [
@@ -40,10 +41,13 @@ const BRAKE = 'echo "wrong branch - hold everything" > .tyran/STOP';
 <section class="l-section" id="install">
   <div class="l-wrap">
     <div class="compound__head reveal">
+      {/* The obelisk: a stone that is raised. This is the section where the
+          thing goes up. */}
+      <span class="l-sectmark"><Icon name="obelisk" size={30} /></span>
       <p class="l-eyebrow">Install</p>
       <h2>Two commands to install it, two more to be running</h2>
       <p class="l-lede">
-        Requires Claude Code. Zero runtime dependencies, Apache-2.0, and it never writes into your
+        Requires Claude Code. Zero runtime dependencies, Apache-2.0, and it never writes into your{' '}
         <code>~/.claude</code>.
       </p>
     </div>
@@ -66,7 +70,7 @@ const BRAKE = 'echo "wrong branch - hold everything" > .tyran/STOP';
       </ol>
 
       <aside class="install__aside reveal" style="--l-delay: 120ms">
-        <h3>The brake</h3>
+        <h3><Icon name="lash" size={18} />The brake</h3>
         <p>
           Stop a run from anywhere, at any time, without killing the session. The conductor and every
           agent check for this file.
@@ -76,7 +80,7 @@ const BRAKE = 'echo "wrong branch - hold everything" > .tyran/STOP';
           <span class="copy__hint" data-copy-hint>copy</span>
         </button>
 
-        <h3 style="margin-top: 1.5rem">Where to go next</h3>
+        <h3 style="margin-top: 1.5rem"><Icon name="scroll" size={18} />Where to go next</h3>
         <ul class="linklist">
           <li><a href={DOCS.gettingStarted}>Getting started</a></li>
           <li><a href={DOCS.configuration}>Configuration and cost profiles</a></li>

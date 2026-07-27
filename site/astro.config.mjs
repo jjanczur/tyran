@@ -58,9 +58,11 @@ export default defineConfig({
       title: 'Tyran',
       description:
         'A task conductor for Claude Code that refuses to believe any agent which cannot show raw command output as proof.',
-      // No logo/wordmark is set here on purpose: inventing a brand mark is a
-      // visual decision, and this story is the docs foundation. The repo
-      // already carries `assets/banner.jpg` for whoever makes that call.
+      // `logo` is deliberately NOT set. It takes an image path and emits an
+      // `<img>`, which would mean shipping the jackal a third time as a file
+      // that nothing keeps in step with `Logo.astro` and `public/favicon.svg`.
+      // The mark reaches this header through the `SiteTitle` override below,
+      // as a component, inheriting `currentColor`.
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: REPO }],
       editLink: {
@@ -72,9 +74,26 @@ export default defineConfig({
       },
       lastUpdated: false,
       customCss: ['./src/styles/custom.css'],
-      // Dark + light are both first-class; Starlight ships the toggle and
-      // Pagefind-backed search by default, and both are asserted in the build
-      // measurement rather than assumed.
+      // DARK ONLY, and enforced through the integration's own override slots
+      // rather than by out-shouting its stylesheet.
+      //
+      // Starlight has no `forceDark` option (checked against 0.41.4). What it
+      // has is component overrides, and the theme is only ever applied by two
+      // of them: `ThemeProvider` writes `data-theme` on <html>, `ThemeSelect`
+      // draws the picker and rewrites it on change. Replace both and the
+      // palette Starlight defines on bare `:root` — which is the dark one —
+      // is the only one that can ever apply. The `:root[data-theme='light']`
+      // block in the theme's props.css becomes unreachable rather than
+      // overridden, so no future declaration inside it can win a specificity
+      // fight this site did not know it was having.
+      //
+      // `SiteTitle` is the third override and is unrelated to the theme: it
+      // puts the jackal mark in the docs header.
+      components: {
+        ThemeProvider: './src/components/starlight/ThemeProvider.astro',
+        ThemeSelect: './src/components/starlight/ThemeSelect.astro',
+        SiteTitle: './src/components/starlight/SiteTitle.astro',
+      },
       defaultLocale: 'root',
       locales: { root: { label: 'English', lang: 'en' } },
       sidebar: [

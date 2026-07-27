@@ -15,6 +15,7 @@
  * own rules is the least believable claim on this page and therefore the one
  * that gets drawn rather than asserted.
  */
+import Icon from './Icon.astro';
 import { DOCS } from './urls';
 
 interface Stage {
@@ -86,6 +87,10 @@ const STAGES: Stage[] = [
 <section class="l-section" id="compounding">
   <div class="l-wrap">
     <div class="compound__head reveal">
+      {/* The djed pillar: courses that widen as they stack. The hieroglyph
+          means "stability" and is drawn as accumulation, which is this
+          section's entire argument in one mark. */}
+      <span class="l-sectmark"><Icon name="djed" size={30} /></span>
       <p class="l-eyebrow">The thesis</p>
       <h2>It adapts to your repo. Every initiative leaves it fitting better.</h2>
       <p class="l-lede">
@@ -128,7 +133,7 @@ const STAGES: Stage[] = [
     </ol>
 
     <div class="callout callout--warn reveal">
-      <h3>What of that is shipped, exactly</h3>
+      <h3><Icon name="feather" size={18} />What of that is shipped, exactly</h3>
       <p>
         <strong>The three stages above are an illustration of the trajectory</strong> &mdash; the
         README&rsquo;s own &ldquo;what compounding looks like&rdquo; block, not a log of a real

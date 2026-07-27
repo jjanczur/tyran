@@ -8,6 +8,11 @@
  *
  * The lash appears here and NOT in the favicon: measured at tab size, a curve
  * under the jaw stops reading as a whip and starts reading as a smile.
+ *
+ * The eye is punched out with the PAGE colour rather than with a hole, so the
+ * mark stays one filled path. It is used in two chromes now — the landing nav
+ * and Starlight's header — so it asks the landing token first, Starlight's
+ * second, and only then falls back to a literal.
  */
 interface Props {
   size?: number;
@@ -29,7 +34,7 @@ const { size = 32, class: className } = Astro.props;
     d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z"
     fill="currentColor"
   />
-  <circle cx="33" cy="33" r="2.6" fill="var(--l-bg, #12100e)" />
+  <circle cx="33" cy="33" r="2.6" fill="var(--l-bg, var(--sl-color-bg, #12100e))" />
   <path
     d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51"
     stroke="currentColor"

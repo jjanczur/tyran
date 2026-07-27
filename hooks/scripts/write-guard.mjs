@@ -54,10 +54,10 @@
  *    anything, and no PreToolUse hook can know. Registering Bash is worth it
  *    for the redirection case and for the operator who reads the command; it
  *    is not a claim about programs.
- *  - **MCP tools are not covered.** They arrive as `mcp__<server>__<tool>`,
- *    the set is unbounded and unknown at install time, and the matcher's
- *    equality branch cannot wildcard them. `doctor --hooks` reports the tools
- *    this guard is registered for so the gap is visible rather than assumed.
+ *  - **MCP tools ARE covered**, via the `mcp__.*` alternative — see
+ *    `MCP_TOOL_PATTERN` for what that costs. What is still NOT covered is a
+ *    tool whose name contains no `mcp__` and is not one of the four named
+ *    ones; there is no way to enumerate those in advance.
  *  - **CR (U+000D) is forbidden**, so an Edit against a file with CRLF line
  *    endings is refused. That is the shared rule, not a local choice, and it
  *    is the one place this gate is likely to bounce honest work; the refusal
@@ -86,8 +86,53 @@ import { PASS, field, main, runGate } from './hook-io.mjs';
  */
 export const DEADLINE_MS = 2000;
 
-/** Tools registered for this gate: the platform's own set, plus Bash. */
+/** Tools registered by NAME: the platform's own set, plus Bash. */
 export const GUARDED_TOOLS = Object.freeze([...FILE_WRITING_TOOLS, 'Bash']);
+
+/**
+ * The alternative that covers every MCP server, and the reason it is here.
+ *
+ * The first version of this file declared MCP tools out of scope because "the
+ * equality branch cannot wildcard them". That sentence is true and the
+ * conclusion drawn from it was false: nothing forces the matcher to STAY in
+ * the equality branch. Adding a single alternative containing `.` and `*`
+ * moves the whole matcher into the regex branch, where `mcp__.*` covers every
+ * server that exists or will exist. Measured on the verified predicate:
+ *
+ *     Write · Edit · NotebookEdit · Bash            -> match
+ *     mcp__filesystem__write_file                   -> match
+ *     Read · NotebookRead · Glob · Grep · WebFetch  -> no match
+ *     TaskOutput · WriteSomething                  -> no match (anchored)
+ *
+ * A filesystem MCP server is today the commonest FOURTH way to write a file,
+ * and the story is binding: a gate on one entrance is not a gate.
+ *
+ * THE COSTS, stated rather than discovered later:
+ *
+ *  - The whole alternation is ANCHORED, `^(...)$`, and that is load-bearing
+ *    rather than tidy. Unanchored, the platform retries a regex against every
+ *    ALIAS of the query, so `Bash` also matched `TaskOutput` — whose alias
+ *    `BashOutputTool` contains it — and `Write` matched any `WriteSomething`.
+ *    Measured both ways; anchoring costs nothing and removes both. `doctor
+ *    --hooks` flags the unanchored form, and it was right to.
+ *  - The guard still runs on READ-ONLY MCP tools: `mcp__.*` cannot tell a
+ *    reader from a writer, because the name is all there is. That costs one
+ *    process per call and scans strings that were never going to reach a file.
+ *    Accepted: the alternative is enumerating servers we cannot know.
+ *  - Coverage refusals were the live risk, so they were measured rather than
+ *    argued: across 401 local transcripts, real MCP tool inputs reach depth 2
+ *    and 4 strings at worst, against this guard's caps of 32 and 10 000. The
+ *    refusal path does not fire on real MCP traffic.
+ */
+export const MCP_TOOL_PATTERN = 'mcp__.*';
+
+/**
+ * The exact matcher string `hooks.json` must carry. Exported so the
+ * registration can be asserted against the code rather than kept in step by
+ * somebody remembering — a matcher and the guard behind it drifting apart is
+ * the failure this whole story is about.
+ */
+export const GUARD_MATCHER = `^(${[...GUARDED_TOOLS, MCP_TOOL_PATTERN].join('|')})$`;
 
 /**
  * Input keys whose value is a PATH rather than file content.
@@ -126,7 +171,9 @@ export function collectStrings(value, { maxDepth = MAX_DEPTH, maxStrings = MAX_S
     if (depth > maxDepth) {
       throw new CoverageFailure(`tool input nests deeper than ${maxDepth} levels at ${path || '(root)'}`);
     }
-    if (out.length > maxStrings) {
+    // `>=`, not `>`: the check runs BEFORE the push, so `>` admitted one
+    // string more than the cap it advertises. Safe direction, still wrong.
+    if (out.length >= maxStrings) {
       throw new CoverageFailure(`tool input holds more than ${maxStrings} string values`);
     }
     if (typeof node === 'string') {

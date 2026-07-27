@@ -16,11 +16,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { invisibleProblem } from '../../scripts/invisible.mjs';
-import { FILE_WRITING_TOOLS } from '../../scripts/hooks-check.mjs';
+import { FILE_WRITING_TOOLS, matcherMatches } from '../../scripts/hooks-check.mjs';
 import {
   CoverageFailure,
   DEADLINE_MS,
   GUARDED_TOOLS,
+  GUARD_MATCHER,
+  MCP_TOOL_PATTERN,
   MAX_DEPTH,
   collectStrings,
   judge,
@@ -233,15 +235,69 @@ test('the registration is real: matcher, event and a timeout above the gate dead
   const entry = doc.hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command.includes('write-guard.mjs')));
   assert.ok(entry, 'the guard is registered for PreToolUse');
 
-  // The matcher must be in the EQUALITY branch and cover exactly the guarded
-  // set — no more (which would fire on readers) and no less (which would leave
-  // an entrance open). This is the check that would have caught `Edit, Write`.
-  assert.deepEqual(entry.matcher.split('|').sort(), [...GUARDED_TOOLS].sort());
-  assert.match(entry.matcher, /^[a-zA-Z0-9_|]+$/, 'stays out of the regex branch');
+  // The matcher is asserted against the CODE, not kept in step by memory.
+  assert.equal(entry.matcher, GUARD_MATCHER);
+
+  // ...and what it covers is asserted through the PLATFORM's own predicate,
+  // because the shape of the string is not the question — what fires is.
+  for (const tool of [...GUARDED_TOOLS, 'mcp__filesystem__write_file', 'mcp__plugin_x_srv__put']) {
+    assert.equal(matcherMatches(tool, entry.matcher), true, `${tool} must be guarded`);
+  }
+  // No more than that. An unanchored alternation quietly widened this: the
+  // platform retries a regex against every ALIAS of the query, so `Bash`
+  // matched `TaskOutput` (via `BashOutputTool`) and `Write` matched
+  // `WriteSomething`. Anchoring removes both, and this is the test that says so.
+  for (const tool of ['Read', 'NotebookRead', 'Glob', 'Grep', 'WebFetch', 'Agent', 'TaskOutput', 'WriteSomething']) {
+    assert.equal(matcherMatches(tool, entry.matcher), false, `${tool} must NOT be guarded`);
+  }
 
   const hook = entry.hooks.find((h) => h.command.includes('write-guard.mjs'));
   assert.match(hook.command, /^"\$\{CLAUDE_PLUGIN_ROOT\}/, 'the path is quoted; the shell would split it otherwise');
   // The platform kills at `timeout` and then does not read stdout at all, so a
   // gate whose own deadline is not strictly shorter can only ever be killed.
   assert.ok(hook.timeout * 1000 > DEADLINE_MS, `${hook.timeout}s must exceed the ${DEADLINE_MS}ms deadline`);
+});
+
+// ------------------------------------------------------------- MCP tools
+
+/**
+ * Round 2. The first version declared MCP tools out of scope, reasoning that
+ * "the equality branch cannot wildcard them". True, and the conclusion was
+ * wrong: nothing forces the matcher to stay in the equality branch. A
+ * filesystem MCP server is the commonest fourth way to write a file, and the
+ * story is binding — a gate on one entrance is not a gate.
+ */
+test('an MCP write tool is guarded, and its payload is judged like any other', () => {
+  const cpx = (...p) => String.fromCodePoint(...p);
+  // The shape an MCP filesystem server actually sends: a flat object of
+  // strings. Measured across 401 local transcripts, real MCP inputs reach
+  // depth 2 and 4 strings at worst — far inside this guard's caps, so the
+  // coverage refusal does not fire on real traffic.
+  const hostile = { path: '/tmp/x.txt', content: 'ok' + cpx(0xe0041) + 'done' };
+  const verdict = judge({ tool_name: 'mcp__filesystem__write_file', tool_input: hostile });
+  assert.equal(verdict.decision, 'deny');
+  assert.equal(judge({ tool_name: 'mcp__filesystem__write_file', tool_input: { path: '/t', content: 'ok' } }), PASS);
+});
+
+test('the MCP pattern covers servers nobody enumerated, and no read tool', () => {
+  assert.equal(MCP_TOOL_PATTERN, 'mcp__.*');
+  for (const t of ['mcp__a__b', 'mcp__plugin_claude-mem_mcp-search__search', 'mcp__x__write_file']) {
+    assert.equal(matcherMatches(t, GUARD_MATCHER), true, t);
+  }
+  assert.equal(matcherMatches('Read', GUARD_MATCHER), false);
+});
+
+test('a real MCP input shape is walked to the bottom without a coverage refusal', () => {
+  // Depth 2, the deepest shape measured in the transcript corpus.
+  const input = { edits: [{ oldText: 'a', newText: 'b' }], path: '/tmp/f' };
+  assert.equal(judge({ tool_name: 'mcp__filesystem__edit_file', tool_input: input }), PASS);
+  assert.equal(collectStrings(input).length, 3);
+});
+
+test('MAX_STRINGS admits exactly its cap, not one more', () => {
+  // The check runs BEFORE the push, so `>` allowed cap+1. Safe direction,
+  // still a lie about the advertised limit.
+  const atCap = { list: Array.from({ length: 5 }, () => 'x') };
+  assert.equal(collectStrings(atCap, { maxStrings: 5 }).length, 5);
+  assert.throws(() => collectStrings({ list: Array.from({ length: 6 }, () => 'x') }, { maxStrings: 5 }), CoverageFailure);
 });

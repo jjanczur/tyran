@@ -321,3 +321,35 @@ And for every matcher, using a transcription of the platform's own predicate:
 - **The declared-event cross-check is textual.** It greps the hook script for
   `event: 'X'`; a script that computes its event would trip it wrongly, and
   the finding says so.
+
+### Keys on the hook ENTRY (the fifth failure variant)
+
+The checks above all pass while a gate is decoration, if the entry carries one
+of four keys. Measured live, same payload, one key changed at a time: a bare
+entry refused and the file was never written; `"async": true` PASSED and wrote
+raw TAG characters to disk; `"if": "Bash(git *)"` PASSED; `"shell":
+"powershell"` PASSED. In every case a logger on the same matcher fired
+normally, so dispatch and matching were both working.
+
+They are **errors**, on blocking events only:
+
+- `async` / `asyncRewake` — "runs in background without blocking". A
+  backgrounded hook has no channel to return a decision through, so the gate
+  cannot refuse at all.
+- `once` — "runs once and is removed after execution". The gate guards the
+  first occurrence, which is the one anybody testing an installation uses.
+- `if` — evaluated by the platform in a language this check does not
+  interpret, so the gate's coverage is unknown. Unknown coverage on a control
+  is treated as failure here, the same call the secrets gate makes when it
+  refuses rather than scanning a prefix.
+- `shell` — the command goes to an interpreter it was not written for, and
+  fails in the silent 127 way.
+
+On a **non-blocking** event none of these is an error: a probe that runs in the
+background, once, or conditionally is a legitimate design. The severity is a
+property of the pair (key, event).
+
+A `timeout` is also checked for plausibility, not only for presence: the field
+is documented in seconds, so a value above the platform's own 600 s default is
+almost always a millisecond figure pasted into a seconds field, and until the
+hook exits the tool call it guards is held.

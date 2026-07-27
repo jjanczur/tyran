@@ -14,11 +14,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const DOCTOR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'doctor.mjs');
 
 import {
+  BLOCKING_EVENTS,
   CLOSED_SUBJECTS,
+  MAX_PLAUSIBLE_TIMEOUT_S,
+  TOOL_ALIASES,
+  entryKeyFindings,
   FILE_WRITING_TOOLS,
   MATCH_QUERY_FIELD,
   PLATFORM_EVENTS,
@@ -462,4 +470,148 @@ test('RED: a DIRECTORY where the hook file should be is an error (mutant M24)', 
   // And it must not ALSO claim the file is absent: two findings for one fact
   // send the reader to fix the wrong thing first.
   assert.ok(!codes(result).includes('hook-file-absent'));
+});
+
+// ============================================================ round 2
+
+/**
+ * The fifth failure variant, and the worst: every earlier check passes. The
+ * file exists, is executable, has a shebang, the matcher is right, the event
+ * is real — and one key on the ENTRY turns the gate into decoration while
+ * `doctor --hooks` prints "healthy". Measured live by review, same payload,
+ * one key changed at a time.
+ */
+function withEntryKey(patch) {
+  const hooks = defaultHooks();
+  Object.assign(hooks.hooks.PreToolUse[0].hooks[0], patch);
+  return checkHooks({ root: tree({ hooks }) });
+}
+
+test('RED: "async" on a blocking event is an ERROR — a backgrounded gate cannot refuse', () => {
+  const result = withEntryKey({ async: true });
+  const f = result.findings.find((x) => x.code === 'hook-async-on-gate');
+  assert.ok(f, 'async is detected');
+  assert.equal(f.severity, 'error');
+  assert.equal(result.ok, false);
+  assert.match(f.message, /background without blocking/);
+});
+
+test('RED: "asyncRewake" implies async and is the same error', () => {
+  assert.equal(withEntryKey({ asyncRewake: true }).findings.some((f) => f.code === 'hook-async-on-gate'), true);
+});
+
+test('RED: "once" on a gate is an ERROR — it guards the first call and nothing after', () => {
+  const f = withEntryKey({ once: true }).findings.find((x) => x.code === 'hook-once-on-gate');
+  assert.equal(f.severity, 'error');
+});
+
+test('RED: "if" on a gate is an ERROR — coverage becomes unknown', () => {
+  const f = withEntryKey({ if: 'Bash(git *)' }).findings.find((x) => x.code === 'hook-conditional-gate');
+  assert.equal(f.severity, 'error');
+  assert.match(f.message, /UNKNOWN/);
+});
+
+test('RED: a foreign "shell" on a gate is an ERROR', () => {
+  const f = withEntryKey({ shell: 'powershell' }).findings.find((x) => x.code === 'hook-foreign-shell');
+  assert.equal(f.severity, 'error');
+  assert.equal(withEntryKey({ shell: 'bash' }).findings.some((x) => x.code === 'hook-foreign-shell'), false);
+});
+
+test('the SAME keys on a PROBE event are not errors — severity is a property of the pair', () => {
+  // A probe that runs in the background, once, or conditionally is a
+  // legitimate design. Flagging it would be the crying-wolf failure.
+  for (const patch of [{ async: true }, { once: true }, { if: 'x' }, { shell: 'powershell' }]) {
+    assert.deepEqual(entryKeyFindings('SessionStart', patch, 'x'), [], JSON.stringify(patch));
+    assert.ok(entryKeyFindings('PreToolUse', patch, 'x').length > 0, JSON.stringify(patch));
+  }
+});
+
+test('the blocking-event list agrees with the runtime that has to answer on them', async () => {
+  // Two models of the platform, kept separate on purpose. If they disagree,
+  // one of them is wrong and the disagreement must not be silent.
+  const { EVENTS } = await import('../../hooks/scripts/hook-io.mjs');
+  for (const [name, meta] of Object.entries(EVENTS)) {
+    if (meta.canBlock) assert.ok(BLOCKING_EVENTS.includes(name), `${name} blocks in hook-io`);
+    else assert.ok(!BLOCKING_EVENTS.includes(name), `${name} is a probe in hook-io`);
+  }
+});
+
+test('RED: a timeout that is plainly milliseconds is reported, not just absence', () => {
+  const f = withEntryKey({ timeout: 10000 }).findings.find((x) => x.code === 'hook-timeout-implausible');
+  assert.ok(f, 'an implausible timeout is detected');
+  assert.match(f.message, /day\(s\)/);
+  assert.match(f.fix, /10\b/);
+  // ...and a sane one is silent.
+  assert.equal(withEntryKey({ timeout: MAX_PLAUSIBLE_TIMEOUT_S }).findings.some((x) => x.code === 'hook-timeout-implausible'), false);
+});
+
+/**
+ * Reviewer counterexample R9, adopted verbatim as a MUST-PASS.
+ *
+ * `ok: counts.error === 0 && counts.warning === 0` -> `ok: counts.error === 0`
+ * left the entire 596-test suite green. It is not equivalent: `ok` drives
+ * doctor's EXIT CODE, and the tree it mislabels is the commonest dead gate
+ * there is — a typo in a tool name, which is a warning because the tool set
+ * is open. Every existing test pinned ok===false for ERRORS; the
+ * warning/healthy boundary was pinned by nothing.
+ */
+test('R9 MUST-PASS: a WARNING-only tree is not healthy, and doctor exits 1', () => {
+  const hooks = defaultHooks('Wrte'); // the typo'd tool name
+  const root = tree({ hooks });
+  const result = checkHooks({ root });
+  assert.equal(result.counts.error, 0, 'no errors in this tree');
+  assert.equal(result.counts.warning, 1, 'exactly one warning');
+  assert.equal(result.ok, false, 'a warning-only tree is NOT ok');
+
+  let rc = 0;
+  let out = '';
+  try {
+    out = execFileSync(process.execPath, [DOCTOR, '--hooks', '--plugin-root', root], { encoding: 'utf8' });
+  } catch (err) {
+    rc = err.status;
+    out = err.stdout ?? '';
+  }
+  assert.equal(rc, 1, 'doctor --hooks exits 1 on a warning-only tree');
+  assert.match(out, /action needed/);
+  assert.doesNotMatch(out, /healthy/);
+});
+
+test('the alias table has all FIVE entries the platform ships', () => {
+  // A missing row made this check report a LIVE gate as dead — the direction
+  // the module header calls inadmissible — in the one file whose only value
+  // is fidelity of transcription.
+  assert.deepEqual(Object.keys(TOOL_ALIASES).sort(), [
+    'AgentOutputTool', 'BashOutputTool', 'Brief', 'KillShell', 'Task',
+  ]);
+  assert.equal(TOOL_ALIASES.Brief, 'SendUserMessage');
+  // The consequence, through the predicate: a matcher of "Brief" fires.
+  assert.equal(matcherMatches('SendUserMessage', 'Brief'), true);
+  assert.deepEqual(aliasesOf('SendUserMessage'), ['Brief']);
+});
+
+test('RED: a matcher spelling a namespace the manifest does not use is an error', () => {
+  // The check the header promised and the first pass never emitted. A
+  // declared severity with no code behind it is a line no mutant can kill.
+  const hooks = {
+    hooks: {
+      SubagentStop: [
+        { matcher: '^oldname:implementer$', hooks: [{ type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/gate.mjs"', timeout: 5 }] },
+      ],
+    },
+  };
+  const result = checkHooks({ root: tree({ hooks, agents: ['implementer'] }) });
+  const f = result.findings.find((x) => x.code === 'hook-namespace-drift');
+  assert.ok(f, 'the drift is detected');
+  assert.equal(f.severity, 'error');
+  assert.match(f.message, /"oldname:"/);
+  assert.match(f.message, /"tyran"/);
+
+  // GREEN: the correct namespace is silent.
+  const ok = checkHooks({
+    root: tree({
+      hooks: { hooks: { SubagentStop: [{ matcher: '^tyran:implementer$', hooks: [{ type: 'command', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/gate.mjs"', timeout: 5 }] }] } },
+      agents: ['implementer'],
+    }),
+  });
+  assert.ok(!codes(ok).includes('hook-namespace-drift'));
 });

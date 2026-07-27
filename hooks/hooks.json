@@ -24,7 +24,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "matcher": "^(Write|Edit|NotebookEdit|Bash|mcp__.*)$",
         "hooks": [
           {
             "type": "command",

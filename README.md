@@ -341,33 +341,28 @@ one directory each.</sub>
 
 ## Command-line use (outside Claude Code)
 
-A single `bin/tyran.mjs` entry point exposes the same scripts the plugin's
-hooks and skills already call — `doctor`, `scan-repo`, `tiers`, `journal`,
-`schema`, `stop-check`, `scan-control-chars`, `desc-budget` — for a shell or a
-CI job with no Claude Code session. Zero dependencies; `--help` lists them.
+Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/tyran)
+— scoped, not the bare name `tyran`, which carries an unpublish tombstone from
+2021-03-30 that npm's abuse policy blocks anyone from reusing, permanently. The
+command stays `tyran` either way; only the registry name is scoped, the same
+pattern as `@angular/cli` giving you `ng`. `bin/tyran.mjs` exposes the same
+scripts the plugin's hooks and skills already call — `doctor`, `scan-repo`,
+`tiers`, `journal`, `schema`, `stop-check`, `scan-control-chars`,
+`desc-budget` — for a shell or a CI job with no Claude Code session. Zero
+dependencies; `--help` lists them.
 
 ```bash
-node bin/tyran.mjs doctor --hooks     # is any gate installed but unable to fire?
-node bin/tyran.mjs scan-repo --dir .  # what this repo looks like, with provenance
+npx @jjanczur/tyran doctor --hooks     # is any gate installed but unable to fire?
+npx @jjanczur/tyran scan-repo --dir .  # what this repo looks like, with provenance
 ```
 
 Exit codes propagate to the digit, so a CI step reddens exactly when the
 underlying script does.
 
-> **Not on npm yet — so `npx @jjanczur/tyran` does not work today.** The
-> package is built, versioned and tested; only the publish is outstanding.
-> Saying it works here before that is true would be exactly the kind of claim
-> this project refuses to accept from its own agents. It publishes under the
-> scope, not the bare name `tyran` — that name carries an npm unpublish
-> tombstone from 2021-03-30, and npm's policy against reusing an unpublished
-> name is permanent, for anyone, not a grace period this project could wait
-> out. The command stays `tyran` either way; only the registry name is scoped.
->
-> **And it would not install the Claude Code plugin either.** For that, run
+> **This does not install the Claude Code plugin.** For that, run
 > `/plugin marketplace add jjanczur/tyran` inside Claude Code — that name is
-> the Claude Code marketplace identity, a separate namespace from npm and
-> unaffected by any of the above. The npm package is the tooling; the plugin
-> is the conductor.
+> the Claude Code marketplace identity, a separate namespace from npm. The npm
+> package is the tooling; the plugin is the conductor.
 
 ## Documentation
 

@@ -1,6 +1,6 @@
 ---
-title: 'What Tyran ships: eight skills and four agents'
-description: 'The eight skills and four agents the plugin installs, each with its role, the assumption it rests on, and whether a person or the conductor normally invokes it.'
+title: 'What Tyran ships: fourteen skills and four agents'
+description: 'The fourteen skills and four agents the plugin installs, each with its role, the assumption it rests on, and whether a person or the conductor normally invokes it.'
 ---
 import Provenance from '../../components/Provenance.astro';
 
@@ -9,15 +9,26 @@ import Provenance from '../../components/Provenance.astro';
 </Provenance>
 
 Tyran is usually described as a conductor, which undersells it. Installing the
-plugin also installs **eight skills** and **four agents** — and the skills are
+plugin also installs **fourteen skills** and **four agents** — and the skills are
 not the conductor's private plumbing. Most of them are things *you* type. There
 is no orchestration involved in `/tyran:doctor`; it is a diagnostic you run
 because you want to know whether your gates can fire.
 
-Two of the eight are not about Tyran at all. `fidelity-gate` and
-`prompt-tuning` are working protocols for problems that have nothing to do with
-agent orchestration, and they are the clearest case for reading this page: they
-exist because a rule written as prose was demonstrably not enough.
+Eight of the fourteen are not about Tyran at all. They are working protocols
+for problems that have nothing to do with agent orchestration — reviewing a
+diff, debugging a failure, driving a browser, cleaning up code, answering a
+reviewer, building against a mockup, tuning a prompt, writing a skill — and
+they are the clearest case for reading this page. Each of them exists because a
+rule written as prose was demonstrably not enough: either it had been
+compressed until the step that does the work fell out, or it was named by the
+conductor as a requirement and never defined anywhere, so it meant whatever the
+agent doing it decided that afternoon.
+
+That is also the admission rule. **A protocol becomes a skill here only when
+something already asks for it by name**, which is why the number is fourteen
+rather than forty. Every description is loaded into every session whether the
+skill fires or not, so the combined length is capped and the cap is checked in
+CI on every push.
 
 ```mermaid
 flowchart TB
@@ -31,8 +42,10 @@ flowchart TB
   end
 
   subgraph PROTO["Protocol skills — invoked by whoever does the work"]
-    S5["/tyran:fidelity-gate"]
-    S6["/tyran:prompt-tuning"]
+    S5["/tyran:code-review · /tyran:root-cause"]
+    S6["/tyran:browser-check · /tyran:deslop"]
+    S7["/tyran:pr-feedback · /tyran:fidelity-gate"]
+    S8["/tyran:prompt-tuning · /tyran:skill-writing"]
   end
 
   COND(["the conductor"])
@@ -56,13 +69,15 @@ flowchart TB
   COND --> ROSTER
   COND --> PROTO
   A2 --> PROTO
+  A3 --> PROTO
+  A4 --> PROTO
   ROSTER -- "reports" --> G1
   ROSTER -- "tool calls" --> G2
   COND --> G3
   G1 -. "rejects a report with no raw output" .-> ROSTER
 ```
 
-## The eight skills
+## The fourteen skills
 
 Every skill is invoked as `/tyran:<name>`. "Who" says whether the caller is
 normally a person, the conductor, or either.
@@ -75,8 +90,14 @@ normally a person, the conductor, or either.
 | [`doctor`](https://github.com/jjanczur/tyran/blob/main/skills/doctor/SKILL.md) | Diagnose Tyran itself in this repo: gates that cannot fire, journal-vs-projection drift, orphaned leases, dead policy rules, config that fails its schema. Never repairs. | That a dead gate and a healthy gate look identical from inside a session — which is the whole reason it exists. Hooks fail **open**. | Either |
 | [`retro`](https://github.com/jjanczur/tyran/blob/main/skills/retro/SKILL.md) | Close an initiative by learning from it: spawn the retrospector over the ledger, the notes and the agents' reports, and record what changed and what was rejected. | A **closed** initiative with a journal and agent reports to read. With no initiative behind it there is no signal, only opinion. | Either — normally the `Stop` gate asks for it |
 | [`hello`](https://github.com/jjanczur/tyran/blob/main/skills/hello/SKILL.md) | Installation smoke test: confirm the plugin loaded, that skills are namespaced `/tyran:*`, and where `${CLAUDE_PLUGIN_ROOT}` resolves. | Nothing. It is the one skill that must work before anything else does — and it is the only one marked `disable-model-invocation`, so it runs when you ask and never on a hunch. | Human |
+| [`code-review`](https://github.com/jjanczur/tyran/blob/main/skills/code-review/SKILL.md) | The depth half of a review: the dimensions a diff is read against, and the rule that you try to refute a finding before you report it. | A diff and the acceptance criteria it claims to satisfy. It does **not** own the verdict — that stays with `tyran:reviewer`, so the two never define "reviewed" twice. | Either |
+| [`root-cause`](https://github.com/jjanczur/tyran/blob/main/skills/root-cause/SKILL.md) | Work a failure down to its mechanism instead of patching the symptom: reproduce, one variable per experiment, bisect, name the mechanism. | That the failure can be made to happen at least sometimes. Everything downstream depends on a reproduction; without one, a fix cannot be shown to have worked. | Either |
+| [`browser-check`](https://github.com/jjanczur/tyran/blob/main/skills/browser-check/SKILL.md) | Drive a real browser and return counts — pages, links, console errors, failed responses, computed styles — rather than an impression. | A browser (chromium) and a server that is actually serving the build you mean. It measures; it does not judge whether the design is right. | Either |
+| [`deslop`](https://github.com/jjanczur/tyran/blob/main/skills/deslop/SKILL.md) | The optimization pass, defined: delete before you add, one smell class per pass, behaviour pinned by a test. Also lints a `SKILL.md` and prose. | A test that ran **before** the edit. Without a green run from beforehand, a green run afterwards proves nothing about what you changed. | Either |
+| [`pr-feedback`](https://github.com/jjanczur/tyran/blob/main/skills/pr-feedback/SKILL.md) | Work a reviewer's comments to the end: all three of GitHub's comment surfaces, a disposition for every comment, push before you reply. | A pull request and `gh` authenticated against it. Assumes the reviewer is a person whose disagreement is worth a written answer, not a queue to clear. | Either |
 | [`fidelity-gate`](https://github.com/jjanczur/tyran/blob/main/skills/fidelity-gate/SKILL.md) | Build a UI against a frozen visual reference without drift. | A reference that is **frozen and in the repo** — a mockup, a spec, a screenshot — and that the reference, not the ticket prose, is the source of visual truth. | Either |
 | [`prompt-tuning`](https://github.com/jjanczur/tyran/blob/main/skills/prompt-tuning/SKILL.md) | Iterate on a prompt, or on anything whose quality is a model's output, without chasing noise. | That the measured quantity is **non-deterministic**. Every rule follows from that one premise; on a deterministic metric the protocol is overkill. | Either |
+| [`skill-writing`](https://github.com/jjanczur/tyran/blob/main/skills/skill-writing/SKILL.md) | What a skill has to earn before it ships here, and how one is written so it actually fires. | That the library is a shared, costed resource: every description is loaded into every session. A skill nothing already asks for is a library entry, not a skill. | Either — normally `retro` |
 
 ## The two that are worth a second sentence
 

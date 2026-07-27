@@ -124,6 +124,49 @@ if (searchCount > 0) {
   searchOpened = (await page.locator('dialog[open]').count()) > 0;
 }
 
+// --- the footer signature ---------------------------------------------------
+//
+// LAST, and on the landing page, which is the only page carrying this footer.
+//
+// The ordering is not cosmetic. This block first sat above the search check
+// and broke it: the search assertion runs against whatever page is currently
+// loaded, and the landing deliberately renders OUTSIDE Starlight's chrome, so
+// it has no search button at all. The suite went red on a working site — the
+// same "a check scoped to the markup it was written against" trap this file
+// already carries a comment about, walked into from the other direction.
+//
+// What it proves, neither of which anything else here can see:
+//
+// 1. The two author links. The crawl above skips every non-localhost href on
+//    purpose, so external links are invisible to it — and a wrong external URL
+//    never 404s, which is exactly the failure `landing-urls.test.mjs` exists
+//    for.
+// 2. That the LinkedIn glyph is actually VISIBLE. `Icon.astro` renders marks
+//    with `fill="none"` because the rest of that set is stroked; the LinkedIn
+//    mark is a solid shape, and without the FILLED branch it renders a 14px
+//    square of nothing. Page builds, link works, icon invisible, and no other
+//    test would notice. So it is measured rather than eyeballed.
+//
+//    Both halves are load-bearing, which was verified by breaking it on
+//    purpose: with `FILLED` emptied, the computed fill went to `none` and the
+//    bounding box STAYED 14x14. An element can be laid out at full size and
+//    paint nothing at all, so the box check alone would have passed the exact
+//    regression this exists to catch.
+await page.goto(`${BASE}/`, { waitUntil: 'load' });
+
+const footerLinks = await page.$$eval('.l-footer__made a[href]', (as) => as.map((a) => a.href));
+const expectedAuthorLinks = ['https://janczura.com/', 'https://www.linkedin.com/in/jacekjanczura/'];
+const authorLinksOk = expectedAuthorLinks.every((want) =>
+  footerLinks.some((href) => href === want || href === want.replace(/\/$/, '')),
+);
+
+const li = page.locator('.l-footer__li svg');
+const liBox = await li.first().boundingBox().catch(() => null);
+const liFill = await li.first().evaluate((el) => getComputedStyle(el).fill).catch(() => 'missing');
+const liLabel = await page.locator('.l-footer__li').first().getAttribute('aria-label');
+const liVisible = Boolean(liBox && liBox.width > 0 && liBox.height > 0);
+const liFilled = liFill !== 'none' && liFill !== 'missing';
+
 await browser.close();
 
 console.log('\n--- results ---');
@@ -143,6 +186,10 @@ console.log(`mermaid svg on hooks       : ${mermaidOnHooks}`);
 console.log(`theme (stored pref=light)  : ${themeAfter}`);
 console.log(`theme pickers rendered     : ${themePickers}`);
 console.log(`search dialog opens        : ${searchOpened}`);
+console.log(`footer author links        : ${authorLinksOk ? 'both present' : footerLinks.join(' , ') || 'NONE'}`);
+console.log(`linkedin glyph box         : ${liBox ? `${Math.round(liBox.width)}x${Math.round(liBox.height)}` : 'NOT RENDERED'}`);
+console.log(`linkedin glyph fill        : ${liFill}`);
+console.log(`linkedin link aria-label   : ${liLabel ?? 'MISSING'}`);
 
 const ok =
   brokenLinks.length === 0 &&
@@ -155,7 +202,11 @@ const ok =
   mermaidOnHooks === 1 &&
   themeAfter === 'dark' &&
   themePickers === 0 &&
-  searchOpened;
+  searchOpened &&
+  authorLinksOk &&
+  liVisible &&
+  liFilled &&
+  Boolean(liLabel);
 
 console.log(ok ? '\nBROWSER PASS: OK' : '\nBROWSER PASS: FAILED');
 process.exit(ok ? 0 : 1);

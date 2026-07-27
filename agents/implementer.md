@@ -23,9 +23,16 @@ commits and anything written to disk are in English.**
      `node ${CLAUDE_PLUGIN_ROOT}/scripts/stop-check.mjs`. Exit 1 means stop
      and report where you got to.
 2. **Order of work:** short plan, implementation, self-review of your own
-   diff, tests (unit, plus a real browser pass for UI: navigation,
-   clickability, a clean console), an optimization pass recorded in the story
-   file, repo validation, then commits, push and PR on the story branch.
+   diff, tests (unit, plus a real browser pass for UI — through
+   `browser-check`, which returns counts rather than impressions), an
+   optimization pass recorded in the story file (`deslop` — it deletes rather
+   than adds, and it needs a test that ran BEFORE your edit), repo validation,
+   then commits, push and PR on the story branch.
+   - When a test fails for a reason you cannot explain, **stop patching and
+     follow `root-cause`**. Reproduce it, change one variable at a time with
+     the prediction written down first, and name the mechanism. A fix for a
+     failure you never reproduced cannot be shown to have worked.
+   - When the PR comes back with comments, follow `pr-feedback`.
 3. **Decide technical questions yourself.** Stop only for product or visual
    decisions, or when something would cross a boundary the handoff named —
    then stop and ask the conductor. "Shall I continue?" is forbidden.

@@ -50,7 +50,11 @@ jobs:
           node scripts/schema.mjs validate knowledge templates/knowledge.yaml
           node scripts/schema.mjs validate policy templates/policies/autonomy.yaml
       - name: Skill description budget
-        run: node scripts/desc-budget.mjs --budget 4000 .
+        # No `--budget` here on purpose. The number lives in exactly one place,
+        # `DEFAULT_BUDGET` in the script, and a test pins it. When it was typed
+        # here as well, the two could disagree — and the disagreement surfaces
+        # as a CI failure quoting a ceiling that no longer exists in the repo.
+        run: node scripts/desc-budget.mjs .
       - name: No raw control or bidi characters in tracked files (ADR-19)
         # Editing tools turn the TEXT of an escape into the character itself;
         # it happened seven times in one session here. The damage is silent —

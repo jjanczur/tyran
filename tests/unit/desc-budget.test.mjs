@@ -5,9 +5,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseFrontmatterDescription, collectSkillDescriptions } from '../../scripts/desc-budget.mjs';
+import {
+  parseFrontmatterDescription,
+  collectSkillDescriptions,
+  DEFAULT_BUDGET,
+} from '../../scripts/desc-budget.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/desc-budget.mjs', import.meta.url));
+const CI = fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url));
 
 function fixture(skills) {
   const root = mkdtempSync(join(tmpdir(), 'tyran-descbudget-'));
@@ -17,6 +22,31 @@ function fixture(skills) {
   }
   return root;
 }
+
+test('the budget is pinned, so raising it has to be deliberate', () => {
+  // The same guard `hook-session-start.test.mjs` puts on DEADLINE_MS. The
+  // budget is the number behind the README's "small curated core, enforced in
+  // CI" claim, and a ceiling that drifts upward whenever it is inconvenient
+  // measures nothing. It was 4000 for the first eight skills and moved once,
+  // to 5000, as a recorded owner decision — see CHANGELOG.
+  assert.equal(DEFAULT_BUDGET, 5000, 'pinned so a change has to be deliberate');
+});
+
+test('CI enforces the budget from the script, never from a second copy', () => {
+  // The number used to be typed here AND in the workflow as `--budget 4000`.
+  // Raising one left the other enforcing the old value: CI would fail quoting
+  // a ceiling that existed nowhere in the repo. This is `prompt-tuning` rule 7
+  // ("every hand-copy of a constant is a future lie") applied to the guard
+  // that exists to stop exactly this class of decay.
+  const ci = readFileSync(CI, 'utf8');
+  const invocation = /node scripts\/desc-budget\.mjs[^\n]*/.exec(ci);
+  assert.ok(invocation, 'CI no longer runs desc-budget at all');
+  assert.doesNotMatch(
+    invocation[0],
+    /--budget/,
+    'CI passes its own --budget, so the ceiling now lives in two places and they can disagree',
+  );
+});
 
 test('parses a plain single-line description', () => {
   const md = '---\ndescription: Does a thing well.\n---\nBody';

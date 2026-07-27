@@ -2,6 +2,51 @@
 
 ## 0.1.0 — unreleased
 
+### Six protocol skills, and the budget raised once to pay for them
+
+**The conductor was ordering work it had never defined.** Rule 3 required a
+browser pass "navigation, clickability, a clean console" and an "optimization
+pass per story"; `fidelity-gate` step 4 required computed styles dumped to
+JSON; rule 4 made a human-reviewed PR the default ending. Not one of those had
+a protocol behind it, so each meant whatever the agent doing it decided that
+afternoon. Six skills now carry them — `browser-check`, `deslop`,
+`code-review`, `root-cause`, `pr-feedback`, `skill-writing` — and each is
+wired into the caller that was already asking for it. **A protocol is admitted
+here only when something names it**, which is the rule that keeps the number
+at fourteen rather than forty.
+
+Two are worth calling out. `pr-feedback` exists because GitHub keeps pull
+request feedback in three separate resources and the inline-comments endpoint
+does not contain a review's body: measured on `cli/cli` PR #13944, which has
+one review carrying written feedback and **zero** inline comments. An agent
+reading one surface there reports "all feedback addressed" — true about what
+it read, false about what it claims. And `skill-writing` exists because the
+retrospective may commit a new skill without asking (AUTO class); that is only
+safe against a standard, and it now has one, including an activation test that
+proves the skill fires from a cold session.
+
+**The description budget moved from 4000 to 5000, once, deliberately.** Every
+description is loaded into every session whether its skill fires or not, which
+is the context tax the README's "small curated core" row is about — and
+oh-my-claudecode's issue #2943 describes a budget that was *exceeded*, not one
+that was moved. So the raise came with the mechanics that make the difference
+real: `DEFAULT_BUDGET` is exported and pinned by a test; `.github/workflows/
+ci.yml` no longer carries its own `--budget 4000` copy, because the number
+living in two places meant raising one left the other enforcing a ceiling that
+existed nowhere in the repo; and raising it stays **GATED** in the autonomy
+policy — a retrospective may propose a raise and may not perform one. Current
+total: 4340 of 5000, and a test now fails if the README's quoted figures and
+the script ever disagree.
+
+**Two more guards, both for claims that decay silently.** The inventory test
+now catches a spelled-out count ("fourteen skills and four agents") that has
+gone stale, which the digit-anchored check could not see — deliberately
+matching only the two phrasings that are claims about what ships, so the
+footnote's historical "the first eight skills" stays correct. `agents/scout.md`
+gained an output contract for mapping unfamiliar code, so recon comes back as
+a one-screen map with entry points, flow and hidden coupling instead of a
+directory listing.
+
 ### The loop closes: setup, four commands, a bare `/tyran`, and a retro that fires itself
 
 **The retrospective no longer depends on anyone remembering it.** A new `Stop`

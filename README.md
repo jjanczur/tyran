@@ -160,11 +160,12 @@ Then `/tyran` interviews you, sizes the work, and either does it itself
 
 ### It is not only an orchestrator — it ships skills you can use yourself
 
-Eight skills and four agents come with the plugin. Six of the skills are the
-conductor's own machinery, but they are **commands, not internals**: you run
-`/tyran:doctor` on a repo you are debugging without ever starting an
-initiative. Two are standalone protocols with nothing to do with
-orchestration at all.
+Fourteen skills and four agents come with the plugin. Six of the skills are
+the conductor's own machinery, but they are **commands, not internals**: you
+run `/tyran:doctor` on a repo you are debugging without ever starting an
+initiative. The other eight are standalone protocols — most of them have
+nothing to do with orchestration and work perfectly well in a session that
+never starts an initiative at all.
 
 | Skill | What it does |
 |---|---|
@@ -173,9 +174,15 @@ orchestration at all.
 | [`status`](skills/status/SKILL.md) | where an initiative got to, from the journal rather than from memory |
 | [`doctor`](skills/doctor/SKILL.md) | is any gate installed but unable to fire; is the state self-consistent |
 | [`retro`](skills/retro/SKILL.md) | the anti-bloat curator that changes Tyran, never your product code |
+| [`hello`](skills/hello/SKILL.md) | proves the plugin is installed and its paths resolve |
+| [`code-review`](skills/code-review/SKILL.md) | **standalone.** The dimensions a diff is read against, and the rule that you refute a finding before reporting it |
+| [`root-cause`](skills/root-cause/SKILL.md) | **standalone.** Reproduce first, one variable per experiment with the prediction written down, exit by naming the mechanism |
+| [`browser-check`](skills/browser-check/SKILL.md) | **standalone.** A UI pass that returns counts — console errors, failed responses, computed styles — instead of "looks fine" |
+| [`deslop`](skills/deslop/SKILL.md) | **standalone.** The optimization pass: delete before you add, one smell per pass, behaviour pinned by a test that ran first |
+| [`pr-feedback`](skills/pr-feedback/SKILL.md) | **standalone.** All three of GitHub's comment surfaces, a disposition for every comment, push before you reply |
 | [`fidelity-gate`](skills/fidelity-gate/SKILL.md) | **standalone.** Build 1:1 against a frozen mockup without drift, measured rather than eyeballed |
 | [`prompt-tuning`](skills/prompt-tuning/SKILL.md) | **standalone.** Tune anything whose quality is a non-deterministic model output — noise baseline first, then medians |
-| [`hello`](skills/hello/SKILL.md) | proves the plugin is installed and its paths resolve |
+| [`skill-writing`](skills/skill-writing/SKILL.md) | **standalone.** What a skill has to earn before it ships, and the activation test that proves it fires |
 
 Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story,
 own branch), `tyran:reviewer` (**no editing tools** — it cannot patch what it
@@ -183,10 +190,16 @@ is grading), `tyran:retro`. What each one assumes, and who is expected to
 invoke it, is in [skills and agents](docs/skills.md); the tier and effort
 routing behind them is in [the roster](docs/agents.md).
 
-The two standalone protocols exist because the rule alone was not enough —
+The standalone protocols exist because the rule alone was not enough.
 `fidelity-gate` had been inlined into three sentences and lost the inventory
 step that does the work; `prompt-tuning` kept its principle and lost
-everything the principle was distilled from.
+everything the principle was distilled from. The rest were dangling
+references — the conductor ordered a browser pass, an optimization pass and a
+review without saying what any of them was, so each meant whatever the agent
+felt like that afternoon. **A skill is admitted here only when something
+already asks for the protocol by name**, which is why there are fourteen and
+not forty; the ceiling on their combined description length is enforced in
+CI, and raising it is an owner decision rather than a retrospective's.
 
 Hit the brake at any time, from anywhere, without killing the session:
 
@@ -273,7 +286,7 @@ test-gated** (flips to ✅ only when the tests exist and pass).
 | Safe parallelism: worktree per agent, leases, sequential merge | ✅⁸ | ⚠️ | ❌ | — | ❌⁵ |
 | Clean install: 2 commands, **never writes into your `~/.claude`** | ✅ | ❌³ | ⚠️ | ❌ | ⚠️ |
 | OSS hygiene: license, changelog, CI validation, pressure tests | ✅ | ⚠️ | ⚠️ | ✅ | ❌⁶ |
-| Skills · agents it ships, counted from the repo tree | 8 · 4¹⁰ | 41 · 19 | 14 · 19 | 0 · 8 | 41 · 8 |
+| Skills · agents it ships, counted from the repo tree | 14 · 4¹⁰ | 41 · 19 | 14 · 19 | 0 · 8 | 41 · 8 |
 
 <sub>¹ Their deliverable check is explicitly non-blocking ("never prevents the
 agent from stopping"). ² Their issues #32/#33/#36: crash loses loop state.
@@ -294,13 +307,18 @@ is a judgement, not a mechanism — and the gate deliberately accepts "I am
 skipping this" as a complete answer. ¹⁰ <b>The one row where a bigger number
 is not a better one, printed anyway.</b> Measured on each repo's default
 branch, July 2026: files matching <code>skills/*/SKILL.md</code> and
-<code>agents/*.md</code>. Two competitors ship five times as many skills as
+<code>agents/*.md</code>. Two competitors ship three times as many skills as
 Tyran does, and that is the point of the "small curated core" row above —
 oh-my-claudecode's own issue #2943 is titled "50+ skills exceeding context
 description budget", which is the bill that arrives with the larger number.
-Tyran's eight are held under a description budget CI enforces on every push
-(2407 of 4000 characters). Counting files is not counting value: what each
-skill is for is in <a href="skills/">skills/</a>, one directory each.</sub>
+Tyran's fourteen are held under a description budget CI enforces on every
+push (4340 of 5000 characters, and a test fails if this sentence and the
+script ever disagree). That ceiling was 4000 for the first eight skills and
+was raised once, deliberately, with the reason in the changelog — the
+distinction being that #2943 describes a budget that was <i>exceeded</i>, and
+an agent here may propose a raise but not perform one. Counting files is not
+counting value: what each skill is for is in <a href="skills/">skills/</a>,
+one directory each.</sub>
 
 ## Command-line use (outside Claude Code)
 
@@ -332,7 +350,7 @@ underlying script does.
 — same text, with search, rendered diagrams and per-page status badges.
 
 - 📖 [Getting started](docs/getting-started.md)
-- 🧰 [Skills and agents](docs/skills.md) — all eight skills and four agents, what each assumes, and who invokes it
+- 🧰 [Skills and agents](docs/skills.md) — all fourteen skills and four agents, what each assumes, and who invokes it
 - ⚙️ [Configuration](docs/configuration.md) — `.tyran/config.yaml`, cost profiles, autonomy classes
 - 🎭 [The roster and model routing](docs/agents.md) — the four agents, the tier and effort table, dynamic overrides, the `.tyran/STOP` brake (shipped)
 - 🏛️ [Architecture](docs/architecture.md) — the three layers, the journal, the hooks

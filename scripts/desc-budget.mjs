@@ -15,7 +15,23 @@ import { escapeInvisible } from './invisible.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DEFAULT_BUDGET = 4000;
+/**
+ * The ceiling, and the ONLY place it is written.
+ *
+ * It was 4000 while the library was eight skills. Raising it to 5000 for the
+ * six protocol skills is an OWNER decision, recorded in the changelog — which
+ * is the whole difference between this and the failure the README cites
+ * (oh-my-claudecode #2943, where the budget was exceeded rather than moved).
+ * An agent proposes a raise; it does not perform one.
+ *
+ * Exported so a test can pin it. Until this change the number lived here AND
+ * in `.github/workflows/ci.yml` as `--budget 4000`, which is the hand-copied
+ * constant `prompt-tuning` rule 7 calls a future lie: raising one leaves the
+ * other enforcing the old value, and the CI failure names a budget that no
+ * longer exists anywhere in the repo. The workflow now invokes the script
+ * bare, exactly as `CONTRIBUTING.md` already did.
+ */
+export const DEFAULT_BUDGET = 5000;
 
 export function parseFrontmatterDescription(markdown) {
   // Frontmatter = first block delimited by lines that are exactly `---`.

@@ -21,66 +21,116 @@
 <h3 align="center">The more you use it, the better it gets.</h3>
 
 <p align="center">
-Tyran is a task conductor for Claude Code <i>(v2 — under construction, in public)</i>:
-it interviews you, plans, drives a team of fresh-context agents through your work — and
-<b>refuses to believe any agent that can't show raw command output as proof</b>. When the
-work is done it will not let the initiative end until it has learned something from it.
-The conductor, the roster, the refusal and that loop are all shipped today; the status
-box below draws the line under what is not.
+Tyran is a task conductor for Claude Code: it interviews you, plans, and drives a team of
+fresh-context agents through your work — <b>refusing to believe any agent that can't show
+raw command output as proof</b>, routing every subtask to the cheapest model that can do
+it, and keeping each agent in the context band where it still thinks clearly. When the
+work is done, it will not let the initiative end until it has learned something from it.
 </p>
 
 ---
 
 ## The Problem
 
-You explain your conventions to your agent. Again. It claims *"done — all tests
-pass"* — nothing was run. The context compacts mid-initiative and the
-orchestration forgets where it was. You finally teach your setup something —
-and the next plugin update wipes it out.
+Four failures, all of them ordinary, all of them silent. You will recognise
+every one.
 
-Every orchestrator we studied has the same three soft spots: **verification is
-advisory**, **execution state dies with the session**, and **updates destroy
-learning**. Tyran exists to make those three failures mechanically impossible —
-enforced by hooks, not requested by prompts.
+| | What happens | What it costs you |
+|---|---|---|
+| 🟥 **Fake green** | *"Done — all tests pass."* Nothing was run. | You find out at review, or at deploy. The report was cheaper to write than the work. |
+| 🟥 **Wrong model, wrong job** | The strongest, most expensive model renames a file, changes a button colour, runs a mechanical sweep. | You pay top rate for work any cheap tier does identically. Nobody notices, because it *worked*. |
+| 🟥 **Context collapse** | Nobody compacts on purpose. The window fills to 60, 70%. Auto-compact then fires **in the middle of a hard debugging run**. | The fine detail the model had just discovered — the thing that took an hour — is gone, and it does not know it is gone. |
+| 🟥 **Amnesia** | State lives in a chat window. Another dev, another branch, tomorrow morning — none of them can see where this got to. | The work is re-derived, or worse, half re-derived. |
+
+**Context collapse is the expensive one**, and it is worth being precise about
+why. Above roughly half the window, the model is carrying so much that it
+starts missing things it would have caught at 10%. And the compaction that
+should relieve that pressure is the very thing that destroys the detail:
+
+```mermaid
+flowchart LR
+    subgraph BAD["❌ one agent carries everything"]
+        direction LR
+        B1["0%<br/>sharp"] --> B2["50%<br/>still fine"] --> B3["70%<br/>missing things"] --> B4["auto-compact<br/>mid-debug"] --> B5["detail gone —<br/>and it does not<br/>know it is gone"]
+    end
+    classDef bad fill:#7f1d1d,stroke:#f87171,color:#fef2f2
+    classDef warn fill:#78350f,stroke:#fbbf24,color:#fffbeb
+    class B3,B4,B5 bad
+    class B2 warn
+```
 
 ## The Solution
 
-```text
-        ┌──────────────────────────────────────────────────────┐
-        │                      /tyran:run                      │
-        │  interview → triage (S/M/L/XL × risk) → plan → gate  │
-        └────────────────────────┬─────────────────────────────┘
-                                 ▼
-      ┌────────────┐      ┌────────────┐      ┌────────────┐
-      │   scout    │      │ implementer│      │  reviewer  │
-      │ (recon,RO) │ ───▶ │ (worktree) │ ───▶ │ (≠ author) │
-      └────────────┘      └─────┬──────┘      └─────┬──────┘
-                                │  EVIDENCE GATE ✋  │  proof or rejected
-                                ▼                    ▼
-        ┌──────────────────────────────────────────────────────┐
-        │   append-only journal (.tyran/) — survives restarts  │
-        └────────────────────────┬─────────────────────────────┘
-                                 ▼
-        ┌──────────────────────────────────────────────────────┐
-        │  /tyran:retro — learns YOUR repo, improves itself    │
-        └──────────────────────────────────────────────────────┘
+**Split the work so nobody has to carry all of it**, and put the state in a
+file instead of a window:
+
+```mermaid
+flowchart TB
+    OP(["you"]) -->|"describes the work"| C["<b>conductor</b><br/>plans · delegates · merges<br/><i>stays lean — it holds the plan,<br/>not the transcripts</i>"]
+
+    C -->|"self-contained handoff"| S["<b>scout</b><br/>fresh context<br/><i>cheap tier</i>"]
+    C -->|"self-contained handoff"| I["<b>implementer</b><br/>fresh context · own worktree<br/><i>work tier</i>"]
+    C -->|"self-contained handoff"| R["<b>reviewer</b><br/>fresh context · never the author<br/><i>work tier, top tier on security</i>"]
+
+    S & I & R -->|"report"| G{{"✋ EVIDENCE GATE<br/>raw command output,<br/>or the report is REFUSED"}}
+    G --> J[("append-only journal<br/>.tyran/ — committed to YOUR repo")]
+    J -->|"survives restart,<br/>compaction, and you"| C
+    J --> D["another dev · another branch<br/>· tomorrow morning"]
+    J --> RT{{"✋ RETRO GATE<br/>the initiative cannot end<br/>without learning something"}}
+    RT -->|"improves"| C
+
+    classDef gate fill:#7f1d1d,stroke:#f87171,color:#fef2f2
+    classDef store fill:#064e3b,stroke:#34d399,color:#ecfdf5
+    class G,RT gate
+    class J store
 ```
 
-**What compounding looks like:**
+Each of the four failures gets a mechanism, not a paragraph of advice:
 
-```text
-Initiative 1   Tyran scans your repo, infers your validation commands,
-               your commit style, your deployment policy. Asks once.
-Initiative 5   It knows your shared-file hot zones, your flaky tests,
-               your review taste. Its retro has already deleted two of
-               its own rules that weren't earning their keep.
-Initiative 20  It has written repo-specific skills for your recurring
-               work, tuned its own agent prompts to your stack, and its
-               cost profile routes every subtask to the cheapest model
-               that can do the job. You mostly just approve gates.
+| Failure | Mechanism | State |
+|---|---|---|
+| Fake green | A `SubagentStop` hook **rejects** a report with no raw command output. Measured on 55 real reports: 53 pass, and both misses were not reports. | ✅ shipped |
+| Wrong model | Every role resolves to a tier from **one config file**. `top` — the expensive one — is reserved for security review, arbitration and acceptance, and a floor stops any profile or flag pushing those down. Effort is a **separate dial**: *same model, think harder* costs nothing extra. | ✅ shipped |
+| Context collapse | Work goes to **fresh-context subagents** with self-contained handoffs, so the conductor never accumulates their transcripts. A `PreCompact` hook checkpoints before every compaction and **refuses a manual `/compact` it could not checkpoint**; `SessionStart` re-injects that checkpoint afterwards. | ✅ shipped · 🎯 a trigger that says *"compact now, this section is finished"* is **not built** |
+| Amnesia | The journal is an append-only file **in your repo**, not in a window. `STATE.md` and `PROGRESS.md` are generated from it. Another agent, another dev, another branch reads where this got to — including which agent is still running and which lease nobody released. | ✅ shipped |
+
+**Cheap where it doesn't matter, expensive where it does.** That is the whole
+cost argument, and it is why the routing table is a table and not a vibe:
+
+```mermaid
+flowchart LR
+    T1["<b>cheap</b><br/>recon · sweeps · bookkeeping"] --- T2["<b>work</b><br/>implementation<br/>ordinary review<br/><i>the default</i>"] --- T3["<b>deep</b><br/>root-cause · hard builds<br/>risky review"] --- T4["<b>top</b><br/>security review<br/>arbitration · acceptance<br/><i>and nothing else</i>"]
+    classDef c fill:#064e3b,stroke:#34d399,color:#ecfdf5
+    classDef w fill:#1e3a5f,stroke:#60a5fa,color:#eff6ff
+    classDef d fill:#78350f,stroke:#fbbf24,color:#fffbeb
+    classDef t fill:#7f1d1d,stroke:#f87171,color:#fef2f2
+    class T1 c
+    class T2 w
+    class T3 d
+    class T4 t
 ```
 
-> **Status: v2 under active construction — in public.** Built epic by epic.
+### And then it gets better on its own
+
+An initiative that ends without a retrospective is **refused one turn** by a
+`Stop` hook. The retro reads the ledger, the notes and the agents' own
+reports, and changes Tyran itself — through a filter whose default answer is
+*change nothing*, which prefers **deleting a rule to adding one**, and which
+is explicitly told not to breed agents, because a roster nobody can hold in
+their head is its own cognitive tax.
+
+```text
+Initiative 1   Infers your stack, your validation commands, your deployment
+               style from how the repo is actually worked. Asks once, about
+               what it genuinely could not establish.
+Initiative 5   Knows your shared-file hot zones, your flaky tests, your
+               review taste. Its retro has already DELETED two of its own
+               rules that weren't earning their keep.
+Initiative 20  Has written repo-specific skills for your recurring work and
+               merged two agents that overlapped. You mostly approve gates.
+```
+
+> **Status — what is shipped, and what is not.** Built epic by epic, in public.
 > **Shipped and tested:** the plugin skeleton and CI; the `.tyran/` state
 > layer (append-only journal, schema, generated projections, doctor); the
 > enforcement hooks — evidence gate, secrets gate, policy gate, write guard,

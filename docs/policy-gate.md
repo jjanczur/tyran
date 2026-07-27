@@ -29,21 +29,35 @@ never surface a permission prompt, and neither do a main loop's under
 | `AUTO` | pass | pass |
 | `GATED` | pass — the platform's own permission prompt **is** the approval | **deny** |
 | `KERNEL` | **deny** | **deny** |
-| **no rule matches** | the policy's `default:` — `GATED` in the shipped template | |
+| **no rule matches, inside `.tyran/` `.claude/` `hooks/`** | the policy's `default:` — `GATED` in the shipped template | |
+| **no rule matches, anywhere else** | pass — see below | pass |
 | **outside the repository** | **deny** | **deny** |
 
 Two rows deserve their reasoning spelled out, because both could defensibly
 have gone the other way.
 
-**A path no rule matches is a row, not a fall-through.** It resolves to
-`default:`, which the validator makes mandatory precisely so this question has
-an answer in the file rather than in the code. The shipped template sets it to
-`GATED`. The reasoning is ADR-19 correction 1: a denylist over input somebody
-else controls is *structurally* incomplete, so "unmatched means allowed" would
-mean the policy protects only what someone remembered to list. The opposite
-extreme — refuse everything unlisted — was rejected for a measured reason
-rather than a stylistic one: a gate that refuses ordinary work is uninstalled,
-and an uninstalled gate protects nothing at all.
+**A path no rule matches is a row, not a fall-through — and it is really two
+rows.** ADR-19 correction 1 says a denylist over input somebody else controls
+is *structurally* incomplete, so "unmatched means allowed" would mean the
+policy protects only what someone remembered to list. The opposite extreme —
+refuse everything unlisted — was rejected on a measurement rather than on
+taste: **65 of the 65 tracked files in this repository match no rule in the
+shipped template**, so that reading would have refused an implementer subagent
+on every write it makes, and a gate that refuses ordinary work is uninstalled.
+
+The split follows what the policy is actually *about*. ADR-06 governs
+**self-improvement** — what the retrospective agent may change about Tyran —
+and every rule in the template names a Tyran artefact. So inside Tyran's own
+namespace (`.tyran/`, `.claude/`, `hooks/`) the policy is meant to be
+exhaustive, an unmatched path means somebody added a new kind of artefact, and
+`default:` applies: fail-closed and cheap, because those trees are small.
+Outside it, the policy has nothing to say and neither does this gate.
+
+This narrows the **default**, not the rules. An explicit rule still applies to
+any path anywhere — write `- path: src/**` and you get exactly that. A path
+outside the repository is still `KERNEL`, and `hooks/**` and
+`.tyran/policies/**` are still refused unconditionally, before any rule is
+consulted.
 
 **`GATED` passes in a supervised main loop.** On `PreToolUse` the platform
 offers a gate exactly two answers: `deny`, and silence. There is no "ask" — and
@@ -136,23 +150,28 @@ finds by itself is a boundary it learns to prefer.
    *Worst case:* an agent refused a KERNEL write through `Edit` can perform the
    same write through `Bash`. The refusal text says so in as many words, and a
    test pins the gap so closing it is a deliberate act.
-2. **A repository with no `.tyran/` directory is left alone** (except for the
+2. **Product code is not classified by default.** Only `.tyran/`, `.claude/`
+   and `hooks/` fall under the policy's `default:`; everything else needs an
+   explicit rule. *Worst case:* a user who believes the policy covers their
+   whole tree gets no refusal for `src/**` until they write the rule. The
+   alternative was measured and rejected above.
+3. **A repository with no `.tyran/` directory is left alone** (except for the
    read rule, which needs no configuration). *Worst case:* `rm -rf .tyran`
    disables the path classes wholesale. Accepted because refusing every write
    in every repository that has not adopted Tyran is a plugin nobody keeps
    installed; detecting the deletion belongs to `doctor`.
-3. **The read rule is a denylist and is therefore incomplete.** A credential in
+4. **The read rule is a denylist and is therefore incomplete.** A credential in
    a file called `notes.md` is read without objection. It is not a claim that
    no secret can reach the context by another name.
-4. **`GATED` in a supervised main loop relies on the platform actually
+5. **`GATED` in a supervised main loop relies on the platform actually
    prompting.** A `permissions.allow` entry in the user's settings suppresses
    the prompt, and the hook cannot see those settings. *Worst case:* a user who
    has allow-listed `Write(*)` gets `GATED` behaviour equal to `AUTO` in the
    main loop. Subagents are unaffected.
-5. **Only the argv of `git push` is modelled**, not every publishing command.
+6. **Only the argv of `git push` is modelled**, not every publishing command.
    `gh release create` and friends are the secrets gate's business; the
    deployment class does not see them.
-6. **Multiple pushes in one command line** are each evaluated, but the
+7. **Multiple pushes in one command line** are each evaluated, but the
    deployment class always comes from the **session** root's config, not from
    the repository the command walked into.
 

@@ -29,15 +29,17 @@
  *
  * ## The two questions this gate had to answer out loud
  *
- * **1. A path no rule matches is a row of the matrix, not a fall-through.**
- * It resolves to the policy's `default`, which the validator makes mandatory
- * and the shipped template sets to GATED. The reasoning matters more than the
- * value: a denylist over hostile input is structurally incomplete (ADR-19
- * correction 1), so "unmatched means allowed" would mean the policy protects
- * only what somebody remembered to list. Both directions were available and
- * the third one — refuse everything unlisted — was rejected on measurement,
- * not taste: a gate that refuses ordinary work is uninstalled, and then it
- * protects nothing at all.
+ * **1. A path no rule matches is a row of the matrix, not a fall-through —
+ * and it turned out to be TWO rows.** Inside Tyran's own namespace it takes
+ * the policy's `default:` (GATED in the shipped template); outside it the
+ * policy has nothing to say and the gate is silent. See `GOVERNED_PREFIXES`
+ * for the full argument and the measurement that forced it — the first
+ * version of this file applied `default:` everywhere and would have refused
+ * an implementer subagent on 65 of the 65 tracked files in this repository.
+ * A gate that refuses ordinary work is uninstalled, and then it protects
+ * nothing at all; that is the cost side of ADR-19 correction 1, which is
+ * otherwise entirely right that "unmatched means allowed" makes a policy
+ * protect only what somebody remembered to list.
  *
  * **2. The highest class covers WRITES. Reads are guarded by a separate,
  * narrower rule, and that boundary is stated rather than left to be found.**
@@ -63,7 +65,7 @@
  */
 import { realpathSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
-import { basename, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PASS, field, main, runGate } from './hook-io.mjs';
@@ -132,6 +134,50 @@ export const READ_TOOLS = Object.freeze(['Read', 'NotebookRead', 'Grep']);
 
 /** Input keys that name a file. Read prototype-safely; see `field`. */
 export const PATH_FIELDS = Object.freeze(['file_path', 'notebook_path', 'path']);
+
+/**
+ * The namespace these path classes govern: Tyran's own artefacts.
+ *
+ * This is a CORRECTED PREMISE, and it is stated rather than quietly encoded.
+ * ADR-06 is titled "the limits of SELF-improvement autonomy", and its table
+ * classifies what the retrospective agent may change about **Tyran** —
+ * knowledge files, local skills, agent overrides, config, the enforcement
+ * hooks. It says nothing about a user's source tree, because a user's source
+ * tree is not what the self-improvement loop edits.
+ *
+ * The first version of this gate applied `default:` to every path, and the
+ * cost was measured rather than imagined: in THIS repository 65 of 65 tracked
+ * files match no rule in the shipped template, so an implementer subagent
+ * would have been refused on every single write it makes. That is not a
+ * stricter gate, it is an uninstalled one — and subagents writing code is what
+ * Tyran is for.
+ *
+ * So "no rule matched" is not one row of the matrix but two:
+ *
+ *  - **inside this namespace** — the policy is meant to enumerate it, so an
+ *    unmatched path means somebody added a new kind of Tyran artefact. That
+ *    deserves `default:` (GATED in the template): fail-closed, and cheap,
+ *    because these trees are small and fully listed;
+ *  - **outside it** — the policy has nothing to say and neither does this
+ *    gate. Silence, declared in `docs/policy-gate.md` as a boundary rather
+ *    than left to be discovered.
+ *
+ * What this does NOT weaken, and each is pinned by a test: an explicit rule
+ * still applies to any path anywhere, so a user who wants `src/**` gated
+ * writes that rule and gets it; a path outside the repository is still
+ * KERNEL; and `MANDATORY_KERNEL_PATHS` is still checked unconditionally,
+ * before any of this.
+ */
+export const GOVERNED_PREFIXES = Object.freeze(['.tyran/', '.claude/', 'hooks/']);
+
+/** True when the policy's `default:` is the right answer for an unmatched path. */
+export function isGoverned(normalized) {
+  // Case-insensitive for the same reason `globMatches` is: on a
+  // case-insensitive filesystem `.TYRAN/x` and `.tyran/x` are one file, and a
+  // classifier must not let casing pick the weaker answer.
+  const lower = String(normalized).toLowerCase();
+  return GOVERNED_PREFIXES.some((prefix) => lower === prefix.slice(0, -1) || lower.startsWith(prefix));
+}
 
 /**
  * Permission modes in which the USER is still asked before a write lands.
@@ -463,6 +509,52 @@ export function quoteRule(policy, normalized, cls) {
 
 // ----------------------------------------------------------- the path matrix
 
+/** How many ancestors `canonicalDeepest` will walk. A path is not a tree. */
+const MAX_PATH_DEPTH = 64;
+
+/**
+ * The realpath of the deepest ANCESTOR that exists, with the rest re-appended.
+ *
+ * A write usually names a file that does not exist yet, so `realpath` on the
+ * target itself fails. The directory above it almost always does.
+ */
+function canonicalDeepest(raw) {
+  let head = resolvePath(raw);
+  const tail = [];
+  for (let i = 0; i < MAX_PATH_DEPTH; i++) {
+    try {
+      return tail.length === 0 ? realpathSync(head) : join(realpathSync(head), ...tail);
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return resolvePath(raw);
+      tail.unshift(basename(head));
+      head = parent;
+    }
+  }
+  return resolvePath(raw);
+}
+
+/**
+ * The repo-relative path, resolved through symlinks on BOTH sides.
+ *
+ * Measured on the live install: `file_path` is always ABSOLUTE — the matrix
+ * for this gate was first written against relative paths, which is a shape the
+ * platform never sends, and mutant M17 is what exposed it. Absolute paths make
+ * symlinks load-bearing, and on macOS `/tmp` and `/var` ARE symlinks, so a
+ * root and a `file_path` routinely name one directory in two spellings. Left
+ * alone that produces "outside the repository, class KERNEL" for an ordinary
+ * source file: a refusal on the commonest write there is, which is how a gate
+ * gets switched off in its first hour.
+ *
+ * Canonicalizing unconditionally (rather than only as a retry) also closes the
+ * other direction: `repo/link/x` where `link` points at `/etc` reads as
+ * repo-relative until the symlink is followed, and then correctly reads as
+ * outside. Two spellings of one location must not resolve to two classes.
+ */
+export function repoRelative(raw, root) {
+  return normalizePath(canonicalDeepest(raw), canonicalDeepest(root));
+}
+
 /** Every path this tool call names. Prototype-safe, deduplicated, order-stable. */
 export function pathTargets(toolInput) {
   if (toolInput === null || typeof toolInput !== 'object') return [];
@@ -657,7 +749,7 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     for (const target of targets) {
       const hits = secretReadRules(target);
       if (hits.length === 0) continue;
-      const normalized = normalizePath(target, root);
+      const normalized = repoRelative(target, root);
       const exempt =
         normalized !== null &&
         policy !== null &&
@@ -700,12 +792,20 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     // classify against one directory while the refusal talked about another,
     // and the two would agree in every test that happened to run in the repo
     // root. Normalization is idempotent, so the resolver's own call is a no-op.
-    const normalized = normalizePath(target, root);
+    const normalized = repoRelative(target, root);
     // The one branch this cannot delegate: a path outside the repository makes
     // `normalizePath` return null, which `classifyPath` answers with KERNEL.
     // Restated in one line rather than reached by passing a null through, and
     // pinned by a test that asserts both spellings still agree.
     const cls = normalized === null ? 'KERNEL' : classifyPath(policy, normalized);
+    // The unmatched row, split in two. `decidingRule` returning null is
+    // exactly "the policy said nothing about this path"; outside the governed
+    // namespace that is not a decision the policy is entitled to make, so the
+    // gate is silent. Inside it, `default:` applies and the class above is
+    // already it.
+    if (normalized !== null && decidingRule(policy, normalized) === null && !isGoverned(normalized)) {
+      continue;
+    }
     const verdict = verdictForClass(cls, unsupervised);
 
     // ADR-21, applied as a check rather than as a refactor: the rule this
@@ -728,7 +828,7 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
         `tyran policy-gate: refused. ${describeTarget(target, normalized)}\n` +
         `class: ${safePolicyText(cls)} · actor: ${actor} · ` +
         `${unsupervised ? 'nobody is asked before this write lands' : 'the user is prompted for this write'}\n` +
-        `rule: ${quoteRule(policy, normalized ?? '', cls)}\n` +
+        `rule: ${quoteRule(policy, normalized, cls)}\n` +
         `${escapeRoute(cls, unsupervised)}`,
     };
   }
@@ -892,13 +992,13 @@ async function decideBash({ input, toolInput, root, runner, budget }) {
   return PASS;
 }
 
-const DEPLOY_CLASS_MEANING = Object.freeze({
+const DEPLOY_CLASS_MEANING = Object.freeze(Object.assign(Object.create(null), {
   P1: 'branch only; an agent pushes its own work and a human moves it further',
   P2: 'staging and testing branches; production stays a human decision',
   P3: 'production too, minus the operations that cannot be undone',
-});
+}));
 
-const DEPLOY_REMEDY = Object.freeze({
+const DEPLOY_REMEDY = Object.freeze(Object.assign(Object.create(null), {
   irreversible:
     'What to do instead: push the branch without deleting or rewriting anything, and let the ' +
     'operator do the destructive step. A deleted remote ref and an overwritten history are not ' +
@@ -912,7 +1012,7 @@ const DEPLOY_REMEDY = Object.freeze({
     'on the branch it created; the shared branches are P2 and above.',
   default:
     'What to do instead: push to a branch of your own and open a pull request from it.',
-});
+}));
 
 /** Turn a PolicyFailure into the refusal it always has to be. */
 export async function handle({ input, runner, startedAt, env }) {

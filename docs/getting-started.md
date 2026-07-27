@@ -2,13 +2,7 @@
 
 ## Install
 
-```text
-/plugin marketplace add jjanczur/tyran
-/plugin install tyran@tyran
-/tyran:hello
-```
-
-**Or paste this into Claude Code and let it install itself.** `/plugin` is a
+**Paste this into Claude Code and let it install itself.** `/plugin` is a
 slash command a human has to type, so this asks for the same steps through
 the `claude` CLI instead, which Claude Code can run on its own — followed by
 the restart those steps require, and a walkthrough of what setup inferred
@@ -25,6 +19,14 @@ Install the Tyran plugin in this repository and set it up for me.
    validation commands and the deployment autonomy class - before we commit it.
 
 Docs: https://jjanczur.github.io/tyran/getting-started/
+```
+
+Or type the same three steps yourself:
+
+```text
+/plugin marketplace add jjanczur/tyran
+/plugin install tyran@tyran
+/tyran:hello
 ```
 
 `/tyran:hello` confirms three things: the plugin loaded, skills are namespaced

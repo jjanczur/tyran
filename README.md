@@ -28,6 +28,12 @@ it, and keeping each agent in the context band where it still thinks clearly. Wh
 work is done, it will not let the initiative end until it has learned something from it.
 </p>
 
+<p align="center">
+Never written a skill, spun up a subagent, or run an agent team yourself? Tyran does all
+three automatically, on your behalf, and the retrospective it runs after every initiative
+means it keeps learning your repo's way of working instead of repeating a generic playbook.
+</p>
+
 ---
 
 ## The Problem

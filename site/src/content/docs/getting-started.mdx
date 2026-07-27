@@ -6,23 +6,7 @@ import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Install
 
-<Steps>
-
-1. ```text
-   /plugin marketplace add jjanczur/tyran
-   ```
-
-2. ```text
-   /plugin install tyran@tyran
-   ```
-
-3. ```text
-   /tyran:hello
-   ```
-
-</Steps>
-
-**Or paste this into Claude Code and let it install itself.** `/plugin` is a
+**Paste this into Claude Code and let it install itself.** `/plugin` is a
 slash command a human has to type, so this asks for the same steps through
 the `claude` CLI instead, which Claude Code can run on its own — followed by
 the restart those steps require, and a walkthrough of what setup inferred
@@ -40,6 +24,24 @@ Install the Tyran plugin in this repository and set it up for me.
 
 Docs: https://jjanczur.github.io/tyran/getting-started/
 ```
+
+Or type the same three steps yourself:
+
+<Steps>
+
+1. ```text
+   /plugin marketplace add jjanczur/tyran
+   ```
+
+2. ```text
+   /plugin install tyran@tyran
+   ```
+
+3. ```text
+   /tyran:hello
+   ```
+
+</Steps>
 
 `/tyran:hello` confirms three things: the plugin loaded, skills are namespaced
 under `/tyran:*`, and `${CLAUDE_PLUGIN_ROOT}` resolves to the installed copy.

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.jpg" alt="Tyran — a pharaoh conductor overseeing agent workers building a pyramid of code" width="100%">
+  <img src="assets/banner.jpg" alt="Tyran — a jackal-headed conductor driving a hall of agent workstations, each screen showing its own status: code optimization at 65%, a critical logic failure, data gathering stalled, self-improvement required" width="100%">
 </p>
 
 <p align="center">
@@ -15,10 +15,10 @@
 <p align="center">
 Tyran is a task conductor for Claude Code <i>(v2 — under construction, in public)</i>:
 it interviews you, plans, drives a team of fresh-context agents through your work — and
-<b>refuses to believe any agent that can't show raw command output as proof</b>. Then it
-runs a retrospective on itself, learns <i>your</i> repo's rules and <i>your</i> style,
-and autonomously sharpens its own playbook and skills. You bring the harness; it does
-the improving.
+<b>refuses to believe any agent that can't show raw command output as proof</b>. That
+refusal is real and shipped today. The rest of the arc — a retrospective that learns
+<i>your</i> repo's rules and sharpens its own playbook — is the design this is being
+built toward, and is <b>not written yet</b>. The status box below draws the line.
 </p>
 
 ---
@@ -72,10 +72,18 @@ Initiative 20  It has written repo-specific skills for your recurring
                that can do the job. You mostly just approve gates.
 ```
 
-> **Status: v2 under active construction — in public.** The conductor core is
-> being built epic by epic (skeleton + CI are done; state layer and
-> enforcement hooks are next). Every capability below ships with tests before
-> we claim it. Watch the repo to follow along.
+> **Status: v2 under active construction — in public.** Built epic by epic.
+> **Shipped and tested:** the plugin skeleton and CI, the `.tyran/` state
+> layer (append-only journal, schema, generated projections, doctor), and the
+> enforcement hooks — evidence gate, secrets gate, policy gate, write guard,
+> state re-injection, and a doctor check that catches a gate which cannot
+> fire. 772 tests.
+> **Not built yet:** the `/tyran:run` conductor, the agent roster itself
+> (`agents/` is empty — scout, implementer and reviewer are a design, not a
+> file), `/tyran:setup`, cost profiles, and the self-improvement loop.
+> The diagram above is the target architecture; the gates in it are real
+> today, the three role boxes are not. Every capability ships with tests
+> before it is claimed, and the roadmap below says which is which.
 
 ## Quick Start
 
@@ -105,27 +113,34 @@ only what it couldn't infer.
   Measured on 55 real reports from this project's own agents: 53 pass, and both
   misses turned out not to be reports at all. Details, numbers in both
   directions, and limits in [the evidence gate](docs/evidence-gate.md).
-- 🧠 **It learns *your* workflow — autonomously.** After every initiative a
-  retrospective agent distills your repo's rules, writes repo-specific
-  skills, and tunes Tyran's own playbook — through a hard anti-bloat filter
-  whose default answer is *"change nothing"*, and which prefers deleting
-  rules over adding them.
+- 🎯 **It will learn *your* workflow — autonomously.** *(designed, not built —
+  no code yet.)* After every initiative a retrospective agent is to distill
+  your repo's rules, write repo-specific skills, and tune Tyran's own
+  playbook — through a hard anti-bloat filter whose default answer is
+  *"change nothing"*, and which prefers deleting rules over adding them.
 - 🔁 **Survives restarts and compaction.** Execution state lives in an
   append-only journal in your repo; a session hook re-injects it after every
   compaction or resume. The team forgets nothing.
-- 🧬 **Update-safe evolution.** Three layers: immutable core plugin · your
-  repo's data (`.tyran/`) · locally evolved skills. `plugin update` never
-  touches your layers; a delta-review agent reconciles new core versions
-  with what your repo has learned.
-- 💸 **Enforced cost modes.** `eco` / `balanced` / `full` route each role to
-  a model *and* effort level via agent frontmatter — policy written in role
-  names, never model names.
+- 🎯 **Update-safe evolution.** *(designed, not built.)* Three layers:
+  immutable core plugin · your repo's data (`.tyran/`) · locally evolved
+  skills. The layout is real — `.tyran/` exists and is never written by the
+  plugin's own files — but the delta-review agent that reconciles a new core
+  version with what your repo has learned does not exist yet.
+- 🎯 **Enforced cost modes.** *(designed, not built.)* `eco` / `balanced` /
+  `full` are to route each role to a model *and* effort level via agent
+  frontmatter — policy written in role names, never model names. There is no
+  routing today, because there are no agent files to carry the frontmatter.
 - 🔒 **Autonomy with a gate on the irreversible step.** Every commit and push
   is scanned for secrets before it happens — the gate assembles the payload
   itself and verifies the scanner covered all of it, so a `.gitattributes`
   line cannot hide anything from it. `--no-verify` (and its abbreviations) and
-  force-pushes are refused; deployment autonomy classes are detected from your
-  repo and never self-escalated. Not a firewall, and
+  force-pushes are refused; a push to your production branch is refused at the
+  strictest autonomy class, including through `HEAD`, `@`, a shell variable or
+  a `git -c` alias. **What it does not do is stop an agent from raising the
+  class itself:** the config file holding it is GATED, not KERNEL, so an agent
+  with a broad allow-list can edit it in the main loop — measured, not
+  supposed. Autonomy classes are a convention the gate enforces downward, not
+  a lock. Not a firewall, and
   [docs/hooks.md](docs/hooks.md) says exactly where it stops — including the
   scanner's own measured false-negative rate.
 
@@ -138,12 +153,12 @@ test-gated** (flips to ✅ only when the tests exist and pass).
 
 | Capability | **Tyran v2** | oh-my-claudecode | metaswarm | pilotfish | pro-workflow |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Evidence contract that **blocks**: no raw command output → report rejected | 🎯 | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
+| Evidence contract that **blocks**: no raw command output → report rejected | ✅ | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
 | Learns **your repo's** rules, with an anti-bloat curator + decision ledger | 🎯 | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
-| Execution state survives restart & compaction (journal + re-inject) | 🎯 | ⚠️ | ❌² | ❌ | ⚠️ |
+| Execution state survives restart & compaction (journal + re-inject) | ✅ | ⚠️ | ❌² | ❌ | ⚠️ |
 | Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
 | Cost modes enforced per repo (`eco`/`balanced`/`full`, role-based routing) | 🎯 | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
-| Secret gate on commit/push with verified scan coverage, no `--no-verify` escape | 🎯 | ❌ | ❌ | ❌ | ⚠️ |
+| Secret gate on commit/push with verified scan coverage, no `--no-verify` escape | ✅ | ❌ | ❌ | ❌ | ⚠️ |
 | Independent reviewer that never grades its own homework — **enforced** | 🎯 | ⚠️ | ⚠️ prompt | ⚠️ | ❌ |
 | Small curated core — no context tax | 🎯 | ❌⁴ | ⚠️ | ✅ | ❌ |
 | Safe parallelism: worktree per agent, leases, sequential merge | 🎯 | ⚠️ | ❌ | — | ❌⁵ |
@@ -167,6 +182,7 @@ links to a LICENSE file that does not exist in the repo.</sub>
 - 🩺 [Doctor](docs/doctor.md) — `--state` consistency check: drift, orphan leases, dead policy rules (shipped)
 - 🪝 [Hook runtime](docs/hooks.md) — gates vs probes, why hooks fail open, and what the deadline really promises (shipped)
 - 🧾 [Evidence gate](docs/evidence-gate.md) — the criterion, who it binds, the recorded escape hatch, and the line between silence and forgery (shipped)
+- 🛡️ [Policy gate](docs/policy-gate.md) — path classes, the deployment class, the one rule on reads, and where each stops (shipped)
 - 🧠 [Self-improvement](docs/self-improvement.md) — how Tyran learns your repo, and its guardrails
 - ❓ [FAQ](docs/faq.md)
 - 🤝 [Contributing](CONTRIBUTING.md)
@@ -193,13 +209,15 @@ links to a LICENSE file that does not exist in the repo.</sub>
 
 - [x] Plugin skeleton, marketplace, CI (validate ×2, tests, description
       budget, gitleaks, semgrep)
-- [ ] `.tyran/` state layer: append-only journal, knowledge schema, generated
-      human-readable projections
-- [ ] Enforcement hooks: evidence gate, secrets gate, policy gate, state
-      re-inject
+- [x] `.tyran/` state layer: append-only journal, knowledge schema, generated
+      human-readable projections, `doctor --state`
+- [x] Enforcement hooks: evidence gate, secrets gate, policy gate, write
+      guard, state re-inject, and `doctor --hooks` — which catches a gate
+      that is installed but cannot fire
 - [ ] `/tyran:run` conductor + agent roster + cost profiles (with benchmark
-      receipts)
-- [ ] `/tyran:setup` repo scanner + `/tyran:doctor`
+      receipts) — **`agents/` is still empty**
+- [ ] `/tyran:setup` repo scanner + a `/tyran:doctor` command (the doctor
+      itself ships as `scripts/doctor.mjs`; the slash command does not)
 - [ ] Self-improvement loop (`/tyran:retro`) + update delta-review
 - [ ] Overnight mode (ralph-tui integration)
 - [ ] Read-only dashboard (phase C)

@@ -2,6 +2,47 @@
 
 ## 0.1.0 — unreleased
 
+### The enforcement epic is complete: five hooks, and a doctor that catches a dead one
+
+`policy-gate.mjs` turns the autonomy classes into a refusal: path classes
+(AUTO/GATED/KERNEL), a deployment class for `git push`, and one narrow rule on
+READS. The read rule exists because a neighbouring project's `.env` was pulled
+into a session here in full, unasked — the secrets gate defends PUBLICATION,
+and that leak arrived by a READ.
+
+`write-guard.mjs` keeps a control character out of a file on every writing
+tool, MCP servers included, and decodes shell escapes so `printf '\U000E0041'`
+stops being the way around it. `hooks-check.mjs` answers the question the
+plugin could not answer about itself: is a declared gate actually able to fire?
+It reports a missing file, a lost execute bit, a matcher that matches nothing,
+and — measured from the platform's own entry schema — the four keys that
+silently disarm a gate while everything else still looks healthy.
+
+Named honestly: the doctor DETECTS, it does not ENFORCE. It cannot refuse
+anything.
+
+### Banner replaced
+
+The hero image is now the code-forging hall: a conductor and a floor of agent
+workstations, each screen showing its own state — 65% done, a critical logic
+failure, data gathering stalled, self-improvement required. It says what the
+product is about better than the pyramid did: the state is on the wall, not in
+somebody's summary.
+
+### README: claims narrowed to what exists
+
+Three bullets described a retrospective agent, a delta-review agent and
+role-based cost routing in the present tense. None of them has any code, and
+`agents/` is empty — scout, implementer and reviewer are a design, not a file.
+They are marked as designed-not-built now. The status box lists shipped versus
+unbuilt, the roadmap ticks the two epics that are done, and the comparison
+table flips three rows from committed to shipped.
+
+One claim was not merely early but false, and the review disproved it by
+measurement: *"deployment autonomy classes are never self-escalated."* The file
+holding the class is GATED, not KERNEL, so an agent with a broad allow-list can
+raise it in the main loop. The README says that now.
+
 ### The evidence contract is now a gate, not a request
 
 `hooks/scripts/evidence-gate.mjs` runs on `SubagentStop` and refuses a report

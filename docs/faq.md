@@ -38,5 +38,7 @@ the session; Tyran's whole design is making those failures impossible.
 
 **Why "Tyran"?**
 Polish for "tyrant". It conducts a team of agents with an iron evidence
-contract and zero tolerance for "trust me, it works". The pharaoh on the
-banner conducts; the agents build the pyramid.
+contract and zero tolerance for "trust me, it works". The figure on the
+banner conducts; every worker's screen shows what it is actually doing,
+including the ones that are stalled or failing. That is the whole idea:
+the state is on the wall, not in someone's summary.

@@ -1,5 +1,5 @@
 {
-  "name": "tyran",
+  "name": "@jjanczur/tyran",
   "version": "0.1.0",
   "description": "Command-line scripts for the Tyran task conductor (doctor, journal, schema, and repo tooling) for CI and terminals outside Claude Code. Installing this package does NOT install the Claude Code plugin — add that separately with `/plugin marketplace add jjanczur/tyran` inside Claude Code.",
   "type": "module",
@@ -8,6 +8,9 @@
   },
   "bin": {
     "tyran": "./bin/tyran.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     ".claude-plugin/",

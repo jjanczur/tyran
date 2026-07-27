@@ -1,12 +1,13 @@
 /**
- * cli — the `tyran` npm package's bin/tyran.mjs dispatcher.
+ * cli — the `@jjanczur/tyran` npm package's bin/tyran.mjs dispatcher.
  *
  * This file tests the DISPATCHER, not the scripts it delegates to (those
  * have their own suites). Four properties matter here, in order of how
  * badly a silent regression would hurt:
  *
- *  1. the exit code contract: `npx tyran <cmd>` in CI must go red exactly
- *     when `node scripts/<cmd>.mjs` would, numerically, not just "nonzero";
+ *  1. the exit code contract: `npx @jjanczur/tyran <cmd>` in CI must go red
+ *     exactly when `node scripts/<cmd>.mjs` would, numerically, not just
+ *     "nonzero";
  *  2. args reach the target script byte-for-byte — no shell re-parsing,
  *     because spaces or quotes silently truncated in argv is a bug users
  *     only discover from a confusing downstream error;

@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 /**
- * tyran — command-line entry point for the `tyran` npm package.
+ * tyran — command-line entry point for the `@jjanczur/tyran` npm package.
+ *
+ * The registry name is scoped (`@jjanczur/tyran`) but the command stays
+ * `tyran` — that is `bin`'s key, not the package name, and npx resolves a
+ * scoped package's sole bin entry regardless of scope (same pattern as
+ * `@angular/cli` giving you `ng`). The bare name `tyran` is not available:
+ * it carries an npm unpublish tombstone from 2021-03-30, and npm's abuse
+ * policy blocks republishing an unpublished name permanently, for anyone.
  *
  * This is a thin dispatcher, not a reimplementation. Every subcommand below
  * is delegated VERBATIM (same argv, same exit code) to a script that already
  * ships in this repo under `scripts/` and that the Claude Code plugin's own
- * hooks and skills already call directly. `npm i tyran` does NOT install the
- * plugin — it only makes these scripts reachable from a shell or a CI job
- * that has no Claude Code session. To install the plugin itself, run
- * `/plugin marketplace add jjanczur/tyran` inside Claude Code.
+ * hooks and skills already call directly. `npm i @jjanczur/tyran` does NOT
+ * install the plugin — it only makes these scripts reachable from a shell or
+ * a CI job that has no Claude Code session. To install the plugin itself,
+ * run `/plugin marketplace add jjanczur/tyran` inside Claude Code (that name
+ * is the Claude Code marketplace/plugin identity, unrelated to the npm
+ * registry and not affected by any of the above).
  *
  * Path resolution note (read before touching this file): npm installs `bin`
  * entries as a SYMLINK into `node_modules/.bin/`. `scripts/desc-budget.mjs`
@@ -24,8 +33,8 @@
  *
  * Exit code contract: whatever the delegated script exits with, THIS process
  * exits with the same code, numerically. A dispatcher that always exits 0
- * turns `npx tyran doctor` in CI into decoration instead of a gate — that is
- * the one property this file must never regress.
+ * turns `npx @jjanczur/tyran doctor` in CI into decoration instead of a
+ * gate — that is the one property this file must never regress.
  */
 
 import { fileURLToPath } from 'node:url';

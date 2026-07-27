@@ -354,14 +354,20 @@ node bin/tyran.mjs scan-repo --dir .  # what this repo looks like, with provenan
 Exit codes propagate to the digit, so a CI step reddens exactly when the
 underlying script does.
 
-> **Not on npm yet — so `npx tyran` does not work today.** The package is
-> built, versioned and tested; only the publish is outstanding. Saying `npx
-> tyran` here before that is true would be exactly the kind of claim this
-> project refuses to accept from its own agents.
+> **Not on npm yet — so `npx @jjanczur/tyran` does not work today.** The
+> package is built, versioned and tested; only the publish is outstanding.
+> Saying it works here before that is true would be exactly the kind of claim
+> this project refuses to accept from its own agents. It publishes under the
+> scope, not the bare name `tyran` — that name carries an npm unpublish
+> tombstone from 2021-03-30, and npm's policy against reusing an unpublished
+> name is permanent, for anyone, not a grace period this project could wait
+> out. The command stays `tyran` either way; only the registry name is scoped.
 >
 > **And it would not install the Claude Code plugin either.** For that, run
-> `/plugin marketplace add jjanczur/tyran` inside Claude Code. The npm package
-> is the tooling; the plugin is the conductor.
+> `/plugin marketplace add jjanczur/tyran` inside Claude Code — that name is
+> the Claude Code marketplace identity, a separate namespace from npm and
+> unaffected by any of the above. The npm package is the tooling; the plugin
+> is the conductor.
 
 ## Documentation
 

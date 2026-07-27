@@ -1,0 +1,68 @@
+---
+/**
+ * A block of terminal text, printed one line at a time when it scrolls into
+ * view.
+ *
+ * The text is passed as a single string and split here, rather than authored as
+ * markup, for one reason: the strings this component is given are copied
+ * character-for-character out of `hooks/scripts/*.mjs`, and a copy that has to
+ * be re-typed as HTML is a copy that drifts. Astro escapes every expression, so
+ * `<N>` and `<code>` inside a refusal reach the reader as text instead of being
+ * parsed as tags.
+ *
+ * An empty source line is rendered as an EMPTY span, not one padded with a
+ * filler character: the height comes from `min-height` in the stylesheet, and
+ * a filler would stop the rendered text being byte-identical to the source it
+ * quotes - which this story's browser pass compares directly against the
+ * hook's own exported string. The first draft of this file used a NO-BREAK
+ * SPACE there, which is also a codepoint this repo's scanner refuses.
+ *
+ * The per-line animation is CSS only: each line carries `--i`, and the
+ * stylesheet turns that into an `animation-delay` once the block is marked
+ * visible. No JavaScript writes any of this text, so with scripting off - or
+ * with reduced motion - the whole block is simply there.
+ */
+interface Props {
+  /** Left side of the title bar, e.g. the hook that produced the text. */
+  title: string;
+  /** Right side of the title bar, e.g. the file it came from. */
+  source?: string;
+  /** The text, exactly as the source produces it. */
+  text: string;
+  /** `refusal` tints the frame and the first line red. */
+  tone?: 'plain' | 'refusal';
+  /**
+   * `true` when the source string wraps its own paragraphs at render time
+   * rather than carrying hard newlines - `retro-gate.mjs` builds one long
+   * paragraph per block, and re-wrapping it here would no longer be a quote.
+   */
+  wrap?: boolean;
+  /** Shown after the last line. Off for a block that is not the last word. */
+  caret?: boolean;
+}
+
+const { title, source, text, tone = 'plain', wrap = false, caret = true } = Astro.props;
+
+const lines = text.split('\n');
+
+/** Colour classes, derived from the text itself so no caller has to label lines. */
+function kindOf(line: string): string | undefined {
+  if (line.startsWith('$ ')) return 'cmd';
+  if (line.startsWith('REFUSED') || line.startsWith('tyran: initiative')) return 'refuse';
+  if (line.startsWith('# ')) return 'dim';
+  if (line.startsWith('ok ') || line.startsWith('EXIT=')) return 'ok';
+  return undefined;
+}
+---
+
+<div class={`term reveal${tone === 'refusal' ? ' term--refusal' : ''}`} data-term>
+  <div class="term__bar">
+    <b>{title}</b>
+    {source && <span>{source}</span>}
+  </div>
+  <pre class="term__body" style={wrap ? 'white-space: pre-wrap' : undefined}><code>{
+    lines.map((line, i) => (
+      <span class="term__line" style={`--i: ${i}`} data-kind={kindOf(line)}>{line}</span>
+    ))
+  }{caret && <span class="term__caret" aria-hidden="true"></span>}</code></pre>
+</div>

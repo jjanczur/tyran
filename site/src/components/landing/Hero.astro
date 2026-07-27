@@ -1,0 +1,71 @@
+---
+/**
+ * The first screen. One claim, one qualifier, one action.
+ *
+ * The headline is the README's own `<h3 align="center">`, word for word, and
+ * the lede is compressed from the paragraph under it. Nothing on this page is
+ * allowed to promise more than the README does, and the fastest way to keep
+ * that true is to quote it.
+ */
+import { Picture } from 'astro:assets';
+import banner from '../../../../assets/banner.jpg';
+import { DOCS, REPO, RELEASE } from './urls';
+---
+
+<section class="hero" id="top">
+  <div class="l-wrap">
+    <div class="hero__badges reveal">
+      <span class="badge badge--amber badge--dot">v2 &mdash; under construction, in public</span>
+      <span class="badge">Claude Code plugin</span>
+      <span class="badge">Apache-2.0</span>
+    </div>
+
+    <h1 class="reveal" style="--l-delay: 60ms">
+      The more you use it, <em>the better it gets.</em>
+    </h1>
+
+    <p class="hero__lede reveal" style="--l-delay: 140ms">
+      Tyran is a task conductor for Claude Code. It interviews you, plans, and drives a team of
+      fresh-context agents through your work &mdash; and <strong
+        >refuses to believe any agent that can&rsquo;t show raw command output as proof</strong
+      >. Every closed initiative ends in a retrospective that improves Tyran itself, against your
+      repo. Never your product code.
+    </p>
+
+    <div class="hero__cta reveal" style="--l-delay: 220ms">
+      <a class="btn btn--primary" href="#install">Install it &mdash; two commands</a>
+      <a class="btn btn--ghost" href="#compounding">See what compounds</a>
+      <a class="btn btn--ghost" href={DOCS.gettingStarted}>Docs</a>
+    </div>
+
+    <p class="hero__proof reveal" style="--l-delay: 300ms">
+      <span>0 runtime dependencies</span>
+      <span>867 tests green at v0.1.0</span>
+      <span>never writes into your ~/.claude</span>
+      <span><a href={REPO} rel="noopener">GitHub</a> &middot; <a href={RELEASE} rel="noopener">v0.1.0</a></span>
+    </p>
+  </div>
+
+  <div class="l-wrap hero__banner reveal" style="--l-delay: 360ms">
+    {/*
+      The one image on the page. `Picture` emits AVIF and WebP with the JPEG as
+      the fallback and a `sizes` hint, because the source is a 1600x872 JPEG of
+      477 kB and shipping that untouched would cost more than everything else
+      on this page put together.
+
+      `loading="eager"` with `fetchpriority="high"`: it is the largest element
+      above the fold on a wide screen, so lazy-loading it would only delay the
+      Largest Contentful Paint it IS.
+    */}
+    <Picture
+      src={banner}
+      formats={['avif', 'webp']}
+      fallbackFormat="jpg"
+      widths={[640, 1024, 1440]}
+      sizes="(min-width: 70rem) 68rem, 100vw"
+      loading="eager"
+      fetchpriority="high"
+      alt="A jackal-headed conductor standing before a hall of agent workstations, each screen showing its own status: code optimization at 65 percent, a critical logic failure, data gathering stalled, self-improvement required."
+    />
+  </div>
+</section>

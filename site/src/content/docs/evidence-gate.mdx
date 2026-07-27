@@ -2,16 +2,16 @@
 title: 'The evidence gate'
 description: 'The criterion that rejects an agent report carrying no raw command output, who it binds, the recorded escape hatch, and the line between silence and forgery.'
 ---
-import { Aside } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 import Measured from '../../components/Measured.astro';
 
-<Aside type="note" title="Status">
-<Verdict state="shipped" /> `hooks/scripts/evidence-gate.mjs`, registered on
-`SubagentStop`. Read [`docs/hooks.md`](../hooks/) first for the runtime it
-sits inside.
-</Aside>
+<Provenance state="shipped">
+`hooks/scripts/evidence-gate.mjs`, on `SubagentStop`
+</Provenance>
+
+This gate inherits its runtime from [the hook runtime](../hooks/); read that
+first if you have not.
 
 An agent finishes and reports *"tests are green, everything works"*. Under v1
 that went through, because the evidence contract was a sentence in prose and

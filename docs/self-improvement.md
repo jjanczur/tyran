@@ -1,10 +1,7 @@
 # Self-improvement — how Tyran learns your repo
 
-> **Status:** shipped. `agents/retro.md` carries the curator and its filter,
-> `skills/retro/SKILL.md` runs it, and a `Stop` gate
-> (`hooks/scripts/retro-gate.mjs`) refuses one turn when an initiative ends
-> without a retrospective. Still outstanding: the update delta-review that
-> reconciles a new core version with what your repo has learned.
+✅ **shipped** · `agents/retro.md` · `skills/retro/SKILL.md` ·
+`hooks/scripts/retro-gate.mjs`
 
 This is Tyran's centerpiece: **you bring the harness, it does the
 improving.** The more initiatives you run, the better it fits your repo and
@@ -61,3 +58,14 @@ Every AUTO entry carries `confidence` and usage/helpfulness counters; entries
 that stop earning their keep get degraded or retired by later retros. Two
 learning loops run at different speeds: fast and local (your repo), slow and
 curated (pull requests to the core — reviewed by humans).
+
+## The one part that is not built: the update delta-review
+
+> **Not built yet.** Everything above runs today. What does not exist is the
+> **delta-review** that runs after `/plugin update`: the step that compares a
+> new core version against what your repo has already learned and proposes the
+> reconciliation ("the core absorbed a rule you learned locally — delete the
+> local duplicate"). Until it ships, a core update leaves your `.tyran/` data
+> and your local skills untouched — which is safe, and is also why a rule can
+> end up stated twice after an update. Reconciling it is a manual read of the
+> [changelog](../CHANGELOG.md) against `.tyran/knowledge/`.

@@ -3,13 +3,12 @@ title: 'Configuration'
 description: 'The .tyran/config.yaml contract: cost profiles, autonomy classes, self-improvement path classes, the YAML subset Tyran parses and the schemas that validate it.'
 ---
 import { Aside } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 
-<Aside type="caution" title="Status">
-<Verdict state="shipped" /> `/tyran:setup` writes this file via `scripts/scan-repo.mjs`,
-and `scripts/schema.mjs` validates it.
-</Aside>
+<Provenance state="shipped">
+written by `scripts/scan-repo.mjs` · validated by `scripts/schema.mjs`
+</Provenance>
 
 All per-repo configuration lives in `.tyran/config.yaml` — committed, human
 reviewable, written by `/tyran:setup` and editable by hand.

@@ -2,17 +2,18 @@
 title: 'Hook runtime reference'
 description: 'The runtime every Tyran hook runs inside: gates versus probes, what the deadline actually promises, the secrets gate, and the measured limits of each.'
 ---
-import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
-import Verdict from '../../components/Verdict.astro';
+import { Aside } from '@astrojs/starlight/components';
+import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 import Measured from '../../components/Measured.astro';
 
-<Aside type="note" title="Status">
-<Verdict state="shipped" /> `hooks/scripts/hook-io.mjs`.
-Read this before writing a gate. The platform's default failure mode is to
-**let the action through**, so most of the ways a gate can be wrong end in
+<Provenance state="shipped">
+`hooks/scripts/hook-io.mjs`
+</Provenance>
+
+Read this page before writing a gate. The platform's default failure mode is
+to **let the action through**, so most of the ways a gate can be wrong end in
 it silently not existing.
-</Aside>
 
 Two files, two jobs:
 

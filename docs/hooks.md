@@ -1,9 +1,10 @@
 # Hook runtime reference
 
-> **Status:** shipped — `hooks/scripts/hook-io.mjs`.
-> Read this before writing a gate. The platform's default failure mode is to
-> **let the action through**, so most of the ways a gate can be wrong end in
-> it silently not existing.
+✅ **shipped** · `hooks/scripts/hook-io.mjs`
+
+Read this page before writing a gate. The platform's default failure mode is
+to **let the action through**, so most of the ways a gate can be wrong end in
+it silently not existing.
 
 Two files, two jobs:
 

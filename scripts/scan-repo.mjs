@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+/**
+ * scan-repo — everything about a repository that can be established WITHOUT
+ * asking, and an honest list of what cannot.
+ *
+ * This is the deterministic half of `/tyran:setup`. Keeping it in a script
+ * rather than in the skill's prose matters for one reason: the same repo must
+ * produce the same answer every time. A model asked to "work out the
+ * validation commands" produces a plausible answer, and a plausible answer to
+ * "how do I know this repo is green" is worse than no answer, because it is
+ * believed once and then never re-examined.
+ *
+ * Every value it emits carries PROVENANCE — the fact that produced it and a
+ * confidence. A field it could not establish is marked `needs_confirmation`,
+ * which is the only thing setup is allowed to ask the operator about. The
+ * point of the provenance is auditability months later: "why does this repo
+ * think it is P2" has an answer in the file itself.
+ *
+ * ## The one thing this deliberately will not do
+ *
+ * It never infers `P3`. Autonomy class P3 means an agent merges to main and
+ * deploys to production; no arrangement of files is evidence that a human
+ * intended to grant that. P1 is the default, P2 requires positive evidence,
+ * and P3 is a decision a person makes in words.
+ *
+ * CLI:
+ *   node scan-repo.mjs [--dir <repo>] [--write <path>] [--json]
+ * Exit: 0 scanned · 2 usage/IO error
+ */
+import { readFileSync, existsSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join, resolve, dirname, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { stringify } from './yaml-lite.mjs';
+import { escapeInvisible } from './invisible.mjs';
+
+/** Lockfile -> package manager. Order matters only for reporting stability. */
+export const LOCKFILES = Object.freeze({
+  'pnpm-lock.yaml': 'pnpm',
+  'bun.lockb': 'bun',
+  'yarn.lock': 'yarn',
+  'package-lock.json': 'npm',
+  'poetry.lock': 'poetry',
+  'uv.lock': 'uv',
+  'Cargo.lock': 'cargo',
+  'go.sum': 'go',
+  'Gemfile.lock': 'bundler',
+});
+
+/** Extension -> language, for the "what is this repo written in" summary. */
+export const LANGUAGES = Object.freeze({
+  '.ts': 'TypeScript',
+  '.tsx': 'TypeScript',
+  '.js': 'JavaScript',
+  '.jsx': 'JavaScript',
+  '.mjs': 'JavaScript',
+  '.py': 'Python',
+  '.rs': 'Rust',
+  '.go': 'Go',
+  '.rb': 'Ruby',
+  '.java': 'Java',
+  '.kt': 'Kotlin',
+  '.swift': 'Swift',
+  '.php': 'PHP',
+  '.cs': 'C#',
+  '.sh': 'Shell',
+});
+
+/**
+ * Script names worth running before calling something done, most valuable
+ * first. `build` is deliberately absent: it is slow, and on most repos the
+ * type check already covers what a build would catch.
+ */
+export const VALIDATION_SCRIPTS = Object.freeze(['lint', 'typecheck', 'types', 'test']);
+
+const RUN_PREFIX = Object.freeze({ npm: 'npm run', pnpm: 'pnpm', yarn: 'yarn', bun: 'bun run' });
+
+function provenance(value, source, confidence, needsConfirmation = false) {
+  return { value, source, confidence, needs_confirmation: needsConfirmation };
+}
+
+/** Run a git command, returning '' when git is absent or the call fails. */
+export function gitRunner(dir) {
+  return (args) => {
+    try {
+      return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      return '';
+    }
+  };
+}
+
+export function detectPackageManager(dir) {
+  for (const [file, manager] of Object.entries(LOCKFILES)) {
+    if (existsSync(join(dir, file))) return provenance(manager, `lockfile: ${file}`, 0.95);
+  }
+  if (existsSync(join(dir, 'package.json'))) {
+    return provenance('npm', 'package.json with no lockfile — npm assumed', 0.5, true);
+  }
+  return null;
+}
+
+export function readPackageJson(dir) {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    return typeof parsed === 'object' && parsed !== null ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validation commands, taken from what the repo ACTUALLY declares.
+ *
+ * A guessed command is worse than none: it fails for a reason unrelated to
+ * the change, the agent spends a round on it, and the operator learns the
+ * gate is noise. When nothing can be read, the list comes back empty and
+ * flagged rather than filled in with `npm test`.
+ */
+export function detectValidation(dir, pkg, manager) {
+  const scripts = pkg?.scripts;
+  if (scripts && typeof scripts === 'object') {
+    const prefix = RUN_PREFIX[manager] ?? 'npm run';
+    const found = VALIDATION_SCRIPTS.filter((name) => typeof scripts[name] === 'string').map((n) => `${prefix} ${n}`);
+    if (found.length > 0) return provenance(found, `package.json scripts: ${found.length} of the usual names`, 0.9);
+  }
+  if (existsSync(join(dir, 'Makefile'))) {
+    try {
+      const text = readFileSync(join(dir, 'Makefile'), 'utf8');
+      const targets = ['lint', 'test', 'check'].filter((t) => new RegExp(`^${t}:`, 'm').test(text));
+      if (targets.length > 0) {
+        return provenance(targets.map((t) => `make ${t}`), `Makefile targets: ${targets.join(', ')}`, 0.8);
+      }
+    } catch {
+      /* fall through to the honest empty answer */
+    }
+  }
+  return provenance([], 'no scripts or Makefile targets recognised — fill these in yourself', 0.2, true);
+}
+
+export function detectLanguages(dir, run = gitRunner(dir)) {
+  const listing = run(['ls-files']);
+  if (listing === '') return [];
+  const counts = new Map();
+  for (const file of listing.split('\n')) {
+    const lang = LANGUAGES[extname(file)];
+    if (lang) counts.set(lang, (counts.get(lang) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
+}
+
+/**
+ * Infer the deployment autonomy class from how the repository is actually
+ * worked, not from what a document claims.
+ *
+ * P3 is never inferred. See the header: no arrangement of files is evidence
+ * that a human meant to let an agent deploy to production.
+ */
+export function detectAutonomy(dir, run = gitRunner(dir)) {
+  const head = run(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  if (head === '') return provenance('P1', 'not a git repository — the safest class', 0.4, true);
+
+  const log = run(['log', '--first-parent', '-50', '--pretty=%p|%s']).trim();
+  if (log === '') return provenance('P1', 'no commit history to judge from — the safest class', 0.4, true);
+
+  const commits = log.split('\n');
+  const merges = commits.filter((line) => {
+    const [parents, subject = ''] = line.split('|');
+    return parents.trim().split(/\s+/).length > 1 || /^Merge pull request|^Merge branch/.test(subject);
+  }).length;
+  const share = merges / commits.length;
+
+  const branches = run(['branch', '-a', '--format=%(refname:short)']);
+  const hasStaging = /(^|\/)(staging|testing|develop|preprod)$/m.test(branches);
+  const hasCi = existsSync(join(dir, '.github', 'workflows')) || existsSync(join(dir, '.gitlab-ci.yml'));
+
+  if (share >= 0.6) {
+    return provenance(
+      'P1',
+      `git log: ${merges} of the last ${commits.length} first-parent commits arrived as merges — main is PR-driven`,
+      0.85,
+    );
+  }
+  if (hasStaging && hasCi) {
+    return provenance(
+      'P2',
+      `git log: ${merges}/${commits.length} merges, plus a staging-class branch and CI — direct pushes look normal here`,
+      0.6,
+      true,
+    );
+  }
+  return provenance(
+    'P1',
+    `git log: ${merges}/${commits.length} merges, no staging branch found — defaulting to the safest class`,
+    0.5,
+    true,
+  );
+}
+
+/** The whole scan. Returns `{config, languages, questions}`. */
+export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
+  const pkg = readPackageJson(dir);
+  const manager = detectPackageManager(dir);
+  const validation = detectValidation(dir, pkg, manager?.value);
+  const autonomy = detectAutonomy(dir, run);
+  const languages = detectLanguages(dir, run);
+
+  const config = {
+    profile: 'balanced',
+    autonomy,
+    tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' },
+    validation,
+    shared_zones: [],
+  };
+
+  const questions = [];
+  if (autonomy.needs_confirmation) questions.push({ field: 'autonomy', asked: autonomy.source });
+  if (validation.needs_confirmation) questions.push({ field: 'validation', asked: validation.source });
+  if (manager?.needs_confirmation) questions.push({ field: 'package manager', asked: manager.source });
+
+  return { config, languages, packageManager: manager, questions };
+}
+
+/**
+ * Render the config to YAML.
+ *
+ * `stringify` is the repo's own emitter, which the parser round-trips — a
+ * hand-rolled writer here would reintroduce the quoting bug that has already
+ * cost this project one red CI run (an apostrophe inside an unquoted scalar).
+ */
+export function renderConfig(config) {
+  return (
+    '# Tyran configuration for this repository.\n' +
+    '#\n' +
+    '# Written by /tyran:setup. Inferred values carry provenance so you can\n' +
+    '# audit where each one came from. Edit freely — your edits win.\n' +
+    '#\n' +
+    '# Validate:  node scripts/schema.mjs validate config .tyran/config.yaml\n' +
+    '# Resolve a role to a model:  node scripts/tiers.mjs --role reviewer\n' +
+    '\n' +
+    stringify(config)
+  );
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const flag = (name, fallback) => {
+    const i = args.indexOf(`--${name}`);
+    return i === -1 ? fallback : args[i + 1];
+  };
+  const dir = resolve(flag('dir', process.cwd()));
+  if (!existsSync(dir)) {
+    console.error(`scan-repo: no such directory ${escapeInvisible(dir)}`);
+    process.exit(2);
+  }
+
+  const result = scanRepo(dir);
+  const target = flag('write', null);
+  if (target !== null) {
+    const path = resolve(target);
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, renderConfig(result.config));
+    } catch (error) {
+      console.error(`scan-repo: could not write ${escapeInvisible(path)}: ${error.message}`);
+      process.exit(2);
+    }
+    console.error(`scan-repo: wrote ${escapeInvisible(path)}`);
+  }
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

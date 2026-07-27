@@ -14,12 +14,14 @@ reviewable, written by `/tyran:setup` and editable by hand.
 
 profile: balanced          # eco | balanced | full  (cost mode)
 
-autonomy: P1               # P1 branch-only · P2 staging · P3 full (never self-escalated)
+autonomy: P1               # P1 branch-only · P2 staging · P3 full
+                           # enforced downward by the policy gate; never INFERRED upward
 
 tiers:                     # the ONLY place model names appear
-  top:   fable             # arbitration, security review, acceptance
-  work:  opus              # implementation, review
   cheap: haiku             # recon, mechanical sweeps, bookkeeping
+  work:  sonnet            # DEFAULT: implementation, ordinary review
+  deep:  opus              # root-cause diagnosis, hard implementation, risky review
+  top:   fable             # security review, arbitration, acceptance
 
 validation:                # detected from package.json / Makefile / CI
   - npm run lint
@@ -32,15 +34,19 @@ shared_zones:              # append-only files, serialized by the conductor
 
 ## Cost profiles
 
-| Profile | top tier used for | work tier | effort |
+| Profile | everyday work runs on | `top` reserved for | effort |
 |---|---|---|---|
-| `eco` | only when unavoidable: security review, arbitration | Sonnet-class | lowered on sweeps/bookkeeping, never on security |
-| `balanced` | security, arbitration, phase acceptance | Opus-class | default |
-| `full` | broadly, incl. critical reviews | Opus-class | high |
+| `eco` | `work` | security review, arbitration | lowered on sweeps and bookkeeping, never on security |
+| `balanced` | `work` | security, arbitration, acceptance | default per tier |
+| `full` | `deep` | security, arbitration, acceptance | raised one step |
 
 Policy is written in **role names, never model names** — a model deprecation
-becomes a one-line change in `tiers:`, not a rewrite. The routing map is
-snapshotted when a plan is accepted and stays immutable for that initiative.
+becomes a one-line change in `tiers:`, not a rewrite. A test asserts that no
+agent or skill file contains a model alias, so the rule is enforced rather
+than merely intended.
+
+The full routing table, the role floors, and how the conductor overrides
+either dial for a single subtask are in [the roster](agents.md#choosing-models).
 
 ## Autonomy classes
 

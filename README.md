@@ -15,11 +15,10 @@
 <p align="center">
 Tyran is a task conductor for Claude Code <i>(v2 — under construction, in public)</i>:
 it interviews you, plans, drives a team of fresh-context agents through your work — and
-<b>refuses to believe any agent that can't show raw command output as proof</b>. The
-conductor, the roster and that refusal are all shipped today. The end of the arc — a
-retrospective loop that accumulates <i>your</i> repo's rules and sharpens its own
-playbook without you asking — is <b>not wired up yet</b>: the agent that does the
-thinking exists, the automation around it does not. The status box below draws the line.
+<b>refuses to believe any agent that can't show raw command output as proof</b>. When the
+work is done it will not let the initiative end until it has learned something from it.
+The conductor, the roster, the refusal and that loop are all shipped today; the status
+box below draws the line under what is not.
 </p>
 
 ---
@@ -78,36 +77,40 @@ Initiative 20  It has written repo-specific skills for your recurring
 > layer (append-only journal, schema, generated projections, doctor); the
 > enforcement hooks — evidence gate, secrets gate, policy gate, write guard,
 > state re-injection, and a doctor check that catches a gate which cannot
-> fire; and the **`/tyran:run` conductor with its four-agent roster** and
-> config-driven role-to-model routing.
-> **Not built yet:** `/tyran:setup`, the self-improvement loop as a command,
-> the update delta-review, and the cost-profile benchmark receipts.
-> Every capability ships with tests before it is claimed, and the roadmap
-> below says which is which.
+> fire; the **conductor with its four-agent roster**, config-driven
+> role-to-model-and-effort routing, and the `/tyran:setup`, `/tyran:status`,
+> `/tyran:doctor`, `/tyran:retro` commands; and a `Stop` gate that makes the
+> retrospective fire on its own rather than on someone remembering.
+> **Not built yet:** the update delta-review, cost-profile benchmark
+> receipts, and overnight mode. Every capability ships with tests before it
+> is claimed, and the roadmap below says which is which.
 
 ## Quick Start
 
 ```text
 /plugin marketplace add jjanczur/tyran
 /plugin install tyran@tyran
-/tyran:hello          # verifies installation and namespacing
-/tyran:run            # then just describe what you want done
+/tyran:setup          # scans the repo, writes .tyran/config.yaml, installs /tyran
+/tyran                # then just describe what you want done
 ```
 
-`/tyran:run` interviews you, sizes the work, and either does it itself (small
-changes) or drives the roster — `tyran:scout`, `tyran:implementer`,
-`tyran:reviewer`, `tyran:retro` — through it. Until `/tyran:setup` ships it
-falls back to the shipped config template and tells you it did.
+Setup infers your stack, your validation commands and your deployment
+autonomy class from how the repo is actually worked, annotates every value
+with the fact that produced it, and asks you only about what it genuinely
+could not establish. It also installs the bare `/tyran` shortcut — plugin
+skills are namespaced, so the conductor is `/tyran:run`, and most people
+would rather type four letters.
+
+Then `/tyran` interviews you, sizes the work, and either does it itself
+(small changes) or drives the roster — `tyran:scout`, `tyran:implementer`,
+`tyran:reviewer`, `tyran:retro` — through it. Also: `/tyran:status`,
+`/tyran:doctor`, `/tyran:retro`.
 
 Hit the brake at any time, from anywhere, without killing the session:
 
 ```bash
 echo "wrong branch — hold everything" > .tyran/STOP
 ```
-
-Coming next: `/tyran:setup` — scans your repo (stack, validation commands,
-git history, deployment style), writes `.tyran/config.yaml`, and asks you
-only what it couldn't infer.
 
 ## What makes Tyran different
 
@@ -123,13 +126,17 @@ only what it couldn't infer.
   Measured on 55 real reports from this project's own agents: 53 pass, and both
   misses turned out not to be reports at all. Details, numbers in both
   directions, and limits in [the evidence gate](docs/evidence-gate.md).
-- 🎯 **It will learn *your* workflow — autonomously.** *(the agent ships; the
-  loop does not.)* `tyran:retro` exists and carries the whole anti-bloat
-  filter — four questions every candidate change must pass, a hard cap of
-  three edits per retrospective, and a stated preference for deleting rules
-  over adding them, so that *"I changed nothing"* is a correct outcome. What
-  is missing is the automatic part: no `/tyran:retro` command, and nothing
-  yet accumulates learned facts into `.tyran/knowledge/`.
+- 🔁 **It learns *your* workflow — and the loop closes itself.** When an
+  initiative's tickets are all merged with no retrospective recorded since
+  the last merge, a `Stop` hook refuses **one** turn and names what is owed.
+  `tyran:retro` then distills your repo's rules into `.tyran/knowledge/` and
+  tunes Tyran's own playbook, through an anti-bloat filter with four
+  questions, a hard cap of three edits per retrospective, and a stated
+  preference for deleting rules over adding them — so *"I changed nothing"*
+  is a correct outcome, and so is declining the retro entirely. **You are
+  never blocked twice**, whichever you choose. This is a gate rather than a
+  sentence in a skill because the retro is the step most easily skipped: it
+  happens after the merge, when the interesting part is over.
 - 🔁 **Survives restarts and compaction.** Execution state lives in an
   append-only journal in your repo; a session hook re-injects it after every
   compaction or resume. The team forgets nothing.
@@ -174,7 +181,7 @@ test-gated** (flips to ✅ only when the tests exist and pass).
 | Capability | **Tyran v2** | oh-my-claudecode | metaswarm | pilotfish | pro-workflow |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Evidence contract that **blocks**: no raw command output → report rejected | ✅ | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
-| Learns **your repo's** rules, with an anti-bloat curator + decision ledger | 🎯 | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
+| Learns **your repo's** rules, with an anti-bloat curator + decision ledger | ✅⁹ | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
 | Execution state survives restart & compaction (journal + re-inject) | ✅ | ⚠️ | ❌² | ❌ | ⚠️ |
 | Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
 | Cost modes resolved from repo config (`eco`/`balanced`/`full`, role-based routing, model names in ONE file) | ✅ | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
@@ -198,13 +205,16 @@ does not make it impossible. ⁸ Worktrees, leases and sequential merge are
 specified in the conductor skill, and lease events are recorded in the
 journal, so `STATE.md` surfaces a lease released by a non-holder. Detection,
 not prevention: nothing physically stops a second agent from entering a held
-worktree.</sub>
+worktree. ⁹ The retrospective is triggered by a `Stop` gate and the curator's
+filter is enforced in the agent's own contract, but what it decides to record
+is a judgement, not a mechanism — and the gate deliberately accepts "I am
+skipping this" as a complete answer.</sub>
 
 ## Documentation
 
 - 📖 [Getting started](docs/getting-started.md)
 - ⚙️ [Configuration](docs/configuration.md) — `.tyran/config.yaml`, cost profiles, autonomy classes
-- 🎭 [The roster and model routing](docs/agents.md) — the four agents, the tier table, the `.tyran/STOP` brake (shipped)
+- 🎭 [The roster and model routing](docs/agents.md) — the four agents, the tier and effort table, dynamic overrides, the `.tyran/STOP` brake (shipped)
 - 🏛️ [Architecture](docs/architecture.md) — the three layers, the journal, the hooks
 - 📜 [Journal reference](docs/journal.md) — the append-only event schema (shipped)
 - 🧾 [Projections](docs/projections.md) — generated `STATE.md` / `PROGRESS.md` and `--check` (shipped)
@@ -248,13 +258,14 @@ worktree.</sub>
       that is installed but cannot fire
 - [x] `/tyran:run` conductor + the four-agent roster + role-to-model routing
       resolved from `.tyran/config.yaml`, plus the `.tyran/STOP` brake
+- [x] `/tyran:setup` repo scanner (never infers `P3`) + `/tyran:doctor`,
+      `/tyran:status`, `/tyran:retro`, and the bare `/tyran` shortcut
+- [x] Self-improvement loop: a `Stop` gate that will not let an initiative
+      end unretrospected, plus knowledge accumulation into `.tyran/knowledge/`
 - [ ] Cost-profile benchmark receipts (three runs per profile on a fixture,
       published as numbers rather than as a table of intentions)
-- [ ] `/tyran:setup` repo scanner + a `/tyran:doctor` command (the doctor
-      itself ships as `scripts/doctor.mjs`; the slash command does not)
-- [ ] Self-improvement loop as a command (`/tyran:retro`) + knowledge
-      accumulation + update delta-review — **the `tyran:retro` agent itself
-      ships today**
+- [ ] Update delta-review: reconcile a new core version with what your repo
+      has learned locally
 - [ ] Overnight mode (ralph-tui integration)
 - [ ] Read-only dashboard (phase C)
 

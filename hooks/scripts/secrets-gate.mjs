@@ -267,6 +267,33 @@ export function isLiteralPath(token) {
 }
 
 /**
+ * True when a REFSPEC SOURCE is safe to hand to `git rev-parse`.
+ *
+ * Same rule as `isLiteralPath` with one exception, and the exception is the
+ * whole point: `~` is a shell expansion only at the START of a word, while in
+ * the middle of one it is git's own "nth ancestor" operator. Treating
+ * `HEAD~130` as unreadable made the gate drop every named refspec and widen the
+ * range back to `--all`, so the ONE remedy this gate offers a blocked push —
+ * "push a smaller range" — silently produced a range that was not smaller.
+ * Measured on a real repository: `git push origin main` listed 1376 objects and
+ * `git push origin HEAD~5:refs/heads/tiny` listed 1410, i.e. MORE. An agent
+ * following the refusal's own advice got the same refusal back, which is how a
+ * gate teaches people to look for a way around it (ADR-19).
+ *
+ * Nothing here reaches a shell: the value is passed to `git rev-parse --verify`
+ * as a single argv element, and a source that does not resolve is dropped by
+ * `pushRange` rather than trusted.
+ */
+export function isLiteralRef(token) {
+  if (token === '' || token.startsWith('-') || token.startsWith('~')) return false;
+  for (const ch of EXPANSION_CHARS) {
+    if (ch === '~') continue; // handled above: leading only
+    if (token.includes(ch)) return false;
+  }
+  return true;
+}
+
+/**
  * Git accepts any UNAMBIGUOUS abbreviation of a long option, which review
  * demonstrated on a live repository: `git commit --no-verif` skipped the
  * repo's pre-commit hook and exited 0, while the round-1 rule — an equality
@@ -503,7 +530,7 @@ export function planCommand(command, startDir) {
       // Same reasoning as `git add` above: an unreadable refspec means the
       // gate cannot NARROW the range, so it keeps the wide one. Widening is
       // always safe; refusing here would block work for no coverage gain.
-      const readable = after.slice(1).every(isLiteralPath);
+      const readable = after.slice(1).every(isLiteralRef);
       const refs = readable ? after.slice(1).map((spec) => spec.split(':')[0]).filter((r) => r !== '') : [];
       note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs });
       triggers.push('a git push (every commit not already on the target remote is scanned)');
@@ -935,10 +962,80 @@ async function readFileBounded(path) {
   return readFile(path);
 }
 
+/**
+ * Sum the sizes of the objects named, refusing before any of them is READ.
+ *
+ * Sizes come from `cat-file --batch-check`, which prints one header line per
+ * object and no content, so this costs a few hundred bytes where `--batch`
+ * costs the whole payload.
+ *
+ * It is not an optimisation. Without it the gate died on the FIRST push of an
+ * ordinary repository, and it died lying. Measured on a local clone of a real
+ * project (88 unpushed commits, 1288 objects): `--batch` emits 64,584,110
+ * bytes, `runChild` stops collecting at MAX_CHILD_OUTPUT_BYTES (5 MiB), the
+ * truncated stream frames 121 records instead of 1376, and `assertComplete`
+ * refuses with
+ *
+ *     git answered for 121 of the 1376 objects this command would publish
+ *
+ * whose remedy names a submodule, a corrupt object or a truncated stream. All
+ * three are wrong; the payload was simply 63.7 MB against a 4 MB ceiling. The
+ * one refusal that carries a way forward — "push in smaller steps" — was
+ * unreachable, because the size check that emits it lives AFTER the read that
+ * never completes. That is the failure mode `DLUG-E3.md` calls the only way
+ * this gate realistically dies: it blocks the first push and gets uninstalled.
+ */
+async function assertPayloadFits(repo, shas, { runner, budget, what }) {
+  const sized = await git(['-C', repo, 'cat-file', '--batch-check'], {
+    runner,
+    timeoutMs: budget(GIT_BUDGET_MS),
+    input: shas.join('\n') + '\n',
+    what: `sizing ${what}`,
+  });
+  const lines = String(sized).split('\n').filter((l) => l !== '');
+  // Same completeness rule as the read below, applied one step earlier: a
+  // short answer here would otherwise become a short answer there.
+  assertComplete(lines.length, shas.length, `sizing ${what}`);
+  let total = 0;
+  for (const line of lines) {
+    const fields = line.split(' ');
+    if (fields[1] !== 'blob') continue; // trees, commits, `missing` — no content
+    const size = Number.parseInt(fields[2], 10);
+    if (!Number.isFinite(size)) {
+      throw new ScanFailure(
+        `git did not report a size for one of the objects this command would publish (${what})`,
+        'the gate refuses rather than guessing how much it is about to read',
+      );
+    }
+    total += size;
+  }
+  if (total > MAX_PAYLOAD_BYTES) {
+    throw new ScanFailure(
+      `this would publish ${total} bytes in ${lines.length} object(s), past the ${MAX_PAYLOAD_BYTES} this gate can scan inside its budget`,
+      'commit or push in smaller steps. For a push that means naming a NARROWER refspec — ' +
+        '`git push <remote> <older-commit>:refs/heads/<branch>` publishes only up to that commit — ' +
+        'and repeating until the branch is up to date. The gate refuses rather than scanning a ' +
+        'prefix: a partial scan that reports nothing looks exactly like a clean one.\n' +
+        'That walk has a FLOOR, and pretending otherwise would make this remedy the kind of ' +
+        'advice that sends an agent looking for a way around the gate: a refspec cannot split a ' +
+        'SINGLE commit. Measured on a real project, one ordinary commit of screenshots carried ' +
+        '43,816,053 bytes — ten times this ceiling — and no narrower step exists for it. When the ' +
+        'smallest remaining step is still too large, this gate has nothing left to offer: scan ' +
+        'that commit by hand (`git rev-list --objects <sha> | gitleaks ...`) and decide about it ' +
+        'outside the gate, where the decision is visible.',
+    );
+  }
+}
+
 async function addBlobs(repo, entries, add, { runner, budget }) {
   const unique = new Map();
   for (const e of entries) if (!unique.has(e.sha)) unique.set(e.sha, e.path);
   if (unique.size === 0) return;
+  await assertPayloadFits(repo, [...unique.keys()], {
+    runner,
+    budget,
+    what: 'the objects this command would publish',
+  });
   const out = await git(['-C', repo, 'cat-file', '--batch'], {
     runner,
     timeoutMs: budget(CHILD_BUDGET_MS),

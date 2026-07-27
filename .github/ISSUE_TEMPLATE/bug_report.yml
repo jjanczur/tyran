@@ -1,0 +1,61 @@
+name: Bug report
+description: A gate that did not fire, a gate that fired wrongly, or anything else that behaved differently from what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project refuses agent reports that carry no raw command output.
+        It would be strange to hold you to a lower standard than we hold our
+        own agents, so: paste the output, not the summary of it. A bug report
+        with a real terminal transcript is usually fixed the same day; one
+        without is usually a conversation about what "it did not work" meant.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+      placeholder: |
+        I expected the evidence gate to refuse a report with no test output.
+        It let the report through.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Raw output
+      description: >-
+        The terminal transcript, including the command and its exit code.
+        `node bin/tyran.mjs doctor --hooks` and `--state` are the two most
+        useful things to include for anything gate- or state-related.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Tyran version
+      description: The release tag, or the commit SHA if you are on `main`.
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Node version and OS
+      placeholder: 'node 22.14.0, macOS 15.3'
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before you post
+      options:
+        - label: >-
+            I have checked the pasted output for tokens, keys and internal
+            hostnames. A gate transcript can contain the payload the gate was
+            scanning.
+          required: true

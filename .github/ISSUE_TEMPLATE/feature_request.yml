@@ -1,0 +1,39 @@
+name: Feature request
+description: A mechanism this should have, or a rule it currently states in prose and should enforce instead.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful request this project gets is *"you say X in a document
+        and nothing stops X from being violated."* That is the shape of every
+        good change here.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What goes wrong today
+      description: >-
+        The failure, not the feature. What did an agent get away with, what
+        did you have to remember, what silently drifted?
+    validations:
+      required: true
+
+  - type: textarea
+    id: mechanism
+    attributes:
+      label: What would make it impossible rather than discouraged
+      description: >-
+        A hook, a script, a schema, a test — or "I do not know, but here is
+        where the rule currently lives as prose". Both are useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost
+    attributes:
+      label: What it would cost
+      description: >-
+        Optional, and worth a sentence. Every gate has a false-positive rate
+        and every agent added to the roster is a name somebody has to hold in
+        their head. A proposal that names its own downside gets read first.

@@ -1,5 +1,20 @@
 ---
+/**
+ * The footer, and the only place on the page that says who built it.
+ *
+ * Deliberately the LAST thing rather than a byline near the headline: a
+ * project whose whole pitch is "mechanisms, not claims" should not open by
+ * introducing its authors. Placed here it reads as a signature on finished
+ * work, which is what it is.
+ *
+ * The release link is labelled `Latest release` rather than `Release v0.1.0`.
+ * `RELEASE` already resolves to `releases/latest` and a test pins that, but
+ * the guard inspects the URL and a hand-written version in the LABEL slips
+ * past it — the link would keep working and keep naming the wrong version.
+ */
 import { DOCS, REPO, RELEASE } from './urls';
+
+const SITE = 'https://janczura.com';
 ---
 
 <footer class="l-footer">
@@ -12,9 +27,14 @@ import { DOCS, REPO, RELEASE } from './urls';
       <a href={DOCS.evidenceGate}>Evidence gate</a>
       <a href={DOCS.selfImprovement}>Self-improvement</a>
       <a href={REPO} rel="noopener">GitHub</a>
-      <a href={RELEASE} rel="noopener">Release v0.1.0</a>
+      <a href={RELEASE} rel="noopener">Latest release</a>
       <a href={`${REPO}/blob/main/LICENSE`} rel="noopener">License</a>
       <a href={`${REPO}/blob/main/CONTRIBUTING.md`} rel="noopener">Contributing</a>
     </nav>
+
+    <p class="l-footer__made">
+      From Berlin with <span class="l-footer__heart" role="img" aria-label="love">&hearts;</span> by
+      two buddies &mdash; <a href={SITE} rel="noopener">Jacek</a> and Piotr.
+    </p>
   </div>
 </footer>

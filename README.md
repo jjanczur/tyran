@@ -176,14 +176,34 @@ Then `/tyran` interviews you, sizes the work, and either does it itself
 `tyran:reviewer`, `tyran:retro` — through it. Also: `/tyran:status`,
 `/tyran:doctor`, `/tyran:retro`.
 
-Two more skills carry protocols the conductor invokes rather than restates:
-[`fidelity-gate`](skills/fidelity-gate/SKILL.md) for building against a
-frozen visual reference without drift, and
-[`prompt-tuning`](skills/prompt-tuning/SKILL.md) for iterating on anything
-whose quality is a non-deterministic model output. Both exist because the
-rule alone was not enough — the first was inlined into three sentences and
-lost the inventory step that does the work; the second kept its principle
-and lost everything the principle was distilled from.
+### It is not only an orchestrator — it ships skills you can use yourself
+
+Eight skills and four agents come with the plugin. Six of the skills are the
+conductor's own machinery, but they are **commands, not internals**: you run
+`/tyran:doctor` on a repo you are debugging without ever starting an
+initiative. Two are standalone protocols with nothing to do with
+orchestration at all.
+
+| Skill | What it does |
+|---|---|
+| [`run`](skills/run/SKILL.md) | the conductor — interviews, sizes, plans, delegates, merges |
+| [`setup`](skills/setup/SKILL.md) | reads the repo and writes `.tyran/config.yaml`, provenance per value |
+| [`status`](skills/status/SKILL.md) | where an initiative got to, from the journal rather than from memory |
+| [`doctor`](skills/doctor/SKILL.md) | is any gate installed but unable to fire; is the state self-consistent |
+| [`retro`](skills/retro/SKILL.md) | the anti-bloat curator that changes Tyran, never your product code |
+| [`fidelity-gate`](skills/fidelity-gate/SKILL.md) | **standalone.** Build 1:1 against a frozen mockup without drift, measured rather than eyeballed |
+| [`prompt-tuning`](skills/prompt-tuning/SKILL.md) | **standalone.** Tune anything whose quality is a non-deterministic model output — noise baseline first, then medians |
+| [`hello`](skills/hello/SKILL.md) | proves the plugin is installed and its paths resolve |
+
+Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story,
+own branch), `tyran:reviewer` (**no editing tools** — it cannot patch what it
+is grading), `tyran:retro`. Roles, assumptions and who invokes each are in
+[the roster](docs/agents.md).
+
+The two standalone protocols exist because the rule alone was not enough —
+`fidelity-gate` had been inlined into three sentences and lost the inventory
+step that does the work; `prompt-tuning` kept its principle and lost
+everything the principle was distilled from.
 
 Hit the brake at any time, from anywhere, without killing the session:
 
@@ -270,6 +290,7 @@ test-gated** (flips to ✅ only when the tests exist and pass).
 | Safe parallelism: worktree per agent, leases, sequential merge | ✅⁸ | ⚠️ | ❌ | — | ❌⁵ |
 | Clean install: 2 commands, **never writes into your `~/.claude`** | ✅ | ❌³ | ⚠️ | ❌ | ⚠️ |
 | OSS hygiene: license, changelog, CI validation, pressure tests | ✅ | ⚠️ | ⚠️ | ✅ | ❌⁶ |
+| Skills · agents it ships, counted from the repo tree | 8 · 4¹⁰ | 41 · 19 | 14 · 19 | 0 · 8 | 41 · 8 |
 
 <sub>¹ Their deliverable check is explicitly non-blocking ("never prevents the
 agent from stopping"). ² Their issues #32/#33/#36: crash loses loop state.
@@ -287,26 +308,40 @@ not prevention: nothing physically stops a second agent from entering a held
 worktree. ⁹ The retrospective is triggered by a `Stop` gate and the curator's
 filter is enforced in the agent's own contract, but what it decides to record
 is a judgement, not a mechanism — and the gate deliberately accepts "I am
-skipping this" as a complete answer.</sub>
+skipping this" as a complete answer. ¹⁰ <b>The one row where a bigger number
+is not a better one, printed anyway.</b> Measured on each repo's default
+branch, July 2026: files matching <code>skills/*/SKILL.md</code> and
+<code>agents/*.md</code>. Two competitors ship five times as many skills as
+Tyran does, and that is the point of the "small curated core" row above —
+oh-my-claudecode's own issue #2943 is titled "50+ skills exceeding context
+description budget", which is the bill that arrives with the larger number.
+Tyran's eight are held under a description budget CI enforces on every push
+(2407 of 4000 characters). Counting files is not counting value: what each
+skill is for is in <a href="skills/">skills/</a>, one directory each.</sub>
 
 ## Command-line use (outside Claude Code)
 
-`npx tyran <command>` exposes the same scripts the plugin's hooks and skills
-already call — `doctor`, `scan-repo`, `tiers`, `journal`, `schema`,
-`stop-check`, `scan-control-chars`, `desc-budget` — for a shell or a CI job
-with no Claude Code session. Zero dependencies; `tyran --help` lists them.
+A single `bin/tyran.mjs` entry point exposes the same scripts the plugin's
+hooks and skills already call — `doctor`, `scan-repo`, `tiers`, `journal`,
+`schema`, `stop-check`, `scan-control-chars`, `desc-budget` — for a shell or a
+CI job with no Claude Code session. Zero dependencies; `--help` lists them.
 
 ```bash
-npx tyran doctor --hooks     # is any gate installed but unable to fire?
-npx tyran scan-repo --dir .  # what this repo looks like, with provenance
+node bin/tyran.mjs doctor --hooks     # is any gate installed but unable to fire?
+node bin/tyran.mjs scan-repo --dir .  # what this repo looks like, with provenance
 ```
 
 Exit codes propagate to the digit, so a CI step reddens exactly when the
 underlying script does.
 
-> **This does NOT install the Claude Code plugin.** For that, run
-> `/plugin marketplace add jjanczur/tyran` inside Claude Code. The npm
-> package is the tooling, not the conductor.
+> **Not on npm yet — so `npx tyran` does not work today.** The package is
+> built, versioned and tested; only the publish is outstanding. Saying `npx
+> tyran` here before that is true would be exactly the kind of claim this
+> project refuses to accept from its own agents.
+>
+> **And it would not install the Claude Code plugin either.** For that, run
+> `/plugin marketplace add jjanczur/tyran` inside Claude Code. The npm package
+> is the tooling; the plugin is the conductor.
 
 ## Documentation
 
@@ -370,6 +405,37 @@ underlying script does.
 - [ ] Overnight mode (ralph-tui integration)
 - [ ] Read-only dashboard (phase C)
 
+## Where this came from
+
+Tyran started as a teaching problem. One of us was mentoring the other
+through learning to program, and the mentee kept hitting the same wall — not
+with the code, with the *tool*. Claude would ask a pile of hard questions at
+once, lose the thread halfway through the answer, and burn a small fortune in
+tokens re-deriving what it had already worked out. From the outside it looked
+like a skill problem. It was a **context** problem.
+
+So we sat down and went through how Claude Code actually works underneath —
+agent teams, subagents, why a fresh context beats a long one, why the state
+has to live somewhere the window cannot take with it. That conversation
+turned into a plugin. The first version was **pure prompt**: a long, careful
+skill that told the model how to behave. It worked exactly as well as a
+written rule ever works — until the run got long, or expensive, or boring.
+
+That failure is the whole reason for v2. Every rule that mattered got
+demoted from a paragraph to a **mechanism**: a hook that refuses a report
+with no command output, a gate that will not let an initiative close
+unretrospected, a file that decides which model a role gets. The motto on the
+conductor skill — *a rule in prose loses to a mechanism that makes the mistake
+impossible* — is not a slogan we adopted. It is the lesson v1 taught us, in
+the order we learned it.
+
 ## License
 
 [Apache-2.0](./LICENSE)
+
+---
+
+<p align="center">
+From Berlin with <b>&hearts;</b> by two buddies &mdash;
+<a href="https://janczura.com">Jacek</a> and Piotr.
+</p>

@@ -108,6 +108,7 @@ export default defineConfig({
         {
           label: 'Concepts',
           items: [
+            { label: 'Skills and agents', slug: 'skills' },
             { label: 'The roster and model routing', slug: 'agents' },
             { label: 'Self-improvement', slug: 'self-improvement' },
           ],

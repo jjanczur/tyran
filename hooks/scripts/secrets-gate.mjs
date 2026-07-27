@@ -367,6 +367,8 @@ export function planCommand(command, startDir) {
 
   let cur = startDir;
   const stack = [];
+  /** Set when a git alias makes some subcommand of this line unreadable. */
+  let aliased = false;
   /** Set once a `git add` is seen: a later commit in the line will include it. */
   let pendingAdd = null;
 
@@ -397,6 +399,27 @@ export function planCommand(command, startDir) {
     if (OPAQUE_MOVERS.has(basename(program)) || isSourceInvocation(tokens)) {
       unmodellable.push({
         what: `\`${basename(program)}\` can move the shell using text this gate must not execute`,
+      });
+    }
+
+    // A git ALIAS makes the subcommand unreadable, and that zeroed this gate.
+    //
+    // Found while building the policy gate and measured here: `git -c
+    // alias.zz=push zz origin main` pushes for real, and the word `push` never
+    // reaches the subcommand slot. No target was noted, `needsScan` came back
+    // false, and `decide` returned PASS before any scan — so **a push carrying
+    // a key was published without being scanned at all**. That is this gate's
+    // one irreversible failure, produced by a spelling rather than by a
+    // scanner problem, and it is why `aliased` also forces `needsScan`: an
+    // unmodellable construct that nothing needs to scan is discarded.
+    //
+    // `git config alias.up push` is caught too. It publishes nothing by
+    // itself, but it installs a name this gate cannot follow, and the same
+    // command line can use it two segments later.
+    if (raw.some(isGitProgram) && raw.some((t) => /(^|=)alias\./i.test(t))) {
+      aliased = true;
+      unmodellable.push({
+        what: 'a `git` alias decides which subcommand runs, and the command line does not say which',
       });
     }
 
@@ -532,7 +555,16 @@ export function planCommand(command, startDir) {
       // always safe; refusing here would block work for no coverage gain.
       const readable = after.slice(1).every(isLiteralRef);
       const refs = readable ? after.slice(1).map((spec) => spec.split(':')[0]).filter((r) => r !== '') : [];
-      note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs });
+      // The argv AFTER `push`, flags included, kept verbatim.
+      //
+      // Nothing in this file reads it: it exists so the policy gate can decide
+      // WHERE a push lands (destination refspecs, `--delete`, `--mirror`)
+      // without lexing the command line a second time. A second decomposition
+      // would have been the third spelling of one rule in this repository
+      // (ADR-21), and the one that decides whether a push reaches production is
+      // not the place to start diverging.
+      const pushArgv = tokens.slice(tokens.indexOf('push') + 1);
+      note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs, pushArgv, pushReadable: readable });
       triggers.push('a git push (every commit not already on the target remote is scanned)');
     }
     if (ghPublishes) {
@@ -627,8 +659,12 @@ export function planCommand(command, startDir) {
     }
   }
 
-  const needsScan = targets.size > 0 || extraFiles.length > 0;
+  // `aliased` counts as "something might be published here": without it the
+  // unmodellable entry above is discarded by the filter below, which is
+  // exactly how the hole stayed open.
+  const needsScan = targets.size > 0 || extraFiles.length > 0 || aliased;
   return {
+    aliased,
     denials,
     triggers: [...new Set(triggers)],
     targets: [...targets.values()],
@@ -1390,8 +1426,16 @@ export function elideOpaqueRuns(text, minimum = OPAQUE_RUN_CHARS) {
   return String(text).replace(new RegExp(`[A-Za-z0-9+=]{${minimum},}`, 'g'), (run) => `<elided:${run.length}>`);
 }
 
-/** Shorten a path for display without losing which file it is. */
-function shortPath(path) {
+/**
+ * Shorten a path for display without losing which file it is.
+ *
+ * Exported so the policy gate quotes paths through the SAME rule rather than
+ * approximating it: `elideOpaqueRuns` exists because a review committed
+ * `backup_<aws key>.txt` and round 1 printed the key body in the refusal.
+ * A second gate re-deriving "how do I print a path safely" is how that comes
+ * back.
+ */
+export function shortPath(path) {
   const text = elideOpaqueRuns(path);
   if (text.length <= MAX_PATH_CHARS) return text;
   return `${text.slice(0, 40)}...${text.slice(-(MAX_PATH_CHARS - 43))}`;

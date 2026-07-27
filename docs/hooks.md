@@ -12,8 +12,11 @@ Two files, two jobs:
 | [`hooks/scripts/hook-io.mjs`](../hooks/scripts/hook-io.mjs) | the runtime every hook runs inside |
 | [`hooks/HOOK-CONTRACT-MEASURED.md`](../hooks/HOOK-CONTRACT-MEASURED.md) | what the platform actually does, read out of the shipped binary |
 
-Gates shipped so far: [the evidence gate](evidence-gate.md)
-(`SubagentStop`). Probes: `session-start.mjs` (`SessionStart`).
+Gates shipped so far: [the evidence gate](evidence-gate.md) (`SubagentStop`),
+the secrets gate (`PreToolUse`, below), and
+[the policy gate](policy-gate.md) (`PreToolUse`) — the autonomy classes and
+the deployment class, plus the one rule that guards a *read*. Probes:
+`session-start.mjs` (`SessionStart`).
 
 ## The rule that decides everything: gates and probes
 
@@ -235,6 +238,18 @@ the wrong lesson: `*.pem binary` is a line people add for diff rendering with
 no idea a secrets gate reads it, an **accidental** hole — which is why that
 class is closed by not consulting attributes at all. A `.gitleaksignore` has
 no purpose other than suppressing findings.
+
+### The alias hole, closed 2026-07-27
+
+`git -c alias.zz=push zz origin main` pushes for real, and the word `push`
+never reaches the subcommand slot. This gate therefore computed that there was
+nothing to publish and returned before assembling a byte: **a push carrying a
+key was published unscanned, with every liveness guard green.** Found while
+building the policy gate, which had the same blind spot.
+
+`planCommand` now reports `aliased`, which forces `needsScan` — an unmodellable
+construct that nothing needs to scan is discarded, and that is exactly how the
+hole stayed open. Both gates read the one answer.
 
 ### What it does NOT catch — the declared boundary
 

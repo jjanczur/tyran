@@ -146,6 +146,25 @@ Initiative 20  Has written repo-specific skills for your recurring work and
 /tyran                # then just describe what you want done
 ```
 
+**Or paste this into Claude Code and let it install itself.** `/plugin` is a
+slash command a human has to type, so this asks for the same two steps
+through the `claude` CLI instead, which Claude Code can run on its own —
+followed by the restart those steps require, and a walkthrough of what setup
+inferred before it is trusted:
+
+```text
+Install the Tyran plugin in this repository and set it up for me.
+
+1. Run: claude plugin marketplace add jjanczur/tyran
+2. Run: claude plugin install tyran@tyran
+3. Tell me to restart Claude Code, so the hooks and agents load.
+4. After the restart, run /tyran:setup. It scans this repo and writes
+   .tyran/config.yaml. Walk me through what it inferred - especially the
+   validation commands and the deployment autonomy class - before we commit it.
+
+Docs: https://jjanczur.github.io/tyran/getting-started/
+```
+
 Setup infers your stack, your validation commands and your deployment
 autonomy class from how the repo is actually worked, annotates every value
 with the fact that produced it, and asks you only about what it genuinely

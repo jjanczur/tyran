@@ -54,8 +54,11 @@ English regardless.
      cannot justify later is indistinguishable from a habit.
    - Some roles have a FLOOR the tool will not let you go below, and it will
      tell you when it corrects you. That is not the tool malfunctioning.
-3. **Teams.** Check whether Agent Teams are available. If not, use ordinary
-   subagents — none of the rules change.
+3. **Teams.** Check whether Agent Teams are available, and on L/XL work check
+   it by **spawning one throwaway teammate**, not by reading configuration.
+   Availability that was inferred rather than exercised has already been
+   wrong. If they are unavailable, use ordinary subagents — none of the rules
+   change.
 4. **Environment hygiene** — an executable checklist, not advice; each line
    below cost someone real hours:
    - anchor every grep over env files (`grep -nE '^VARIABLE='`) — unanchored,
@@ -171,14 +174,15 @@ open one.
    the project configuration. For UI, always drive a browser: navigation,
    clickability, a clean console. An optimization pass per story. You merge,
    sequentially.
-   - **Against a visual reference, the gate is a MEASUREMENT** on a fixture
-     carrying the same data as the mockup — a narrative verdict ("differences
-     are data only", "looks right") is REJECTED. Disputes about size, padding
-     or colour are settled by dumping computed styles to JSON, never by eye.
-     Warm the routes up before a batch run; a cold compile produces false
-     failures. Every deliberate deviation gets a debt entry (reason, owner,
-     the condition that closes it) — a skipped check with no entry, or a
-     quietly raised tolerance, turns the gate back into an opinion.
+   - **Against a visual reference, follow the `fidelity-gate` skill** and
+     enforce it as definition-of-done from the FIRST piece of work. Read it;
+     the inventory, the relics list and the measurement steps live there and
+     are not to be reconstructed from memory. Your part as conductor: the
+     gate is a MEASUREMENT on a fixture carrying the reference's own data, a
+     narrative verdict ("differences are data only", "looks right") is
+     REJECTED, and every deliberate deviation gets a debt entry. Drift
+     uncaught on the first screen multiplies onto every screen after it —
+     measured once at four waves of rework.
    - **Read a numeric gate as a DELTA, not a state.** The phase report gives
      the number BEFORE and AFTER, both freshly measured, never copied from
      the previous report. "Unchanged" is not evidence that the phase did
@@ -187,7 +191,8 @@ open one.
      spread with no change first, then compare medians of at least three
      runs. A delta inside the spread is noise. (Measured here: 20% swing on
      an identical prompt, and three tuning rounds burned before anyone
-     checked.)
+     checked.) When the work IS prompt iteration, follow the `prompt-tuning`
+     skill — it carries the rest of what that initiative cost to learn.
    - Before fixing N findings one by one, check whether they share ONE cause —
      a wrong baseline, measurement conditions unlike production, a property
      the gate cannot see. Repairing a gate that inflates its signal, or is

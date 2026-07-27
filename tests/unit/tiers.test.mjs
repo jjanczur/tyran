@@ -19,8 +19,12 @@ import {
   ROLES,
   ROLE_TIERS,
   ROLE_FLOOR,
+  ROLE_EFFORT_FLOOR,
   TIER_ORDER,
+  EFFORT_ORDER,
+  EFFORT_BY_TIER,
   resolveTier,
+  resolveEffort,
   resolveModel,
   resolveAll,
   loadConfig,
@@ -95,13 +99,95 @@ test('a missing alias THROWS rather than resolving to undefined', () => {
   assert.throws(() => resolveModel(undefined, 'scout', 'balanced'), /no model alias/);
 });
 
-test('resolveAll covers every role and reports both the tier and the model', () => {
+test('resolveAll covers every role and reports tier, model and effort', () => {
   const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
   const all = resolveAll(doc, 'balanced');
   assert.deepEqual(Object.keys(all).sort(), [...ROLES].sort());
-  assert.deepEqual(all.scout, { tier: 'cheap', model: 'haiku' });
-  assert.deepEqual(all['security-review'], { tier: 'top', model: 'fable' });
-  assert.deepEqual(all.implementer, { tier: 'work', model: 'sonnet' });
+  assert.deepEqual(all.scout, { tier: 'cheap', model: 'haiku', effort: 'low', floored: false });
+  assert.deepEqual(all['security-review'], { tier: 'top', model: 'fable', effort: 'max', floored: false });
+  assert.deepEqual(all.implementer, { tier: 'work', model: 'sonnet', effort: 'medium', floored: false });
+});
+
+// --- dynamic overrides: the conductor adjusting a single subtask -----------
+
+test('the conductor can raise or lower the tier for one subtask', () => {
+  assert.equal(resolveTier('implementer', 'balanced'), 'work');
+  assert.equal(resolveTier('implementer', 'balanced', 'normal', { tier: 'deep' }), 'deep');
+  assert.equal(resolveTier('implementer', 'balanced', 'normal', { tier: 'cheap' }), 'cheap');
+});
+
+test('effort is a SEPARATE dial — same model, think harder', () => {
+  // The most common real adjustment: the task is not bigger, it is subtler.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const base = resolveModel(doc, 'implementer', 'balanced');
+  const harder = resolveModel(doc, 'implementer', 'balanced', 'normal', { effort: 'xhigh' });
+  assert.equal(harder.model, base.model, 'raising effort must not silently change the model');
+  assert.equal(harder.effort, 'xhigh');
+  assert.equal(base.effort, 'medium');
+});
+
+test('a pinned tier still lets risk raise the effort', () => {
+  // "Use the cheap model, but think hard about it" has to be expressible or
+  // the conductor will reach for the expensive model to buy the reasoning.
+  assert.equal(resolveEffort('implementer', 'balanced', 'high', { tier: 'cheap' }), 'medium');
+  assert.equal(resolveEffort('implementer', 'balanced', 'normal', { tier: 'cheap' }), 'low');
+});
+
+test('an override CANNOT go below a role floor, on either ladder', () => {
+  // The floor is applied last, after both the risk shift and the override.
+  assert.equal(resolveTier('security-review', 'eco', 'low', { tier: 'cheap' }), 'top');
+  assert.equal(resolveEffort('security-review', 'eco', 'low', { effort: 'low' }), 'max');
+  assert.equal(resolveEffort('arbitration', 'eco', 'low', { effort: 'low' }), 'high');
+});
+
+test('a corrected override is REPORTED, not silently swallowed', () => {
+  // A floor that quietly fixed the request would teach the conductor that its
+  // overrides take effect when they did not.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const r = resolveModel(doc, 'security-review', 'balanced', 'normal', { tier: 'cheap' });
+  assert.equal(r.tier, 'top');
+  assert.equal(r.floored, true);
+  assert.equal(resolveModel(doc, 'implementer', 'balanced', 'normal', { tier: 'deep' }).floored, false);
+});
+
+test('an unknown tier or effort override throws rather than being ignored', () => {
+  // Silently ignoring a typo is the worst outcome: the conductor believes it
+  // escalated and nothing changed.
+  assert.throws(() => resolveTier('implementer', 'balanced', 'normal', { tier: 'ultra' }), /unknown tier override/);
+  assert.throws(() => resolveEffort('implementer', 'balanced', 'normal', { effort: 'lots' }), /unknown effort override/);
+});
+
+test('every tier has a default effort, and every role floor is on the ladder', () => {
+  for (const tier of TIER_ORDER) assert.ok(EFFORT_ORDER.includes(EFFORT_BY_TIER[tier]), `no effort for ${tier}`);
+  for (const [role, floor] of Object.entries(ROLE_EFFORT_FLOOR)) {
+    assert.ok(ROLES.includes(role), `${role} is not a role`);
+    assert.ok(EFFORT_ORDER.includes(floor), `${floor} is not an effort level`);
+  }
+});
+
+test('CLI --field selects what lands on stdout', () => {
+  const dir = repoWithConfig();
+  const at = (args) =>
+    execFileSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  assert.equal(at(['--role', 'implementer', '--field', 'effort']), 'medium');
+  assert.equal(at(['--role', 'implementer', '--field', 'tier']), 'work');
+  assert.equal(at(['--role', 'implementer', '--effort', 'max', '--field', 'effort']), 'max');
+  assert.deepEqual(JSON.parse(at(['--role', 'scout', '--field', 'json'])), {
+    tier: 'cheap',
+    model: 'haiku',
+    effort: 'low',
+    floored: false,
+  });
+});
+
+test('CLI announces on stderr when a floor overrode what was asked for', () => {
+  const dir = repoWithConfig();
+  const r = execFileSync(process.execPath, [SCRIPT, '--role', 'security-review', '--tier', 'cheap'], {
+    cwd: dir,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  assert.equal(r.trim(), 'fable');
 });
 
 test('no model name appears anywhere in the routing table itself', () => {

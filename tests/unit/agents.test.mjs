@@ -69,11 +69,15 @@ test('every agent has frontmatter that parses, with a name and a description', (
 });
 
 test('no frontmatter value contains a bare colon — the shape that silently voids the block', () => {
+  // The shipped shim is included: it is copied verbatim into a user's repo by
+  // /tyran:setup, so a malformed block there breaks THEIR /tyran, silently,
+  // in a file they did not write.
   const targets = [
     ...agentFiles.map((f) => ['agents/' + f, join(AGENTS_DIR, f)]),
     ...readdirSync(SKILLS_DIR)
       .filter((d) => existsSync(join(SKILLS_DIR, d, 'SKILL.md')))
       .map((d) => ['skills/' + d, join(SKILLS_DIR, d, 'SKILL.md')]),
+    ['templates/project-command', join(ROOT, 'templates', 'project-command', 'SKILL.md')],
   ];
   for (const [label, path] of targets) {
     const fm = frontmatter(readFileSync(path, 'utf8'));

@@ -39,13 +39,55 @@ tiers:
 Resolve a role to a model:
 
 ```bash
-node scripts/tiers.mjs                              # the whole map, as JSON
-node scripts/tiers.mjs --role reviewer              # -> one alias on stdout
-node scripts/tiers.mjs --role reviewer --risk high  # escalate one tier
+node scripts/tiers.mjs                                  # the whole map, as JSON
+node scripts/tiers.mjs --role reviewer                  # -> one alias on stdout
+node scripts/tiers.mjs --role reviewer --risk high      # escalate one step
+node scripts/tiers.mjs --role implementer --effort xhigh # same model, think harder
+node scripts/tiers.mjs --role scout --field json        # -> {tier, model, effort}
 ```
 
 The conductor reads the map once at the start of an initiative and passes the
-resolved alias as the `model` parameter at spawn.
+resolved values as the `model` and effort parameters at spawn.
+
+### Two dials, not one
+
+Model and reasoning effort are separate on purpose, because most of the time
+you want one without the other. A mechanical sweep on a strong model still
+does not need deep reasoning; a subtle diagnosis on the middle model very
+often does. Collapsing them into a single "power" setting is what makes cost
+modes blunt enough that people stop using them.
+
+| Tier | Default effort |
+|---|---|
+| `cheap` | low |
+| `work` | medium |
+| `deep` | high |
+| `top` | xhigh |
+
+`--risk high` shifts both ladders one step; `--risk low` shifts both down.
+A pinned `--tier` still lets risk move the effort, so *"use the cheap model,
+but think hard about it"* is expressible — otherwise the conductor reaches
+for an expensive model just to buy the reasoning.
+
+### The conductor is expected to override this
+
+The table is a starting point, not a prediction of the task in front of it.
+The conductor may set `--tier` or `--effort` for a single subtask whenever it
+can see the default does not fit — that is the intended use, not an escape
+hatch. Raise effort for root-cause diagnosis, a failure nobody can reproduce,
+an arbitration between two agents who disagree: anything where the first
+plausible answer is probably wrong. Lower it for sweeps, bookkeeping, and
+re-runs of a recipe that already worked.
+
+Two things keep that from becoming drift. Every deviation is recorded as a
+`decision` event naming the subtask, the default, what was used and why — an
+override you cannot justify later is indistinguishable from a habit. And an
+override **cannot** go below a role floor: `security-review` and
+`arbitration` stay at `top`/`max` and `high` whatever is asked. When a floor
+corrects a request, the tool says so on stderr rather than quietly handing
+back something other than what was asked for, because a floor that silently
+"fixed" the request would teach the conductor that its overrides take effect
+when they did not.
 
 ### The routing table
 

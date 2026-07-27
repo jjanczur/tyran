@@ -2,6 +2,51 @@
 
 ## 0.1.0 — unreleased
 
+### The loop closes: setup, four commands, a bare `/tyran`, and a retro that fires itself
+
+**The retrospective no longer depends on anyone remembering it.** A new `Stop`
+gate refuses exactly one turn when an initiative has all its tickets merged
+and nothing recorded since the last merge. It anchors on the LAST MERGE
+rather than on "any retro ever", so one old retrospective cannot silence
+every future initiative in a repo. It short-circuits on `stop_hook_active`
+before touching the filesystem, so the worst case is one extra turn and never
+a held-open session. It fails open on everything — no journal, corrupt
+journal, unreadable initiative — because being unable to prove a retro is
+owed is not evidence that one is owed. And declining is a complete answer:
+record a `retro.entry` with `kind: skipped` and it is satisfied.
+
+**`/tyran:setup` configures a repo from what is true about it.** The
+deterministic half is `scripts/scan-repo.mjs`: package manager from
+lockfiles, validation commands from the scripts the repo actually declares,
+languages by weight, and an autonomy class inferred from merge history.
+Everything carries provenance — value, source, confidence — so "why does this
+repo think it is P2" has an answer in the file. Two refusals are deliberate:
+it **never infers `P3`**, because no arrangement of files is evidence that a
+person meant to let an agent deploy to production; and it returns an EMPTY
+validation list rather than guessing `npm test`, because a guessed command
+fails for an unrelated reason and teaches the operator that the gate is noise.
+
+**`/tyran` without the colon.** Plugin skills are namespaced, so the
+conductor is `/tyran:run`. Setup offers to install a short shim into
+`.claude/skills/tyran/` that hands straight over to it — the playbook stays
+in the plugin, so updates keep reaching it. Setup asks first, because a file
+appearing in someone's working tree unannounced is a bad way to meet a tool.
+
+**Reasoning effort is now a dial of its own**, alongside the model. Most
+adjustments want one and not the other: a mechanical sweep on a strong model
+still needs no deep reasoning, and a subtle diagnosis on the middle model
+usually does. The conductor is explicitly expected to override either for a
+single subtask — that is the intended use, not an escape — with every
+deviation recorded as a `decision` event. What it cannot do is go under a
+role floor, and when a floor corrects a request the tool says so instead of
+quietly returning something else.
+
+Also: `/tyran:status`, `/tyran:doctor`, `/tyran:retro`.
+
+The doctor caught a defect in this very change: the platform builds no match
+query for `Stop`, so the matcher first written on that entry was decorative.
+It is gone, and the registry is clean.
+
 ### The conductor and its roster ship: `/tyran:run` plus four agents
 
 `agents/` is no longer empty. `scout`, `implementer`, `reviewer` and `retro`

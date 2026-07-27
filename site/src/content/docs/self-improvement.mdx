@@ -6,9 +6,10 @@ import { Aside } from '@astrojs/starlight/components';
 import Verdict from '../../components/Verdict.astro';
 
 <Aside type="caution" title="Status">
-<Verdict state="designed" /> design contract — the retro agent and its guardrails land with
-the self-improvement epic (after the state layer and enforcement hooks
-exist, deliberately in that order). Present tense describes the target.
+<Verdict state="shipped" /> `agents/retro.md` carries the curator and its filter,
+`skills/retro/SKILL.md` runs it, and a `Stop` gate (`hooks/scripts/retro-gate.mjs`) refuses
+one turn when an initiative ends without a retrospective. Still outstanding: the update
+delta-review that reconciles a new core version with what your repo has learned.
 </Aside>
 
 This is Tyran's centerpiece: **you bring the harness, it does the

@@ -116,7 +116,7 @@ sequenceDiagram
 | `PreToolUse` (Bash) | secrets gate: staged diff through gitleaks before commit/push; `--no-verify`, bare force-push blocked | **yes** |
 | `PreToolUse` (Write/Edit/Bash) | policy gate: autonomy classes (P1/P2/P3) and self-improvement path classes (AUTO/GATED/KERNEL) | **yes** |
 | `Stop` | retro gate: an initiative whose tickets are all merged and which has no retrospective recorded since the last merge refuses ONE turn | **yes** |
-| `PreCompact` | checkpoint archive before compaction | no |
+| `PreCompact` | writes a checkpoint before compaction — and refuses a **manual** `/compact` it could not write. An **automatic** compaction is never refused, because refusing one would end the session | **manual only** |
 | `TaskCompleted` | **🎯 DESIGNED, NOT REGISTERED.** The runtime in `hook-io.mjs` knows the event and would let a gate block on it, but `hooks.json` registers nothing there, so nothing runs. Listed here because the type scaffolding exists and misreads as shipped otherwise. | — |
 
 ```mermaid

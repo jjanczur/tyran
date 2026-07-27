@@ -1,0 +1,90 @@
+---
+/**
+ * Install, copied straight from the README's Quick Start.
+ *
+ * Four lines and no npm line: `package.json` publishes a CLI whose own
+ * description says installing it does NOT install the plugin, and it is not on
+ * the registry yet. Offering it here as an install path would be the first
+ * false sentence on the page.
+ *
+ * The copy buttons are progressive enhancement. The command is real text inside
+ * a `<button>`, so with scripting off it is selectable and readable; the script
+ * only adds the clipboard write and the "copied" state.
+ */
+import { DOCS, REPO, RELEASE } from './urls';
+
+const STEPS = [
+  {
+    cmd: '/plugin marketplace add jjanczur/tyran',
+    note: 'Registers this repository as a plugin marketplace inside Claude Code.',
+  },
+  {
+    cmd: '/plugin install tyran@tyran',
+    note: 'Installs the plugin: the conductor, the four agents, and the hooks.',
+  },
+  {
+    cmd: '/tyran:setup',
+    note:
+      'Scans the repo, writes .tyran/config.yaml annotating every value with the fact that ' +
+      'produced it, and asks you only about what it could not establish.',
+  },
+  {
+    cmd: '/tyran',
+    note: 'Then just describe what you want done. Also: /tyran:status, /tyran:doctor, /tyran:retro.',
+  },
+];
+
+const BRAKE = 'echo "wrong branch - hold everything" > .tyran/STOP';
+---
+
+<section class="l-section" id="install">
+  <div class="l-wrap">
+    <div class="compound__head reveal">
+      <p class="l-eyebrow">Install</p>
+      <h2>Two commands to install it, two more to be running</h2>
+      <p class="l-lede">
+        Requires Claude Code. Zero runtime dependencies, Apache-2.0, and it never writes into your
+        <code>~/.claude</code>.
+      </p>
+    </div>
+
+    <div class="install__grid">
+      <ol class="steps reveal">
+        {
+          STEPS.map((step) => (
+            <li>
+              <button class="copy" type="button" data-copy={step.cmd}>
+                <code>{step.cmd}</code>
+                <span class="copy__hint" data-copy-hint>
+                  copy
+                </span>
+              </button>
+              <p>{step.note}</p>
+            </li>
+          ))
+        }
+      </ol>
+
+      <aside class="install__aside reveal" style="--l-delay: 120ms">
+        <h3>The brake</h3>
+        <p>
+          Stop a run from anywhere, at any time, without killing the session. The conductor and every
+          agent check for this file.
+        </p>
+        <button class="copy" type="button" data-copy={BRAKE}>
+          <code>{BRAKE}</code>
+          <span class="copy__hint" data-copy-hint>copy</span>
+        </button>
+
+        <h3 style="margin-top: 1.5rem">Where to go next</h3>
+        <ul class="linklist">
+          <li><a href={DOCS.gettingStarted}>Getting started</a></li>
+          <li><a href={DOCS.configuration}>Configuration and cost profiles</a></li>
+          <li><a href={DOCS.faq}>FAQ &mdash; trust, models, updates, the name</a></li>
+          <li><a href={REPO} rel="noopener">Source on GitHub</a></li>
+          <li><a href={RELEASE} rel="noopener">Release v0.1.0</a></li>
+        </ul>
+      </aside>
+    </div>
+  </div>
+</section>

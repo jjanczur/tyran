@@ -1,0 +1,1187 @@
+/* Landing page styles.
+ *
+ * Scope: `src/pages/index.astro` and the components under
+ * `src/components/landing/`. Nothing here is loaded by the Starlight
+ * documentation pages, and nothing in `custom.css` is loaded here — the
+ * landing renders outside Starlight's chrome, so it carries its own tokens.
+ *
+ * The tokens below are COPIES of Starlight's, not imports. `@astrojs/starlight`
+ * exports only `./style/markdown.css` in its package `exports` map (checked in
+ * node_modules/@astrojs/starlight/package.json), so `style/props.css` is not
+ * importable without reaching past the package boundary — which would break
+ * silently on a minor upgrade. Copying the values keeps the two themes visually
+ * identical to the docs and makes the coupling a thing you can see.
+ *
+ * Two colours are added on top of Starlight's palette, and neither is invented
+ * here: the amber is `#d4a017` from the README's "Claude Code plugin" badge,
+ * used for everything about LEARNING; red is Starlight's own `--sl-color-red`,
+ * used for everything about REFUSAL. The landing has exactly two ideas and they
+ * get one colour each.
+ */
+
+/* ------------------------------------------------------------------ tokens */
+
+:root {
+  /* Dark is the default, as in Starlight: the theme script writes
+     data-theme="light" for the other one and never data-theme="dark". */
+  --l-white: hsl(0, 0%, 100%);
+  --l-gray-1: hsl(224, 20%, 94%);
+  --l-gray-2: hsl(224, 6%, 77%);
+  --l-gray-3: hsl(224, 6%, 56%);
+  --l-gray-4: hsl(224, 7%, 36%);
+  --l-gray-5: hsl(224, 10%, 23%);
+  --l-gray-6: hsl(224, 14%, 16%);
+  --l-black: hsl(224, 10%, 10%);
+
+  --l-accent: hsl(224, 100%, 60%);
+  --l-accent-high: hsl(224, 100%, 85%);
+  --l-accent-low: hsl(224, 54%, 20%);
+
+  --l-amber: hsl(41, 82%, 63%);
+  --l-amber-low: hsl(41, 39%, 22%);
+  --l-red: hsl(339, 82%, 63%);
+  --l-red-low: hsl(339, 39%, 22%);
+  --l-green: hsl(101, 82%, 63%);
+
+  --l-bg: var(--l-black);
+  --l-bg-raised: var(--l-gray-6);
+  --l-bg-sunken: hsl(224, 12%, 8%);
+  --l-text: var(--l-gray-2);
+  --l-heading: var(--l-white);
+  --l-muted: var(--l-gray-3);
+  --l-hairline: var(--l-gray-5);
+  --l-hairline-soft: var(--l-gray-6);
+  --l-shadow: 0 1px 2px hsla(0, 0%, 0%, 0.4), 0 12px 32px hsla(0, 0%, 0%, 0.35);
+
+  --l-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+  --l-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --l-max: 68rem;
+  --l-radius: 0.75rem;
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --l-white: hsl(224, 10%, 10%);
+  --l-gray-1: hsl(224, 14%, 16%);
+  --l-gray-2: hsl(224, 10%, 23%);
+  --l-gray-3: hsl(224, 7%, 36%);
+  --l-gray-4: hsl(224, 6%, 56%);
+  --l-gray-5: hsl(224, 6%, 77%);
+  --l-gray-6: hsl(224, 20%, 94%);
+  --l-black: hsl(0, 0%, 100%);
+
+  --l-accent: hsl(234, 90%, 60%);
+  --l-accent-high: hsl(234, 80%, 30%);
+  --l-accent-low: hsl(234, 88%, 90%);
+
+  /* The light theme darkens every hue Starlight darkens, for the same reason:
+     a 63%-lightness amber on white is unreadable body text. */
+  --l-amber: hsl(41, 80%, 33%);
+  --l-amber-low: hsl(41, 90%, 90%);
+  --l-red: hsl(339, 80%, 38%);
+  --l-red-low: hsl(339, 80%, 93%);
+  --l-green: hsl(101, 80%, 22%);
+
+  --l-bg: var(--l-black);
+  --l-bg-raised: hsl(224, 19%, 97%);
+  --l-bg-sunken: hsl(224, 20%, 94%);
+  --l-text: var(--l-gray-2);
+  --l-heading: var(--l-white);
+  --l-muted: var(--l-gray-3);
+  --l-hairline: var(--l-gray-5);
+  --l-hairline-soft: var(--l-gray-6);
+  --l-shadow: 0 1px 2px hsla(0, 0%, 0%, 0.06), 0 12px 32px hsla(0, 0%, 0%, 0.08);
+
+  color-scheme: light;
+}
+
+/* -------------------------------------------------------------------- base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* The nav is sticky, so an in-page jump lands with its target under the bar
+   unless the target reserves room for it. Measured after adding it: the first
+   line of #compounding sits below the nav's bottom edge instead of behind it. */
+:target,
+[id] {
+  scroll-margin-top: 4.75rem;
+}
+
+main:focus-visible {
+  outline: none;
+}
+
+body {
+  margin: 0;
+  background: var(--l-bg);
+  color: var(--l-text);
+  font-family: var(--l-font);
+  font-size: 1rem;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--l-heading);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+a {
+  color: var(--l-accent-high);
+  text-underline-offset: 0.2em;
+}
+
+:root[data-theme='light'] a {
+  color: var(--l-accent-high);
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--l-mono);
+  font-size: 0.875em;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+:focus-visible {
+  outline: 2px solid var(--l-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.l-skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  background: var(--l-bg-raised);
+  color: var(--l-heading);
+  border: 1px solid var(--l-hairline);
+  border-radius: 0 0 var(--l-radius) 0;
+}
+
+.l-skip:focus {
+  left: 0;
+}
+
+.l-wrap {
+  width: min(100% - 2.5rem, var(--l-max));
+  margin-inline: auto;
+}
+
+/* Grid and flex items default to `min-width: auto`, which means "at least as
+   wide as my content" - and several items on this page contain a `<code>` with
+   `white-space: pre` that is wider than a phone. Without this the track grows
+   to fit it and the whole PAGE scrolls sideways instead of the code block
+   scrolling inside its own box.
+   Measured at 375px before this rule existed: document scrollWidth 528 against
+   a clientWidth of 375, from `.steps`, its `<li>` and `.install__aside`. The
+   terminals were already immune only because `.term` carries `overflow:
+   hidden`, which resolves the same `auto` to zero - i.e. the page was one
+   stylesheet edit away from the same bug in three more places. */
+.install__grid > *,
+.gates__grid > *,
+.caps__grid > *,
+.l-nav__inner > *,
+.steps > li,
+.steps > li > *,
+.term,
+.copy {
+  min-width: 0;
+}
+
+.l-section {
+  padding-block: clamp(3.5rem, 9vw, 6.5rem);
+  border-top: 1px solid var(--l-hairline-soft);
+}
+
+.l-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--l-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--l-muted);
+  margin-bottom: 1rem;
+}
+
+.l-eyebrow::before {
+  content: '';
+  width: 1.75rem;
+  height: 1px;
+  background: currentColor;
+}
+
+.l-lede {
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.1rem);
+  color: var(--l-text);
+  max-width: 46rem;
+}
+
+.l-note {
+  color: var(--l-muted);
+  font-size: 0.9rem;
+}
+
+/* --------------------------------------------------------------------- nav */
+
+.l-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--l-bg) 82%, transparent);
+  border-bottom: 1px solid var(--l-hairline-soft);
+}
+
+.l-nav__inner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 3.5rem;
+}
+
+.l-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--l-heading);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.l-brand__mark {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+}
+
+.l-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.l-nav__links a {
+  color: var(--l-text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+}
+
+.l-nav__links a:hover {
+  color: var(--l-heading);
+  background: var(--l-bg-raised);
+}
+
+@media (max-width: 33rem) {
+  .l-nav__links a[data-optional] {
+    display: none;
+  }
+}
+
+.l-themetoggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--l-text);
+  cursor: pointer;
+}
+
+.l-themetoggle:hover {
+  color: var(--l-heading);
+  border-color: var(--l-hairline);
+}
+
+.l-themetoggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* One icon is shown per theme; the other is removed from the accessibility
+   tree as well as the layout, so a screen reader is never offered both. */
+:root:not([data-theme='light']) .l-themetoggle__sun,
+:root[data-theme='light'] .l-themetoggle__moon {
+  display: none;
+}
+
+/* -------------------------------------------------------------------- hero */
+
+.hero {
+  position: relative;
+  padding-block: clamp(3rem, 8vw, 5.5rem) 0;
+  overflow: hidden;
+}
+
+/* A single radial wash instead of an image: it costs no bytes, it reads as
+   stage lighting above the banner, and it is the one place the accent and the
+   amber (the two ideas of this page) touch. */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: -30% -10% auto;
+  height: 46rem;
+  background:
+    radial-gradient(60% 50% at 30% 40%, color-mix(in srgb, var(--l-accent) 22%, transparent), transparent 70%),
+    radial-gradient(45% 45% at 78% 25%, color-mix(in srgb, var(--l-amber) 14%, transparent), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.hero__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--l-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--l-hairline);
+  color: var(--l-muted);
+  background: var(--l-bg-raised);
+  white-space: nowrap;
+}
+
+.badge--amber {
+  color: var(--l-amber);
+  border-color: color-mix(in srgb, var(--l-amber) 45%, transparent);
+  background: color-mix(in srgb, var(--l-amber-low) 55%, transparent);
+}
+
+.badge--dot::before {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.hero h1 {
+  font-size: clamp(2.4rem, 1.6rem + 3.6vw, 4.25rem);
+  max-width: 18ch;
+}
+
+.hero h1 em {
+  font-style: normal;
+  color: var(--l-amber);
+}
+
+.hero__lede {
+  margin-top: 1.35rem;
+  font-size: clamp(1.05rem, 1rem + 0.4vw, 1.25rem);
+  color: var(--l-text);
+  max-width: 44rem;
+}
+
+.hero__lede strong {
+  color: var(--l-heading);
+  font-weight: 600;
+}
+
+.hero__cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 2rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.15rem;
+  border-radius: 0.6rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn--primary {
+  background: var(--l-accent);
+  color: hsl(0, 0%, 100%);
+}
+
+.btn--primary:hover {
+  background: color-mix(in srgb, var(--l-accent) 85%, var(--l-white));
+}
+
+.btn--ghost {
+  border-color: var(--l-hairline);
+  color: var(--l-heading);
+  background: var(--l-bg-raised);
+}
+
+.btn--ghost:hover {
+  border-color: var(--l-accent);
+}
+
+.hero__proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin-top: 1.75rem;
+  font-size: 0.85rem;
+  color: var(--l-muted);
+  font-family: var(--l-mono);
+}
+
+.hero__banner {
+  margin-top: clamp(2.5rem, 6vw, 4rem);
+  position: relative;
+}
+
+.hero__banner img {
+  display: block;
+  width: 100%;
+  border-radius: var(--l-radius);
+  border: 1px solid var(--l-hairline-soft);
+  /* The banner is an illustration, not a screenshot: it bleeds into the page
+     rather than sitting in a frame that pretends it is product UI. */
+  mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+}
+
+/* ------------------------------------------------------- compounding rail */
+
+.compound__head {
+  max-width: 46rem;
+  margin-bottom: clamp(2.5rem, 6vw, 3.5rem);
+}
+
+.compound__head h2 {
+  font-size: clamp(1.8rem, 1.3rem + 2vw, 2.75rem);
+}
+
+.compound__head p {
+  margin-top: 1rem;
+}
+
+/* An <ol> because the three stages ARE ordered and a screen reader should say
+   so. The decimal markers are removed because the numbered dot on the rail is
+   the visible marker; leaving both on shipped a stray "2." and "3." beside the
+   second and third cards, caught in a screenshot. */
+.compound__rail {
+  position: relative;
+  display: grid;
+  gap: clamp(1.5rem, 4vw, 2.5rem);
+  margin: 0;
+  padding-left: 3.25rem;
+  list-style: none;
+}
+
+/* The rail: a hairline track with a fill that grows as stages activate. The
+   fill height is `--l-fill`, a number between 0 and 1 written by the page
+   script. Its DEFAULT IS 1 — a reader with no JavaScript, or with reduced
+   motion, sees a finished rail rather than an empty one. */
+.compound__rail::before,
+.compound__rail::after {
+  content: '';
+  position: absolute;
+  left: 1.05rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 2px;
+  border-radius: 2px;
+}
+
+.compound__rail::before {
+  background: var(--l-hairline-soft);
+}
+
+.compound__rail::after {
+  background: linear-gradient(to bottom, var(--l-accent), var(--l-amber));
+  transform-origin: top;
+  transform: scaleY(var(--l-fill, 1));
+}
+
+.stage {
+  position: relative;
+}
+
+.stage__dot {
+  position: absolute;
+  left: -3.25rem;
+  top: 0.35rem;
+  width: 2.15rem;
+  height: 2.15rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--l-bg);
+  border: 2px solid var(--l-hairline);
+  font-family: var(--l-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--l-muted);
+}
+
+.stage.is-visible .stage__dot {
+  border-color: var(--l-amber);
+  color: var(--l-amber);
+}
+
+.stage__card {
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: var(--l-radius);
+  background: var(--l-bg-raised);
+  padding: clamp(1.1rem, 3vw, 1.6rem);
+  box-shadow: var(--l-shadow);
+}
+
+.stage__label {
+  font-family: var(--l-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--l-amber);
+}
+
+.stage__card h3 {
+  margin-top: 0.35rem;
+  font-size: clamp(1.15rem, 1rem + 0.6vw, 1.45rem);
+}
+
+.stage__card p {
+  margin-top: 0.65rem;
+  color: var(--l-text);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.chips li {
+  font-family: var(--l-mono);
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--l-amber) 45%, transparent);
+  color: var(--l-amber);
+  background: color-mix(in srgb, var(--l-amber-low) 40%, transparent);
+}
+
+/* A learned rule that the retro later DELETED. The strike-through is the whole
+   point of the sub-section, so it is drawn in CSS and does not depend on the
+   animation running. */
+.chips li[data-struck] {
+  border-style: solid;
+  border-color: var(--l-hairline);
+  color: var(--l-muted);
+  background: transparent;
+  text-decoration: line-through;
+  text-decoration-color: var(--l-red);
+  text-decoration-thickness: 2px;
+}
+
+.stage__ledger {
+  margin-top: 1rem;
+  border-top: 1px dashed var(--l-hairline-soft);
+  padding-top: 0.85rem;
+  font-family: var(--l-mono);
+  font-size: 0.78rem;
+  color: var(--l-muted);
+  display: grid;
+  gap: 0.3rem;
+}
+
+.stage__ledger span::before {
+  content: attr(data-op);
+  display: inline-block;
+  width: 1.25rem;
+  font-weight: 700;
+}
+
+.stage__ledger span[data-op='+'] {
+  color: var(--l-green);
+}
+
+.stage__ledger span[data-op='-'] {
+  color: var(--l-red);
+}
+
+/* --------------------------------------------------------------- callouts */
+
+.callout {
+  margin-top: 2rem;
+  border: 1px solid var(--l-hairline-soft);
+  border-left: 3px solid var(--l-accent);
+  border-radius: 0 var(--l-radius) var(--l-radius) 0;
+  background: var(--l-bg-raised);
+  padding: 1.1rem 1.25rem;
+}
+
+.callout--warn {
+  border-left-color: var(--l-amber);
+}
+
+.callout--red {
+  border-left-color: var(--l-red);
+}
+
+.callout h3 {
+  font-size: 0.95rem;
+  font-family: var(--l-mono);
+  letter-spacing: 0.02em;
+}
+
+.callout p {
+  margin-top: 0.5rem;
+  font-size: 0.92rem;
+  color: var(--l-text);
+}
+
+.callout p + p {
+  margin-top: 0.6rem;
+}
+
+/* -------------------------------------------------------------- terminals */
+
+.gates__head {
+  max-width: 46rem;
+  margin-bottom: clamp(2rem, 5vw, 3rem);
+}
+
+.gates__head h2 {
+  font-size: clamp(1.8rem, 1.3rem + 2vw, 2.75rem);
+}
+
+.gates__head p {
+  margin-top: 1rem;
+}
+
+.gates__grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 55rem) {
+  .gates__grid {
+    grid-template-columns: 0.85fr 1.15fr;
+    align-items: start;
+  }
+}
+
+.term {
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: var(--l-radius);
+  background: var(--l-bg-sunken);
+  overflow: hidden;
+  box-shadow: var(--l-shadow);
+}
+
+.term--refusal {
+  border-color: color-mix(in srgb, var(--l-red) 40%, var(--l-hairline-soft));
+}
+
+.term__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid var(--l-hairline-soft);
+  background: var(--l-bg-raised);
+  font-family: var(--l-mono);
+  font-size: 0.72rem;
+  color: var(--l-muted);
+}
+
+.term__bar b {
+  color: var(--l-heading);
+  font-weight: 600;
+}
+
+.term--refusal .term__bar b {
+  color: var(--l-red);
+}
+
+.term__body {
+  margin: 0;
+  padding: 1rem 1.1rem 1.25rem;
+  font-family: var(--l-mono);
+  font-size: 0.76rem;
+  line-height: 1.7;
+  color: var(--l-text);
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+@media (min-width: 40rem) {
+  .term__body {
+    font-size: 0.8rem;
+  }
+}
+
+.term__line {
+  display: block;
+  min-height: 1.7em;
+}
+
+.term__line[data-kind='cmd'] {
+  color: var(--l-accent-high);
+}
+
+.term__line[data-kind='refuse'] {
+  color: var(--l-red);
+  font-weight: 700;
+}
+
+.term__line[data-kind='dim'] {
+  color: var(--l-muted);
+}
+
+.term__line[data-kind='ok'] {
+  color: var(--l-green);
+}
+
+/* The caret marks the terminal as live without a JS typewriter. It is a single
+   element, and it disappears entirely when motion is reduced (see the
+   reduced-motion block at the end of this file). */
+.term__caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  vertical-align: text-bottom;
+  background: var(--l-amber);
+}
+
+.gates__aside {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.stat {
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: var(--l-radius);
+  background: var(--l-bg-raised);
+  padding: 1rem 1.15rem;
+}
+
+.stat__n {
+  font-family: var(--l-mono);
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--l-heading);
+  line-height: 1.1;
+}
+
+.stat p {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--l-muted);
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.caps__grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  margin-top: 2.5rem;
+}
+
+.cap {
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: var(--l-radius);
+  background: var(--l-bg-raised);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.cap h3 {
+  font-size: 1.02rem;
+}
+
+.cap p {
+  font-size: 0.9rem;
+  color: var(--l-text);
+}
+
+.cap__limit {
+  margin-top: auto;
+  font-size: 0.82rem;
+  color: var(--l-muted);
+  border-top: 1px dashed var(--l-hairline-soft);
+  padding-top: 0.6rem;
+}
+
+.verdict {
+  align-self: flex-start;
+  font-family: var(--l-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid;
+}
+
+.verdict--shipped {
+  color: var(--l-green);
+  border-color: color-mix(in srgb, var(--l-green) 45%, transparent);
+  background: color-mix(in srgb, var(--l-green) 10%, transparent);
+}
+
+.verdict--designed {
+  color: var(--l-amber);
+  border-color: color-mix(in srgb, var(--l-amber) 45%, transparent);
+  background: color-mix(in srgb, var(--l-amber) 10%, transparent);
+}
+
+/* ---------------------------------------------------------------- install */
+
+.install__grid {
+  display: grid;
+  gap: 2rem;
+  margin-top: 2.5rem;
+}
+
+@media (min-width: 55rem) {
+  .install__grid {
+    grid-template-columns: 1.1fr 0.9fr;
+  }
+}
+
+.steps {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+}
+
+.steps li::before {
+  counter-increment: step;
+  content: counter(step);
+  grid-row: 1;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 1px solid var(--l-hairline);
+  font-family: var(--l-mono);
+  font-size: 0.72rem;
+  color: var(--l-muted);
+}
+
+.steps li p {
+  grid-column: 2;
+  font-size: 0.85rem;
+  color: var(--l-muted);
+}
+
+.copy {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem 0.5rem 0.85rem;
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: 0.55rem;
+  background: var(--l-bg-sunken);
+  font-family: var(--l-mono);
+  font-size: 0.82rem;
+  color: var(--l-heading);
+  text-align: left;
+  cursor: pointer;
+  overflow-x: auto;
+}
+
+.copy:hover {
+  border-color: var(--l-accent);
+}
+
+.copy code {
+  white-space: pre;
+  font-size: 1em;
+}
+
+.copy__hint {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--l-muted);
+}
+
+.copy[data-copied='true'] .copy__hint {
+  color: var(--l-green);
+}
+
+.install__aside {
+  border: 1px solid var(--l-hairline-soft);
+  border-radius: var(--l-radius);
+  background: var(--l-bg-raised);
+  padding: 1.25rem;
+  align-self: start;
+}
+
+.install__aside h3 {
+  font-size: 1rem;
+}
+
+.install__aside p {
+  margin-top: 0.6rem;
+  font-size: 0.88rem;
+  color: var(--l-text);
+}
+
+.install__aside .copy {
+  grid-column: auto;
+  margin-top: 0.85rem;
+}
+
+.linklist {
+  display: grid;
+  gap: 0.4rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+/* ----------------------------------------------------------------- footer */
+
+.l-footer {
+  border-top: 1px solid var(--l-hairline-soft);
+  padding-block: 2.5rem 3.5rem;
+  color: var(--l-muted);
+  font-size: 0.85rem;
+}
+
+.l-footer__inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.l-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+}
+
+.l-footer a {
+  color: var(--l-text);
+  text-decoration: none;
+}
+
+.l-footer a:hover {
+  color: var(--l-heading);
+  text-decoration: underline;
+}
+
+/* ================================================================ motion ==
+ *
+ * Everything above renders COMPLETE and STATIC. The rules below are the only
+ * ones that hide or move anything, and they are behind two independent
+ * conditions, both of which must hold:
+ *
+ *   1. `@media (prefers-reduced-motion: no-preference)` - the CSS condition.
+ *   2. `html.tyran-anim` - written by an inline script only when JavaScript
+ *      runs AND the same media query matches.
+ *
+ * Two conditions rather than one because they fail differently: without JS the
+ * class is absent, and with reduced motion the media query excludes the whole
+ * block even if some future script added the class anyway. A reader who has
+ * asked their operating system for less motion gets the entire page, in full,
+ * with nothing to scroll past and nothing waiting on an observer.
+ * ======================================================================== */
+
+@media (prefers-reduced-motion: no-preference) {
+  .tyran-anim .reveal {
+    opacity: 0;
+    transform: translateY(1.25rem);
+    transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--l-delay, 0ms);
+  }
+
+  .tyran-anim .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* The rail starts empty and is filled by the script as stages activate. */
+  .tyran-anim .compound__rail {
+    --l-fill: 0;
+  }
+
+  .tyran-anim .compound__rail::after {
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .tyran-anim .stage__dot {
+    transition: border-color 0.4s ease, color 0.4s ease, box-shadow 0.4s ease;
+  }
+
+  .tyran-anim .stage.is-visible .stage__dot {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--l-amber) 12%, transparent);
+  }
+
+  .tyran-anim .chips li {
+    opacity: 0;
+    transform: translateY(0.4rem) scale(0.96);
+  }
+
+  .tyran-anim .stage.is-visible .chips li {
+    animation: chip-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(220ms + var(--i, 0) * 90ms);
+  }
+
+  .tyran-anim .stage__ledger span {
+    opacity: 0;
+  }
+
+  .tyran-anim .stage.is-visible .stage__ledger span {
+    animation: chip-in 0.4s ease forwards;
+    animation-delay: calc(500ms + var(--i, 0) * 140ms);
+  }
+
+  /* Terminal lines print one after another, which is the only animation on
+     this page that carries meaning: a gate answers in sequence. */
+  .tyran-anim .term__line {
+    opacity: 0;
+  }
+
+  .tyran-anim .term.is-visible .term__line {
+    animation: line-in 0.24s ease forwards;
+    animation-delay: calc(var(--i, 0) * 55ms);
+  }
+
+  .tyran-anim .term__caret {
+    animation: caret 1.05s steps(1) infinite;
+  }
+}
+
+@keyframes chip-in {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes line-in {
+  from {
+    opacity: 0;
+    transform: translateX(-0.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The backstop. Even if a rule above is added later without remembering the
+   two conditions, a reduced-motion reader gets no motion and no smooth scroll.
+   `0.01ms` rather than `none` on purpose: an animation that never runs never
+   fires `animationend`, and a `forwards` fill would then never be applied. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+
+  .term__caret {
+    display: none;
+  }
+}

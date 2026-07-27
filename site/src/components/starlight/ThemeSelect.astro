@@ -1,0 +1,14 @@
+---
+/**
+ * Starlight override: no theme picker.
+ *
+ * The site is dark everywhere, so the control is removed rather than left
+ * rendering a choice that does nothing. Starlight renders this component twice
+ * — desktop header and mobile menu — and both disappear with it.
+ *
+ * Rendering nothing also takes Starlight's `ThemeSelect` client script out of
+ * the build: it is the module that defines the `starlight-theme-select` custom
+ * element, reads and writes `localStorage['starlight-theme']`, and subscribes
+ * to `prefers-color-scheme` changes. None of that has anything left to do.
+ */
+---

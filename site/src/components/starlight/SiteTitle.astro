@@ -1,0 +1,59 @@
+---
+/**
+ * Starlight override: the site title carries the mark.
+ *
+ * `Logo.astro` is an Astro component, and Starlight's `logo` config option
+ * takes an image PATH — it emits an `<img>` and cannot render a component. Two
+ * ways out: ship the mark a second time as an SVG file for Starlight to
+ * reference, or override the one component that draws the header title. The
+ * second wins, because the first would mean the same silhouette existing in
+ * three files (`Logo.astro`, `public/favicon.svg`, and a new one) with nothing
+ * keeping them in step.
+ *
+ * The upstream component's branches for a configured light/dark logo pair are
+ * dropped rather than ported: this site has no light theme, and the mark takes
+ * its colour from `currentColor`.
+ *
+ * `siteTitleHref` rather than a literal `/`: it is base-prefixed and
+ * locale-aware, and `check-base-prefix.mjs` fails the build on a root-absolute
+ * URL that does not carry `/tyran`.
+ */
+import Logo from '../landing/Logo.astro';
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title sl-flex">
+  <Logo size={26} />
+  <span translate="no">{siteTitle}</span>
+</a>
+
+<style>
+  .site-title {
+    align-items: center;
+    gap: var(--sl-nav-gap);
+    font-size: var(--sl-text-h4);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    /* The docs header takes the landing's gold so the two chromes read as one
+       site. It is a literal rather than a token because `landing.css` is not
+       loaded on documentation pages — the value is pinned by the palette note
+       in that file. */
+    color: #d4a017;
+    text-decoration: none;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .site-title:hover {
+    color: #e8bc4d;
+  }
+
+  span {
+    overflow: hidden;
+  }
+
+  svg {
+    flex: none;
+  }
+</style>

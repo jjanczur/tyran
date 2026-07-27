@@ -5,13 +5,35 @@
  * the ones this documentation actually needs.
  */
 
-/* No accent override is set here. `--sl-hue-accent` looks like the knob for it
-   and is NOT: Starlight writes `--sl-color-accent: hsl(224, 100%, 60%)` as a
-   concrete value in props.css, so setting the hue changes nothing at all. That
-   version of this file shipped briefly and was caught by measuring the
-   rendered stroke colour rather than by reading the stylesheet. Changing the
-   accent means overriding `--sl-color-accent{,-low,-high}` directly, and
-   picking a brand colour is a visual decision this story does not own. */
+/* ---------------------------------------------------------------------------
+   The accent
+   ---------------------------------------------------------------------------
+   `--sl-hue-accent` looks like the knob for this and is NOT: Starlight writes
+   `--sl-color-accent: hsl(224, 100%, 60%)` as a concrete value in props.css,
+   so setting the hue changes nothing at all. That version of this file shipped
+   briefly and was caught by measuring the rendered stroke colour rather than
+   by reading the stylesheet. The accent has to be overridden by name.
+
+   The brand colour is now decided — #d4a017, off the banner, the same gold the
+   landing and the favicon use — so the docs take it and the two halves of the
+   site stop disagreeing. Without this the header mark is gold and every link
+   under it is blue, which reads as a mistake rather than a theme.
+
+   THE SCOPE IS LOAD-BEARING. `:root:not([data-theme='light'])` leaves
+   Starlight's light palette exactly as shipped. The site has no light theme
+   any more — `ThemeProvider` is overridden to write `dark` and `ThemeSelect`
+   renders nothing — but `scripts/check-mermaid-contrast.mjs` still forces
+   `data-theme="light"` with script and measures the diagrams in it. Gold on
+   Starlight's white scores 2.38:1 against that script's 3.0 floor. Scoping
+   keeps the unreachable theme measurable and honest instead of quietly
+   failing a gate for a page nobody can open.
+   --------------------------------------------------------------------------- */
+
+:root:not([data-theme='light']) {
+  --sl-color-accent-low: #2a2110;
+  --sl-color-accent: #d4a017;
+  --sl-color-accent-high: #e8bc4d;
+}
 
 /* Tables in this documentation are frequently wide (routing tables, the
    deployment-class matrix, the doctor finding codes). Let them scroll inside

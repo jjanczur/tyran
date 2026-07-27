@@ -10,12 +10,23 @@
  * Every card also carries its limit. The README states each of these in the
  * same breath as the claim, because a control whose boundary is not stated
  * gets read as a guarantee.
+ *
+ * Each card also carries an icon, and each icon is picked for what the card
+ * MEANS rather than to fill the corner: papyrus for the journal, a sealed
+ * cartouche for the gate on the irreversible step, a graduated cubit rod for
+ * cost tiers, two forms held apart for the reviewer who is never the author,
+ * three tally strokes — Egypt's plural determinative — for parallelism, and a
+ * three-course pyramid for the three-layer update model that is still a
+ * drawing.
  */
+import Icon from './Icon.astro';
+import type { IconName } from './Icon.astro';
 import { DOCS } from './urls';
 
 interface Cap {
   title: string;
   state: 'shipped' | 'designed';
+  icon: IconName;
   body: string;
   limit: string;
   href: string;
@@ -26,6 +37,7 @@ const CAPS: Cap[] = [
   {
     title: 'Survives restarts and compaction',
     state: 'shipped',
+    icon: 'scroll',
     body:
       'Execution state lives in an append-only journal inside your repo, and a session hook ' +
       're-injects it after every compaction or resume. The team forgets where it was; the journal ' +
@@ -37,6 +49,7 @@ const CAPS: Cap[] = [
   {
     title: 'A gate on the irreversible step',
     state: 'shipped',
+    icon: 'cartouche',
     body:
       'Every commit and push is scanned for secrets before it happens, and the gate assembles the ' +
       'payload itself and verifies the scanner covered all of it. --no-verify and force-pushes are ' +
@@ -50,6 +63,7 @@ const CAPS: Cap[] = [
   {
     title: 'Cost modes that resolve from config, not habit',
     state: 'shipped',
+    icon: 'rod',
     body:
       'Model names appear in exactly ONE file. Skills, agents and policies are written in role ' +
       'names, so a model deprecation is a one-line edit. Security review and arbitration have a ' +
@@ -63,6 +77,7 @@ const CAPS: Cap[] = [
   {
     title: 'A reviewer that never grades its own homework',
     state: 'shipped',
+    icon: 'divide',
     body:
       'The reviewer agent is a different agent from the one that wrote the code, and it is granted ' +
       'no editing tools at all - it cannot patch what it is grading.',
@@ -75,6 +90,7 @@ const CAPS: Cap[] = [
   {
     title: 'Parallelism that does not corrupt itself',
     state: 'shipped',
+    icon: 'strokes',
     body:
       'A worktree per agent, a lease per worktree, and a merge order that is sequential rather ' +
       'than hopeful. Lease events land in the journal, so a lease released by a non-holder shows ' +
@@ -88,6 +104,7 @@ const CAPS: Cap[] = [
   {
     title: 'Updates that do not delete what it learned',
     state: 'designed',
+    icon: 'pyramid',
     body:
       'Three layers: the immutable core plugin, your repo data in .tyran/, and locally evolved ' +
       'skills. The layout is real - .tyran/ exists and the plugin never writes into it.',
@@ -103,6 +120,9 @@ const CAPS: Cap[] = [
 <section class="l-section" id="mechanism">
   <div class="l-wrap">
     <div class="compound__head reveal">
+      {/* The wedjat. Its fractions were Egypt's system of measures, so the eye
+          carries both halves of this section at once: watched, and measured. */}
+      <span class="l-sectmark"><Icon name="eye" size={30} /></span>
       <p class="l-eyebrow">The rest of it</p>
       <h2>Six mechanisms, five of them running</h2>
       <p class="l-lede">
@@ -115,7 +135,12 @@ const CAPS: Cap[] = [
       {
         CAPS.map((cap, i) => (
           <article class="cap reveal" style={`--l-delay: ${(i % 3) * 80}ms`}>
-            <span class={`verdict verdict--${cap.state}`}>{cap.state}</span>
+            <div class="cap__top">
+              <span class="cap__icon">
+                <Icon name={cap.icon} size={24} />
+              </span>
+              <span class={`verdict verdict--${cap.state}`}>{cap.state}</span>
+            </div>
             <h3>{cap.title}</h3>
             <p>{cap.body}</p>
             <p class="cap__limit">

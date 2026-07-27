@@ -20,6 +20,7 @@ const SLUGS = [
   'getting-started',
   'architecture',
   'configuration',
+  'skills',
   'agents',
   'self-improvement',
   'hooks',
@@ -81,9 +82,18 @@ for (const slug of SLUGS) {
 
 // --- component markup actually rendered -----------------------------------
 await page.goto(`${BASE}/evidence-gate/`, { waitUntil: 'load' });
-const verdicts = await page.locator('.verdict').count();
 const limits = await page.locator('.limit').count();
 const measured = await page.locator('.measured').count();
+
+// `<Verdict>` used to sit in every page's status banner, so ANY page proved it
+// rendered. The banner is gone and the badge is an EXCEPTION marker now: it
+// appears only where something is genuinely not built. `architecture` is where
+// that is true (the unregistered `TaskCompleted` row), so this has to look
+// there — left on `evidence-gate` it counted zero on a correct site, and the
+// separate navigation is what the first attempt at this fix got wrong by
+// putting it before the two counts above.
+await page.goto(`${BASE}/architecture/`, { waitUntil: 'load' });
+const verdicts = await page.locator('.verdict').count();
 
 await page.goto(`${BASE}/hooks/`, { waitUntil: 'load' });
 const mermaidOnHooks = await page.locator('svg[id^="mermaid-"]').count();
@@ -126,7 +136,7 @@ console.log(`console errors         : ${consoleErrors.length}`);
 consoleErrors.slice(0, 10).forEach((b) => console.log('   ' + b));
 console.log(`uncaught page errors   : ${pageErrors.length}`);
 pageErrors.slice(0, 10).forEach((b) => console.log('   ' + b));
-console.log(`<Verdict> on evidence-gate : ${verdicts}`);
+console.log(`<Verdict> on architecture  : ${verdicts}`);
 console.log(`<Limit>   on evidence-gate : ${limits}`);
 console.log(`<Measured> on evidence-gate: ${measured}`);
 console.log(`mermaid svg on hooks       : ${mermaidOnHooks}`);

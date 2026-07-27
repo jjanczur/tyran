@@ -1,6 +1,6 @@
 # Journal reference
 
-✅ **shipped** · `scripts/journal.mjs` · 47 unit tests
+`scripts/journal.mjs` · 47 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.

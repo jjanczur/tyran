@@ -1,6 +1,6 @@
 # Configuration
 
-✅ **shipped** · written by `scripts/scan-repo.mjs` · validated by
+written by `scripts/scan-repo.mjs` · validated by
 `scripts/schema.mjs`
 
 All per-repo configuration lives in `.tyran/config.yaml` — committed, human

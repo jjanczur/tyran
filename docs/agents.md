@@ -1,6 +1,6 @@
 # The roster, and how models are chosen
 
-✅ **shipped** · `agents/` · routing in `scripts/tiers.mjs`
+`agents/` · routing in `scripts/tiers.mjs`
 
 Four agents ship in `agents/`. The conductor (`/tyran:run`) spawns them; you
 can also invoke one directly when you want just that mode of work. For what

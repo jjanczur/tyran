@@ -681,6 +681,43 @@ test('knowledge/ or policies/ that is not a directory is reported, not skipped',
   assert.equal(result.ok, false);
 });
 
+// --- the silent one -------------------------------------------------------
+//
+// `git worktree add` carries tracked files only, and the policy gate is silent
+// in a repo with no `.tyran/`. An uncommitted `.tyran/` therefore means every
+// worktree runs ungated — nothing fails, nothing is refused. Measured on a
+// real install: four worktrees, four implementers with no autonomy class.
+
+const fakeGit = (map) => (args) => map[args.join(' ')] ?? '';
+const IN_TREE = 'rev-parse --is-inside-work-tree';
+
+test('an untracked .tyran/ is a warning, because worktrees will be ungated', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const run = fakeGit({ [IN_TREE]: 'true\n', 'ls-files -- .tyran': '' });
+  const found = byCode(runStateChecks({ dir, run }), 'tyran-dir-untracked');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].fix, /git add/);
+});
+
+test('a committed .tyran/ produces no finding', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const run = fakeGit({ [IN_TREE]: 'true\n', 'ls-files -- .tyran': '.tyran/config.yaml\n' });
+  assert.deepEqual(byCode(runStateChecks({ dir, run }), 'tyran-dir-untracked'), []);
+});
+
+test('outside a git work tree the question has NO answer, and none is invented', () => {
+  // The same discipline as detectPackageManager: "git could not tell us" is
+  // not evidence of anything. Without this the check fires on every temp
+  // directory and every fresh `git init`, and a warning that is always on is
+  // a warning nobody reads.
+  const root = repo();
+  const dir = scaffold(root);
+  assert.deepEqual(byCode(runStateChecks({ dir, run: fakeGit({}) }), 'tyran-dir-untracked'), []);
+});
+
 test('a repo with no autonomy policy is told its writes are all refused', () => {
   // `error`, not `info`. The policy gate fails closed on this exact state, so
   // a `.tyran/` with no policy under it is a repository where every tool call
@@ -1133,6 +1170,7 @@ const EXPECTED_SEVERITY = {
   'knowledge-invalid': 'error',
   'knowledge-unreadable': 'error',
   'knowledge-not-a-directory': 'warning',
+  'tyran-dir-untracked': 'warning',
   'policy-missing': 'error',
   'policy-invalid': 'error',
   'policy-unreadable': 'error',

@@ -236,6 +236,16 @@ open one.
    sets only; a git worktree per agent; shared zones (per the manifest in
    `PLAN.md`) are APPEND-ONLY and serialized; a branch per story; rebase
    before merge.
+   - **A worktree without `.tyran/` is an UNGATED worktree.** `git worktree
+     add` carries tracked files only, so an uncommitted `.tyran/` does not
+     reach one — and the policy gate is deliberately silent in a repo that has
+     no `.tyran/` at all. The agents there then run with no autonomy class and
+     no path classes: nothing fails, the boundary is simply absent, in the one
+     place you are running the most agents. Measured on a real install: four
+     worktrees, four ungated implementers. So **check every worktree you
+     create** and, if `.tyran/` is missing, get it committed on the main
+     checkout first rather than copying it in — a copy makes four divergent
+     configs, which is the same defect one layer down.
    - **Leases are files.** Every worktree and every heavy slot has
      `.tyran/initiatives/<slug>/locks/<resource>.lease` holding holder,
      purpose, story and expiry. A handoff BEGINS by taking the lease — an

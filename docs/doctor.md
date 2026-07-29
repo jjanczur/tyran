@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 76 unit tests
+`scripts/doctor.mjs --state` · 79 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -70,6 +70,7 @@ possible to change one and keep the suite green.
 | `projection-unreadable` | error | a projection exists but could not be read (errno printed) |
 | `projection-failed` | error | rendering the projection threw |
 | `config-missing` | info | the repo has not been set up (yet) |
+| `tyran-dir-untracked` | warning | nothing under `.tyran/` is tracked by git — worktrees get no config and no policy, so agents run there with no autonomy class at all |
 | `policy-missing` | error | `.tyran/` exists with no `policies/autonomy.yaml` under it — the policy gate fails closed on this state, so every write in the repo is refused until the file is there |
 | `config-invalid` · `knowledge-invalid` · `policy-invalid` | error | a schema validator rejected the file, with its exact field path |
 | `config-unreadable` · `knowledge-unreadable` · `policy-unreadable` | error | the file could not be read at all (errno printed) |

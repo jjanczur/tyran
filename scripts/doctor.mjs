@@ -49,6 +49,7 @@ import {
   STATE_FILE,
 } from './project.mjs';
 import { classifyPath, normalizePath, validateFile, MANDATORY_KERNEL_PATHS } from './schema.mjs';
+import { gitRunner } from './scan-repo.mjs';
 
 /** Severity order is also the report order. `info` never fails the check. */
 export const SEVERITIES = Object.freeze(['error', 'warning', 'info']);
@@ -178,6 +179,7 @@ export const SEVERITY_BY_CODE = Object.freeze(
     // Not `info`, which is what it was: with `.tyran/` on disk and no policy
     // under it the gate refuses every write in the repository. A severity that
     // does not fail the check reports a locked-out repo as a note.
+    'tyran-dir-untracked': 'warning',
     'policy-missing': 'error',
     'policy-invalid': 'error',
     'policy-unreadable': 'error',
@@ -983,7 +985,31 @@ function policyFindings(path, repoRoot) {
  * Run every state check. Pure with respect to time: `now` is either given
  * or taken from each journal's last event, never from the clock.
  */
-export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAULT_STALE_HOURS } = {}) {
+/**
+ * Is `.tyran/` committed? The one Tyran failure that is completely silent.
+ *
+ * `git worktree add` carries TRACKED files only, and the policy gate is
+ * deliberately silent in a repository with no `.tyran/` directory. Put those
+ * two together and an uncommitted `.tyran/` means every worktree the conductor
+ * creates runs with no autonomy class and no path classes — nothing fails,
+ * nothing is refused, the boundary is simply absent in the one place the most
+ * agents run. Measured on a real install: four worktrees, four ungated
+ * implementers, and the operator had no way to see it.
+ *
+ * Returns null when git cannot answer. The distinction matters exactly as it
+ * does in `detectPackageManager`: "this is not a git repository" is not
+ * evidence that a file is untracked, and reporting it as such would fire on
+ * every temp directory and every fresh `git init`.
+ */
+export function untrackedTyranDir(repoRoot, run) {
+  if (run(['rev-parse', '--is-inside-work-tree']).trim() !== 'true') return null;
+  // `ls-files` over the directory: any tracked file under it means the tree
+  // travels with a worktree, which is the property being checked. Asking about
+  // config.yaml alone would pass a repo that committed only the policy.
+  return run(['ls-files', '--', '.tyran']).trim() === '';
+}
+
+export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAULT_STALE_HOURS, run = null } = {}) {
   const root = resolve(dir);
   if (!existsSync(root)) {
     return summarize(dir, [finding('no-state-dir', show(dir), 'no Tyran state directory here — nothing to check')], [
@@ -1011,6 +1037,21 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     );
     checked.push('config.yaml: absent');
   }
+
+  const untracked = untrackedTyranDir(repoRoot, run ?? gitRunner(repoRoot));
+  if (untracked === true) {
+    findings.push(
+      finding(
+        'tyran-dir-untracked',
+        show(dir),
+        'nothing under .tyran/ is tracked by git — `git worktree add` carries tracked files only, and ' +
+          'the policy gate is silent in a repo with no .tyran/, so every worktree runs with no autonomy ' +
+          'class and no path classes. Nothing fails; the boundary is absent where the most agents run',
+        `git add ${sq(dir)} && git commit -m 'chore: adopt Tyran'`,
+      ),
+    );
+  }
+  checked.push(`.tyran/ tracked by git: ${untracked === null ? 'unknown (not a git work tree)' : !untracked}`);
 
   const knowledge = yamlFilesIn(join(dir, 'knowledge'), 'knowledge');
   findings.push(...knowledge.findings);
@@ -1224,8 +1265,13 @@ function main() {
     if (err instanceof UsageError) {
       console.error(
         'usage: doctor.mjs --state [--dir <.tyran>] [--json] [--now <iso>] [--stale-hours <n>]\n' +
-          '       --state is the only mode today; it is required so that adding --env/--config later\n' +
-          '       cannot change what a bare invocation means.',
+          '       doctor.mjs --hooks [--plugin-root <dir>] [--json]\n' +
+          '\n' +
+          '       A mode is REQUIRED: `--state` asks whether the record of the work is\n' +
+          '       consistent, `--hooks` whether the gates can fire at all. They answer\n' +
+          '       different questions, and a bare invocation would have to pick one\n' +
+          '       silently. This text said `--state is the only mode today` long after\n' +
+          '       `--hooks` shipped, which sent readers looking for a flag they had.',
       );
       process.exit(2);
     }

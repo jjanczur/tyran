@@ -22,6 +22,7 @@ import {
   detectLanguages,
   LOCKFILES,
   VALIDATION_SCRIPTS,
+  watchModeProblem,
   BootstrapError,
   POLICY_PATH,
   ensureAutonomyPolicy,
@@ -62,6 +63,38 @@ test('package.json with no lockfile assumes npm but FLAGS the assumption', () =>
   assert.equal(got.needs_confirmation, true, 'an assumption must be visible as one');
 });
 
+test('a lockfile git does NOT track loses to one it does', () => {
+  // Measured on a real install: pnpm-lock.yaml on disk but gitignored, with
+  // package-lock.json the tracked one the deploy builds from. Choosing by disk
+  // order made every validation command wrong — `pnpm lint` in a repo with no
+  // pnpm. Presence is not evidence; being committed is.
+  const d = repo({ 'pnpm-lock.yaml': '', 'package-lock.json': '{}' });
+  const git = fakeGit({ 'ls-files': 'package.json\npackage-lock.json\nsrc/a.ts\n' });
+  const got = detectPackageManager(d, git);
+  assert.equal(got.value, 'npm');
+  assert.match(got.source, /pnpm-lock\.yaml/, 'the rejected lockfile is named, not silently skipped');
+  assert.equal(got.needs_confirmation, false);
+});
+
+test('no git answer means no conclusion — presence still decides', () => {
+  // The distinction that keeps the rule honest. An empty `ls-files` is "git
+  // could not tell us" (no repo, nothing committed), not "this file is
+  // ignored". Reading it as the latter would flag every fresh clone.
+  const d = repo({ 'pnpm-lock.yaml': '' });
+  const got = detectPackageManager(d, fakeGit({}));
+  assert.equal(got.value, 'pnpm');
+  assert.equal(got.needs_confirmation, false);
+  assert.ok(got.confidence > 0.9);
+});
+
+test('lockfiles on disk and none of them committed is a FLAGGED guess', () => {
+  const d = repo({ 'pnpm-lock.yaml': '' });
+  const got = detectPackageManager(d, fakeGit({ 'ls-files': 'package.json\nsrc/a.ts\n' }));
+  assert.equal(got.value, 'pnpm');
+  assert.equal(got.needs_confirmation, true, 'a manager nothing in git supports is not a fact');
+  assert.ok(got.confidence < 0.5);
+});
+
 test('a repo with neither returns null rather than inventing a manager', () => {
   assert.equal(detectPackageManager(repo()), null);
 });
@@ -69,7 +102,11 @@ test('a repo with neither returns null rather than inventing a manager', () => {
 // --- validation ------------------------------------------------------------
 
 test('validation commands come from the scripts the repo actually declares', () => {
-  const pkg = { scripts: { lint: 'eslint .', typecheck: 'tsc', test: 'vitest', deploy: 'nope' } };
+  // `test: 'vitest run'`, not `'vitest'`. The bare form was filler here and the
+  // watcher rule now drops it — correctly, which is why this fixture had to
+  // change rather than the rule. A test whose scenery trips a real guard tells
+  // you nothing about the thing it was written to check.
+  const pkg = { scripts: { lint: 'eslint .', typecheck: 'tsc', test: 'vitest run', deploy: 'nope' } };
   const got = detectValidation(repo(), pkg, 'pnpm');
   assert.deepEqual(got.value, ['pnpm lint', 'pnpm typecheck', 'pnpm test']);
   assert.equal(got.needs_confirmation, false);
@@ -79,6 +116,40 @@ test('`build` is deliberately not treated as a validation command', () => {
   assert.ok(!VALIDATION_SCRIPTS.includes('build'), 'build is slow and typecheck already covers most of it');
   const got = detectValidation(repo(), { scripts: { build: 'next build' } }, 'npm');
   assert.deepEqual(got.value, [], 'a repo with only a build script has no validation to report');
+});
+
+// --- the watcher rule ------------------------------------------------------
+//
+// A validation command that watches does not FAIL the agent that runs it. It
+// hangs it — no output, no timeout, a session that has simply stopped. Setup
+// wrote `pnpm test` into a real repo whose test script was bare `vitest`, and
+// every agent handed that gate would have waited forever.
+
+test('a bare `vitest` test script is rerouted to the run-once variant', () => {
+  const pkg = { scripts: { test: 'vitest', 'test:run': 'vitest run', lint: 'eslint .' } };
+  const got = detectValidation(repo(), pkg, 'npm');
+  assert.deepEqual(got.value, ['npm run lint', 'npm run test:run']);
+  assert.match(got.source, /watch mode/);
+  assert.equal(got.needs_confirmation, false, 'a clean alternate is an answer, not a question');
+});
+
+test('a watcher with no run-once variant is LEFT OUT and flagged, never written', () => {
+  const pkg = { scripts: { test: 'vitest', lint: 'eslint .' } };
+  const got = detectValidation(repo(), pkg, 'npm');
+  assert.deepEqual(got.value, ['npm run lint'], 'the hanging command must not reach the config');
+  assert.equal(got.needs_confirmation, true);
+  assert.match(got.source, /left out/);
+});
+
+test('watchModeProblem is narrow — a false positive drops a real test command', () => {
+  // Runs once, and must be left alone.
+  for (const clean of ['vitest run', 'vitest run --coverage', 'jest', 'jest --ci', 'node --test', 'vitest --run', 'pytest']) {
+    assert.equal(watchModeProblem(clean), null, clean);
+  }
+  // Never exits.
+  for (const watcher of ['vitest', 'vitest --coverage', 'jest --watch', 'jest --watchAll', 'nodemon test.js']) {
+    assert.notEqual(watchModeProblem(watcher), null, watcher);
+  }
 });
 
 test('nothing recognisable yields an EMPTY list, flagged — never a guess', () => {

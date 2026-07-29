@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.1.2 — 2026-07-29
+
+From a field report on a real 0.1.1 install. Every item below is a failure
+somebody hit, not one anybody predicted.
+
+### The worktree with no boundary
+
+**`git worktree add` carries tracked files only, and the policy gate is
+deliberately silent in a repo with no `.tyran/`.** Put those together and an
+uncommitted `.tyran/` means every worktree the conductor creates has no config
+and no policy — so the agents there run with **no autonomy class and no path
+classes at all**. Nothing is refused, nothing fails, and `git push origin main`
+returns `PASS` on line 1213 of the gate. Measured: four worktrees, four ungated
+implementers, and no way for the operator to see it.
+
+This is the worst kind of defect this project can have, because Tyran's whole
+argument is that the boundary is a mechanism rather than a promise — and here
+it was absent precisely where the most agents run.
+
+Three changes, none of which touch the gate:
+
+- `doctor --state` gains **`tyran-dir-untracked`** (warning): git is asked
+  whether anything under `.tyran/` is tracked. It returns *no answer* outside a
+  work tree rather than inventing one, the same discipline the lockfile rule
+  below uses;
+- `/tyran:setup` now ends by asking for the commit, **with the reason**, rather
+  than leaving `.tyran/` sitting untracked;
+- the conductor treats a worktree without `.tyran/` as a precondition failure,
+  and is told to fix it by committing on the main checkout — not by copying the
+  file in, which just makes four divergent configs one layer down.
+
+### Two inferences that produced a broken gate
+
+**A validation command that watches does not fail an agent, it hangs it.**
+Setup wrote `pnpm test` into a repo whose `test` script is bare `vitest` —
+watch mode, no output, no timeout, a session that simply stops. `detectValidation`
+now reroutes to a run-once variant (`test:run`, `test:ci`, `test:once`) and, if
+there is none, **leaves the command out** and flags the config rather than
+writing a booby trap. The rule is deliberately narrow — `jest` runs once by
+default and is not treated as a watcher — because a false positive here silently
+drops a real test command.
+
+**A lockfile on disk is not evidence that it is the repo's lockfile.** The same
+install had `pnpm-lock.yaml` gitignored and untracked alongside the tracked
+`package-lock.json` that its deploy actually builds from, and `.gitignore` said
+so in words. Picking by disk order chose pnpm, and then every single validation
+command was wrong. `detectPackageManager` now asks git which lockfiles are
+tracked and says which one it rejected. An empty `git ls-files` means git could
+not answer and changes nothing — "not a git repo" is not evidence that a file is
+ignored.
+
+Both replay clean against the repository that produced them.
+
+### Errors that named the wrong cause
+
+`yaml-lite` answered every unbalanced quote with *"quote the whole value if it
+contains an apostrophe"*. An operator writing a long `source:` as a multi-line
+double-quoted string was sent hunting an apostrophe that did not exist, three
+times. A value that opens a quote and never closes it now says exactly that,
+and says the subset has no multi-line scalars. The apostrophe advice survives
+only on the case it is actually about.
+
+`doctor.mjs` with no flag printed *"--state is the only mode today"* long after
+`--hooks` shipped, sending readers to look for a flag they already had.
+
+The generated `config.yaml` header now states the YAML subset and asks for the
+commit, since both traps are sprung by hand-editing a file whose constraints
+were documented somewhere else.
+
+### Still open, deliberately
+
+The report also found that the gate matches on command TEXT, so `ls -1 .npmrc`
+is refused as a credential read though it reads nothing, and that a `GATED`
+refusal tells an agent to write a diff for the operator while `outside this
+repository is never autonomous` refuses the scratch directory that is the
+obvious place to put it. That second one is self-defeating and worth fixing.
+Both are changes to refusal semantics in a KERNEL file and are not being made
+in the same pass as everything above.
+
 ## 0.1.1 — 2026-07-29
 
 Both entries below come from one install of 0.1.0 on a real repository. The

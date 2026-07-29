@@ -92,9 +92,57 @@ export function gitRunner(dir) {
   };
 }
 
-export function detectPackageManager(dir) {
-  for (const [file, manager] of Object.entries(LOCKFILES)) {
-    if (existsSync(join(dir, file))) return provenance(manager, `lockfile: ${file}`, 0.95);
+/** The repo's tracked files as a Set, or null when git could not answer. */
+export function trackedFiles(run) {
+  const listing = run(['ls-files']);
+  if (listing === '') return null;
+  return new Set(listing.split('\n').filter((line) => line !== ''));
+}
+
+/**
+ * Which package manager this repo actually uses.
+ *
+ * A lockfile being ON DISK is not evidence that it is the repo's lockfile.
+ * Measured on a real install: the repo had both `pnpm-lock.yaml` and
+ * `package-lock.json`, `pnpm-lock.yaml` was gitignored and untracked, and
+ * `.gitignore` said in words that the npm lockfile was authoritative. Picking
+ * by disk order chose pnpm, and then EVERY validation command was wrong —
+ * `pnpm lint`, `pnpm typecheck`, `pnpm test` in a repo with no pnpm.
+ *
+ * So git is asked which lockfiles it tracks, and a tracked one wins. The
+ * distinction that keeps this honest: `git ls-files` returning NOTHING means
+ * git could not answer (no repository, nothing committed yet), and no
+ * conclusion is drawn from it. A non-empty listing that omits a lockfile is
+ * positive evidence that the file is ignored or untracked, and that is the
+ * only case that changes the answer.
+ */
+export function detectPackageManager(dir, run = gitRunner(dir)) {
+  const present = Object.entries(LOCKFILES).filter(([file]) => existsSync(join(dir, file)));
+  if (present.length > 0) {
+    const tracked = trackedFiles(run);
+    if (tracked === null) {
+      const [file, manager] = present[0];
+      return provenance(manager, `lockfile: ${file}`, 0.95);
+    }
+    const inGit = present.filter(([file]) => tracked.has(file));
+    if (inGit.length > 0) {
+      const [file, manager] = inGit[0];
+      const ignored = present.filter(([f]) => !tracked.has(f)).map(([f]) => f);
+      const source =
+        ignored.length === 0
+          ? `lockfile: ${file}`
+          : `lockfile: ${file} — tracked by git, unlike ${ignored.join(', ')}, which git does not track`;
+      return provenance(manager, source, 0.95);
+    }
+    // On disk, none of them committed. Something is the answer here, but the
+    // repository is not saying which — so it is a flagged guess, not a fact.
+    const [file, manager] = present[0];
+    return provenance(
+      manager,
+      `lockfile: ${file}, but git tracks no lockfile at all — this one may be ignored`,
+      0.4,
+      true,
+    );
   }
   if (existsSync(join(dir, 'package.json'))) {
     return provenance('npm', 'package.json with no lockfile — npm assumed', 0.5, true);
@@ -119,12 +167,77 @@ export function readPackageJson(dir) {
  * gate is noise. When nothing can be read, the list comes back empty and
  * flagged rather than filled in with `npm test`.
  */
+/**
+ * Suffixes a repo uses for "the same thing, but it exits". Tried in order.
+ */
+export const RUN_ONCE_SUFFIXES = Object.freeze([':run', ':ci', ':once']);
+
+/**
+ * Why this script would never return, or null.
+ *
+ * This is the single most dangerous inference the scanner can make. A
+ * validation command that watches instead of exiting does not fail the agent
+ * that runs it — it HANGS it, with no output and no timeout, and the operator
+ * sees a session that has simply stopped. Measured on a real install: setup
+ * wrote `pnpm test`, whose script was bare `vitest`, and every agent handed
+ * that gate would have waited forever.
+ *
+ * Deliberately narrow, because a false positive here drops a real test command
+ * out of the config. `jest` is NOT listed: it runs once by default and only
+ * watches when told to, so the explicit-flag rule below already covers it.
+ */
+export function watchModeProblem(script) {
+  const text = String(script);
+  if (/(^|[\s;&|])nodemon(\s|$)/.test(text)) return 'runs `nodemon`, which watches and never exits';
+  if (/--watch(All|-all)?\b(?!=false)/.test(text)) return 'passes --watch, so it never exits';
+  // `vitest` with no subcommand is watch mode outside CI. `vitest run`,
+  // `vitest bench` and an explicit `--run` all terminate.
+  if (/(^|[\s;&|])vitest(\s|$)/.test(text) && !/(^|\s)vitest\s+(run|bench|related)\b/.test(text) && !/--run\b/.test(text)) {
+    return 'is bare `vitest`, which defaults to watch mode and never exits';
+  }
+  return null;
+}
+
+/**
+ * The script to actually run for `name`, avoiding a watcher.
+ *
+ * Returns `{ script, note }` — `script` null when every candidate watches,
+ * which is a command deliberately LEFT OUT rather than written into a config
+ * where it would hang the first agent that trusted it.
+ */
+export function resolveValidationScript(scripts, name) {
+  const problem = watchModeProblem(scripts[name]);
+  if (problem === null) return { script: name, note: null };
+  for (const suffix of RUN_ONCE_SUFFIXES) {
+    const alternate = `${name}${suffix}`;
+    if (typeof scripts[alternate] === 'string' && watchModeProblem(scripts[alternate]) === null) {
+      return { script: alternate, note: `\`${name}\` ${problem}, so \`${alternate}\` is used instead` };
+    }
+  }
+  return { script: null, note: `\`${name}\` ${problem}, and no run-once variant exists — left out` };
+}
+
 export function detectValidation(dir, pkg, manager) {
   const scripts = pkg?.scripts;
   if (scripts && typeof scripts === 'object') {
     const prefix = RUN_PREFIX[manager] ?? 'npm run';
-    const found = VALIDATION_SCRIPTS.filter((name) => typeof scripts[name] === 'string').map((n) => `${prefix} ${n}`);
-    if (found.length > 0) return provenance(found, `package.json scripts: ${found.length} of the usual names`, 0.9);
+    const found = [];
+    const notes = [];
+    let dropped = false;
+    for (const name of VALIDATION_SCRIPTS) {
+      if (typeof scripts[name] !== 'string') continue;
+      const { script, note } = resolveValidationScript(scripts, name);
+      if (note !== null) notes.push(note);
+      if (script === null) dropped = true;
+      else found.push(`${prefix} ${script}`);
+    }
+    if (found.length > 0 || notes.length > 0) {
+      const base = `package.json scripts: ${found.length} of the usual names`;
+      const source = notes.length === 0 ? base : `${base}. ${notes.join('; ')}`;
+      // A dropped command means this repo's validation is INCOMPLETE, and the
+      // operator is the only one who can say what to run instead.
+      return provenance(found, source, dropped ? 0.6 : 0.9, dropped);
+    }
   }
   if (existsSync(join(dir, 'Makefile'))) {
     try {
@@ -202,7 +315,7 @@ export function detectAutonomy(dir, run = gitRunner(dir)) {
 /** The whole scan. Returns `{config, languages, questions}`. */
 export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
   const pkg = readPackageJson(dir);
-  const manager = detectPackageManager(dir);
+  const manager = detectPackageManager(dir, run);
   const validation = detectValidation(dir, pkg, manager?.value);
   const autonomy = detectAutonomy(dir, run);
   const languages = detectLanguages(dir, run);
@@ -236,6 +349,16 @@ export function renderConfig(config) {
     '#\n' +
     '# Written by /tyran:setup. Inferred values carry provenance so you can\n' +
     '# audit where each one came from. Edit freely — your edits win.\n' +
+    '#\n' +
+    '# EDITING BY HAND: Tyran parses a small YAML subset. Block scalars (>- and\n' +
+    '# |-) are REJECTED, and a file this parser cannot read makes the policy\n' +
+    '# gate refuse every write in this repository. Keep each `source:` on ONE\n' +
+    '# line, single-quoted, however long it gets.\n' +
+    '#\n' +
+    '# COMMIT THIS DIRECTORY. `.tyran/` is your repo\'s data, and an untracked\n' +
+    '# one does not reach `git worktree add` — agents then run there with no\n' +
+    '# autonomy class at all, which is the boundary silently missing exactly\n' +
+    '# where the most agents run.\n' +
     '#\n' +
     '# Validate:  node scripts/schema.mjs validate config .tyran/config.yaml\n' +
     '# Resolve a role to a model:  node scripts/tiers.mjs --role reviewer\n' +

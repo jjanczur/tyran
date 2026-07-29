@@ -142,6 +142,31 @@ test('round-trips values containing quotes (regression: E2S2-R11)', () => {
   }
 });
 
+test('an unbalanced quote names the construct, not a guess at the cause', () => {
+  // The message said "quote the whole value if it contains an apostrophe" for
+  // EVERY unbalanced quote. Measured on a real install: an operator wrote a
+  // long `source:` as a multi-line double-quoted string and spent three
+  // round-trips hunting an apostrophe that did not exist. A diagnosis that
+  // names the wrong cause with confidence is worse than one that names none.
+  assert.throws(
+    () => parse('source: "one\n  two"\n'),
+    /never closes on this line.*no multi-line scalars/s,
+    'a value that opens a quote and does not close it IS the multi-line case',
+  );
+  assert.throws(() => parse("a: don't ask # why\n"), /if the value contains an apostrophe/);
+  // and the apostrophe advice must NOT appear on the multi-line diagnosis
+  assert.equal(/apostrophe/.test(errorOf(() => parse('source: "one\n  two"\n'))), false);
+});
+
+function errorOf(fn) {
+  try {
+    fn();
+    return '';
+  } catch (err) {
+    return err.message;
+  }
+}
+
 test('stringify REFUSES an invisible codepoint instead of writing it', () => {
   // This subset has no escape that survives a round trip: `unquote` rejects a
   // backslash rather than decode it half-way, so a double-quoted \uXXXX is not

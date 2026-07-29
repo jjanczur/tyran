@@ -108,3 +108,25 @@ you asked about, that both `.tyran/` files are in place and validate, whether
 the shortcut was installed, and what to run next. Paste the raw output of the
 commands above — the evidence contract binds you exactly as it binds every
 agent you will spawn.
+
+## 6. Tell the operator to commit `.tyran/`, and say why
+
+End by asking for one commit of `.tyran/`. This is not tidiness, and the
+reason is the one failure mode of this whole setup that is **silent**:
+
+```bash
+git add .tyran && git commit -m "chore: adopt Tyran"
+```
+
+`git worktree add` does not carry untracked files. Tyran's parallel model is
+worktrees, so an uncommitted `.tyran/` means every worktree the conductor
+creates has no config and no policy — and a repo with no `.tyran/` is a repo
+the policy gate deliberately says nothing about. The agents running in those
+worktrees then have no autonomy class and no path classes at all. Nothing
+fails; the boundary is simply not there, in exactly the place the most agents
+run. Measured on a real install: four worktrees, four ungated implementers.
+
+Until it is committed there is a second hazard worth naming in your report: an
+agent that runs `git add -A` on a story branch sweeps the untracked `.tyran/`
+into that branch, and a four-way parallel run ends with four conflicting
+copies of the config. Stage explicit paths until this commit exists.

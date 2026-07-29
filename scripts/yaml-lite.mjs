@@ -133,7 +133,28 @@ function stripComment(line, lineNo) {
   // YAML loader (`a: don't ask # why`) — refuse rather than guess
   // (review E2S2 note 1).
   if (inSingle || inDouble) {
-    throw new YamlLiteError('unbalanced quote — quote the whole value if it contains an apostrophe', lineNo);
+    // Name the construct, not one guess at its cause.
+    //
+    // This said "quote the whole value if it contains an apostrophe" for every
+    // unbalanced quote there is. Measured on a real install: an operator wrote
+    // a long `source:` as a multi-line double-quoted string, got told to worry
+    // about an apostrophe that was not there, and burned three round-trips
+    // looking for one. A diagnosis that confidently names the wrong cause is
+    // worse than one that names none — it sends the reader somewhere else.
+    //
+    // The two cases are distinguishable from what is already known here: a
+    // value that OPENS with the quote still in flight was never closed on this
+    // line, which in a subset with no multi-line scalars is the whole answer.
+    const opener = inSingle ? "'" : '"';
+    const body = line.slice(line.indexOf(':') + 1).trim();
+    const opensWithQuote = body.startsWith(opener);
+    throw new YamlLiteError(
+      opensWithQuote
+        ? `a ${opener}-quoted value that never closes on this line. This subset has no multi-line ` +
+          'scalars (no >-, no |), so put the whole value on one line however long it gets'
+        : `unbalanced ${opener} — if the value contains an apostrophe, quote the whole value`,
+      lineNo,
+    );
   }
   return cut === -1 ? line : line.slice(0, cut);
 }

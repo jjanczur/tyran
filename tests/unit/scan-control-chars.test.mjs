@@ -849,6 +849,7 @@ test('THIS repository scans clean end to end', () => {
     '.github/workflows/security.yml',
     '.gitignore',
     'CHANGELOG.md',
+    'CLAUDE.md',
     'CODE_OF_CONDUCT.md',
     'CONTRIBUTING.md',
     'LICENSE',

@@ -2,6 +2,83 @@
 
 ## 0.1.0 — unreleased
 
+### `.tyran/config.yaml` is AUTO, and what that costs is written down
+
+**The file that says how to validate this repo was one an agent could not
+fix.** Measured on the same install as below: setup inferred `pnpm test`,
+which in that repo is bare `vitest` — watch mode, it never exits, and it would
+have hung every agent handed to it. The session that *discovered* that could
+not repair the file that said it. It produced a diff, then a heredoc for the
+operator to paste, then explained why it would not route around its own gate.
+It was right not to. The gate was wrong.
+
+So the shipped policy classes `.tyran/config.yaml` `AUTO`. It is mostly a
+description of the repository — package manager, validation commands, shared
+zones — and the agent that finds it wrong is what is best placed to correct it.
+
+The cost is real and is now stated in all four places a user might read
+(`templates/policies/autonomy.yaml`, `docs/configuration.md`,
+`docs/policy-gate.md`, `docs/self-improvement.md`), because an unstated cost is
+a false guarantee: **`autonomy:` lives in this file too, so an agent can raise
+its own deployment class from P1 to P3 and then push to main.** What remains is
+weaker and is said as such — nothing *infers* a raise, and a raise is a diff in
+a committed file with its provenance beside it. Note that `docs/policy-gate.md`
+had already measured this exact escalation happening *under* GATED, in an
+unattended main loop, wherever `Write` is allow-listed; GATED was buying less
+here than it looked like it was buying.
+
+The push gate's own refusal named the old class too, and naming a class there
+was the underlying mistake rather than naming the wrong one: the text is
+per-repo configuration, so any class it prints goes stale the moment somebody
+reclassifies the file. It now says the policy decides and names nothing, and
+the test asserts the *absence* of a class claim instead of pinning a string
+that has already been wrong once.
+
+Two claims that had gone false are corrected rather than left standing:
+`README.md`'s "the config file holding it is GATED, not KERNEL" and
+`docs/configuration.md`'s "Tyran never raises it on its own — that path is
+blocked by the policy hook". A test now pins the class *and* pins that the
+template still spells out what it gives up, because flipping it back is a
+one-word edit nobody would notice in review.
+
+### Setup no longer locks the repository it is setting up
+
+**`/tyran:setup` created `.tyran/config.yaml` and stopped, and that one
+missing file made the repository unwritable.** The policy gate is silent in a
+repo with no `.tyran/` directory and refuses every write in a repo that has
+one without `.tyran/policies/autonomy.yaml` under it. Both halves are right;
+their seam was not. Setup's own first command moved a fresh repo from
+"unmanaged" to "refuses everything" — including the write that would have
+installed the missing policy. Measured on a real install: the session ended
+with the operator being handed a `mkdir` and a `cp` to run by hand, in the
+middle of a one-command setup.
+
+`scan-repo.mjs` now installs the policy from the shipped template **before**
+it writes the config, and removes what it created if it cannot, so a failed
+bootstrap cannot leave behind the exact state it exists to prevent. A repo
+from before this change is repaired with `--ensure-policy`, which touches
+nothing else.
+
+That is bootstrap, not a loop authorizing itself, and the difference is
+mechanical rather than a matter of intent: it only ever creates — an existing
+policy is never read, merged or overwritten — and what it writes is the
+shipped template byte for byte, the strictest default Tyran has. No input
+makes it emit something weaker. Editing the file afterwards is human-only,
+enforced exactly as before. Three tests pin the properties that make that
+sentence true rather than aspirational: byte-identity with the template, an
+untouched hand-written policy across setup and repair, and no `.tyran/` left
+on disk when the install fails.
+
+Two smaller things the same incident exposed. `doctor`'s `policy-missing`
+finding was severity `info` — a repository where every tool call is denied,
+reported as a note — and its suggested fix was a `cp` naming the policy path,
+which the gate refuses when an agent runs it; it is now an `error` carrying a
+command that works. And the documented `schema.mjs validate policy
+.tyran/policies/…` line is one a **human** runs: inside a session it names a
+path under `.tyran/policies/**` and is refused like any other. `doctor --state
+--dir .tyran` validates the same file and names only the directory. The docs
+say so now, and `/tyran:setup` runs the latter.
+
 ### Six protocol skills, and the budget raised once to pay for them
 
 **The conductor was ordering work it had never defined.** Rule 3 required a

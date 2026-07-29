@@ -1342,8 +1342,11 @@ const DEPLOY_REMEDY = Object.freeze(Object.assign(Object.create(null), {
     'recoverable from this session, which is the whole reason they are outside every autonomy class.',
   production:
     'What to do instead: push to your own branch and open a pull request. The class lives in ' +
-    `\`${CONFIG_PATH}\`, which ADR-06 classifies GATED rather than KERNEL, so raising it is an ` +
-    'operator decision by CONVENTION, not by mechanism: measured in review, an agent in an ' +
+    `\`${CONFIG_PATH}\`, and it is your own policy that decides whether an agent may edit that ` +
+    'file — the shipped template classifies it AUTO — so keeping the class where the operator put ' +
+    'it is by CONVENTION, not by mechanism. No class is named here on purpose: this text would ' +
+    'otherwise go stale the moment a repo reclassified the file, and a refusal that states the ' +
+    'wrong reason is worse than one that states none. Measured in review, an agent in an ' +
     'unattended main loop edited P1 to P3 with no refusal. Treat raising it yourself as the thing ' +
     'you were asked not to do, and say in your report that you wanted to.',
   shared:

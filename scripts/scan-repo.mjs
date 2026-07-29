@@ -25,13 +25,15 @@
  *
  * CLI:
  *   node scan-repo.mjs [--dir <repo>] [--write <path>] [--json]
+ *   node scan-repo.mjs [--dir <repo>] --ensure-policy
  * Exit: 0 scanned · 2 usage/IO error
  */
-import { readFileSync, existsSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync, rmdirSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, resolve, dirname, extname } from 'node:path';
+import { join, resolve, dirname, extname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stringify } from './yaml-lite.mjs';
+import { parse, stringify } from './yaml-lite.mjs';
+import { validatePolicy } from './schema.mjs';
 import { escapeInvisible } from './invisible.mjs';
 
 /** Lockfile -> package manager. Order matters only for reporting stability. */
@@ -242,6 +244,140 @@ export function renderConfig(config) {
   );
 }
 
+// ------------------------------------------------------- bootstrapping the policy
+
+/**
+ * The directory whose existence ARMS the policy gate, and the file that gate
+ * needs in order to answer anything.
+ */
+export const TYRAN_DIR = '.tyran';
+export const POLICY_PATH = '.tyran/policies/autonomy.yaml';
+
+/**
+ * Seeding the policy is part of writing the config, and it is not optional.
+ *
+ * The policy gate is silent in a repository with no `.tyran/` directory — no
+ * adoption, nothing to say — and REFUSES every write in a repository that has
+ * one but no `.tyran/policies/autonomy.yaml`, because a boundary it cannot
+ * read must never read as an open one (ADR-22). Both halves are right. Their
+ * seam was not: `--write .tyran/config.yaml` created the directory and nothing
+ * created the policy, so setup's own first command moved the repo from
+ * "silent" to "refuses everything" — including the write that would have
+ * installed the missing file. Measured on a real install: the setup session
+ * ended with the operator being handed a `mkdir` and a `cp` to run by hand.
+ *
+ * Seeding it here is bootstrap, not self-authorization, and the difference is
+ * mechanical rather than a matter of intent:
+ *
+ *  - it only ever CREATES. An existing policy is never read, never merged,
+ *    never overwritten — `existsSync` returns first. So this cannot weaken a
+ *    boundary that exists, which is the whole content of KERNEL;
+ *  - what it writes is the shipped template byte for byte, which is the
+ *    strictest default Tyran has (`default: GATED`, `hooks/**` and
+ *    `.tyran/policies/**` KERNEL). There is no arrangement of inputs that
+ *    makes it write something more permissive;
+ *  - it is validated before it lands, so a damaged template becomes a loud
+ *    exit 2 rather than a repository nobody can write to.
+ *
+ * Editing the policy afterwards is still human-only, by hand, and the gate
+ * still refuses `Write`, `Edit` and any shell command that names the path.
+ */
+export class BootstrapError extends Error {
+  constructor(message, remedy) {
+    super(message);
+    this.name = 'BootstrapError';
+    this.remedy = remedy;
+  }
+}
+
+/** The shipped template, from this script's REAL location (see isMainModule). */
+export function policyTemplatePath() {
+  const self = canonicalPath(fileURLToPath(import.meta.url));
+  return join(dirname(self), '..', 'templates', 'policies', 'autonomy.yaml');
+}
+
+/** True when writing `path` would create or populate the repo's `.tyran/`. */
+export function underTyranDir(path, repoRoot) {
+  const rel = relative(resolve(repoRoot), resolve(path)).replace(/\\/g, '/');
+  return rel === TYRAN_DIR || rel.startsWith(`${TYRAN_DIR}/`);
+}
+
+/** The ancestors of `leaf` up to and including `stopAt` that do not exist yet. */
+function absentAncestors(leaf, stopAt) {
+  const absent = [];
+  let cursor = resolve(leaf);
+  const root = resolve(stopAt);
+  while (cursor !== root && cursor !== dirname(cursor)) {
+    if (!existsSync(cursor)) absent.push(cursor);
+    cursor = dirname(cursor);
+  }
+  return absent;
+}
+
+/**
+ * Install `.tyran/policies/autonomy.yaml` from the shipped template if it is
+ * absent. Returns `{ path, status: 'created' | 'present' }`.
+ *
+ * On failure it removes the directories it created before throwing. That
+ * cleanup is the point rather than tidiness: a half-finished bootstrap leaves
+ * `.tyran/` on disk with no policy under it, which is exactly the state that
+ * refuses every subsequent write — the bug this function exists to prevent,
+ * reintroduced by its own error path.
+ */
+export function ensureAutonomyPolicy(repoRoot, { templatePath = policyTemplatePath() } = {}) {
+  const root = resolve(repoRoot);
+  const path = join(root, ...POLICY_PATH.split('/'));
+  if (existsSync(path)) return { path, status: 'present' };
+
+  let text;
+  try {
+    text = readFileSync(templatePath, 'utf8');
+  } catch (error) {
+    throw new BootstrapError(
+      `the shipped policy template is unreadable at ${escapeInvisible(templatePath)}: ${error.message}`,
+      'reinstall the plugin — this file ships with it, and without it a repository cannot be set up at all',
+    );
+  }
+
+  // Validated BEFORE it lands. A template that fails its own schema installs a
+  // repository the gate refuses on every write, and the operator then debugs a
+  // policy they never wrote.
+  let errors;
+  try {
+    errors = validatePolicy(parse(text));
+  } catch (error) {
+    errors = [`the template is not parseable YAML (${error.name})`];
+  }
+  if (errors.length > 0) {
+    throw new BootstrapError(
+      `the shipped policy template does not validate (${errors.length} finding(s); the first is ` +
+        `${escapeInvisible(String(errors[0]))})`,
+      'this is a defect in the plugin, not in your repository. Report it rather than hand-editing the template.',
+    );
+  }
+
+  const created = absentAncestors(dirname(path), root);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  } catch (error) {
+    for (const dir of created) {
+      // Deepest first, and only while empty — rmdirSync refuses a directory
+      // with anything in it, which is the behaviour to want here.
+      try {
+        rmdirSync(dir);
+      } catch {
+        break;
+      }
+    }
+    throw new BootstrapError(
+      `could not write ${escapeInvisible(path)}: ${error.message}`,
+      'check the directory permissions; nothing was left behind, so re-running this command is safe',
+    );
+  }
+  return { path, status: 'created' };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const flag = (name, fallback) => {
@@ -254,10 +390,34 @@ function main() {
     process.exit(2);
   }
 
+  // Repair mode: seed the policy and do nothing else. This is what `doctor`
+  // hands an operator whose `.tyran/` predates this bootstrap, and it names no
+  // protected path on its command line, so it is a remedy an agent can run
+  // rather than a chore an agent has to delegate back to a human.
+  if (args.includes('--ensure-policy')) {
+    const seeded = seedPolicy(dir);
+    console.error(
+      seeded.status === 'created'
+        ? `scan-repo: created ${escapeInvisible(seeded.path)} from the shipped template`
+        : `scan-repo: ${escapeInvisible(seeded.path)} already exists — left untouched`,
+    );
+    return;
+  }
+
   const result = scanRepo(dir);
   const target = flag('write', null);
   if (target !== null) {
     const path = resolve(target);
+    // The boundary goes in FIRST. Between the mkdir that creates `.tyran/` and
+    // the write that puts a policy under it, every tool call in the session is
+    // refused; ordering it this way makes that window empty instead of
+    // permanent.
+    if (underTyranDir(path, dir)) {
+      const seeded = seedPolicy(dir);
+      if (seeded.status === 'created') {
+        console.error(`scan-repo: created ${escapeInvisible(seeded.path)} from the shipped template`);
+      }
+    }
     try {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, renderConfig(result.config));
@@ -268,6 +428,18 @@ function main() {
     console.error(`scan-repo: wrote ${escapeInvisible(path)}`);
   }
   console.log(JSON.stringify(result, null, 2));
+}
+
+/** `ensureAutonomyPolicy`, with a BootstrapError turned into exit 2. */
+function seedPolicy(dir) {
+  try {
+    return ensureAutonomyPolicy(dir);
+  } catch (error) {
+    if (!(error instanceof BootstrapError)) throw error;
+    console.error(`scan-repo: ${error.message}`);
+    console.error(`scan-repo: ${error.remedy}`);
+    process.exit(2);
+  }
 }
 
 function canonicalPath(path) {

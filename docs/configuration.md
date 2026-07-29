@@ -57,17 +57,29 @@ either dial for a single subtask are in [the roster](agents.md#choosing-models).
 | `P3` | additionally: merge to main with auto-deploy | irreversible or user-visible operations, feature-flag flips |
 
 The class is **detected** from your repo (branch protection, merge history,
-staging presence) and **confirmed by you once**. Tyran never raises it on
-its own — that path is blocked by the policy hook, not by good intentions.
+staging presence) and **confirmed by you once**. `scan-repo` never *infers*
+`P3`: no arrangement of files is evidence that a person meant to let an agent
+deploy to production.
+
+**The hook no longer blocks an agent from raising it, and this page said it
+did.** `.tyran/config.yaml` is class `AUTO` in the shipped policy as of this
+version — a deliberate trade, made because the same file holds the validation
+commands, and a repo whose agents cannot fix a hanging test command is a repo
+where the boundary gets deleted wholesale. What is left is weaker and is worth
+stating exactly: nothing *infers* a raise, and every raise is a diff in a
+committed file with its provenance next to it. If you want the mechanism back
+rather than the convention, set the `.tyran/config.yaml` rule in
+`.tyran/policies/autonomy.yaml` to `GATED` — it is a one-word edit, and
+[`policy-gate`](policy-gate.md) lists what GATED does and does not guarantee.
 
 ## Self-improvement boundaries (`.tyran/policies/autonomy.yaml`)
 
 Three artifact classes, enforced by a `PreToolUse` hook on file paths:
 
-- **AUTO** — knowledge facts, rule tweaks, repo-specific skills (with a
-  passing activation test): the retro agent commits these itself.
-- **GATED** — new/changed hooks, autonomy class changes, budget raises,
-  deletion of safety rules: proposed, you approve.
+- **AUTO** — knowledge facts, rule tweaks, `.tyran/config.yaml`, repo-specific
+  skills (with a passing activation test): the retro agent commits these itself.
+- **GATED** — new/changed hooks, agent overrides, budget raises, deletion of
+  safety rules: proposed, you approve.
 - **KERNEL** — the enforcement hooks themselves, the rollback mechanism, and
   this very list: never touched autonomously.
 
@@ -86,6 +98,13 @@ node scripts/schema.mjs validate policy    .tyran/policies/autonomy.yaml
 
 Exit 0 means valid; exit 1 prints one finding per line with the exact path
 (`entries[2].confidence: must be a number in [0, 1]`).
+
+The policy line is one **you** run, in your own terminal. Inside a Claude Code
+session the policy gate refuses any shell command that names a path under
+`.tyran/policies/**`, and it makes no exception for a validator — that is the
+boundary protecting itself. An agent checks the same file with
+`node scripts/doctor.mjs --state --dir .tyran`, which validates everything in
+`.tyran/` and names only the directory.
 
 ### YAML subset
 

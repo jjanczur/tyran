@@ -201,15 +201,26 @@ finds by itself is a boundary it learns to prefer.
    prompt", never "the user was asked", and **no refusal claims otherwise** —
    the round-two text printed "the user is prompted for this write" in a
    session where nobody was. *Worst case:* a user who has allow-listed
-   `Write(*)` gets `GATED` behaviour equal to `AUTO` in the main loop, and that
-   includes `.tyran/config.yaml`, which holds the deployment class. Review
-   raised P1 to P3 from an unattended main loop with no refusal. ADR-06 puts
-   that file in `GATED`, not `KERNEL`, so this is convention, not mechanism,
-   and the refusal now says so instead of promising the opposite.
-6. **Only the argv of `git push` is modelled**, not every publishing command.
+   `Write(*)` gets `GATED` behaviour equal to `AUTO` in the main loop. Review
+   raised P1 to P3 from an unattended main loop with no refusal.
+6. **The deployment class is stored in a file the shipped policy now classes
+   `AUTO`.** `.tyran/config.yaml` was `GATED`; limit 5 above had already
+   measured that gating it was convention rather than mechanism wherever
+   `Write` is allow-listed, and a second install measured what it cost when it
+   *did* bite: setup inferred `pnpm test`, which in that repo is bare `vitest`
+   and never exits, and the agent that discovered every future agent would hang
+   was refused the write that fixes it. It handed the operator a heredoc, during
+   setup. So the trade was made in the direction of the file being repairable,
+   and the cost is stated rather than implied: **an agent can raise its own
+   `autonomy:` from P1 to P3 and then push to main.** What remains is that
+   nothing infers a raise, and that a raise is a diff in a committed file. A
+   repo that wants the mechanism sets the rule back to `GATED` in
+   `.tyran/policies/autonomy.yaml`, which is a KERNEL file and therefore a
+   decision only a human can make — in either direction.
+7. **Only the argv of `git push` is modelled**, not every publishing command.
    `gh release create` and friends are the secrets gate's business; the
    deployment class does not see them.
-7. **Multiple pushes in one command line** are each evaluated, but the
+8. **Multiple pushes in one command line** are each evaluated, but the
    deployment class always comes from the **session** root's config, not from
    the repository the command walked into.
 
@@ -314,6 +325,24 @@ switch off by breaking it is not a gate (ADR-22):
   round two had the policy deny and the config pass, which is the same
   asymmetry ADR-22 is about at a smaller scale;
 - a push whose destination the gate cannot determine.
+
+### Who installs the policy, then
+
+The first of those states is unreachable through setup, and it was not always:
+`/tyran:setup` created `.tyran/` with a config in it and nothing else, which
+armed this gate against a repository that had no policy for it to read. Every
+subsequent write was refused, including the one that would have installed the
+policy — the operator was handed a `mkdir` and a `cp` to run by hand.
+
+`scan-repo.mjs` now writes `.tyran/policies/autonomy.yaml` *before* it writes
+the config, and removes what it created if it cannot. `--ensure-policy` repairs
+a `.tyran/` from before that change without touching anything else.
+
+That is bootstrap, not a loop authorizing itself, and the difference is
+mechanical: the bootstrap only ever creates — an existing policy is never read,
+merged or overwritten — and what it writes is the shipped template byte for
+byte, the strictest default there is. No input makes it emit something weaker.
+Editing the file afterwards is human-only exactly as before.
 
 ## What a refusal may say
 

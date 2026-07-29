@@ -32,9 +32,21 @@ rules:
     class: AUTO
     reason: the execution journal is append-only and written by the conductor itself
 
+  # Was GATED. The cost was measured on a real install: setup had inferred
+  # `pnpm test`, which in that repo is bare `vitest` — it never exits, so every
+  # agent would have hung forever. The session that FOUND that could not fix it,
+  # and handed the operator a heredoc to paste. A boundary that blocks the repair
+  # of a footgun it created is one the user edits away, and then it protects
+  # nothing at all.
+  #
+  # What this gives up, in one sentence, because an unstated cost is a false
+  # guarantee: `autonomy:` lives in this file too, so an agent can now raise its
+  # own deployment class. Set this rule back to GATED if that trade is wrong for
+  # your repo — and read `docs/policy-gate.md`, which measured the same
+  # escalation happening under GATED anyway wherever `Write` is allow-listed.
   - path: .tyran/config.yaml
-    class: GATED
-    reason: autonomy class and model routing live here, so this file sets both what Tyran may do and what it may spend
+    class: AUTO
+    reason: mostly a description of this repo — validation commands, package manager, shared zones — and an agent that finds it wrong is what is best placed to correct it
 
   - path: .claude/agents/**
     class: GATED

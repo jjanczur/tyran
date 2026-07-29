@@ -14,9 +14,11 @@ Install the Tyran plugin in this repository and set it up for me.
 1. Run: claude plugin marketplace add jjanczur/tyran
 2. Run: claude plugin install tyran@tyran
 3. Tell me to restart Claude Code, so the hooks and agents load.
-4. After the restart, run /tyran:setup. It scans this repo and writes
-   .tyran/config.yaml. Walk me through what it inferred - especially the
-   validation commands and the deployment autonomy class - before we commit it.
+4. After the restart, run /tyran:setup, then /tyran:doctor. Setup writes the
+   two files under .tyran/ that Tyran needs - the config, and the autonomy
+   policy the write gate reads - and doctor proves the install actually
+   works. Walk me through what setup inferred - especially the validation
+   commands and the deployment autonomy class - before we commit it.
 
 Docs: https://jjanczur.github.io/tyran/getting-started/
 ```
@@ -48,6 +50,14 @@ class — the safest class is always the default and `P3` is **never** inferred
 — writes `.tyran/config.yaml` with every field annotated
 `value · source · confidence`, and asks you **one** batch of questions, only
 about fields it could not establish.
+
+It also installs the autonomy policy under `.tyran/policies/`, from the
+shipped template, before it writes the config. That file is what the write
+gate reads, and a `.tyran/` without one refuses every write in the
+repository — so it is not a separate step you can be left holding. It is
+only ever created, never overwritten: a policy you have tightened by hand
+survives every later run of setup. Editing it afterwards is human-only, by
+design.
 
 It also offers to install a `/tyran` shortcut into `.claude/skills/tyran/`,
 so you can type `/tyran` instead of `/tyran:run`. That file is a few lines
@@ -101,6 +111,34 @@ This exists because the retro is the step most easily skipped: it happens
 after the work is done, after the merge, when the interesting part is over.
 It is also the only mechanism by which Tyran gets better at *your* repo
 rather than repeating itself.
+
+## Updating
+
+```bash
+claude plugin update tyran@tyran
+```
+
+Then restart Claude Code — hooks and agents are read when a session starts,
+so an update that is not restarted into is an update you are not running.
+
+The plugin is installed per **scope**, not per repository (`claude plugin
+list` shows yours; `--scope user` is the default). At user scope one update
+reaches every repo you use Tyran in.
+
+An update does not touch your `.tyran/` directory. That is your repository's
+data — config, knowledge, journals, and the autonomy policy — and it is
+deliberately outside the plugin so a version change cannot rewrite the
+boundary you set. Re-running `/tyran:setup` after an update is safe and
+optional: it re-scans and rewrites `config.yaml`, and it never overwrites an
+existing `.tyran/policies/autonomy.yaml`.
+
+If a repo was set up before the policy was installed automatically — the
+symptom is every write being refused with *"has a `.tyran/` directory but no
+`.tyran/policies/autonomy.yaml`"* — this repairs it and changes nothing else:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/scan-repo.mjs" --dir . --ensure-policy
+```
 
 ## Uninstall / rollback
 

@@ -262,6 +262,29 @@ test('the shipped policy template classifies the kernel paths it must', () => {
   assert.equal(doc.default, 'GATED');
 });
 
+test('the shipped template puts .tyran/config.yaml in AUTO, and says what that costs', () => {
+  // Deliberate, and the reason it is pinned here is that flipping it back is a
+  // one-word edit nobody would notice in review. It was GATED, and GATED meant
+  // an agent that discovered `pnpm test` was bare `vitest` — watch mode, never
+  // exits, hangs every agent it is handed to — could not repair the file that
+  // said so. It handed the operator a heredoc instead, during setup.
+  //
+  // The cost is real and is not hidden: `autonomy:` lives in this file, so an
+  // agent can raise its own deployment class. The template has to SAY so, or
+  // the trade is one the user made without being told.
+  const text = readFileSync(join(TEMPLATES, 'policies/autonomy.yaml'), 'utf8');
+  const doc = parse(text);
+  const rule = doc.rules.find((r) => r.path === '.tyran/config.yaml');
+  assert.ok(rule, 'the template must classify the config explicitly, not leave it to `default:`');
+  assert.equal(rule.class, 'AUTO');
+  // Matched against the comment prose with its `#` markers and line wrapping
+  // removed. Asserting on the raw text would pin the line breaks rather than
+  // the sentence, and go red the first time someone rewraps a paragraph.
+  const prose = text.replace(/^\s*#\s?/gm, '').replace(/\s+/g, ' ');
+  assert.match(prose, /raise its own deployment class/, 'the give-up is stated in the file the user reads');
+  assert.match(prose, /Set this rule back to GATED/, 'and so is the way back');
+});
+
 // --- CLI ---------------------------------------------------------------
 
 test('CLI exits 0 for valid files and 1 with findings for invalid ones', () => {

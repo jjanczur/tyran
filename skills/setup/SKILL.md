@@ -20,6 +20,27 @@ an autonomy class inferred from how the repository is really worked. Every
 value carries the fact that produced it and a confidence, so months later
 "why does this repo think it is P2" has an answer in the file itself.
 
+**It writes two files, and the second one is why this command is not
+optional.** Before the config, it installs `.tyran/policies/autonomy.yaml`
+from the shipped template. The policy gate is silent in a repository with no
+`.tyran/` directory and refuses every write in a repository that has one
+without a policy under it — so creating the config alone moves the repo from
+"unmanaged" to "refuses everything", including the write that would have
+fixed it. Setup did exactly that once, and the session ended with a `mkdir`
+and a `cp` handed to the operator.
+
+Installing it is bootstrap, not an agent granting itself permission: it only
+ever creates, never overwrites, and what it writes is the strictest template
+Tyran ships. Editing that file afterwards is human-only and stays so — the
+gate refuses `Write`, `Edit`, and any shell command that names the path.
+
+If you find a repository already in the broken state — `.tyran/` present, no
+policy — this repairs it without touching anything else:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/scan-repo.mjs" --dir . --ensure-policy
+```
+
 **It never infers `P3`.** No arrangement of files is evidence that a person
 meant to let an agent merge to main and deploy to production. That is a
 decision someone makes in words, and if the operator wants it they will say
@@ -71,9 +92,19 @@ someone's working tree unannounced is a bad way to meet a tool.
 node "${CLAUDE_PLUGIN_ROOT}/scripts/schema.mjs" validate config .tyran/config.yaml
 node "${CLAUDE_PLUGIN_ROOT}/scripts/tiers.mjs" --config .tyran/config.yaml
 node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --hooks
+node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --state --dir .tyran
 ```
 
-Report in five lines: what was detected, what was inferred and from what,
-what you asked about, whether the shortcut was installed, and what to run
-next. Paste the raw output of the three commands above — the evidence
-contract binds you exactly as it binds every agent you will spawn.
+The `--state` run is the one that answers "is this repo actually usable now",
+and it is also how you validate the policy. Do **not** reach for
+`schema.mjs validate policy .tyran/policies/autonomy.yaml`: the gate refuses
+any shell command that names a path under `.tyran/policies/**`, including
+that one. `doctor --state` validates the same file and names only `.tyran`.
+A `policy-missing` finding there is an **error**, not a note — it means every
+write in the repo is being refused.
+
+Report in six lines: what was detected, what was inferred and from what, what
+you asked about, that both `.tyran/` files are in place and validate, whether
+the shortcut was installed, and what to run next. Paste the raw output of the
+commands above — the evidence contract binds you exactly as it binds every
+agent you will spawn.

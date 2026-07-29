@@ -146,7 +146,7 @@ Initiative 20  Has written repo-specific skills for your recurring work and
 ```text
 /plugin marketplace add jjanczur/tyran
 /plugin install tyran@tyran
-/tyran:setup          # scans the repo, writes .tyran/config.yaml, installs /tyran
+/tyran:setup          # scans the repo, writes .tyran/, installs /tyran
 /tyran                # then just describe what you want done
 ```
 
@@ -162,9 +162,11 @@ Install the Tyran plugin in this repository and set it up for me.
 1. Run: claude plugin marketplace add jjanczur/tyran
 2. Run: claude plugin install tyran@tyran
 3. Tell me to restart Claude Code, so the hooks and agents load.
-4. After the restart, run /tyran:setup. It scans this repo and writes
-   .tyran/config.yaml. Walk me through what it inferred - especially the
-   validation commands and the deployment autonomy class - before we commit it.
+4. After the restart, run /tyran:setup, then /tyran:doctor. Setup writes the
+   two files under .tyran/ that Tyran needs - the config, and the autonomy
+   policy the write gate reads - and doctor proves the install actually
+   works. Walk me through what setup inferred - especially the validation
+   commands and the deployment autonomy class - before we commit it.
 
 Docs: https://jjanczur.github.io/tyran/getting-started/
 ```
@@ -282,10 +284,12 @@ echo "wrong branch — hold everything" > .tyran/STOP
   force-pushes are refused; a push to your production branch is refused at the
   strictest autonomy class, including through `HEAD`, `@`, a shell variable or
   a `git -c` alias. **What it does not do is stop an agent from raising the
-  class itself:** the config file holding it is GATED, not KERNEL, so an agent
-  with a broad allow-list can edit it in the main loop — measured, not
-  supposed. Autonomy classes are a convention the gate enforces downward, not
-  a lock. Not a firewall, and
+  class itself:** the config file holding it is `AUTO` in the shipped policy,
+  so an agent can edit it. That is deliberate — the same file holds your
+  validation commands, and an agent that cannot correct a wrong one is an
+  agent that runs your test suite wrong forever. Set the rule back to `GATED`
+  in one word if you want the other trade. Autonomy classes are a convention
+  the gate enforces downward, not a lock. Not a firewall, and
   [docs/hooks.md](docs/hooks.md) says exactly where it stops — including the
   scanner's own measured false-negative rate.
 
@@ -405,9 +409,9 @@ underlying script does.
    generalizable improvements travel to the core as pull requests.
 6. **Autonomy earns trust in layers.** Detected once, confirmed with you, and
    enforced downward by the policy gate. Not *"never self-escalated"* — the
-   file holding the class is GATED rather than KERNEL, and an agent with a
-   broad allow-list can edit it. Measured, not assumed; see
-   [the policy gate](docs/policy-gate.md).
+   file holding the class is `AUTO`, so an agent can edit it, chosen so that
+   an agent can also repair the validation commands stored beside it.
+   Measured, not assumed; see [the policy gate](docs/policy-gate.md).
 
 ## Roadmap
 

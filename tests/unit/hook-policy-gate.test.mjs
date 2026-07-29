@@ -169,7 +169,11 @@ const reasonOf = (payload) => payload.hookSpecificOutput?.permissionDecisionReas
  */
 const MATRIX = [
   { cls: 'AUTO', path: '.tyran/knowledge/facts.yaml', supervised: 'pass', unsupervised: 'pass' },
-  { cls: 'GATED', path: '.tyran/config.yaml', supervised: 'pass', unsupervised: 'deny' },
+  // AUTO in the shipped template as of this version — and the row is kept
+  // rather than deleted, because this is the file holding the deployment
+  // class. If it ever stops passing for a subagent the template moved, and
+  // that should be a decision someone makes, not a diff nobody notices.
+  { cls: 'AUTO', path: '.tyran/config.yaml', supervised: 'pass', unsupervised: 'pass' },
   { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny' },
   { cls: 'KERNEL', path: 'hooks/scripts/secrets-gate.mjs', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'KERNEL', path: '.tyran/policies/autonomy.yaml', supervised: 'deny', unsupervised: 'deny' },
@@ -915,9 +919,11 @@ test('BOUNDARY: what the Bash path rules do and do NOT reach', async () => {
   }
   assert.equal(SHELL_DECLARED_MISSES.length >= 4, true);
   // The write refusal points at the shell honestly: it says what the shell
-  // route does NOT check, rather than advertising it as a way through.
+  // route does NOT check, rather than advertising it as a way through. Driven
+  // through `.claude/agents/**` — `.tyran/config.yaml` is AUTO in the shipped
+  // template now and produces no refusal to inspect.
   const refusal = await handle({
-    input: writeInput(join(dir, '.tyran/config.yaml'), { agentId: 'a1' }),
+    input: writeInput(join(dir, '.claude/agents/reviewer.md'), { agentId: 'a1' }),
     env: { CLAUDE_PROJECT_DIR: dir },
   });
   assert.match(refusal.reason, /outside what this gate checks for CLASSES/);
@@ -1035,8 +1041,11 @@ test('M17: an ABSOLUTE path is classified against THIS call\'s root', async () =
   // AUTO through an absolute path: the mutant answers KERNEL here, because
   // resolving against the wrong root makes an in-repo file look outside.
   assert.equal(await ask(writeInput(join(root, '.tyran/knowledge/a.yaml'), { agentId: 'a1' }), root), PASS);
-  // and the class still comes from the policy, not from the path being long
-  const denied = await ask(writeInput(join(root, '.tyran/config.yaml'), { agentId: 'a1' }), root);
+  // and the class still comes from the policy, not from the path being long.
+  // This used to name `.tyran/config.yaml`, which the shipped template now
+  // classes AUTO — so the row needs a path the template still gates, or it
+  // stops distinguishing the mutant from the fix.
+  const denied = await ask(writeInput(join(root, '.claude/agents/reviewer.md'), { agentId: 'a1' }), root);
   assert.equal(denied.decision, 'deny');
 });
 
@@ -1352,16 +1361,21 @@ test('B5: no refusal claims the user was prompted, because the gate cannot know'
 });
 
 test('B5: the deployment remedy states the gap instead of promising a mechanism', async () => {
-  // `.tyran/config.yaml` is GATED by ADR-06, not KERNEL, so a main loop CAN
-  // edit it — review did, P1 to P3, with no refusal. The refusal used to say
-  // raising the class is "never one an agent makes for itself". That sentence
-  // is the blocker; the behaviour is correct.
+  // A main loop CAN edit `.tyran/config.yaml` — review did, P1 to P3, with no
+  // refusal. The refusal used to say raising the class is "never one an agent
+  // makes for itself". That sentence is the blocker; the behaviour is correct.
   const dir = deployRepo('P1', 'main');
   const got = await ask(bashInput('git push origin main', dir), dir);
   assert.equal(got.decision, 'deny');
   assert.equal(/never one an agent makes/.test(got.reason), false);
-  assert.match(got.reason, /GATED rather than KERNEL/);
   assert.match(got.reason, /by CONVENTION, not by mechanism/);
+  // The class this file has is NOT pinned, and that is the point. This text
+  // used to assert `GATED rather than KERNEL`; the shipped template moved the
+  // file to AUTO and the refusal went on naming a class no policy in the repo
+  // used — a stale reason inside a refusal, which is the one thing this gate's
+  // own doctrine says is worse than giving no reason. The remedy now names no
+  // class, so a repo that reclassifies the file cannot make it lie.
+  assert.equal(/classifies GATED|GATED rather than KERNEL/.test(got.reason), false);
 });
 
 test('B6: a symlink to a credential file is refused, like every other spelling', async () => {

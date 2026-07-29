@@ -46,13 +46,22 @@ candidates are logged — they protect future retros from re-litigating.
 
 | Class | Examples | Who decides |
 |---|---|---|
-| **AUTO** | knowledge facts, rule tweaks, new repo-specific skills (written to the [`skill-writing`](../skills/skill-writing/SKILL.md) standard, including its activation test) | retro commits autonomously; ledger entry; `git revert` rolls back |
-| **GATED** | new/changed hooks, autonomy class, budgets, deleting safety rules | retro proposes, you approve |
+| **AUTO** | knowledge facts, rule tweaks, `.tyran/config.yaml`, new repo-specific skills (written to the [`skill-writing`](../skills/skill-writing/SKILL.md) standard, including its activation test) | retro commits autonomously; ledger entry; `git revert` rolls back |
+| **GATED** | new/changed hooks, agent overrides, budgets, deleting safety rules | retro proposes, you approve |
 | **KERNEL** | the enforcement hooks, the rollback mechanism, this classification itself | humans only, by hand |
 
 The classification is a file in your repo (`.tyran/policies/autonomy.yaml`)
 and is enforced by a `PreToolUse` hook on write paths — the boundary does not
 depend on the model behaving.
+
+`.tyran/config.yaml` is AUTO **and it holds the deployment class**, which is
+the one place that table trades safety for usability on purpose. It was GATED
+until a real install showed what GATED costs there: setup had inferred
+`pnpm test`, which in that repo is bare `vitest` — watch mode, never exits —
+and the agent that discovered every future agent would hang could not repair
+the file that said so. If that trade is wrong for your repo, set the rule back
+to `GATED` (see [`policy-gate`](policy-gate.md), which also measured the same
+escalation happening *under* GATED wherever `Write` is allow-listed).
 
 Note where the line falls for skills: writing one is AUTO, and raising the
 **description budget** to make room for it is GATED. That is deliberate. The

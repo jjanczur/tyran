@@ -8,9 +8,11 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   scanRepo,
   renderConfig,
@@ -20,9 +22,14 @@ import {
   detectLanguages,
   LOCKFILES,
   VALIDATION_SCRIPTS,
+  BootstrapError,
+  POLICY_PATH,
+  ensureAutonomyPolicy,
+  policyTemplatePath,
+  underTyranDir,
 } from '../../scripts/scan-repo.mjs';
 import { parse } from '../../scripts/yaml-lite.mjs';
-import { validateConfig } from '../../scripts/schema.mjs';
+import { validateConfig, validatePolicy } from '../../scripts/schema.mjs';
 
 function repo(files = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tyran-scan-'));
@@ -188,4 +195,133 @@ test('--write produces a file that validates', () => {
   mkdirSync(join(d, '.tyran'), { recursive: true });
   writeFileSync(target, renderConfig(config));
   assert.deepEqual(validateConfig(parse(readFileSync(target, 'utf8'))), []);
+});
+
+// --- bootstrapping the policy ----------------------------------------------
+//
+// The state these tests are about is not "a file is missing". It is a
+// repository that REFUSES EVERY WRITE: the policy gate is silent without a
+// `.tyran/` directory and fails closed with one, so a setup that creates the
+// directory and not the policy locks the session out of the repair. It shipped
+// that way and cost a real operator a hand-run `mkdir` and `cp`.
+
+const SCRIPT = fileURLToPath(new URL('../../scripts/scan-repo.mjs', import.meta.url));
+
+/**
+ * Run the CLI the way setup does, over BOTH streams. scan-repo reports what it
+ * wrote on stderr and its scan on stdout, so a helper that reads only stdout
+ * asserts against an empty string and passes over a silent bootstrap.
+ */
+function cli(args, cwd) {
+  const result = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8' });
+  return { code: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
+}
+
+const policyOf = (d) => join(d, ...POLICY_PATH.split('/'));
+
+test('writing .tyran/config.yaml also installs the autonomy policy', () => {
+  const d = repo({ 'package.json': JSON.stringify({ scripts: { test: 'node --test' } }), 'package-lock.json': '{}' });
+  const { code } = cli(['--dir', d, '--write', join(d, '.tyran', 'config.yaml')], d);
+
+  assert.equal(code, 0);
+  assert.ok(existsSync(join(d, '.tyran', 'config.yaml')), 'config was written');
+  assert.ok(existsSync(policyOf(d)), 'the gate has a policy to read');
+  assert.deepEqual(validatePolicy(parse(readFileSync(policyOf(d), 'utf8'))), []);
+});
+
+test('the installed policy is the shipped template, byte for byte', () => {
+  // Not "a policy" — THE strictest one Tyran ships. A bootstrap that writes
+  // something of its own devising is a bootstrap that can write a weaker
+  // boundary than the one a reader of the template expects.
+  const d = repo();
+  ensureAutonomyPolicy(d);
+  assert.equal(readFileSync(policyOf(d), 'utf8'), readFileSync(policyTemplatePath(), 'utf8'));
+});
+
+test('an existing policy is never overwritten, whatever it says', () => {
+  // This is the KERNEL boundary, and it is the one property that separates
+  // bootstrap from self-authorization. A policy a human tightened by hand must
+  // survive every later run of setup.
+  const d = repo();
+  mkdirSync(join(d, '.tyran', 'policies'), { recursive: true });
+  const mine = 'default: KERNEL\nrules: []\n';
+  writeFileSync(policyOf(d), mine);
+
+  assert.equal(ensureAutonomyPolicy(d).status, 'present');
+  cli(['--dir', d, '--write', join(d, '.tyran', 'config.yaml')], d);
+  cli(['--dir', d, '--ensure-policy'], d);
+
+  assert.equal(readFileSync(policyOf(d), 'utf8'), mine, 'the human-authored policy is untouched');
+});
+
+test('--ensure-policy repairs a .tyran/ that predates the bootstrap', () => {
+  // The already-broken repositories: `.tyran/` on disk from an older setup,
+  // every write refused, and the operator needing a command that does not
+  // itself name the protected path.
+  const d = repo();
+  mkdirSync(join(d, '.tyran'), { recursive: true });
+  writeFileSync(join(d, '.tyran', 'config.yaml'), 'autonomy: P1\n');
+
+  const { code, out } = cli(['--dir', d, '--ensure-policy'], d);
+  assert.equal(code, 0);
+  assert.match(out, /created/);
+  assert.deepEqual(validatePolicy(parse(readFileSync(policyOf(d), 'utf8'))), []);
+  assert.equal(readFileSync(join(d, '.tyran', 'config.yaml'), 'utf8'), 'autonomy: P1\n', 'config untouched');
+});
+
+test('a --write outside .tyran/ seeds nothing', () => {
+  // The gate arms on the DIRECTORY. Writing a config somewhere else does not
+  // arm it, so nothing needs to be installed, and setup must not scatter
+  // policy files into repositories that never adopted Tyran.
+  const d = repo({ 'package.json': '{}' });
+  cli(['--dir', d, '--write', join(d, 'elsewhere.yaml')], d);
+  assert.ok(existsSync(join(d, 'elsewhere.yaml')));
+  assert.equal(existsSync(join(d, '.tyran')), false);
+});
+
+test('underTyranDir sees the directory, not one filename', () => {
+  const d = '/repo';
+  assert.equal(underTyranDir('/repo/.tyran/config.yaml', d), true);
+  assert.equal(underTyranDir('/repo/.tyran/knowledge/x.yaml', d), true);
+  assert.equal(underTyranDir('/repo/.tyran', d), true);
+  assert.equal(underTyranDir('/repo/config.yaml', d), false);
+  assert.equal(underTyranDir('/elsewhere/.tyran/config.yaml', d), false);
+});
+
+test('a template that does not validate refuses instead of installing', () => {
+  const d = repo();
+  const bad = join(repo(), 'autonomy.yaml');
+  writeFileSync(bad, 'default: WHATEVER\nrules: []\n');
+  assert.throws(() => ensureAutonomyPolicy(d, { templatePath: bad }), BootstrapError);
+  assert.equal(existsSync(join(d, '.tyran')), false, 'nothing half-installed');
+});
+
+test('a failed install leaves no .tyran/ behind', () => {
+  // The error path reintroducing the bug is the shape worth pinning: an
+  // aborted bootstrap that leaves the directory on disk produces exactly the
+  // repository-refuses-everything state, and the operator has no idea why.
+  const d = repo();
+  const readOnly = join(d, '.tyran');
+  mkdirSync(readOnly, { recursive: true });
+  chmodSync(readOnly, 0o500);
+  try {
+    assert.throws(() => ensureAutonomyPolicy(d), BootstrapError);
+  } finally {
+    chmodSync(readOnly, 0o700);
+  }
+  assert.equal(existsSync(policyOf(d)), false);
+});
+
+test('the CLI exits 2, loudly, when the policy cannot be installed', () => {
+  const d = repo({ 'package.json': '{}' });
+  mkdirSync(join(d, '.tyran'), { recursive: true });
+  chmodSync(join(d, '.tyran'), 0o500);
+  try {
+    const { code, out } = cli(['--dir', d, '--write', join(d, '.tyran', 'config.yaml')], d);
+    assert.equal(code, 2);
+    assert.match(out, /scan-repo:/);
+    assert.equal(existsSync(join(d, '.tyran', 'config.yaml')), false, 'no config without a boundary to govern it');
+  } finally {
+    chmodSync(join(d, '.tyran'), 0o700);
+  }
 });

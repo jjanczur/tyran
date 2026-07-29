@@ -76,7 +76,8 @@ possible to change one and keep the suite green.
 | `projection-blocked` | warning | the journal cannot be projected at all, so drift is not a meaningful question |
 | `projection-unreadable` | error | a projection exists but could not be read (errno printed) |
 | `projection-failed` | error | rendering the projection threw |
-| `config-missing` · `policy-missing` | info | the repo has not been set up (yet) |
+| `config-missing` | info | the repo has not been set up (yet) |
+| `policy-missing` | error | `.tyran/` exists with no `policies/autonomy.yaml` under it — the policy gate fails closed on this state, so every write in the repo is refused until the file is there |
 | `config-invalid` · `knowledge-invalid` · `policy-invalid` | error | a schema validator rejected the file, with its exact field path |
 | `config-unreadable` · `knowledge-unreadable` · `policy-unreadable` | error | the file could not be read at all (errno printed) |
 | `policies-unreadable` | error | `policies/` could not be listed (errno printed) — **not** "zero policies" |

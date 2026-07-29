@@ -681,12 +681,18 @@ test('knowledge/ or policies/ that is not a directory is reported, not skipped',
   assert.equal(result.ok, false);
 });
 
-test('a repo with no autonomy policy is told the boundary is undefined', () => {
+test('a repo with no autonomy policy is told its writes are all refused', () => {
+  // `error`, not `info`. The policy gate fails closed on this exact state, so
+  // a `.tyran/` with no policy under it is a repository where every tool call
+  // that writes anything is denied — and the remedy has to be a command that
+  // does not itself name the protected path, or it is refused too.
   const root = repo();
   const dir = scaffold(root, { policy: false });
   const missing = byCode(runStateChecks({ dir }), 'policy-missing');
   assert.equal(missing.length, 1);
-  assert.equal(missing[0].severity, 'info');
+  assert.equal(missing[0].severity, 'error');
+  assert.match(missing[0].fix, /--ensure-policy/);
+  assert.ok(!/\bcp\b/.test(missing[0].fix), 'a cp naming the policy path is refused by the gate itself');
 });
 
 test('a config.yaml that is a directory is a finding, not an exception', () => {
@@ -1127,7 +1133,7 @@ const EXPECTED_SEVERITY = {
   'knowledge-invalid': 'error',
   'knowledge-unreadable': 'error',
   'knowledge-not-a-directory': 'warning',
-  'policy-missing': 'info',
+  'policy-missing': 'error',
   'policy-invalid': 'error',
   'policy-unreadable': 'error',
   'policies-unreadable': 'error',

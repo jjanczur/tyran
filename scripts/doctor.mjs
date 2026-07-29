@@ -175,7 +175,10 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'knowledge-invalid': 'error',
     'knowledge-unreadable': 'error',
     'knowledge-not-a-directory': 'warning',
-    'policy-missing': 'info',
+    // Not `info`, which is what it was: with `.tyran/` on disk and no policy
+    // under it the gate refuses every write in the repository. A severity that
+    // does not fail the check reports a locked-out repo as a note.
+    'policy-missing': 'error',
     'policy-invalid': 'error',
     'policy-unreadable': 'error',
     'policies-unreadable': 'error',
@@ -1022,8 +1025,11 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
       finding(
         'policy-missing',
         show(join(dir, 'policies')),
-        'no autonomy policy — the self-improvement boundary (AUTO / GATED / KERNEL) is undefined for this repo',
-        `mkdir -p ${sq(join(dir, 'policies'))} && cp templates/policies/autonomy.yaml ${sq(join(dir, 'policies', 'autonomy.yaml'))}`,
+        'no autonomy policy, in a repo that HAS a .tyran/ directory — the policy gate fails closed on ' +
+          'exactly this state, so every write in every session is refused until the file exists. It is not ' +
+          'a missing nicety; the repository is unusable',
+        `node scripts/scan-repo.mjs --dir ${sq(repoRoot)} --ensure-policy   # installs the shipped template; ` +
+          'never overwrites a policy you wrote',
       ),
     );
   }

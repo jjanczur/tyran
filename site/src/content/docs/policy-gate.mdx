@@ -337,6 +337,34 @@ switch off by breaking it is not a gate (ADR-22):
   asymmetry ADR-22 is about at a smaller scale;
 - a push whose destination the gate cannot determine.
 
+### A git worktree is the same repository
+
+Two field reports described **opposite** failures with one cause: this gate
+read "the repository" as "this directory tree", and a worktree is neither
+inside it nor a different repository.
+
+- a session running **in** a worktree found no `.tyran/` there — the directory
+  is committed data, and `git worktree add` gives you a fresh checkout — so the
+  gate concluded Tyran had not been adopted and went **silent**. Measured: four
+  worktrees, four implementers with no autonomy class and no path classes, and
+  `git push origin main` passing;
+- a session running in the main checkout and writing **into** a worktree got
+  `normalizePath → null → KERNEL`, so every `Edit` was refused as "outside this
+  repository". Five agents hit it in one initiative and all rerouted through
+  `Bash` heredocs, which this gate does not class at all — a refusal that moves
+  work into a less visible channel is worse than no refusal.
+
+The gate now asks *which repository is this path in*. A linked worktree's
+`.git` is a **file** holding `gitdir:`, so the main checkout is found with a
+stat and a small read rather than a subprocess — the write path still runs no
+child processes. The policy and the config are inherited from the main
+checkout when the worktree has none of its own, and a path in a worktree is
+classified against that worktree.
+
+The property that keeps this from being a hole is **identity, not proximity**:
+both sides must resolve to the same main checkout. A path in a different
+repository still normalizes to `null` and is still KERNEL.
+
 ### Who installs the policy, then
 
 The first of those states is unreachable through setup, and it was not always:

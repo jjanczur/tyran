@@ -190,6 +190,48 @@ test('CLI: unknown flags and non-integer --limit fail loudly', () => {
   assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'query', f, '--limit', 'abc'], { stdio: 'pipe' }), /Command failed|status 1/);
 });
 
+// --- the contract discovers itself -------------------------------------
+//
+// Two independent field reports raised these. `skills/run/SKILL.md` says IDs
+// never come from memory, because after a compaction memory hands out the same
+// number twice — and `append` then REJECTED a missing id rather than issuing
+// one. Measured: 12 decision IDs hand-assigned from memory in a single
+// initiative, the exact failure the rule names, with nothing objecting.
+
+test('CLI: append ISSUES a decision id when none is given, and never reuses one', () => {
+  const f = tmp();
+  const idOf = (out) => JSON.parse(out).data.id;
+  const first = idOf(execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"text":"a"}'], { encoding: 'utf8' }));
+  const second = idOf(execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"text":"b"}'], { encoding: 'utf8' }));
+  assert.equal(first, 'D-1');
+  assert.equal(second, 'D-2');
+  // An explicit id still wins — this issues one, it does not take the choice away.
+  const mine = idOf(execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"D-99","text":"c"}'], { encoding: 'utf8' }));
+  assert.equal(mine, 'D-99');
+});
+
+test('CLI: a rejected event names the whole closed set, and the whole data contract', () => {
+  // Both were discoverable only by grepping the plugin's source or by failing
+  // one invocation per missing key. The agent recovering from these errors has
+  // no other source of truth.
+  const f = tmp();
+  const fails = (args) => {
+    try {
+      execFileSync(process.execPath, [SCRIPT, ...args], { stdio: 'pipe', encoding: 'utf8' });
+      return '';
+    } catch (err) {
+      return `${err.stdout ?? ''}${err.stderr ?? ''}`;
+    }
+  };
+  const unknown = fails(['append', f, 'review.verdict', 'demo', '--data', '{}']);
+  for (const ev of EVENT_TYPES) assert.match(unknown, new RegExp(ev.replace('.', '\\.')), `must list ${ev}`);
+
+  const incomplete = fails(['append', f, 'review', 'demo', '--data', '{}']);
+  for (const key of ['ticket', 'verdict', 'by']) {
+    assert.match(incomplete, new RegExp(`\\b${key}\\b`), `must name the ${key} requirement up front`);
+  }
+});
+
 // --- concurrency -------------------------------------------------------
 // Review finding E2S1-R2: earlier versions of these tests were tautologies
 // (sequential execFileSync / microtasks). This one spawns 20 processes

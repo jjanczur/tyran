@@ -63,7 +63,7 @@
  * read rule, which needs no configuration and is what the incident above
  * actually called for.
  */
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -314,6 +314,83 @@ export class PolicyFailure extends Error {
   }
 }
 
+// ------------------------------------------------------------- git worktrees
+
+/**
+ * A linked worktree's main checkout, or null when this IS the main checkout.
+ *
+ * Two field reports on 0.1.2 described opposite failures with one cause: this
+ * gate treated "the repository" as "this directory tree", and a git worktree is
+ * neither inside it nor a different repository.
+ *
+ *  - a session running IN a worktree found no `.tyran/` there — the directory
+ *    is committed data, but `git worktree add` gives you a fresh checkout and
+ *    the tree only travels if it was committed — so `loadPolicy` returned null
+ *    and the gate went SILENT. Measured: four worktrees, four implementers with
+ *    no autonomy class and no path classes, and `git push origin main` passing;
+ *  - a session running in the main checkout and writing into a sibling worktree
+ *    got `normalizePath` -> null -> unconditional KERNEL, so every `Edit` was
+ *    refused as "outside this repository". Five agents hit it in one initiative
+ *    and all converged on `python3` heredocs through `Bash`, which this gate
+ *    does not class at all. A refusal that reroutes work into a less visible
+ *    channel is worse than no refusal.
+ *
+ * Both are fixed by asking the same question — *which repository is this path
+ * in* — instead of *is this path under my root*.
+ *
+ * Detection is pure filesystem, deliberately. `.git` is a DIRECTORY in a main
+ * checkout and a FILE in a linked worktree, holding `gitdir: <path>`. Reading
+ * it costs a stat and a small read; asking git would cost a subprocess on the
+ * write path, which today does none at all and is measured at ~50 ms.
+ */
+export function mainWorktreeOf(root) {
+  const dotGit = join(root, '.git');
+  let text;
+  try {
+    if (statSync(dotGit).isDirectory()) return null;
+    text = readFileSync(dotGit, 'utf8');
+  } catch {
+    return null;
+  }
+  if (text.length > MAX_GITFILE_BYTES) return null;
+  const match = /^gitdir:\s*(.+)$/m.exec(text);
+  if (match === null) return null;
+  // `<main>/.git/worktrees/<name>` — the main checkout is what precedes it.
+  const gitdir = resolvePath(root, match[1].trim()).replace(/\\/g, '/');
+  const marker = '/.git/worktrees/';
+  const at = gitdir.indexOf(marker);
+  return at === -1 ? null : gitdir.slice(0, at);
+}
+
+/** A `.git` file is one short line. Anything larger is not one (ADR-22 c1 D). */
+export const MAX_GITFILE_BYTES = 4096;
+
+/** How far up from a path to look for the checkout containing it. */
+const MAX_WORKTREE_WALK = 64;
+
+/**
+ * The checkout root containing `path`, and the repository it belongs to.
+ *
+ * Returns `{ checkout, repository }` where `repository` is the main worktree —
+ * the identity two sibling worktrees share — or null when no checkout is found.
+ */
+export function checkoutOf(path) {
+  let cursor = resolvePath(path);
+  for (let i = 0; i < MAX_WORKTREE_WALK; i++) {
+    let exists = false;
+    try {
+      exists = statSync(join(cursor, '.git')) !== null;
+    } catch {
+      exists = false;
+    }
+    if (exists) return { checkout: cursor, repository: mainWorktreeOf(cursor) ?? cursor };
+    const parent = dirname(cursor);
+    if (parent === cursor) return null;
+    cursor = parent;
+  }
+  return null;
+}
+
 /** The repository this call is about. Explicit, never defaulted per call site. */
 export function repoRootOf(input, env = process.env) {
   const fromEnv = env.CLAUDE_PROJECT_DIR;
@@ -364,13 +441,32 @@ async function readBounded(path, what) {
  * that lets writes through is the defect this whole epic is about.
  */
 export async function loadPolicy(root) {
-  const text = await readBounded(join(root, POLICY_PATH), 'the autonomy policy');
+  // A linked worktree inherits its repository's policy. Without this a
+  // worktree with no `.tyran/` of its own reads as "this repo never adopted
+  // Tyran" and the gate goes silent — measured in the field as four worktrees
+  // running four implementers with no autonomy class at all. Tried in order,
+  // so a `.tyran/` that DID travel with the worktree still wins.
+  const roots = [root, mainWorktreeOf(root)].filter((r) => r !== null);
+  let text = null;
+  let from = root;
+  for (const candidate of roots) {
+    text = await readBounded(join(candidate, POLICY_PATH), 'the autonomy policy');
+    if (text !== null) {
+      from = candidate;
+      break;
+    }
+  }
   if (text === null) {
     let adopted = false;
-    try {
-      adopted = (await stat(join(root, TYRAN_DIR))).isDirectory();
-    } catch {
-      adopted = false;
+    for (const candidate of roots) {
+      try {
+        if ((await stat(join(candidate, TYRAN_DIR))).isDirectory()) {
+          adopted = true;
+          break;
+        }
+      } catch {
+        /* keep looking */
+      }
     }
     if (!adopted) return null;
     throw new PolicyFailure(
@@ -403,7 +499,14 @@ export async function loadPolicy(root) {
 
 /** Load the deployment class from config.yaml, or refuse. `null` = no config. */
 export async function loadDeployClass(root) {
-  const text = await readBounded(join(root, CONFIG_PATH), 'the Tyran config');
+  // Same inheritance as the policy, and for the sharper reason: without it a
+  // `git push origin main` from inside a worktree found no config, concluded
+  // the repo had not adopted Tyran, and PASSED at every deployment class.
+  let text = null;
+  for (const candidate of [root, mainWorktreeOf(root)].filter((r) => r !== null)) {
+    text = await readBounded(join(candidate, CONFIG_PATH), 'the Tyran config');
+    if (text !== null) break;
+  }
   if (text === null) return null;
   let doc;
   try {
@@ -595,7 +698,25 @@ function canonicalDeepest(raw) {
  * outside. Two spellings of one location must not resolve to two classes.
  */
 export function repoRelative(raw, root) {
-  return normalizePath(canonicalDeepest(raw), canonicalDeepest(root));
+  const direct = normalizePath(canonicalDeepest(raw), canonicalDeepest(root));
+  if (direct !== null) return direct;
+  // Not under this root — but a git worktree of the SAME repository is not
+  // "outside the repository", and calling it that refused every Edit an
+  // implementer made in the worktree rule 7 tells the conductor to give it.
+  // Five agents hit this in one initiative and all rerouted their writes
+  // through `Bash` heredocs, which this gate does not class at all.
+  //
+  // The test is repository IDENTITY, never proximity: both sides resolve to a
+  // main checkout and those must be the same path. A path in a DIFFERENT
+  // repository still normalizes to null and is still KERNEL, which is the
+  // property that keeps this from being a hole.
+  const target = checkoutOf(canonicalDeepest(raw));
+  if (target === null) return null;
+  const session = checkoutOf(canonicalDeepest(root));
+  if (session === null || target.repository !== session.repository) return null;
+  // Classified against the worktree it lives in, so `.tyran/knowledge/x.yaml`
+  // in a worktree is the same class as in the main checkout.
+  return normalizePath(canonicalDeepest(raw), target.checkout);
 }
 
 /** Every path this tool call names. Prototype-safe, deduplicated, order-stable. */
@@ -1205,10 +1326,17 @@ async function decideBash({ input, toolInput, root, runner, budget }) {
     // config in an ADOPTED repo refuses, exactly as a missing policy does.
     // Only a repo with no `.tyran/` at all is silent.
     let adopted = false;
-    try {
-      adopted = (await stat(join(root, TYRAN_DIR))).isDirectory();
-    } catch {
-      adopted = false;
+    // The worktree's repository, not just the worktree: a push from a linked
+    // checkout must not read as "Tyran does not run here" (see loadPolicy).
+    for (const candidate of [root, mainWorktreeOf(root)].filter((r) => r !== null)) {
+      try {
+        if ((await stat(join(candidate, TYRAN_DIR))).isDirectory()) {
+          adopted = true;
+          break;
+        }
+      } catch {
+        /* keep looking */
+      }
     }
     if (!adopted) return PASS;
     throw new PolicyFailure(

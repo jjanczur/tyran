@@ -236,6 +236,18 @@ open one.
    sets only; a git worktree per agent; shared zones (per the manifest in
    `PLAN.md`) are APPEND-ONLY and serialized; a branch per story; rebase
    before merge.
+   - **A fresh worktree has no dependencies, so every validation command in
+     the config fails at once.** `npm run lint`, the type check and the test
+     suite all exit 127 in a new worktree, and the evidence contract then
+     cannot be satisfied by construction — measured on a Node repo, and the
+     same holds for `.venv`, `vendor/` and `target/`. Link the main checkout's
+     dependency directory into the worktree rather than installing: the
+     manifest and lockfile are already a SHARED ZONE nobody may edit, so the
+     dependencies are guaranteed identical, and a per-worktree install is how
+     a lockfile drifts. Say in the handoff which directory you linked.
+   - **`.tyran/state/**` lives in the main checkout only.** An agent told to
+     append to `NOTES.md` from inside a worktree must use the absolute
+     main-repo path, or it writes into a copy nobody reads.
    - **A worktree without `.tyran/` is an UNGATED worktree.** `git worktree
      add` carries tracked files only, so an uncommitted `.tyran/` does not
      reach one — and the policy gate is deliberately silent in a repo that has
@@ -280,6 +292,12 @@ open one.
   a reply unless it is a gate.
 - Final report: what was built · how it was verified · everything in
   `NOTES.md` · the list of things the operator should check by hand.
+- **You are notified when a subagent finishes — do not poll for it.** The
+  reflex is to set a repeating check; measured on a real run, most of those
+  fired after the agent had already reported, producing dozens of stale
+  notifications the conductor then had to disown in front of the operator.
+  Reserve a long fallback interval for work the harness cannot track, such as
+  a remote CI run.
 - **The retrospective is not optional and not on your memory.** When every
   ticket in an initiative is merged and no retrospective has been recorded
   since the last merge, the `Stop` gate refuses one turn and says so. Run

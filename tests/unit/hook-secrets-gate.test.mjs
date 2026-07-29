@@ -345,6 +345,60 @@ test('B3: a movement this gate cannot follow is a REFUSAL, not an assumption', (
   assert.equal(planCommand('cd "$WT" && npm test', '/a').unmodellable.length, 0);
 });
 
+// --- the subcommand slot ---------------------------------------------------
+//
+// These three classifications were `words.has('push')` and friends: true when
+// the word appeared ANYWHERE in the segment. Measured in the field on 0.1.2,
+// `git stash push --staged -m "conductor: ..."` — a purely local operation —
+// was read as a publish, and the remote was then taken from the token after
+// the word: `conductor` out of the message, `2` out of a `2>&1`. The refusal
+// told the operator to run `git remote set-head conductor -a`, which cannot
+// succeed, about a repo whose default branch was recorded all along.
+//
+// The cost was not one bad refusal. Rule 7 REQUIRES addressed stashes to
+// protect other windows' work, so the gate refused the safe half of a workflow
+// the plugin mandates.
+
+test('B3: a local `git stash push` is not a publish', () => {
+  const plan = planCommand('git stash push --staged -m "conductor: hold three files"', '/a');
+  assert.deepEqual(plan.targets.filter((t) => t.scanPush === true), [], 'stash publishes nothing');
+});
+
+test('B3: `git remote add` and `git worktree add` are not `git add`', () => {
+  // `worktree add` is the command rule 7 tells every parallel agent to run.
+  for (const command of ['git remote add origin https://example.com/r.git', 'git worktree add .wt/story-1']) {
+    const plan = planCommand(`${command} && git commit -m x`, '/a');
+    const commit = plan.targets.find((t) => t.scanCommit === true);
+    assert.equal(commit.includeUntracked, false, command);
+    assert.deepEqual(commit.includePaths, [], command);
+  }
+});
+
+test('B3: a real push is still seen through every spelling that reaches the slot', () => {
+  // The fix narrows WHERE the word counts, so each way of reaching the
+  // subcommand slot needs a row here — otherwise the narrowing is a hole.
+  for (const command of [
+    'git push origin main',
+    'git -c user.name=x push origin main',
+    'git --no-pager push origin main',
+    // `subtree push` publishes for real, and its verb is the SECOND word. This
+    // row is why the resolver forwards a namespace verb instead of stopping at
+    // the first token — dropping it would trade a false positive for a false
+    // negative on a genuine push.
+    'git subtree push --prefix=dist origin gh-pages',
+  ]) {
+    const pushes = planCommand(command, '/a').targets.filter((t) => t.scanPush === true);
+    assert.equal(pushes.length, 1, command);
+    assert.equal(pushes[0].pushRemote, 'origin', command);
+  }
+});
+
+test('B3: the remote is read from after the VERB, not after the first matching word', () => {
+  // The misparse that produced `conductor` and `2` as remote names.
+  const plan = planCommand('git stash push --staged -m "conductor: x" 2>&1', '/a');
+  assert.deepEqual(plan.targets.filter((t) => t.scanPush === true), []);
+});
+
 test('B3: an unmodellable target is refused by the GATE, not merely noted in the plan', async () => {
   // Asserting on `planCommand` alone left the refusal itself unguarded: a
   // mutant that computed `unmodellable` and then ignored it passed the whole

@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -1047,6 +1047,97 @@ test('M17: an ABSOLUTE path is classified against THIS call\'s root', async () =
   // stops distinguishing the mutant from the fix.
   const denied = await ask(writeInput(join(root, '.claude/agents/reviewer.md'), { agentId: 'a1' }), root);
   assert.equal(denied.decision, 'deny');
+});
+
+// --- git worktrees ---------------------------------------------------------
+//
+// Two field reports on 0.1.2 described OPPOSITE failures with one cause: this
+// gate treated "the repository" as "this directory tree". A worktree is
+// neither inside it nor a different repository, so both readings were wrong.
+//
+// These tests drive real `git worktree add` rather than a hand-built `.git`
+// file, because the thing being relied on is git's on-disk layout.
+
+/** A real repository with one commit and a linked worktree beside it. */
+function withWorktree({ tyran = true } = {}) {
+  const main = tempDir('tyran-policy-main-');
+  git(main, 'init', '-q', '-b', 'main');
+  git(main, 'config', 'user.email', 'a@b');
+  git(main, 'config', 'user.name', 't');
+  writeFileSync(join(main, 'README.md'), '# r\n');
+  if (tyran) {
+    mkdirSync(join(main, '.tyran', 'policies'), { recursive: true });
+    writeFileSync(join(main, POLICY_PATH), TEMPLATE);
+    writeFileSync(join(main, CONFIG_PATH), 'profile: balanced\nautonomy: P1\ntiers:\n  top: a\n  work: b\n  cheap: c\n');
+  }
+  git(main, 'add', '-A');
+  git(main, 'commit', '-qm', 'init');
+  // Deliberately a SIBLING path, which is the shape that normalized to null.
+  const wt = join(main, '..', `${basename(main)}-wt`);
+  git(main, 'worktree', 'add', '-q', '-b', 'story-1', wt);
+  return { main, wt: resolve(wt) };
+}
+
+test('WT1: a worktree of the same repo is not "outside the repository"', async () => {
+  // The BLOCKER. Every Edit inside the worktree rule 7 mandates was refused as
+  // KERNEL, and five agents in one initiative rerouted their writes through
+  // `Bash` heredocs — a channel this gate does not class at all. A refusal
+  // that moves work somewhere less visible is worse than no refusal.
+  const { main, wt } = withWorktree();
+  assert.equal(await ask(writeInput(join(wt, 'src/x.ts'), { agentId: 'a1' }), main), PASS);
+});
+
+test('WT1: the test is repository IDENTITY, not proximity', async () => {
+  // The property that keeps the above from being a hole: a path in a DIFFERENT
+  // repository is still outside, still KERNEL, still refused.
+  const { main } = withWorktree();
+  const other = withWorktree().main;
+  const denied = await ask(writeInput(join(other, 'src/x.ts'), { agentId: 'a1' }), main);
+  assert.equal(denied.decision, 'deny');
+  assert.match(denied.reason, /outside this repository/);
+});
+
+test('WT2: a worktree inherits its repository\'s policy — classes still apply', async () => {
+  // The SILENT failure, and the more serious of the two. `git worktree add`
+  // gives a fresh checkout; `.tyran/` only travels if it was committed. When
+  // it is not, the worktree read as "Tyran does not run here" and the gate
+  // went quiet. Measured: four worktrees, four ungated implementers.
+  const { main, wt } = withWorktree();
+  rmSync(join(wt, '.tyran'), { recursive: true, force: true });
+  // Driven with the WORKTREE as the session root, which is what an implementer
+  // spawned into it actually has.
+  const denied = await ask(writeInput(join(wt, '.tyran/policies/autonomy.yaml'), { agentId: 'a1' }), wt);
+  assert.equal(denied.decision, 'deny', 'KERNEL must still be KERNEL inside a worktree');
+});
+
+test('WT2: a push from a worktree is held to the repository\'s deployment class', async () => {
+  // The sharpest form: with no config found, `loadDeployClass` returned null,
+  // the repo read as unadopted, and `git push origin main` PASSED at every
+  // class. P1 must refuse it from a worktree exactly as from the main checkout.
+  const { main, wt } = withWorktree();
+  rmSync(join(wt, '.tyran'), { recursive: true, force: true });
+  git(main, 'remote', 'add', 'origin', join(main, '..', 'bare.git'));
+  const got = await ask(bashInput('git push origin main', wt), wt);
+  assert.equal(got.decision, 'deny', 'the push is refused from a worktree, as it would be from main');
+  // Denied for the RIGHT reason, and this assertion had to be earned: asserting
+  // only `deny` let a mutant that dropped the config inheritance survive, because
+  // the push was still refused — as "this repo has a .tyran/ and no config"
+  // rather than as the deployment class doing its job. Two mechanisms reaching
+  // one verdict is the shape that keeps a test green over a broken guard.
+  //
+  // `P1` appearing in the refusal is the proof that `loadDeployClass` read the
+  // repository's config THROUGH the worktree. With the inheritance removed the
+  // message is the missing-config one and says no such thing.
+  assert.match(got.reason, /under P1/);
+  assert.equal(/but no .tyran\/config\.yaml/.test(got.reason), false, 'the config WAS found, via the repository');
+});
+
+test('WT3: a repo that never adopted Tyran is still left alone, worktree or not', async () => {
+  // The inheritance must not turn every worktree everywhere into a governed
+  // one — silence for unadopted repos is a declared boundary, not an oversight.
+  const { main, wt } = withWorktree({ tyran: false });
+  assert.equal(await ask(writeInput(join(wt, 'src/x.ts'), { agentId: 'a1' }), wt), PASS);
+  assert.equal(await ask(writeInput(join(main, 'src/x.ts'), { agentId: 'a1' }), main), PASS);
 });
 
 test('M31: two spellings of one directory resolve to ONE class', async () => {

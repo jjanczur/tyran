@@ -1,5 +1,106 @@
 # Changelog
 
+## 0.1.3 — 2026-07-29
+
+From two independent field reports on complete initiatives — one M, one L —
+run on 0.1.1 and 0.1.2. Five of the reported items are fixed; the rest are
+recorded here as open, with the reason.
+
+### A git worktree is the same repository
+
+Two reports described **opposite** failures with one cause: the policy gate
+read "the repository" as "this directory tree", and a worktree is neither
+inside it nor a different repository.
+
+- **Silent.** A session running *in* a worktree found no `.tyran/` there — the
+  directory is committed data and `git worktree add` gives a fresh checkout —
+  so the gate concluded Tyran had not been adopted and said nothing. Four
+  worktrees, four implementers with no autonomy class and no path classes, and
+  `git push origin main` passing at every deployment class.
+- **Loud.** A session in the main checkout writing *into* a worktree got
+  `normalizePath → null → KERNEL`: every `Edit` refused as "outside this
+  repository", while `skills/run/SKILL.md` rule 7 *requires* a worktree per
+  agent. Five agents hit it in one initiative and all rerouted through `Bash`
+  heredocs — a channel the gate does not class at all. A refusal that moves
+  work somewhere less visible is worse than no refusal, and this one was the
+  plugin contradicting itself.
+
+The gate now asks which repository a path belongs to. Detection is pure
+filesystem — a linked worktree's `.git` is a *file* holding `gitdir:` — so the
+write path still runs no child processes. Policy and config are inherited from
+the main checkout, and the test is **identity, not proximity**: both sides must
+resolve to the same main checkout, so a path in a different repository is still
+KERNEL. Three mutants were installed and killed, including one that survived
+the first version of the push test — it refused for the wrong reason and the
+assertion could not tell.
+
+### `git stash push` was read as `git push`
+
+`words.has('push')` was true when the word appeared anywhere in the segment, so
+`git stash push --staged -m "conductor: ..."` — purely local — was classified as
+a publish. The remote was then read as the token after the word: `conductor` out
+of the message, or `2` out of a `2>&1`. The refusal told the operator to run
+`git remote set-head conductor -a`, which cannot succeed, about a repository
+whose default branch was recorded all along.
+
+The cost was not one bad refusal: rule 7 *requires* addressed stashes to protect
+other windows' work, so the gate refused the safe half of a workflow the plugin
+mandates and pushed agents toward the deprecated positional form. `git remote
+add` and `git worktree add` had the same shape against the `add` rule — and
+`worktree add` is what rule 7 tells every parallel agent to run.
+
+Classification now resolves the **subcommand slot**. It is not a pure narrowing:
+`git subtree push` publishes for real and its verb is the second word, so
+namespace subcommands forward their verb. Dropping that would have traded a
+false positive for a false negative on a genuine push.
+
+### `journal.mjs append` issues the id it used to demand
+
+`skills/run/SKILL.md` says IDs never come from memory, because after a
+compaction memory hands out the same number twice — and `append` then *rejected*
+a missing `data.id`, leaving the conductor to remember a separate `next-id`
+call. Measured: 12 decision IDs hand-assigned from memory in one initiative,
+the exact failure the rule names, with nothing objecting. Both reports raised
+it independently. An explicit id still wins.
+
+Two errors that could only be answered by grepping the plugin's source now
+answer themselves: a rejected `ev` lists the closed set, and a missing `data`
+key names the whole contract for that event rather than the first key checked.
+`--help` prints the per-event table.
+
+### Worktrees, in the conductor's own words
+
+Rule 7 said "a git worktree per agent" and stopped. A fresh worktree has no
+dependencies, so every validation command exits 127 and the evidence contract
+cannot be satisfied by construction. The rule now says to link the main
+checkout's dependency directory — safe precisely because the manifest and
+lockfile are already a shared zone nobody may edit — and notes that
+`.tyran/state/**` exists only in the main checkout.
+
+Also: the conductor is told it is notified when a subagent finishes and should
+not poll. On a real run most polled checkpoints fired after the agent had
+already reported, and the operator watched the conductor disown dozens of stale
+notifications.
+
+### Open, and why
+
+- **No lease on the checkout.** Two agents in one checkout is the failure rule 7
+  exists to prevent, and nothing enforces it; leases cover the heavy slot and
+  not the working tree. The reporting retro reached the same conclusion and
+  refused to patch it locally, correctly — the only real fix is a hook, and
+  `hooks/**` is KERNEL, so no session can build one. It needs a design pass,
+  not a hurried one.
+- **The gate matches command TEXT**, so `ls -1 .npmrc` is refused as a
+  credential read though it reads nothing, and the scratch directory a `GATED`
+  refusal tells an agent to write its diff into is refused as outside the repo.
+  The second is self-defeating and should be fixed; both are refusal semantics.
+- **`doctor` does not enumerate worktrees or cross-check `RELEASED` leases**
+  against resources that still exist. A field run lost a validation baseline to
+  32,243 phantom lint errors from leftover worktrees.
+- **Forge detection.** Tyran assumes GitHub; on Bitbucket the default terminal
+  step of the default autonomy class has no defined path, and two agents each
+  rediscovered that.
+
 ## 0.1.2 — 2026-07-29
 
 From a field report on a real 0.1.1 install. Every item below is a failure

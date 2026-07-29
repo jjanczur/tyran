@@ -304,6 +304,75 @@ export function isAbbreviationOf(token, longOption, minimum = 4) {
   return token.length >= minimum && token.length <= longOption.length && longOption.startsWith(token);
 }
 
+// ------------------------------------------------------ the subcommand slot
+
+/**
+ * git's own options, which sit BEFORE the subcommand. These consume the token
+ * after them, so a resolver that skipped only tokens starting with `-` would
+ * read `git -C push …` as the subcommand `push` when the directory is called
+ * `push`, and `git -c alias.x=y stash` as `alias.x=y`.
+ */
+export const GIT_GLOBAL_VALUE_FLAGS = Object.freeze([
+  '-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix',
+]);
+
+/**
+ * Subcommands that are a NAMESPACE: their own second word is the verb.
+ *
+ * This is the whole reason `git stash push` was misread as a publish. Keeping
+ * the list explicit rather than "anything with two words" means a new git
+ * subcommand is read as a plain verb — the conservative direction, because an
+ * unknown verb in the first slot is compared against `push`/`commit`/`add`
+ * directly and still matches when it is one of them.
+ */
+export const GIT_NAMESPACE_SUBCOMMANDS = Object.freeze([
+  'stash', 'subtree', 'worktree', 'remote', 'submodule', 'bundle', 'notes', 'sparse-checkout', 'maintenance',
+]);
+
+/** The next token that is not a flag or a flag's value, from `from`. */
+function nextWord(tokens, from) {
+  for (let k = from; k < tokens.length; k++) {
+    const token = tokens[k];
+    if (GIT_GLOBAL_VALUE_FLAGS.includes(token)) {
+      k++;
+      continue;
+    }
+    if (token === '--' || token.startsWith('-')) continue;
+    return { name: token, index: k };
+  }
+  return null;
+}
+
+/**
+ * What this git command actually DOES, from the subcommand slot.
+ *
+ * Returns `{ name, index }` where `name` is the verb and `index` is where that
+ * verb sits, so a caller slicing "everything after the verb" gets the right
+ * tokens. For a namespace subcommand the verb is the second word:
+ * `git stash push` answers `push` at the index of the SECOND token — which is
+ * why callers must ask `name === 'push'` *and* check the namespace, rather
+ * than trusting the name alone.
+ *
+ * `git subtree push --prefix=x origin main` is the case that stops this being
+ * a pure narrowing: it publishes, and its verb is in the second slot. Both
+ * spellings therefore resolve to a verb, and the caller distinguishes them by
+ * `namespace`.
+ */
+export function gitOperation(tokens) {
+  const first = nextWord(tokens, 1);
+  if (first === null) return null;
+  if (!GIT_NAMESPACE_SUBCOMMANDS.includes(first.name)) {
+    return { name: first.name, namespace: null, index: first.index };
+  }
+  const second = nextWord(tokens, first.index + 1);
+  if (second === null) return { name: first.name, namespace: first.name, index: first.index };
+  // `git subtree push` publishes; `git stash push`, `git worktree add` and
+  // `git remote add` do not do the thing their verb names elsewhere. Only
+  // `subtree` forwards its verb.
+  if (first.name === 'subtree') return { name: second.name, namespace: 'subtree', index: second.index };
+  return { name: `${first.name} ${second.name}`, namespace: first.name, index: second.index };
+}
+
 // ----------------------------------------------------------- the classifier
 
 export const DENIAL_CODES = Object.freeze({
@@ -482,9 +551,34 @@ export function planCommand(command, startDir) {
       }
     }
 
-    const gitCommit = hasGit && words.has('commit');
-    const gitPush = hasGit && words.has('push');
-    const gitAdd = hasGit && words.has('add');
+    // Asked of the SUBCOMMAND SLOT, never of the token bag.
+    //
+    // These three were `words.has('push')` and friends — true when the word
+    // appeared ANYWHERE in the segment. Measured in the field on `tyran@0.1.2`:
+    // `git stash push --staged -m "conductor: ..."`, a purely local operation,
+    // was classified as a publish, and the remote was then read as the token
+    // after the word — `conductor` from the message, or `2` from a `2>&1`. The
+    // refusal told the operator to run `git remote set-head conductor -a`, a
+    // command that cannot succeed, about a repository whose default branch was
+    // recorded all along.
+    //
+    // The cost was not one bad refusal. `skills/run/SKILL.md` rule 7 REQUIRES
+    // addressed stashes to protect other windows' work, so the gate refused the
+    // safe half of a workflow the plugin mandates, and pushed agents toward the
+    // deprecated positional form that has no `--staged` and no pathspec.
+    //
+    // `git remote add` and `git worktree add` had the same shape against
+    // `gitAdd` — and `worktree add` is the command rule 7 tells every parallel
+    // agent to run.
+    const op = hasGit ? gitOperation(tokens) : null;
+    const gitCommit = op !== null && op.name === 'commit';
+    // NOT narrower than the token bag where it counts: `git subtree push`
+    // publishes for real and its verb is the second word, so the resolver
+    // returns that word rather than stopping at `subtree`. Dropping it would
+    // have traded one false positive for a false NEGATIVE on a real push,
+    // which is the wrong direction for this gate.
+    const gitPush = op !== null && op.name === 'push';
+    const gitAdd = op !== null && op.name === 'add';
     const hasGh = raw.some(isGhProgram);
     const ghPublishes =
       hasGh &&
@@ -492,7 +586,7 @@ export function planCommand(command, startDir) {
       (words.has('pr') || words.has('repo') || words.has('release') || words.has('gist'));
 
     if (gitAdd) {
-      const after = tokens.slice(tokens.indexOf('add') + 1);
+      const after = tokens.slice(op.index + 1);
       const all = after.some((t) => t === '-A' || t === '--all' || t === '.' || t === '-u');
       const named = [];
       let widen = false;
@@ -537,7 +631,7 @@ export function planCommand(command, startDir) {
       // without ever being scanned. Review raised it as a hypothesis; it
       // reproduced on the first attempt.
       const after = tokens
-        .slice(tokens.indexOf('push') + 1)
+        .slice(op.index + 1)
         .filter((t) => !t.startsWith('-'))
         .map((t) => (t.startsWith('+') ? t.slice(1) : t));
       const remote = after[0] ?? null;
@@ -563,7 +657,7 @@ export function planCommand(command, startDir) {
       // would have been the third spelling of one rule in this repository
       // (ADR-21), and the one that decides whether a push reaches production is
       // not the place to start diverging.
-      const pushArgv = tokens.slice(tokens.indexOf('push') + 1);
+      const pushArgv = tokens.slice(op.index + 1);
       note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs, pushArgv, pushReadable: readable });
       triggers.push('a git push (every commit not already on the target remote is scanned)');
     }

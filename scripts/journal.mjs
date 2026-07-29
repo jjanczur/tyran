@@ -53,8 +53,15 @@ export const EVENT_TYPES = Object.freeze([
   'error',
 ]);
 
+/**
+ * Event types whose `data.id` the CLI issues when the caller omits it, and the
+ * prefix to issue it under. `ticket.created` is deliberately absent: a ticket
+ * id comes from the plan, which numbers its own stories.
+ */
+export const ID_ISSUED_FOR = Object.freeze(Object.assign(Object.create(null), { decision: 'D' }));
+
 /** Per-type required keys inside `data` (data may always carry extra keys). */
-const DATA_REQUIRED = Object.freeze({
+export const DATA_REQUIRED = Object.freeze({
   'ticket.created': ['id'],
   spawn: ['agent', 'role'],
   report: ['agent', 'verdict'],
@@ -95,7 +102,10 @@ export function validateEvent(event) {
     errors.push('ts must be an ISO-8601 timestamp string');
   }
   if (!EVENT_TYPES.includes(event.ev)) {
-    errors.push(`ev "${q(event.ev)}" is not in the closed event set`);
+    // The set is CLOSED and was not printed, so the only way to recover was to
+    // grep the plugin's own source — which is what a field run actually did.
+    // A closed set that will not name its members is a riddle, not a contract.
+    errors.push(`ev "${q(event.ev)}" is not in the closed event set — valid: ${EVENT_TYPES.join(', ')}`);
   }
   if (typeof event.init !== 'string' || event.init.length === 0) {
     errors.push('init (initiative slug) must be a non-empty string');
@@ -107,8 +117,16 @@ export function validateEvent(event) {
     errors.push('data must be a JSON object (may be empty)');
   } else if (DATA_REQUIRED[event.ev]) {
     for (const key of DATA_REQUIRED[event.ev]) {
-      if (!(key in event.data)) errors.push(`data.${q(key)} is required for ev "${q(event.ev)}"`);
-      else if (key === 'id' && typeof event.data.id !== 'string') {
+      // Name the WHOLE contract, not just the key that happened to be checked
+      // first. Discovering it by rejection cost a field run four round-trips,
+      // one failed invocation each, because the agent recovering from the error
+      // has no other source of truth — the table is not printed anywhere else.
+      if (!(key in event.data)) {
+        errors.push(
+          `data.${q(key)} is required for ev "${q(event.ev)}" ` +
+            `(this event requires: ${DATA_REQUIRED[event.ev].join(', ')})`,
+        );
+      } else if (key === 'id' && typeof event.data.id !== 'string') {
         errors.push(`data.id must be a string for ev "${q(event.ev)}" (got ${typeof event.data.id})`);
       }
     }
@@ -635,6 +653,20 @@ function main() {
         const [file, ev, init] = rest;
         if (!file || !ev || !init) throw new UsageError();
         const data = flags.data ? JSON.parse(flags.data) : {};
+        // An id the caller omitted is ISSUED, not demanded.
+        //
+        // `skills/run/SKILL.md` is emphatic that IDs never come from memory,
+        // because after a compaction memory hands out the same number twice —
+        // and then `append` REJECTED a missing `data.id` and left the conductor
+        // to remember a separate `next-id` call. Measured in the field: 12
+        // decision IDs hand-assigned from memory in one initiative, which is
+        // the exact failure the rule names, with nothing objecting.
+        //
+        // A rule in prose loses to a mechanism that makes the mistake
+        // impossible. This is that mechanism, and an explicit id still wins.
+        if (ID_ISSUED_FOR[ev] !== undefined && data.id === undefined) {
+          data.id = nextId(file, ID_ISSUED_FOR[ev]);
+        }
         const written = append(file, { ev, init, actor: flags.actor ?? 'conductor', data });
         console.log(emit(written));
         return;
@@ -695,7 +727,17 @@ function main() {
           '       journal.mjs query <file> [--ev E] [--init I] [--ticket T] [--limit N]\n' +
           '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>\n' +
           '       journal.mjs open-spawns <file>\n' +
-          '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]',
+          '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]\n' +
+          '\n' +
+          // The `--data` contract varies per event and lived only in a table no
+          // command printed. A field run discovered it by rejection, one failed
+          // invocation at a time.
+          'events, and the `--data` keys each one requires:\n' +
+          EVENT_TYPES.map((ev) => {
+            const required = DATA_REQUIRED[ev];
+            const issued = ID_ISSUED_FOR[ev] !== undefined ? '  (id is issued if omitted)' : '';
+            return `  ${ev.padEnd(16)}${required === undefined ? '—' : required.join(', ')}${issued}`;
+          }).join('\n'),
       );
       process.exit(2);
     }

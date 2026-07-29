@@ -95,6 +95,10 @@ a condition now.
 ## Commits and versioning
 
 - Conventional-ish commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`.
-- `version` in `.claude-plugin/plugin.json` is explicit semver. Users only
-  receive updates when it is bumped — bump it in the release PR together
-  with a `CHANGELOG.md` entry.
+- `version` is explicit semver, and **users only receive updates when it is
+  bumped** — `claude plugin update` compares the version field, not the commit,
+  so a fix on `main` under an unchanged version reaches nobody. It lives in
+  three files that different tools cross-check against each other. The full
+  release procedure, including which tags to create and why there are two, is
+  in [CLAUDE.md](CLAUDE.md#releasing--the-version-not-the-commit); bump it in
+  the release PR together with a `CHANGELOG.md` entry.

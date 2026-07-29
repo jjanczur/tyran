@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.1 — 2026-07-29
+
+Both entries below come from one install of 0.1.0 on a real repository. The
+version is bumped rather than folded into 0.1.0 because `claude plugin update`
+compares **versions**, not commits: with the manifest left at 0.1.0 it reports
+"already at the latest version" and users never receive the fix.
 
 ### `.tyran/config.yaml` is AUTO, and what that costs is written down
 
@@ -78,6 +83,8 @@ command that works. And the documented `schema.mjs validate policy
 path under `.tyran/policies/**` and is refused like any other. `doctor --state
 --dir .tyran` validates the same file and names only the directory. The docs
 say so now, and `/tyran:setup` runs the latter.
+
+## 0.1.0 — 2026-07-27
 
 ### Six protocol skills, and the budget raised once to pay for them
 

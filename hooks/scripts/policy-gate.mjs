@@ -65,7 +65,8 @@
  */
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
-import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PASS, field, main, runGate } from './hook-io.mjs';
@@ -681,6 +682,80 @@ function canonicalDeepest(raw) {
 }
 
 /**
+ * The path segments below `base`, canonicalized on BOTH sides, or null when
+ * `target` is not under `base`. `canonicalDeepest` on the base too, so `/tmp`
+ * and `/private/tmp` — one directory in two spellings on macOS — do not read as
+ * two, the same symlink hazard `repoRelative` documents.
+ */
+function segmentsUnder(canonTarget, base) {
+  let root;
+  try {
+    root = canonicalDeepest(base);
+  } catch {
+    return null;
+  }
+  if (canonTarget === root) return [];
+  const prefix = root.endsWith(sep) ? root : root + sep;
+  if (!canonTarget.startsWith(prefix)) return null;
+  return canonTarget.slice(prefix.length).split(sep).filter(Boolean);
+}
+
+/**
+ * Claude Code's own two working directories, which belong to no repository:
+ * the persistent memory store under the config dir, and the per-session
+ * scratchpad under the system temp dir. `repoRelative` returns null for both —
+ * they are genuinely outside every repo — so the write matrix answered them
+ * with KERNEL, and adopting Tyran in a repo then refused the harness's OWN
+ * memory writes: `Write` to `~/.claude/projects/<slug>/memory/*.md` failed with
+ * "outside this repository", so the assistant could no longer persist what it
+ * learned while working in a Tyran repo. A boundary that blocks the tool's own
+ * bookkeeping is one its user turns off.
+ *
+ * The exemption is narrow on two axes, and both carry weight:
+ *   - PATH — only the memory store <config>/projects/<slug>/memory and the
+ *     scratchpad <tmp>/claude-<id>. The rest of the config dir is untouched,
+ *     so `.claude/settings.json`, which registers these very hooks, stays
+ *     KERNEL and out of reach. An allowlist of two shapes, never "anything
+ *     under home".
+ *   - ACTOR — `main` only, enforced at the call site. A subagent has no
+ *     business writing outside its worktree; `actorOf` returns `subagent` for
+ *     it and it still falls through to KERNEL. So the blast radius is an
+ *     interactive thread writing advisory notes and temp files, not a
+ *     fanned-out loop reaching across the filesystem.
+ *
+ * Bash never needed this: an out-of-repo token yields no finding in
+ * `shellPathFindings`, so `echo > scratch` was already allowed. The refusal
+ * lived only on the file-writing tools, which is the asymmetry a user meets.
+ */
+export function harnessWritable(rawPath, env = process.env) {
+  let canon;
+  try {
+    canon = canonicalDeepest(rawPath);
+  } catch {
+    return false;
+  }
+  const configDir =
+    typeof env.CLAUDE_CONFIG_DIR === 'string' && env.CLAUDE_CONFIG_DIR.trim() !== ''
+      ? env.CLAUDE_CONFIG_DIR
+      : join(homedir(), '.claude');
+  const underConfig = segmentsUnder(canon, configDir);
+  // The memory store's exact shape: <config>/projects/<slug>/memory/**.
+  if (underConfig !== null && underConfig[0] === 'projects' && underConfig[2] === 'memory') {
+    return true;
+  }
+  // The scratchpad: <tmp>/claude-*/**, under whichever temp root the platform
+  // used. `/tmp` is included explicitly because `os.tmpdir()` is `/var/...` on
+  // macOS while the scratchpad lives under `/private/tmp`.
+  for (const tempRoot of new Set([tmpdir(), '/tmp'])) {
+    const underTemp = segmentsUnder(canon, tempRoot);
+    if (underTemp !== null && underTemp.length >= 1 && /^claude-/.test(underTemp[0])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * The repo-relative path, resolved through symlinks on BOTH sides.
  *
  * Measured on the live install: `file_path` is always ABSOLUTE — the matrix
@@ -996,6 +1071,13 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     // and the two would agree in every test that happened to run in the repo
     // root. Normalization is idempotent, so the resolver's own call is a no-op.
     const normalized = repoRelative(target, root);
+    // Claude Code's own memory store and per-session scratchpad are outside
+    // every repository, so `normalized` is null and the matrix below answers
+    // KERNEL — which made adopting Tyran refuse the harness's own memory
+    // writes. `harnessWritable` exempts exactly those two locations, and only
+    // for the main thread; a subagent still falls through to KERNEL. See its
+    // definition for the full argument.
+    if (normalized === null && actor === 'main' && harnessWritable(target, env)) continue;
     // The one branch this cannot delegate: a path outside the repository makes
     // `normalizePath` return null, which `classifyPath` answers with KERNEL.
     // Restated in one line rather than reached by passing a null through, and

@@ -12,7 +12,21 @@ name: Publish to npm
 # Nothing here reads a token at any other time, and the token never reaches a
 # step that runs repository code: `npm publish` is the last thing to execute
 # and the tests run before it, under no auth at all.
+# A pushed `v*` tag publishes. That is the automation, and it exists because
+# the manual step was skipped for three consecutive releases: 0.1.1, 0.1.2 and
+# 0.1.3 were all live on the marketplace while npm still served 0.1.0, so
+# `npx @jjanczur/tyran doctor` in anyone's CI ran code three versions behind
+# the plugin it was checking. A release step a human has to remember is a
+# release step that drifts — the same argument this project makes about every
+# rule that has no mechanism behind it.
+#
+# `release: published` stays, so cutting a GitHub release by hand still works
+# and still publishes. The two triggers are idempotent in the only way that
+# matters: npm refuses a version that already exists, so whichever fires second
+# fails loudly instead of publishing something different under the same number.
 on:
+  push:
+    tags: ['v*']
   release:
     types: [published]
   workflow_dispatch:
@@ -44,9 +58,10 @@ jobs:
       - name: The version being published must match the tag that triggered it
         # A release tagged v0.2.0 that publishes 0.1.0 is not a build error —
         # it succeeds, and the registry quietly carries the wrong thing under
-        # the right name. Only meaningful on the `release` trigger; a manual
-        # run has no tag to disagree with.
-        if: github.event_name == 'release'
+        # the right name. This matters MORE now that a tag push publishes on its
+        # own: nobody reads a release form on the way past. Runs for both tag
+        # triggers; a manual dispatch has no tag to disagree with.
+        if: github.event_name != 'workflow_dispatch'
         run: |
           PKG=$(jq -r .version package.json)
           TAG="${GITHUB_REF_NAME#v}"

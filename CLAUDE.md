@@ -48,8 +48,13 @@ tag — **both**, because they serve different consumers and neither covers the
 other: `npm-publish.yml` computes `${GITHUB_REF_NAME#v}`, which `tyran--v0.1.1`
 does not satisfy.
 
-Publishing to npm happens only when a **GitHub release** is published. Pushing
-a tag does not do it. That is a deliberate, irreversible, human-triggered step.
+Publishing to npm happens when a `v<version>` tag is pushed **or** a GitHub
+release is published — `npm-publish.yml` triggers on both (a pushed tag was
+added in 0.1.4, after the manual release step was skipped for three consecutive
+versions and npm drifted three releases behind the marketplace). npm refuses a
+duplicate version, so if both fire the second fails loudly rather than shipping
+something different under the same number. Publishing is irreversible — a
+version, once on npm, cannot be replaced.
 
 ## The gate runs on you too
 

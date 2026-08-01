@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.4 — 2026-08-01
+
+### The gate stopped refusing Claude Code's own memory
+
+Adopting Tyran in a repo made the policy gate refuse the harness's OWN writes:
+`Write` to `~/.claude/projects/<slug>/memory/*.md` came back "outside this
+repository, class KERNEL". The memory store and the per-session scratchpad are
+genuinely outside every repository, so `repoRelative` returned null and the
+write matrix answered KERNEL — the same branch that correctly refuses writing
+into somebody else's repo. The cost was that the assistant could no longer
+persist what it learned while working in a Tyran repo, and a boundary that
+blocks the tool's own bookkeeping is one its user turns off.
+
+The gate now exempts exactly two locations, and only for the `main` thread:
+`<config>/projects/<slug>/memory/` and `<tmp>/claude-<id>/`. Everything else
+outside the repo is still KERNEL; the rest of the config dir — including
+`settings.json`, which registers these very hooks — stays untouchable; and a
+subagent is never exempted, because it has no business writing outside its
+worktree. Bash never hit this: an out-of-repo token yields no finding, so
+`echo > scratch` was already allowed — the refusal lived only on the
+file-writing tools, which is the asymmetry a user actually meets.
+
+### npm publishes on a pushed tag
+
+`npm-publish.yml` now also triggers on a pushed `v*` tag, not only on a
+published GitHub release. npm served 0.1.0 while the marketplace was three
+releases ahead, because the manual release step was skipped for 0.1.1, 0.1.2
+and 0.1.3; a release step a human has to remember is one that drifts. The
+version-must-match-the-tag guard runs for both triggers, and npm refuses a
+duplicate version, so the two are idempotent.
+
 ## 0.1.3 — 2026-07-29
 
 From two independent field reports on complete initiatives — one M, one L —

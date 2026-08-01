@@ -52,6 +52,7 @@ import {
   decidingRule,
   deployVerdict,
   handle,
+  harnessWritable,
   isGoverned,
   isUnsupervised,
   pathTargets,
@@ -1609,4 +1610,61 @@ test('a git alias is ONE answer, given by the lexer, read by both gates', async 
   assert.equal(planCommand('git config alias.up push', dir).aliased, true);
   assert.equal(planCommand('git push origin main', dir).aliased, false);
   assert.equal(planCommand('git -c user.name=a commit -m x', dir).aliased, false);
+});
+
+// ============================================ 7. THE HARNESS'S OWN DIRECTORIES
+//
+// The gate refuses writes outside the repository as KERNEL. Two locations are
+// outside every repository AND are where Claude Code itself writes on the main
+// thread's behalf: the memory store under the config dir, and the per-session
+// scratchpad under the system temp dir. Adopting Tyran made writing to the
+// memory store fail with "outside this repository", i.e. the harness could no
+// longer persist what it learned. These pin the narrow exemption that fixes it.
+
+test('harness: the main thread may write to its own memory store', async () => {
+  const root = adopted();
+  const cfg = tempDir('tyran-cfg-');
+  const memPath = join(cfg, 'projects', 'proj-slug', 'memory', 'note.md');
+  const got = await handle({ input: writeInput(memPath), env: { CLAUDE_PROJECT_DIR: root, CLAUDE_CONFIG_DIR: cfg } });
+  // Mutation killed: dropping the exemption restores "outside this repository".
+  assert.deepEqual(got, PASS, JSON.stringify(got));
+});
+
+test('harness: the main thread may write to its session scratchpad', async () => {
+  const root = adopted();
+  const scratch = mkdtempSync(join(tmpdir(), 'claude-'));
+  temps.push(scratch);
+  const f = join(scratch, 'proj', 'sess', 'scratchpad', 'tmp.txt');
+  const got = await handle({ input: writeInput(f), env: { CLAUDE_PROJECT_DIR: root } });
+  assert.deepEqual(got, PASS, JSON.stringify(got));
+});
+
+test('harness: a SUBAGENT is not exempted — its memory write stays KERNEL', async () => {
+  // The exemption is actor-scoped: a fanned-out subagent has no business
+  // writing outside its worktree, and dropping the `actor === 'main'` guard is
+  // exactly the mutation this kills.
+  const root = adopted();
+  const cfg = tempDir('tyran-cfg-');
+  const memPath = join(cfg, 'projects', 'proj-slug', 'memory', 'note.md');
+  const got = await handle({
+    input: writeInput(memPath, { agentId: 'a1' }),
+    env: { CLAUDE_PROJECT_DIR: root, CLAUDE_CONFIG_DIR: cfg },
+  });
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /outside this repository/);
+});
+
+test('harness: the exemption is two shapes, not the whole config dir', () => {
+  // settings.json registers these very hooks; it must stay KERNEL. And a
+  // sibling of `memory/` under the same project must not ride along.
+  const cfg = tempDir('tyran-cfg-');
+  const env = { CLAUDE_CONFIG_DIR: cfg };
+  assert.equal(harnessWritable(join(cfg, 'projects', 's', 'memory', 'x.md'), env), true);
+  assert.equal(harnessWritable(join(cfg, 'projects', 's', 'memory'), env), true);
+  assert.equal(harnessWritable(join(cfg, 'settings.json'), env), false);
+  assert.equal(harnessWritable(join(cfg, 'projects', 's', 'notes', 'x.md'), env), false);
+  assert.equal(harnessWritable('/etc/hosts', env), false);
+  const scratch = mkdtempSync(join(tmpdir(), 'claude-'));
+  temps.push(scratch);
+  assert.equal(harnessWritable(join(scratch, 'a', 'b.txt')), true);
 });

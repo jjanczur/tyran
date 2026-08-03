@@ -52,7 +52,7 @@ function plugin({ hooks, manifest, scripts = {}, agents = [] } = {}) {
   mkdirSync(join(root, 'agents'), { recursive: true });
   writeFileSync(
     join(root, '.claude-plugin', 'plugin.json'),
-    JSON.stringify(manifest ?? { name: 'tyran', hooks: './hooks/hooks.json' }),
+    JSON.stringify(manifest ?? { name: 'tyran' }),
   );
   if (hooks !== null) {
     writeFileSync(join(root, 'hooks', 'hooks.json'), JSON.stringify(hooks ?? defaultHooks()));
@@ -335,7 +335,7 @@ test('RED: the equality trap — "implementer" can never match "tyran:implemente
 });
 
 test('the namespace comes from the manifest, so a rename changes the subjects', () => {
-  const root = tree({ manifest: { name: 'renamed', hooks: './hooks/hooks.json' }, agents: ['implementer'] });
+  const root = tree({ manifest: { name: 'renamed' }, agents: ['implementer'] });
   assert.equal(readPluginName(root), 'renamed');
   assert.deepEqual(pluginAgentTypes(root), ['renamed:implementer']);
   // ...which is exactly how renaming a plugin silently disarms its matchers.
@@ -365,9 +365,24 @@ test('RED: an unanchored regex that is NOT a wildcard still warns', () => {
 
 // ------------------------------------------------- the manifest and file
 
-test('RED: a manifest with no hooks field is an error', () => {
-  const result = checkHooks({ root: tree({ manifest: { name: 'tyran' } }) });
+test('RED: no hooks field AND no standard hooks.json is an error', () => {
+  // With the standard hooks/hooks.json auto-loaded, a missing manifest field is
+  // fine; the error is only when there is no hooks file anywhere.
+  const result = checkHooks({ root: tree({ hooks: null, manifest: { name: 'tyran' } }) });
   assert.ok(codes(result).includes('hooks-manifest-no-hooks'));
+});
+
+test('a missing manifest field is HEALTHY when the standard hooks.json exists (auto-loaded)', () => {
+  const result = checkHooks({ root: tree({ manifest: { name: 'tyran' } }) });
+  assert.equal(result.counts.error, 0, JSON.stringify(result.findings, null, 2));
+});
+
+test('RED: a manifest that re-declares the auto-loaded hooks.json is the load-killing duplicate', () => {
+  // The MUST-FAIL case for the inverted check: Claude Code auto-loads the
+  // standard file, so naming it in the manifest too is the fatal duplicate that
+  // shipped in 0.1.4 and gated nothing.
+  const root = tree({ manifest: { name: 'tyran', hooks: './hooks/hooks.json' } });
+  assert.ok(codes(checkHooks({ root })).includes('hooks-manifest-duplicates-standard'));
 });
 
 test('RED: a hooks file that is not valid JSON is an error, not a crash', () => {
@@ -377,8 +392,9 @@ test('RED: a hooks file that is not valid JSON is an error, not a crash', () => 
   assert.ok(codes(result).includes('hooks-file-invalid'));
 });
 
-test('RED: a manifest pointing at a hooks file that does not exist is an error', () => {
-  const root = tree({ hooks: null });
+test('RED: a manifest pointing at an ADDITIONAL hooks file that does not exist is an error', () => {
+  // A non-standard file the manifest names but that is not on disk.
+  const root = tree({ hooks: null, manifest: { name: 'tyran', hooks: './hooks/extra.json' } });
   assert.ok(codes(checkHooks({ root })).includes('hooks-file-missing'));
 });
 

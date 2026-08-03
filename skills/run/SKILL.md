@@ -163,7 +163,13 @@ open one.
    rather than asserting it — take that baseline after a `git fetch` run
    immediately beforehand, because a stale `origin/main` once turned a
    methodologically correct proof into a false accusation of someone else's
-   regression; (6) "verify the premises of this handoff in the code — and
+   regression. And measure the fix in the EXECUTION MODE the defect was
+   observed in — a dev server is not a production build: a 404 fix green under
+   `next dev` was inert under `next start`, caught by the reviewer's production
+   builds one merge short of shipping. A guard or regression test is proven
+   only by a run in which it FAILS without the change — one that matches nothing
+   passes exactly like one that works (measured twice); (6) "verify the
+   premises of this handoff in the code — and
    premises about DATA by measuring the real thing read-only: a field being in
    the schema is not the same as the field being in the data. Correct a wrong
    premise and report the correction EXPLICITLY"; (7) when to escalate.
@@ -258,6 +264,15 @@ open one.
      create** and, if `.tyran/` is missing, get it committed on the main
      checkout first rather than copying it in — a copy makes four divergent
      configs, which is the same defect one layer down.
+     **And place them OUTSIDE the directories Tyran governs.** A worktree under
+     `.claude/` or `.tyran/` fails the opposite way: every file in it, `src/**`
+     included, repo-relativizes into Tyran's own artefact namespace, matches no
+     rule written for product code, and falls through to the policy's
+     `default: GATED` — which denies a subagent unconditionally. The implementer
+     cannot edit anything and has no legitimate route through. Measured: two
+     implementers restarted and one fix delivered as a hand-applied diff.
+     Siblings of the checkout (`../<repo>-<slug>`) sidestep it, whatever
+     convention the repo already had.
    - **Leases are files.** Every worktree and every heavy slot has
      `.tyran/initiatives/<slug>/locks/<resource>.lease` holding holder,
      purpose, story and expiry. A handoff BEGINS by taking the lease — an

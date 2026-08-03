@@ -9,8 +9,15 @@ description: The optimization pass, defined - delete before you add, one smell c
 
 **The default action is deletion.** A pass that ends with more lines than it
 started with was a refactor, and a refactor is a different piece of work with a
-different risk profile. If you cannot delete anything, say so and stop — that is
-a complete and respectable outcome.
+different risk profile. **"Started with" means the state immediately before
+THIS pass, not the branch point** — a story that adds a feature adds lines, and
+judging the pass by the whole branch diff condemns it in advance. That number
+is then invisible to everyone but you, so make it recomputable: commit the
+story's work, then commit the pass separately. Measured: an author counting
+honestly from its own uncommitted draft and a reviewer counting from the branch
+point produced a blocking CHANGES-REQUESTED and an arbitration, with neither
+agent wrong on its own terms. If you cannot delete anything, say so and stop —
+that is a complete and respectable outcome.
 
 ## The order, and why it is an order
 
@@ -92,6 +99,7 @@ For a README, a report, an error message or a commit body:
 ## The report
 
 Files touched, what class of slop came out of each, the test output from before
-and after, and one line on what you deliberately left. The last part matters: a
+and after, the two line counts with the commit range a reviewer can recompute
+them from, and one line on what you deliberately left. The last part matters: a
 cleanup that silently declined to touch the worst file in the area looks
 identical to one that found nothing there.

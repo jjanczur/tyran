@@ -533,6 +533,45 @@ export async function loadDeployClass(root) {
   return value;
 }
 
+/**
+ * A leading `~` expanded to the home directory; everything else untouched so
+ * the `*`/`**` in a glob survive (`resolve` would collapse a trailing `**`).
+ */
+function expandHome(p) {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/**
+ * The out-of-repo paths config.yaml lets the MAIN thread write, home-expanded.
+ * Optional: absence is [], never a refusal. A config too broken to parse yields
+ * [] rather than throwing, so the write stays refused — fail closed. This only
+ * lists paths; the actor split (main-thread only) is enforced at the call site,
+ * so it can never widen what a subagent may do.
+ */
+export async function loadMainWritablePaths(root) {
+  let text = null;
+  for (const candidate of [root, mainWorktreeOf(root)].filter((r) => r !== null)) {
+    text = await readBounded(join(candidate, CONFIG_PATH), 'the Tyran config');
+    if (text !== null) break;
+  }
+  if (text === null) return [];
+  let doc;
+  try {
+    doc = parse(text);
+  } catch {
+    return [];
+  }
+  const raw = doc !== null && typeof doc === 'object' ? doc.main_writable_paths : undefined;
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    if (typeof entry === 'string' && entry.trim() !== '') out.push(expandHome(entry.trim()));
+  }
+  return out;
+}
+
 // ------------------------------------------------------ quoting the decision
 
 /**
@@ -739,9 +778,13 @@ export function harnessWritable(rawPath, env = process.env) {
       ? env.CLAUDE_CONFIG_DIR
       : join(homedir(), '.claude');
   const underConfig = segmentsUnder(canon, configDir);
-  // The memory store's exact shape: <config>/projects/<slug>/memory/**.
-  if (underConfig !== null && underConfig[0] === 'projects' && underConfig[2] === 'memory') {
-    return true;
+  if (underConfig !== null) {
+    // The memory store's exact shape: <config>/projects/<slug>/memory/**.
+    if (underConfig[0] === 'projects' && underConfig[2] === 'memory') return true;
+    // The plans directory: <config>/plans/** — where the main thread writes the
+    // plan files a user reads between sessions. A popular out-of-repo path, so
+    // it is exempt by default rather than requiring per-repo config.
+    if (underConfig[0] === 'plans') return true;
   }
   // The scratchpad: <tmp>/claude-*/**, under whichever temp root the platform
   // used. `/tmp` is included explicitly because `os.tmpdir()` is `/var/...` on
@@ -1062,6 +1105,11 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     return PASS;
   }
 
+  // Config-declared out-of-repo allowances for the main thread
+  // (`.tyran/config.yaml` `main_writable_paths`), loaded lazily and once: only
+  // an out-of-repo main-thread write ever consults them.
+  let mainWritable;
+
   for (const target of targets) {
     // Normalized HERE, with the root this call is about, and only then handed
     // to the resolver. `classifyPath` normalizes internally too, but against
@@ -1071,13 +1119,20 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     // and the two would agree in every test that happened to run in the repo
     // root. Normalization is idempotent, so the resolver's own call is a no-op.
     const normalized = repoRelative(target, root);
-    // Claude Code's own memory store and per-session scratchpad are outside
-    // every repository, so `normalized` is null and the matrix below answers
-    // KERNEL — which made adopting Tyran refuse the harness's own memory
-    // writes. `harnessWritable` exempts exactly those two locations, and only
-    // for the main thread; a subagent still falls through to KERNEL. See its
-    // definition for the full argument.
-    if (normalized === null && actor === 'main' && harnessWritable(target, env)) continue;
+    // Claude Code's own memory store, plans dir and scratchpad are outside every
+    // repository, so `normalized` is null and the matrix below answers KERNEL —
+    // which made adopting Tyran refuse the harness's own writes. `harnessWritable`
+    // exempts those built-in locations; `main_writable_paths` in config.yaml adds
+    // operator-chosen ones. Both are MAIN-thread only: a subagent still falls
+    // through to KERNEL.
+    if (normalized === null && actor === 'main') {
+      if (harnessWritable(target, env)) continue;
+      if (mainWritable === undefined) mainWritable = await loadMainWritablePaths(root);
+      if (mainWritable.length > 0) {
+        const canon = canonicalDeepest(target);
+        if (mainWritable.some((glob) => globMatches(glob, canon) || globMatches(glob, target))) continue;
+      }
+    }
     // The one branch this cannot delegate: a path outside the repository makes
     // `normalizePath` return null, which `classifyPath` answers with KERNEL.
     // Restated in one line rather than reached by passing a null through, and

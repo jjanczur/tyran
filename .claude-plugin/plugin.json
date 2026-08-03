@@ -1,6 +1,6 @@
 {
   "name": "tyran",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A task conductor for Claude Code: multi-agent orchestration with an enforced evidence contract, repo-specific learning, and update-safe local evolution.",
   "author": {
     "name": "Jacek Janczura",
@@ -9,7 +9,6 @@
   "homepage": "https://github.com/jjanczur/tyran#readme",
   "repository": "https://github.com/jjanczur/tyran",
   "license": "Apache-2.0",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "orchestration",
     "multi-agent",

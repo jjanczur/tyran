@@ -69,11 +69,18 @@ export const LANGUAGES = Object.freeze({
 });
 
 /**
- * Script names worth running before calling something done, most valuable
- * first. `build` is deliberately absent: it is slow, and on most repos the
- * type check already covers what a build would catch.
+ * Script names worth running before calling something done. `build` is
+ * deliberately absent: it is slow, and on most repos the type check already
+ * covers what a build would catch.
+ *
+ * `format:check` leads because it is the cheapest and fails fastest, and it is
+ * here at all because omitting it ships a red main. Measured: a repo declared
+ * `format:check` in package.json AND ran it in CI, this list did not include
+ * it, so no handoff required it — two unformatted files reached main and
+ * needed a repair commit. Only the CHECKING name is listed: a bare `format`
+ * REWRITES the working tree, which is not a validation command.
  */
-export const VALIDATION_SCRIPTS = Object.freeze(['lint', 'typecheck', 'types', 'test']);
+export const VALIDATION_SCRIPTS = Object.freeze(['format:check', 'lint', 'typecheck', 'types', 'test']);
 
 const RUN_PREFIX = Object.freeze({ npm: 'npm run', pnpm: 'pnpm', yarn: 'yarn', bun: 'bun run' });
 

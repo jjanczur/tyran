@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.1.5 — 2026-08-03
+
+### The plugin loads again (0.1.4 did not)
+
+On Claude Code 2.1.197 the plugin failed to load outright — `Duplicate hooks
+file detected: ./hooks/hooks.json` — because the manifest declared
+`"hooks": "./hooks/hooks.json"` while the harness now auto-loads that standard
+path, and the duplicate is fatal. With the hooks unloaded there was no gate at
+all: an out-of-repo write the gate exists to refuse went straight through.
+Every other plugin ships `hooks/hooks.json` with no manifest reference — the
+key is removed. The standard location is auto-discovered on every recent
+version, so this is also cross-version safe.
+
+### The main thread may write its own working files
+
+The gate refuses writes outside the repository as KERNEL — correct for a
+fanned-out subagent, wrong for Claude Code's own bookkeeping. Adopting Tyran
+made the harness unable to write to its memory store or plan files: "outside
+this repository". (0.1.4 shipped the memory half of this fix but never loaded,
+so users meet it here first.)
+
+The **main thread** — never a subagent — may now write three built-in
+out-of-repo locations: the memory store (`<config>/projects/<slug>/memory/`),
+the plans directory (`<config>/plans/`), and the per-session scratchpad
+(`<tmp>/claude-*/`). For anything else, `.tyran/config.yaml` gains an optional
+**`main_writable_paths`** list (globs, `~` expanded) the operator opts into.
+Both are actor-scoped: a subagent still falls through to KERNEL, so a parallel
+run stays contained. Everything else outside the repo is still refused.
+
+### Retrospectives applied
+
+Four field reports across two initiatives, folded into the conductor and its
+tools:
+
+- **`scan-repo`** now recognises `format:check` as a validation command — the
+  CHECK name only, because a bare `format` rewrites the working tree. A repo
+  that ran it in CI but was missing it from this list shipped two unformatted
+  files to main.
+- **`run` rule 7** — worktrees must live OUTSIDE the directories Tyran governs
+  (`.claude/`, `.tyran/`). One placed inside has every file, `src/**` included,
+  fall through to `default: GATED`, and a subagent cannot edit anything.
+- **`run` rule 2 (evidence contract)** — measure a fix in the EXECUTION MODE
+  the defect appeared in (a `next dev` pass was inert under `next start`), and a
+  guard or regression test is proven only by a run in which it FAILS without the
+  change: one that matches nothing passes exactly like one that works.
+- **`deslop`** — "started with" is the state immediately before THIS pass, not
+  the branch point; make the count recomputable by committing the story's work
+  and the pass separately.
+
 ## 0.1.4 — 2026-08-01
 
 ### The gate stopped refusing Claude Code's own memory

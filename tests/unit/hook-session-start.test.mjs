@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -247,9 +247,39 @@ function hooksConfig() {
   return JSON.parse(readFileSync(HOOKS_JSON, 'utf8'));
 }
 
-test('plugin.json points at hooks.json, or none of this ever runs', () => {
+test('plugin.json does NOT redeclare the auto-loaded hooks.json, or the plugin fails to load', () => {
+  // Inverted in 0.1.5. Claude Code (measured 2.1.197) auto-loads the standard
+  // hooks/hooks.json, so naming it in the manifest too is a duplicate the
+  // harness rejects — the plugin then loads nothing and gates nothing. The
+  // standard file must still exist; the manifest just must not point at it.
   const plugin = JSON.parse(readFileSync(join(REPO_ROOT, '.claude-plugin', 'plugin.json'), 'utf8'));
-  assert.equal(plugin.hooks, './hooks/hooks.json');
+  const declared = typeof plugin.hooks === 'string' ? resolve(REPO_ROOT, plugin.hooks) : null;
+  assert.notEqual(
+    declared,
+    resolve(REPO_ROOT, 'hooks', 'hooks.json'),
+    'the manifest names the standard hooks.json — a duplicate that fails plugin load; remove the "hooks" key',
+  );
+  assert.ok(existsSync(join(REPO_ROOT, 'hooks', 'hooks.json')), 'the auto-loaded hooks.json must exist');
+});
+
+test('checkHooks flags a manifest that re-declares the standard hooks.json (the load-killing duplicate)', () => {
+  // The MUST-FAIL case for the inverted guard: without the check, a manifest
+  // that reintroduces the duplicate passes exactly like a correct one and the
+  // plugin silently fails to load. This is the exact regression 0.1.4 shipped.
+  const root = mkdtempSync(join(tmpdir(), 'tyran-dup-hooks-'));
+  mkdirSync(join(root, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(root, 'hooks'), { recursive: true });
+  writeFileSync(
+    join(root, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 't', version: '0.0.0', hooks: './hooks/hooks.json' }),
+  );
+  writeFileSync(join(root, 'hooks', 'hooks.json'), JSON.stringify({ hooks: { SessionStart: [] } }));
+  const result = checkHooks({ root });
+  assert.ok(
+    JSON.stringify(result.findings).includes('hooks-manifest-duplicates-standard'),
+    JSON.stringify(result.findings, null, 2),
+  );
+  assert.ok(result.counts.error >= 1, 'a re-declared standard hooks file must be an error');
 });
 
 test('every registered hook command resolves to an executable file with a shebang', () => {

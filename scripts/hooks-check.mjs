@@ -325,6 +325,7 @@ export const HOOK_SEVERITY_BY_CODE = Object.freeze(
     'hooks-manifest-missing': 'error',
     'hooks-manifest-unreadable': 'error',
     'hooks-manifest-no-hooks': 'error',
+    'hooks-manifest-duplicates-standard': 'error',
     'hooks-file-missing': 'error',
     'hooks-file-unreadable': 'error',
     'hooks-file-invalid': 'error',
@@ -1043,23 +1044,53 @@ export function checkHooks({ root = DEFAULT_PLUGIN_ROOT, env = process.env } = {
     );
     return summarize(pluginRoot, findings, checked);
   }
+  // Claude Code auto-loads the standard hooks/hooks.json at the plugin root, so
+  // manifest.hooks is for ADDITIONAL hook files only. Declaring the standard
+  // path there too is a duplicate the harness rejects — measured on 2.1.197,
+  // "Duplicate hooks file detected" — and the plugin then fails to load and
+  // gates NOTHING. This inverts the old check: a missing field is healthy when
+  // the standard file exists, and a field naming the standard file is the error.
+  const standardHooksPath = resolve(pluginRoot, 'hooks', 'hooks.json');
   const declaredHooks = typeof manifest?.hooks === 'string' ? manifest.hooks : null;
-  if (declaredHooks === null) {
+  const declaredIsStandard = declaredHooks !== null && resolve(pluginRoot, declaredHooks) === standardHooksPath;
+
+  if (declaredIsStandard) {
     findings.push(
       finding(
-        'hooks-manifest-no-hooks',
+        'hooks-manifest-duplicates-standard',
         q(manifestPath),
-        'the manifest declares no "hooks" file. Every gate in this repository is registered through it, ' +
-          'so without the field the plugin installs cleanly and gates nothing.',
-        `add "hooks": "./hooks/hooks.json" to ${q(manifestPath)}`,
+        `the manifest declares "hooks": ${q(declaredHooks)}, but Claude Code auto-loads the standard ` +
+          'hooks/hooks.json at the plugin root. Declaring it again is a duplicate the harness rejects, so ' +
+          'the plugin fails to load and gates NOTHING. manifest.hooks is for ADDITIONAL hook files only.',
+        `remove the "hooks" key from ${q(manifestPath)} — the standard file is auto-loaded`,
       ),
     );
     return summarize(pluginRoot, findings, checked);
   }
-  checked.push(`manifest: name "${readPluginName(pluginRoot) ?? '(unnamed)'}", hooks -> ${declaredHooks}`);
+
+  if (declaredHooks === null && !existsSync(standardHooksPath)) {
+    findings.push(
+      finding(
+        'hooks-manifest-no-hooks',
+        q(manifestPath),
+        'no hooks file: the manifest declares none and there is no hooks/hooks.json at the plugin root, ' +
+          'so nothing registers a gate at all.',
+        `create ${q(standardHooksPath)} — it is auto-loaded — or point "hooks" at an additional file`,
+      ),
+    );
+    return summarize(pluginRoot, findings, checked);
+  }
+
+  // The file the platform loads: the additional file if the manifest names one,
+  // otherwise the auto-loaded standard file.
+  const hooksRel = declaredHooks ?? './hooks/hooks.json';
+  checked.push(
+    `manifest: name "${readPluginName(pluginRoot) ?? '(unnamed)'}", hooks -> ${hooksRel}` +
+      (declaredHooks === null ? ' (auto-loaded)' : ''),
+  );
 
   // ---- the hooks file ----------------------------------------------------
-  const hooksPath = resolve(pluginRoot, declaredHooks);
+  const hooksPath = resolve(pluginRoot, hooksRel);
   let doc;
   try {
     doc = JSON.parse(readFileSync(hooksPath, 'utf8'));

@@ -30,6 +30,13 @@ validation:                # detected from package.json / Makefile / CI
 
 shared_zones:              # append-only files, serialized by the conductor
   - messages/*.json
+
+main_writable_paths:       # OPTIONAL. Out-of-repo paths the MAIN thread may
+  - '~/.claude/plans/**'   # write, on top of the built-ins (the memory store,
+                           # ~/.claude/plans/, and the session scratchpad). A
+                           # `~` expands to home; globs are the usual `*`/`**`.
+                           # Never widens what a SUBAGENT may do — the gate
+                           # enforces the actor split; this only lists paths.
 ```
 
 ## Cost profiles

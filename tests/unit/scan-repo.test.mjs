@@ -118,6 +118,13 @@ test('`build` is deliberately not treated as a validation command', () => {
   assert.deepEqual(got.value, [], 'a repo with only a build script has no validation to report');
 });
 
+test('a format CHECK is validation; a format WRITE is not', () => {
+  const pkg = { scripts: { format: 'prettier --write .', 'format:check': 'prettier --check .', lint: 'eslint .' } };
+  const got = detectValidation(repo(), pkg, 'npm');
+  assert.deepEqual(got.value, ['npm run format:check', 'npm run lint']);
+  assert.ok(!VALIDATION_SCRIPTS.includes('format'), 'a validation command must never rewrite the working tree');
+});
+
 // --- the watcher rule ------------------------------------------------------
 //
 // A validation command that watches does not FAIL the agent that runs it. It

@@ -29,7 +29,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +54,7 @@ import {
   handle,
   harnessWritable,
   isGoverned,
+  loadMainWritablePaths,
   isUnsupervised,
   pathTargets,
   protectedGlobFor,
@@ -1667,4 +1668,41 @@ test('harness: the exemption is two shapes, not the whole config dir', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'claude-'));
   temps.push(scratch);
   assert.equal(harnessWritable(join(scratch, 'a', 'b.txt')), true);
+});
+
+test('harness: the plans directory is writable by the main thread', () => {
+  // A popular out-of-repo path, exempt by default rather than by config.
+  const cfg = tempDir('tyran-cfg-');
+  assert.equal(harnessWritable(join(cfg, 'plans', 'my-plan.md'), { CLAUDE_CONFIG_DIR: cfg }), true);
+  assert.equal(harnessWritable(join(cfg, 'plans'), { CLAUDE_CONFIG_DIR: cfg }), true);
+  assert.equal(harnessWritable(join(cfg, 'plansible', 'x'), { CLAUDE_CONFIG_DIR: cfg }), false);
+});
+
+test('config main_writable_paths lets the MAIN thread write an out-of-repo path — never a subagent', async () => {
+  const store = tempDir('tyran-plan-store-');
+  const root = adopted({
+    config: `profile: balanced\nautonomy: P1\ntiers:\n  top: a\n  work: b\n  cheap: c\nmain_writable_paths:\n  - '${store}/**'\n`,
+  });
+  const target = join(store, 'notes', 'plan.md');
+  const okMain = await handle({ input: writeInput(target), env: { CLAUDE_PROJECT_DIR: root } });
+  assert.deepEqual(okMain, PASS, JSON.stringify(okMain));
+  // Actor-scoped: a subagent writing the EXACT same path is still refused.
+  // Dropping the `actor === 'main'` guard is the mutation this kills.
+  const sub = await handle({ input: writeInput(target, { agentId: 'a1' }), env: { CLAUDE_PROJECT_DIR: root } });
+  assert.equal(sub.decision, 'deny');
+  assert.match(sub.reason, /outside this repository/);
+  // A path NOT on the list stays refused for the main thread too.
+  const other = await handle({ input: writeInput(join(tempDir('tyran-other-'), 'x')), env: { CLAUDE_PROJECT_DIR: root } });
+  assert.equal(other.decision, 'deny');
+});
+
+test('loadMainWritablePaths expands ~, and a repo with no config is []', async () => {
+  const root = adopted({
+    config: `profile: balanced\nautonomy: P1\ntiers:\n  top: a\n  work: b\n  cheap: c\nmain_writable_paths:\n  - '~/plans/**'\n`,
+  });
+  const got = await loadMainWritablePaths(root);
+  assert.equal(got.length, 1);
+  assert.ok(got[0].startsWith(homedir()), got[0]);
+  assert.ok(got[0].endsWith('/plans/**'), got[0]);
+  assert.deepEqual(await loadMainWritablePaths(unadopted()), []);
 });

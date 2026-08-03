@@ -68,7 +68,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -128,6 +128,20 @@ export function validateConfig(doc) {
       for (const [k, v] of Object.entries(doc.budget)) {
         if (typeof v !== 'number' || v <= 0) errors.push(`budget.${k}: must be a positive number`);
       }
+    }
+  }
+
+  // Out-of-repo paths the MAIN thread may write, on top of the built-in memory
+  // store, plans dir and scratchpad. A `~` is expanded to the home directory;
+  // globs are the same `*`/`**` the policy uses. Never widens what a SUBAGENT
+  // may do — the gate enforces the actor split, this only lists paths.
+  if ('main_writable_paths' in doc) {
+    if (!Array.isArray(doc.main_writable_paths)) {
+      errors.push('main_writable_paths: must be a list of path globs');
+    } else {
+      doc.main_writable_paths.forEach((p, i) => {
+        if (!isNonEmptyString(p)) errors.push(`main_writable_paths[${i}]: must be a non-empty path glob`);
+      });
     }
   }
 

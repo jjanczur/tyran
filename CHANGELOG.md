@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.6 — 2026-08-06
+
+### A browser pass must follow the value to what got STORED
+
+A column-mapping override shipped with a perfect `browser-check` measurement —
+15/15 columns visible, 0 console errors, the mapping visibly changed by hand —
+and was completely inert. The server re-derived the source type from the
+uploaded bytes, discarded the client's mapping, and answered `201` either way.
+Nothing in the browser pass could have caught it, because it never inspected
+what the server persisted; a reviewer reading the route did.
+
+`browser-check` now says so: when the UI claims to change something the SERVER
+acts on, a clean console and a `2xx` are not proof it arrived. Capture the
+request body you actually sent, or read the value back with a second request or
+a reload, and assert on THAT. The evidence contract already pinned the
+execution MODE (dev server vs production build); it said nothing about
+following a value past the response into storage.
+
+### A reviewer must never restore an uncommitted tree with git
+
+Breaking the fix to watch its test fail is the right way to prove a guard is
+real. The restore is the foot-gun: the work under review is UNCOMMITTED, so
+`git checkout -- <file>`, `git restore` and `git stash` all revert to HEAD and
+destroy the very thing the reviewer was sent to review. Measured in the field —
+a reviewer did exactly this, caught it by re-diffing, and recovered only
+because it had taken a backup first. Without the backup the author's work is
+gone with no record of what was in it.
+
+`agents/reviewer.md` now carries the procedure: copy to a scratch path, restore
+from the copy, prove the restore with `diff`, then disclose the mutation in the
+report. The agent already knew it had no edit tools "on purpose" and that
+`Bash` can still write — what it lacked was the one sequence where its own
+correct technique destroys the subject.
+
+
 ## 0.1.5 — 2026-08-03
 
 ### The plugin loads again (0.1.4 did not)

@@ -57,6 +57,18 @@ Return them as **counts plus the first few offenders**, then a single verdict
 line. A pass with `0` console errors is a fact; "the console was clean" is a
 recollection.
 
+**When the UI claims to change something the SERVER acts on** — a mapping, a
+setting, a value the next request depends on — a clean console and a `2xx` are
+not proof it arrived. The evidence has to follow the value to what got STORED,
+not stop at what got RENDERED: capture the request body you actually sent, or
+read the value back with a second request or a reload, and assert on THAT. This
+is not hypothetical. A column-mapping override shipped with a perfect browser
+pass — 15/15 columns visible, 0 console errors, the mapping visibly changed by
+hand — while the server re-derived the source type from the uploaded bytes and
+discarded the mapping, answering `201` either way. Only a reviewer reading the
+server route caught it; nothing in the browser measurement could have, because
+it never inspected what the server persisted.
+
 ## Selectors that do not go blind
 
 Anchor on what the user sees — a role, a label, the text — not on a container

@@ -31,6 +31,16 @@ that keeps you.
    - Warm up routes before a batch run; a cold compile reads as a failure.
    - Take heavy slots only through the lease protocol, and clean up your
      processes afterwards (SIGTERM, not `kill -9`).
+   - **To prove a guard is real, break the fix — but never restore with git.**
+     Neutering the change to watch its test fail is the right technique. The
+     restore is where it goes wrong: the work under review is UNCOMMITTED, so
+     `git checkout -- <file>`, `git restore` and `git stash` all revert to
+     HEAD and destroy the very thing you were sent to review. Copy the file to
+     a scratch path first, restore from that copy, and prove the restore with
+     `diff` before you carry on. Then DISCLOSE the mutation in your report.
+     Measured: a reviewer did exactly this, caught it by re-diffing, and
+     recovered only because it had taken the backup — the same sequence
+     without one loses the author's work with no record of what was in it.
 3. **Check the optimization section** — whether what the author claims is
    genuinely in the code, not just in the write-up.
 4. **The verdict is binary.** APPROVE, with minor notes routed to `NOTES.md`;

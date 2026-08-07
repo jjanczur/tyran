@@ -143,8 +143,19 @@ open one.
    and **signals about the PROCESS itself**: what slowed the work, what the
    handoff was missing, what a gate let through — this is the raw material
    `tyran:retro` reads). After a compaction or restart, read these FIRST.
-   - **IDs never come from memory** — `journal.mjs next-id` issues them.
-     After a compaction, memory hands out the same number twice.
+   - **A file write is not a git commit.** `journal.mjs append` only ever
+     touches the working tree. Stage and commit `.tyran/state/<initiative>/**`
+     explicitly (never `-A`) at every merge, not only when the initiative
+     closes — a backstop that fires once, at the end, depends on whoever
+     closes the initiative both remembering to check and being permitted to
+     commit, and measured three times in one repository, neither held. An
+     initiative whose journal never reaches history is one `git clean -fd`
+     away from having never happened.
+   - **IDs never come from memory** — omit `id` from a `decision` event's
+     `--data` (or leave it empty) and `append` issues the next one itself.
+     `journal.mjs next-id <file> <prefix>` exists to preview a value ahead of
+     time (prefix `D` → `D-7`); it is not a required preliminary step before
+     `append`. After a compaction, memory hands out the same number twice.
    - **Authorizations and stops are `decision` events.** What you may do
      without asking, and the CLOSED list of situations where you halt, live
      in the journal with the date and the operator's own words. Outside that
@@ -279,6 +290,10 @@ open one.
      existing unexpired lease means the agent refuses to start and reports —
      and ENDS by releasing it. Assigning slots from your own memory is
      forbidden: the lead's memory is the least reliable store in the system.
+     If the policy gate refuses the lease write — an install whose repo-local
+     `autonomy.yaml` predates the `locks/**` AUTO rule — fall back to
+     `lease.acquired`/`lease.released` events in the journal, same holder,
+     purpose and expiry, conductor-written, rather than working unleased.
    - **Preflight a heavy slot** on acquisition: check free disk against a
      threshold, clear known caches above it, and reap the previous holder's
      orphaned processes with SIGTERM rather than `kill -9`.
@@ -322,6 +337,9 @@ open one.
   so is judging the work too small to be worth one. Either way, record a
   `retro.entry` — `kind: skipped` with a reason is a complete answer — and
   the gate is satisfied. You will not be blocked twice.
+  Dispatching the retro as a background agent? Record a `retro.entry` with
+  `kind: spawned` at dispatch time — the gate anchors on the entry, not the
+  agent, and will otherwise stop you once while the retro is still running.
 - **Leases you took, you release.** Before you finish, check the ledger for
   a lease still held by an agent that has already reported. An orphaned lease
   blocks the next initiative from a resource nobody is using, and the person

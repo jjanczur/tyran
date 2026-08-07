@@ -32,6 +32,28 @@ rules:
     class: AUTO
     reason: the execution journal is append-only and written by the conductor itself
 
+  # Measured on a real initiative: iron rule 7 says "a handoff BEGINS by taking
+  # the lease" and ENDS by releasing it — but leases live under
+  # `.tyran/initiatives/<slug>/locks/`, which matched NO rule here, so it fell
+  # through to `default: GATED`. A subagent is ALWAYS unsupervised, and
+  # `verdictForClass(GATED, unsupervised)` denies unconditionally. So the lease
+  # protocol the conductor skill mandates could not be satisfied by any
+  # implementer, in any repo, under the shipped template — the agent either
+  # reported the refusal (correct, and what happened) or quietly worked without
+  # the lease, which is the failure mode leases exist to prevent. The conductor
+  # had to write every lease itself, which puts the record of who holds a
+  # resource in the one place iron rule 7 says it must not live: the lead.
+  #
+  # AUTO is the safe class here precisely because these are not history: the
+  # repo's own .gitignore excludes `.tyran/initiatives/*/locks/`, so nothing
+  # under it is version-controlled and the blast radius of a bad write is a
+  # stale lock file, cleared by deleting it. Scoped to `locks/` deliberately
+  # rather than all of `.tyran/initiatives/**`, so anything else that comes to
+  # live under an initiative keeps the stricter default.
+  - path: .tyran/initiatives/*/locks/**
+    class: AUTO
+    reason: runtime worktree and heavy-slot leases, gitignored and not history; GATED denies every subagent unconditionally, which makes the take-your-own-lease protocol of iron rule 7 unsatisfiable
+
   # Was GATED. The cost was measured on a real install: setup had inferred
   # `pnpm test`, which in that repo is bare `vitest` — it never exits, so every
   # agent would have hung forever. The session that FOUND that could not fix it,

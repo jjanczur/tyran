@@ -1,6 +1,6 @@
 # Journal reference
 
-`scripts/journal.mjs` · 49 unit tests
+`scripts/journal.mjs` · 54 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.
@@ -33,9 +33,9 @@ The journal is the append-only source of truth for an initiative:
 | `spawn` | `agent`, `role` | agent started (+ `model`, `ticket`, `worktree`); `agent` must have no open spawn — see below |
 | `report` | `agent`, `verdict` | agent finished (+ `evidence[]: {cmd, exit, counts}`); closes that agent's open spawn |
 | `gate` | `kind`, `result` | quality gate outcome (+ `evidence_ref`) |
-| `review` | `ticket`, `verdict`, `by` | independent review verdict |
+| `review` | `ticket`, `verdict`, `by` | independent review verdict (closes the reviewer’s open spawn — role `reviewer` only) |
 | `merge` | `ticket`, `sha` | merged (+ `mode`) |
-| `decision` | `id`, `text` | ledger entry (IDs issued via `next-id`) |
+| `decision` | `id`, `text` | ledger entry (`append` issues the id when omitted or empty) |
 | `lease.acquired` | `resource`, `holder` | worktree / heavy-slot lease taken |
 | `lease.released` | `resource`, `holder` | lease returned |
 | `checkpoint` | `phase`, `next_steps` | resume surface (re-injected after compaction) |
@@ -65,9 +65,10 @@ The journal is the append-only source of truth for an initiative:
   whose agent already has a `spawn` with no `report` — see below.
 - **Lease protocol honesty:** a `lease.released` by a non-holder does not
   free the lease — it is surfaced in `tail().mismatchedReleases`.
-- **IDs never from memory:** `journal.mjs next-id <file> D` scans the file
-  and returns `D-<max+1>` — duplicate ledger numbers after a compaction
-  become impossible.
+- **IDs never from memory:** omit `id` (or leave it empty) and `append`
+  scans the file and issues `D-<max+1>` itself — duplicate or blank ledger
+  numbers after a compaction become impossible. `journal.mjs next-id <file> D`
+  previews the next value without appending.
 - **Resume surface:** `journal.mjs tail <file>` returns the latest
   `checkpoint` and all unreleased leases — exactly what the `SessionStart`
   hook re-injects.
@@ -183,6 +184,6 @@ node scripts/journal.mjs query       <file> [--ev E] [--init I] [--ticket T] [--
 node scripts/journal.mjs validate    <file>        # exit 1 on errors; warnings do not fail
 node scripts/journal.mjs next-id     <file> <prefix>
 node scripts/journal.mjs tail        <file>
-node scripts/journal.mjs open-spawns <file>        # agents with no report yet
+node scripts/journal.mjs open-spawns <file>        # agents with no report or review yet
 node scripts/journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]
 ```

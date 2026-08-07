@@ -46,7 +46,15 @@ gap nobody notices.
   is broken? Delete a line of the implementation in your head and ask which
   test goes red — if the answer is none, the test asserts nothing. Watch for a
   test that pins the CURRENT output rather than the CORRECT one, which converts
-  a bug into a requirement.
+  a bug into a requirement. And watch what the test's OWN inputs are made of:
+  a fixture that hand-builds a value another function normally derives (a
+  mapper, a parser, a coercion) exercises only the consumer of that value,
+  never the step that derives it, and can pin THAT step's defect as correct
+  without ever calling it. A three-state flag silently collapsed to two states
+  survived two review rounds this way — every guard test hand-built the
+  post-coercion object, and the only two tests that called the real producer
+  were themselves asserting the coerced, wrong value. Trace at least one test
+  through the real producer, not a stand-in for its output.
 - **Resource lifecycle.** What is opened, started, spawned or leased, and where
   it is closed — including on the path where an exception is thrown.
 - **The gate itself.** If the change touches a check, ask what that check can

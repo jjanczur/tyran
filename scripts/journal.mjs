@@ -15,7 +15,7 @@
  *   node journal.mjs validate    <file>
  *   node journal.mjs next-id     <file> <prefix>   # e.g. prefix D -> D-7
  *   node journal.mjs tail        <file>            # last checkpoint + open items
- *   node journal.mjs open-spawns <file>            # agents with no report yet
+ *   node journal.mjs open-spawns <file>            # agents with no report or review yet
  *   node journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V]
  * Exit: 0 ok · 1 validation/finding error · 2 usage/IO error
  */
@@ -179,7 +179,11 @@ export function agentNameProblem(name) {
 
 /**
  * Pair `spawn` events with `report` events by agent name, in file order:
- * a report closes the OLDEST still-open spawn of that name (FIFO). This is
+ * a report closes the OLDEST still-open spawn of that name (FIFO), and a
+ * `review` closes its reviewer the same way, correlated by `data.by` — but
+ * only a spawn whose `role` is `reviewer`: `by` is a free string, and a
+ * collision with a still-working implementer's name must not mark that
+ * implementer reported with a verdict it never earned. This is
  * the one and only pairing rule — `append` enforces that it can never be
  * ambiguous (ADR-18: at most one open spawn per name), so consumers such as
  * the projection generator implement a guarantee, not a heuristic.
@@ -210,10 +214,18 @@ export function pairSpawns(events) {
    */
   const ambiguous = new Map(); // agent -> the largest number of spawns open at once
   for (const e of events) {
-    if (e?.ev !== 'spawn' && e?.ev !== 'report') continue;
-    const agent = e.data?.agent;
+    if (e?.ev !== 'spawn' && e?.ev !== 'report' && e?.ev !== 'review') continue;
+    // A reviewer never files a `report` about itself — its verdict IS its
+    // completion. Measured in the field: reviewers spawned per iron rule 3
+    // stayed "still working" in the session-start probe for days, because
+    // only reports closed spawns. A review's correlator is `data.by`.
+    const isReview = e.ev === 'review';
+    const agent = isReview ? e.data?.by : e.data?.agent;
     const problem = agentNameProblem(agent);
     if (problem) {
+      // A review is a verdict record first; an uncorrelatable `by` is not an
+      // agent-lifecycle defect, so it stays out of the unusable set.
+      if (isReview) continue;
       badNames.set(JSON.stringify(agent ?? null), problem);
       unusable.push({ event: e, problem });
       continue; // unusable as a correlator; validate() reports it
@@ -225,17 +237,25 @@ export function pairSpawns(events) {
       if (depth > 1 && depth > (ambiguous.get(agent) ?? 0)) ambiguous.set(agent, depth);
     } else {
       const queue = open.get(agent);
-      if (queue?.length) {
+      const closable = queue?.length && (!isReview || queue[0].data?.role === 'reviewer');
+      if (closable) {
         const spawn = queue.shift();
         pairs.push({ spawn, report: e });
         if (queue.length === 0) open.delete(agent);
+      } else if (isReview) {
+        // A review by a never-spawned (or already-closed) actor is ordinary —
+        // a verdict does not require a lifecycle to close.
+      } else if (e.data?.closed_by === 'close-spawn') {
+        // Journals written before reviews closed spawns carry a close-spawn
+        // report right after the review that now closes the same spawn:
+        // redundant, not orphaned — flagging it would fail history retroactively.
       } else orphanReports.push(e);
     }
   }
   return { open, orphanReports, badNames, pairs, unusable, ambiguous };
 }
 
-/** Agents whose `spawn` has no matching `report` yet — the "still working" set. */
+/** Agents whose `spawn` has no matching `report` or `review` yet — the "still working" set. */
 export function openSpawns(file) {
   const { open } = pairSpawns(readJournal(file).events);
   return [...open.values()].flat().map((e) => ({
@@ -663,8 +683,11 @@ function main() {
         // the exact failure the rule names, with nothing objecting.
         //
         // A rule in prose loses to a mechanism that makes the mistake
-        // impossible. This is that mechanism, and an explicit id still wins.
-        if (ID_ISSUED_FOR[ev] !== undefined && data.id === undefined) {
+        // impossible. This is that mechanism, and an explicit id still wins —
+        // but `"id":""` is not explicit: a conductor recovering from next-id's
+        // usage error supplied exactly that, three times, and the ledger kept
+        // three permanently blank ids nothing can reference.
+        if (ID_ISSUED_FOR[ev] !== undefined && (data.id === undefined || data.id === '')) {
           data.id = nextId(file, ID_ISSUED_FOR[ev]);
         }
         const written = append(file, { ev, init, actor: flags.actor ?? 'conductor', data });

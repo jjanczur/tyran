@@ -880,3 +880,67 @@ test('validateJournal messages carry no raw journal values', () => {
     );
   }
 });
+
+// --- field fixes: reviews close reviewer spawns; empty ids are issued ---
+
+const reviewEv = (by, { data = {}, ...over } = {}) => ({
+  ev: 'review',
+  init: 'demo',
+  actor: by,
+  ...over,
+  data: { ticket: 'T-1', verdict: 'APPROVE', by, ...data },
+});
+
+test('a review whose `by` names an open spawn closes it, like a report', () => {
+  const f = tmp();
+  append(f, spawnEv('reviewer-1', { data: { role: 'reviewer' } }));
+  append(f, reviewEv('reviewer-1'));
+  assert.deepEqual(openSpawns(f), []);
+  // the pairing is visible to consumers, verdict included
+  const { pairs } = pairSpawns(readJournal(f).events);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].report.data.verdict, 'APPROVE');
+  // ADR-18 still holds: the name can be spawned again, once
+  append(f, spawnEv('reviewer-1'));
+  assert.throws(() => append(f, spawnEv('reviewer-1')), /already has an open spawn/);
+});
+
+test('a review with no open spawn of that name is not an orphan', () => {
+  const f = tmp();
+  append(f, reviewEv('never-spawned'));
+  const { orphanReports, unusable } = pairSpawns(readJournal(f).events);
+  assert.deepEqual(orphanReports, []);
+  assert.deepEqual(unusable, []);
+  assert.equal(validateJournal(f).ok, true);
+});
+
+test('legacy close-spawn report after a review-closure is not an orphan', () => {
+  const f = tmp();
+  append(f, spawnEv('reviewer-1', { data: { role: 'reviewer' } }));
+  append(f, reviewEv('reviewer-1')); // closes the spawn under the new rule
+  // a journal written under the old rule then carries the close-spawn report:
+  append(f, reportEv('reviewer-1', { data: { closed_by: 'close-spawn' } }));
+  assert.deepEqual(pairSpawns(readJournal(f).events).orphanReports, []);
+  // a stray ORDINARY report with no spawn is still an orphan
+  append(f, reportEv('reviewer-1'));
+  assert.equal(pairSpawns(readJournal(f).events).orphanReports.length, 1);
+});
+
+test('an explicit empty data.id is issued by CLI append, not stored blank', () => {
+  const f = tmp();
+  execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"","text":"picked a default"}']);
+  execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"","text":"second"}']);
+  assert.deepEqual(query(f, { ev: 'decision' }).map((e) => e.data.id), ['D-1', 'D-2']);
+});
+
+test('a review cannot close a colliding non-reviewer spawn', () => {
+  // Review finding: `by` is a free string; a collision with a still-working
+  // implementer's name must not mark that implementer reported.
+  const f = tmp();
+  append(f, spawnEv('worker-1'));
+  append(f, reviewEv('worker-1'));
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['worker-1']);
+  assert.equal(pairSpawns(readJournal(f).events).pairs.length, 0);
+  // and ADR-18 still refuses a second live spawn of the same name
+  assert.throws(() => append(f, spawnEv('worker-1')), /already has an open spawn/);
+});

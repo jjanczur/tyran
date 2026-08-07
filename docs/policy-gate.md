@@ -25,11 +25,11 @@ are **supervision**, not merely which actor is running: a subagent's tool calls
 never surface a permission prompt, and neither do a main loop's under
 `acceptEdits` or `bypassPermissions`.
 
-| path class | supervised main loop | subagent, or prompts off |
-|---|---|---|
-| `AUTO` | pass | pass |
-| `GATED` | pass — the platform's own permission prompt **is** the approval | **deny** |
-| `KERNEL` | **deny** | **deny** |
+| path class | supervised main loop | main loop under `acceptEdits` | subagent, or other prompt-less modes |
+|---|---|---|---|
+| `AUTO` | pass | pass | pass |
+| `GATED` | pass — the platform's own permission prompt **is** the approval | **ask** — the gate summons the prompt itself | **deny** |
+| `KERNEL` | **deny** | **deny** | **deny** |
 | **no rule matches, inside `.tyran/` `.claude/` `hooks/`** | the policy's `default:` — `GATED` in the shipped template | |
 | **no rule matches, anywhere else** | pass — see below | pass |
 | **outside the repository** | **deny** | **deny** |
@@ -60,13 +60,19 @@ outside the repository is still `KERNEL`, and `hooks/**` and
 `.tyran/policies/**` are still refused unconditionally, before any rule is
 consulted.
 
-**`GATED` passes in a supervised main loop.** On `PreToolUse` the platform
-offers a gate exactly two answers: `deny`, and silence. There is no "ask" — and
-`permissionDecision: "allow"` is not one either, since it *auto-approves* the
-call and skips the user's prompt. So `GATED` is enforced where no one is asked,
-and delegated where an approval channel already exists. That is what makes
-supervision an axis rather than a detail: treating `acceptEdits` as supervised
-would have made the whole row decorative in the mode agents actually run in.
+**`GATED` passes in a supervised main loop, and asks under `acceptEdits`.**
+On `PreToolUse` a gate has three answers: `deny`, silence, and
+`permissionDecision: "ask"`, which renders the user's own prompt even in a
+mode that auto-accepts edits. (`"allow"` is none of these — it *auto-approves*
+the call and skips the prompt, so this runtime cannot emit it.) So `GATED` is
+delegated where the platform prompts anyway, asked where the MAIN loop has a
+prompt surface that `acceptEdits` merely mutes, and denied where no prompt can
+render at all: every subagent, `bypassPermissions`, and any mode the gate does
+not recognise — an ask a mode might not render must fail toward deny, never
+toward approval. Field measurement, before the ask column existed: under
+`acceptEdits` the operator's own conductor could not perform a GATED write
+anywhere, while the refusal text pointed at a main session that refused the
+same way.
 
 ## The deployment class
 

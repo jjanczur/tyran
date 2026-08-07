@@ -176,7 +176,7 @@ const MATRIX = [
   // class. If it ever stops passing for a subagent the template moved, and
   // that should be a decision someone makes, not a diff nobody notices.
   { cls: 'AUTO', path: '.tyran/config.yaml', supervised: 'pass', unsupervised: 'pass' },
-  { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny' },
+  { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
   { cls: 'KERNEL', path: 'hooks/scripts/secrets-gate.mjs', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'KERNEL', path: '.tyran/policies/autonomy.yaml', supervised: 'deny', unsupervised: 'deny' },
   // The unmatched row, which is TWO rows. Neither is a fall-through.
@@ -184,7 +184,7 @@ const MATRIX = [
   // Inside the governed namespace — Tyran's own artefacts, which the policy is
   // meant to enumerate — an unmatched path takes the policy's `default:`,
   // GATED in the shipped template, and behaves exactly like the GATED rows.
-  { cls: 'default (GATED), governed', path: '.tyran/something-new.yaml', supervised: 'pass', unsupervised: 'deny' },
+  { cls: 'default (GATED), governed', path: '.tyran/something-new.yaml', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
   { cls: 'KERNEL (hook registry)', path: '.claude/settings.json', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'default (GATED), governed', path: 'hooks/notes.md', supervised: 'deny', unsupervised: 'deny' },
   // Outside it the policy has nothing to say and the gate is silent. Measured
@@ -211,13 +211,15 @@ for (const row of MATRIX) {
     assert.equal(got === PASS || got.decision === 'pass' ? 'pass' : got.decision, row.unsupervised);
   });
 
-  test(`matrix: ${row.cls} · ${row.path} · main loop with prompts off -> ${row.unsupervised}`, async () => {
+  const promptsOff = row.mainPromptsOff ?? row.unsupervised;
+  test(`matrix: ${row.cls} · ${row.path} · main loop with prompts off -> ${promptsOff}`, async () => {
     // The axis is SUPERVISION, not just the actor. Under `acceptEdits` the
-    // main loop has no prompt either, so treating actor as the whole story
-    // would make the GATED row decorative in the mode agents actually run in.
+    // main loop auto-accepts, so it counts as unsupervised — but unlike a
+    // subagent it still HAS a prompt surface, so GATED asks there instead of
+    // denying. The hard deny stays where no prompt can render.
     const root = adopted();
     const got = await askWrite(root, row.path, { mode: 'acceptEdits' });
-    assert.equal(got === PASS || got.decision === 'pass' ? 'pass' : got.decision, row.unsupervised);
+    assert.equal(got === PASS || got.decision === 'pass' ? 'pass' : got.decision, promptsOff);
   });
 }
 
@@ -1705,4 +1707,30 @@ test('loadMainWritablePaths expands ~, and a repo with no config is []', async (
   assert.ok(got[0].startsWith(homedir()), got[0]);
   assert.ok(got[0].endsWith('/plans/**'), got[0]);
   assert.deepEqual(await loadMainWritablePaths(unadopted()), []);
+});
+
+// =============================== GATED asks the main loop under acceptEdits
+
+test('verdictForClass: GATED unsupervised is ask only when askable', () => {
+  assert.equal(verdictForClass('GATED', true, true), 'ask');
+  assert.equal(verdictForClass('GATED', true, false), 'deny');
+  assert.equal(verdictForClass('GATED', true), 'deny'); // askable defaults off: fail-closed
+  assert.equal(verdictForClass('GATED', false, true), 'pass'); // supervised never double-prompts
+  assert.equal(verdictForClass('KERNEL', true, true), 'deny'); // ask never unlocks KERNEL
+  assert.equal(verdictForClass('AUTO', true, true), 'pass');
+});
+
+test('GATED + main + bypassPermissions stays deny — an ask nobody renders must not degrade', async () => {
+  const root = adopted();
+  const got = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'bypassPermissions' });
+  assert.equal(got.decision, 'deny');
+});
+
+test('GATED + main + acceptEdits asks; a subagent in the same mode still gets deny', async () => {
+  const root = adopted();
+  const got = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'acceptEdits' });
+  assert.equal(got.decision, 'ask');
+  assert.match(got.reason, /approv/i);
+  const sub = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'acceptEdits', agentId: 'a1' });
+  assert.equal(sub.decision, 'deny');
 });

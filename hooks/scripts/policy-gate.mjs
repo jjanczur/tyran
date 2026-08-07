@@ -853,25 +853,31 @@ export function pathTargets(toolInput) {
  *
  * The full matrix, and every cell is a decision rather than a fall-through:
  *
- * | class    | supervised main loop | unsupervised (subagent, or prompts off) |
- * |----------|----------------------|------------------------------------------|
- * | AUTO     | pass                 | pass                                     |
- * | GATED    | pass — the platform's own prompt IS the approval | **deny**      |
- * | KERNEL   | **deny**             | **deny**                                 |
- * | unmatched| = the policy's `default:` (GATED in the shipped template) |     |
+ * | class    | supervised main loop | main, prompts off (askable) | subagent / other |
+ * |----------|----------------------|-----------------------------|------------------|
+ * | AUTO     | pass                 | pass                        | pass             |
+ * | GATED    | pass — the platform's own prompt IS the approval | **ask** — the gate summons the prompt itself | **deny** |
+ * | KERNEL   | **deny**             | **deny**                    | **deny**         |
+ * | unmatched| = the policy's `default:` (GATED in the shipped template) |  |  |
  *
- * The GATED row is the one worth arguing. On PreToolUse the platform offers
- * exactly two answers, `deny` and silence; there is no "ask" this runtime can
- * emit, and inventing one means editing hook-io, which is a different
- * decision than this story's. So GATED is delegated where an approval channel
- * already exists — the user's own permission prompt — and enforced where it
- * does not. That is why supervision, not just actor, is an axis: under
- * `acceptEdits` the main loop has no prompt either, and treating it as
- * supervised would have made the whole row decorative.
+ * The GATED row is the one worth arguing. hook-io can emit a third answer —
+ * an "ask" — which renders the user's own prompt even in a mode that
+ * auto-accepts edits, so GATED can mean what ADR-06 says it means wherever a
+ * prompt can render. `askable` is that fact as an argument: the caller sets
+ * it only for the MAIN loop under `acceptEdits`, the mode agents actually
+ * run in. It stays false under `bypassPermissions` and unknown modes — an
+ * ask a mode might not render must fail toward deny, never toward approval —
+ * and false for every subagent, whose calls have no prompt surface at all.
+ * Measured before this cell existed: under `acceptEdits` the operator's own
+ * conductor could not perform a GATED write anywhere, while the refusal text
+ * pointed at a main session that refused exactly the same way.
  */
-export function verdictForClass(cls, unsupervised) {
+export function verdictForClass(cls, unsupervised, askable = false) {
   if (cls === 'KERNEL') return 'deny';
-  if (cls === 'GATED') return unsupervised ? 'deny' : 'pass';
+  if (cls === 'GATED') {
+    if (!unsupervised) return 'pass';
+    return askable ? 'ask' : 'deny';
+  }
   if (cls === 'AUTO') return 'pass';
   // An unrecognised class cannot be resolved to a permission. validatePolicy
   // rejects one, so reaching here means the resolver and the validator
@@ -1032,6 +1038,10 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
   const root = repoRootOf(input, env);
   const unsupervised = isUnsupervised(input);
   const actor = actorOf(input);
+  // The one mode where an unsupervised main loop still renders an ask.
+  // Deliberately not "any unsupervised main": bypassPermissions and unknown
+  // modes must keep the hard deny — see verdictForClass's matrix.
+  const askable = actor === 'main' && field(input, 'permission_mode') === 'acceptEdits';
 
   if (toolName === 'Bash') return await decideBash({ input, toolInput, root, runner, budget });
 
@@ -1146,7 +1156,7 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     if (normalized !== null && decidingRule(policy, normalized) === null && !isGoverned(normalized)) {
       continue;
     }
-    const verdict = verdictForClass(cls, unsupervised);
+    const verdict = verdictForClass(cls, unsupervised, askable);
 
     // ADR-21, applied as a check rather than as a refactor: the rule this
     // refusal names and the class the resolver returned must agree. They are
@@ -1162,6 +1172,19 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     }
 
     if (verdict === 'pass') continue;
+    if (verdict === 'ask') {
+      return {
+        decision: 'ask',
+        reason:
+          `tyran policy-gate: this write is GATED — your approval IS the gate. ` +
+          `${describeTarget(target, normalized)}\n` +
+          `class: ${safePolicyText(cls)} · actor: ${actor} · permission_mode: ` +
+          `${safePolicyText(String(field(input, 'permission_mode') ?? '(absent)'))}\n` +
+          `rule: ${quoteRule(policy, normalized, cls)}\n` +
+          'Approve to perform exactly this write, once. Decline and the agent is told to put ' +
+          'the change in its report instead.',
+      };
+    }
     return {
       decision: 'deny',
       reason:

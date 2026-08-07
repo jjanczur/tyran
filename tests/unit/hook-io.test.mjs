@@ -23,6 +23,7 @@ import {
   parseHookInput,
   readStdin,
   refusalPayload,
+  askPayload,
   resolveEvent,
   runGate,
   runProbe,
@@ -702,4 +703,32 @@ test('a probe clamps its injection to the platform limit and reports the cut', a
   assert.equal(payload.hookSpecificOutput.hookEventName, 'SessionStart');
   assert.match(payload.hookSpecificOutput.additionalContext, /output truncated/);
   assert.match(io.err.join(''), /injected context truncated/);
+});
+
+// ------------------------------------------------ ask: the third answer
+
+test('askPayload emits an ask decision for PreToolUse only', () => {
+  assert.deepEqual(askPayload('PreToolUse', 'because'), {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'ask',
+      permissionDecisionReason: 'because',
+    },
+  });
+  assert.throws(() => askPayload('SessionStart', 'x'), GateOnProbeEventError);
+  assert.throws(() => askPayload('Stop', 'x'), /only expressible/);
+});
+
+test('runGate emits the ask payload when the handler asks', async () => {
+  const io = fakeIo(inputFor('PreToolUse'));
+  await runGate({
+    event: 'PreToolUse',
+    deadlineMs: 1000,
+    io,
+    handler: () => ({ decision: 'ask', reason: 'your call' }),
+  });
+  const payload = soleOutput(io);
+  assert.equal(payload.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(payload.hookSpecificOutput.permissionDecisionReason, 'your call');
+  assert.deepEqual(io.codes, [0]);
 });

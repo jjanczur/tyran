@@ -182,6 +182,34 @@ export function refusalPayload(event, reason) {
   return { decision: 'block', reason };
 }
 
+/**
+ * The ask payload for `event` — a REAL question to the user, not a refusal.
+ *
+ * "ask" renders the user's own permission prompt even in a mode that
+ * auto-accepts edits, which is what lets a gate delegate one decision to the
+ * operator instead of choosing between deny and silence. It is only
+ * expressible where the platform models permissionDecision (PreToolUse);
+ * every other event refuses the registration the same way refusalPayload
+ * does, because an ask nobody can render would degrade to silence, and
+ * silence is a pass (ADR-19: an exclusion may never be quiet).
+ */
+export function askPayload(event, reason) {
+  const meta = EVENTS[event];
+  if (meta === undefined || meta.refusal === null) {
+    throw new GateOnProbeEventError(String(event));
+  }
+  if (meta.refusal !== 'permissionDecision') {
+    throw new Error(`"ask" is only expressible where the platform models permissionDecision, not on ${String(event)}`);
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: event,
+      permissionDecision: 'ask',
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
 /** The context-injection payload for `event`, or `{}` where it accepts none. */
 export function contextPayload(event, additionalContext) {
   const meta = EVENTS[event];
@@ -458,9 +486,11 @@ function refusalText({ errorClass, message, fix }) {
  *     platform's timeout kills the process and DISCARDS its output, so a
  *     gate that is merely slow is a gate that approves.
  *
- * `handler(input)` returns `PASS` or `{ decision: 'deny', reason }`.
- * Anything else is treated as a bug and refuses — an unrecognised return
- * value must not be able to mean "allow".
+ * `handler(input)` returns `PASS`, `{ decision: 'deny', reason }` or —
+ * on events that model permissionDecision — `{ decision: 'ask', reason }`,
+ * which renders the user's own prompt for exactly this call. Anything else
+ * is treated as a bug and refuses — an unrecognised return value must not
+ * be able to mean "allow".
  *
  * ## What the deadline does and does not promise
  *
@@ -683,8 +713,16 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
         emit(payload);
         return;
       }
+      if (verdict !== null && typeof verdict === 'object' && verdict.decision === 'ask') {
+        const { payload } = clampPayload(
+          (reason) => askPayload(outEvent, reason),
+          sanitizeForOutput(String(verdict.reason ?? 'asked without a stated reason')),
+        );
+        emit(payload);
+        return;
+      }
       throw new Error(
-        `handler returned ${JSON.stringify(verdict)}; expected PASS or { decision: 'deny', reason }`,
+        `handler returned ${JSON.stringify(verdict)}; expected PASS or { decision: 'deny' | 'ask', reason }`,
       );
     } catch (err) {
       refuse(outEvent, describeError(err));

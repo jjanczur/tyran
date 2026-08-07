@@ -1388,3 +1388,16 @@ test('the alias rule costs two commands in fourteen, not a working day', async (
   }
   assert.deepEqual(flagged, ['git -c alias.zz=push zz origin main', 'git config alias.up push']);
 });
+
+test('a read-only core.hooksPath query is not a hooks bypass', () => {
+  // Measured in the field: a mid-incident `git config core.hooksPath` read,
+  // run to find out WHICH hook had just refused a push, was itself refused.
+  assert.deepEqual(planCommand('git config core.hooksPath', '/r').denials, []);
+  assert.deepEqual(planCommand('git config --get core.hooksPath', '/r').denials, []);
+});
+
+test('setting core.hooksPath via git config is still refused', () => {
+  assert.deepEqual(planCommand('git config core.hooksPath /dev/null', '/r').denials.map((d) => d.code), [
+    DENIAL_CODES.HOOKS_PATH,
+  ]);
+});

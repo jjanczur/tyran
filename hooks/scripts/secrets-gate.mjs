@@ -694,11 +694,25 @@ export function planCommand(command, startDir) {
         break;
       }
     }
-    if (raw.some((t) => t.toLowerCase().includes('core.hookspath'))) {
+    // Only the OVERRIDE forms disable hooks: `core.hooksPath=DIR` in any
+    // spelling, or `git config core.hooksPath DIR` (a following value). A bare
+    // query — `git config [--get] core.hooksPath` — reads the very state this
+    // rule protects, and refusing it was measured mid-incident: the command run
+    // to find out WHICH hook had just refused a push was itself refused. A gate
+    // that blocks reading its own subject teaches routing around, not caution.
+    const hooksPathOverride = raw.some((t, i) => {
+      const lower = t.toLowerCase();
+      if (!lower.includes('core.hookspath')) return false;
+      if (lower.includes('core.hookspath=')) return true;
+      if (!words.has('config')) return false;
+      const next = raw[i + 1];
+      return next !== undefined && !next.startsWith('-');
+    });
+    if (hooksPathOverride) {
       denials.push({
         code: DENIAL_CODES.HOOKS_PATH,
         detail: "`core.hooksPath` is being overridden, which disables git's hooks for this command",
-        remedy: 'run the command without -c core.hooksPath=...',
+        remedy: 'run the command without -c core.hooksPath=... (a bare `git config core.hooksPath` query is fine)',
       });
     }
     if (gitCommit && tokens.some((t) => isShortCluster(t) && t.includes('n'))) {

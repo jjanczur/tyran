@@ -176,6 +176,10 @@ const MATRIX = [
   // class. If it ever stops passing for a subagent the template moved, and
   // that should be a decision someone makes, not a diff nobody notices.
   { cls: 'AUTO', path: '.tyran/config.yaml', supervised: 'pass', unsupervised: 'pass' },
+  // The lease rule exists because iron rule 7's take-your-own-lease protocol
+  // was unsatisfiable without it — measured on two initiatives. This row is
+  // what stops a future template edit from silently reintroducing that.
+  { cls: 'AUTO (leases)', path: '.tyran/initiatives/demo/locks/worktree-a.lease', supervised: 'pass', unsupervised: 'pass' },
   { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
   { cls: 'KERNEL', path: 'hooks/scripts/secrets-gate.mjs', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'KERNEL', path: '.tyran/policies/autonomy.yaml', supervised: 'deny', unsupervised: 'deny' },

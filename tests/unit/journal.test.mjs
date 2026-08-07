@@ -916,7 +916,7 @@ test('a review with no open spawn of that name is not an orphan', () => {
 
 test('legacy close-spawn report after a review-closure is not an orphan', () => {
   const f = tmp();
-  append(f, spawnEv('reviewer-1'));
+  append(f, spawnEv('reviewer-1', { data: { role: 'reviewer' } }));
   append(f, reviewEv('reviewer-1')); // closes the spawn under the new rule
   // a journal written under the old rule then carries the close-spawn report:
   append(f, reportEv('reviewer-1', { data: { closed_by: 'close-spawn' } }));
@@ -931,4 +931,16 @@ test('an explicit empty data.id is issued by CLI append, not stored blank', () =
   execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"","text":"picked a default"}']);
   execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"","text":"second"}']);
   assert.deepEqual(query(f, { ev: 'decision' }).map((e) => e.data.id), ['D-1', 'D-2']);
+});
+
+test('a review cannot close a colliding non-reviewer spawn', () => {
+  // Review finding: `by` is a free string; a collision with a still-working
+  // implementer's name must not mark that implementer reported.
+  const f = tmp();
+  append(f, spawnEv('worker-1'));
+  append(f, reviewEv('worker-1'));
+  assert.deepEqual(openSpawns(f).map((s) => s.agent), ['worker-1']);
+  assert.equal(pairSpawns(readJournal(f).events).pairs.length, 0);
+  // and ADR-18 still refuses a second live spawn of the same name
+  assert.throws(() => append(f, spawnEv('worker-1')), /already has an open spawn/);
 });

@@ -705,8 +705,10 @@ export function planCommand(command, startDir) {
       if (!lower.includes('core.hookspath')) return false;
       if (lower.includes('core.hookspath=')) return true;
       if (!words.has('config')) return false;
-      const next = raw[i + 1];
-      return next !== undefined && !next.startsWith('-');
+      // ANY following token can be the value: git stores "-evildir" verbatim
+      // rather than rejecting it as a flag (review finding, verified against
+      // real git). A query puts the key LAST, so key-then-anything is a set.
+      return raw[i + 1] !== undefined;
     });
     if (hooksPathOverride) {
       denials.push({

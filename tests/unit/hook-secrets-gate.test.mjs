@@ -1401,3 +1401,11 @@ test('setting core.hooksPath via git config is still refused', () => {
     DENIAL_CODES.HOOKS_PATH,
   ]);
 });
+
+test('a dash-prefixed value is still a value: setting the hooks path with it is refused', () => {
+  // Review finding, verified against real git: `git config` stores "-evildir"
+  // as the value rather than rejecting it as a flag, so hooks are disabled.
+  assert.deepEqual(planCommand('git config core.hooksPath -evildir', '/r').denials.map((d) => d.code), [
+    DENIAL_CODES.HOOKS_PATH,
+  ]);
+});

@@ -1,6 +1,6 @@
 # Journal reference
 
-`scripts/journal.mjs` · 53 unit tests
+`scripts/journal.mjs` · 54 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.
@@ -33,7 +33,7 @@ The journal is the append-only source of truth for an initiative:
 | `spawn` | `agent`, `role` | agent started (+ `model`, `ticket`, `worktree`); `agent` must have no open spawn — see below |
 | `report` | `agent`, `verdict` | agent finished (+ `evidence[]: {cmd, exit, counts}`); closes that agent's open spawn |
 | `gate` | `kind`, `result` | quality gate outcome (+ `evidence_ref`) |
-| `review` | `ticket`, `verdict`, `by` | independent review verdict (closes the reviewer’s open spawn) |
+| `review` | `ticket`, `verdict`, `by` | independent review verdict (closes the reviewer’s open spawn — role `reviewer` only) |
 | `merge` | `ticket`, `sha` | merged (+ `mode`) |
 | `decision` | `id`, `text` | ledger entry (`append` issues the id when omitted or empty) |
 | `lease.acquired` | `resource`, `holder` | worktree / heavy-slot lease taken |

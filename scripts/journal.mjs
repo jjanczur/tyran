@@ -180,7 +180,10 @@ export function agentNameProblem(name) {
 /**
  * Pair `spawn` events with `report` events by agent name, in file order:
  * a report closes the OLDEST still-open spawn of that name (FIFO), and a
- * `review` closes its reviewer the same way, correlated by `data.by`. This is
+ * `review` closes its reviewer the same way, correlated by `data.by` — but
+ * only a spawn whose `role` is `reviewer`: `by` is a free string, and a
+ * collision with a still-working implementer's name must not mark that
+ * implementer reported with a verdict it never earned. This is
  * the one and only pairing rule — `append` enforces that it can never be
  * ambiguous (ADR-18: at most one open spawn per name), so consumers such as
  * the projection generator implement a guarantee, not a heuristic.
@@ -234,7 +237,8 @@ export function pairSpawns(events) {
       if (depth > 1 && depth > (ambiguous.get(agent) ?? 0)) ambiguous.set(agent, depth);
     } else {
       const queue = open.get(agent);
-      if (queue?.length) {
+      const closable = queue?.length && (!isReview || queue[0].data?.role === 'reviewer');
+      if (closable) {
         const spawn = queue.shift();
         pairs.push({ spawn, report: e });
         if (queue.length === 0) open.delete(agent);

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.1.7 — 2026-08-07
+
+### The lease protocol nobody could follow
+
+Iron rule 7 says a handoff BEGINS by taking a lease file — and the shipped
+policy template had no rule for `.tyran/initiatives/<slug>/locks/`, so the
+path fell to `default: GATED`, which denies every subagent unconditionally.
+Measured twice in one adopted repo: implementers correctly refused to route
+around the gate, and each occurrence cost a full dispatch round-trip before
+the conductor took over lease-keeping by hand — exactly the relocation of
+state into the lead's memory that the rule exists to prevent. The template now
+carries a `locks/**` AUTO rule (gitignored, never history, blast radius one
+stale file), a MATRIX test row pins it so a template edit cannot silently
+reintroduce the gap, and the run skill names the journal-event fallback for
+installs whose repo-local policy predates the rule.
+
+### GATED said "the prompt is the approval" — and then there was no prompt
+
+Under `acceptEdits` — the mode agents actually run in — the main loop counts
+as unsupervised, so a GATED write was denied with a message pointing at a main
+session that refused the same way. The gate's docstring claimed the platform
+offers only `deny` and silence; that claim is outdated. hook-io can now emit
+the platform's third answer, an "ask", which renders the user's own permission
+prompt even under `acceptEdits`, so GATED means what ADR-06 says wherever a
+prompt can render. `bypassPermissions`, unknown modes, and every subagent
+keep the hard deny: an ask a mode might not render must fail toward deny,
+never toward approval.
+
+### Reviewers that never stop working, and ledger ids nothing can reference
+
+A reviewer never files a `report` about itself — its verdict IS its
+completion — so every reviewer spawned per iron rule 3 stayed in the "still
+working" set until someone hand-ran `close-spawn` (measured: six-day-old
+ghosts in a session-start probe). A `review` now closes its reviewer's
+spawn, FIFO like a report, but only a spawn whose role is `reviewer`: the
+review's `by` is a free string, and the first review round of this very
+release proved a name collision could otherwise mark a working implementer as
+reported with a verdict it never earned. `append` also issues a decision id
+for an explicit `"id":""` now — a conductor recovering from `next-id`'s
+usage error wrote three permanently blank ledger ids, with nothing objecting.
+
+### A gate that blocks reading its own subject
+
+The hooks-path rule fired on ANY token containing the config key, so the
+read-only query run mid-incident — to find out WHICH hook had just refused a
+push — was itself refused. The same rule, one layer up, then refused the very
+commit that fixed it, because the commit MESSAGE quoted the key. Only override
+forms deny now, and the review of this release found and closed the bypass the
+first narrowing opened: git stores a dash-prefixed value verbatim, so
+`-evildir` was a value, not a flag. The code-review skill also gained the
+"trace at least one test through the real producer" clause, paid for by a
+three-state flag collapse that survived two full review rounds behind
+hand-built fixtures.
+
 ## 0.1.6 — 2026-08-06
 
 ### A browser pass must follow the value to what got STORED

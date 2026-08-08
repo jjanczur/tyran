@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.1.8 — 2026-08-08
+
+### The secrets gate scanned everything except what the command published
+
+A publishing `gh` command recorded its push with no remote and no refspecs,
+so the payload estimate fell back to `--all --not --remotes=<target>` —
+every unpushed commit on every local branch, none of which `gh pr create`
+publishes. In a checkout with many parallel worktrees that range is
+permanently over the 4 MiB ceiling (field-measured five times on one
+install, latest: 308 objects / 5.4 MB scanned for a command publishing
+196 KB), so PR creation was simply unavailable and agents fell back to
+manual gitleaks + REST publishes outside the gate. `gh pr create` now
+resolves its head positionally and hands it to `pushRange` as the refspec;
+everything not positively readable — quoted spans, expansion-bearing
+values, flag clusters, a bare `--head` — keeps the wide range, and a union
+with an explicit `--all` never narrows. (#36)
+
+### A journal entry describing a filename is not a command publishing it
+
+`journal.mjs append` carries its payload as `--data '{...}'` — the same
+prose shape as `-m`, but missing from `MESSAGE_FLAGS`, so a ledger entry
+merely naming a dotenv-shaped path was refused as if it published the
+file. `--data` is now exempted as prose in both the flag list and
+`stripMessageArguments`; a credential-shaped path OUTSIDE the quoted blob
+still refuses. Known residuals (apostrophe `sq()` chains and ANSI-C
+`$'…'` payloads still unstripped) are documented in the PR for a
+follow-up. (#37)
+
+### Rule 7 binds the conductor too
+
+The parallelism discipline read as a rule about spawned agents, leaving
+the conductor's own commits in a shared checkout implicitly exempt —
+measured cost: three commits on another window's branch and an `--amend`
+that welded two windows' work together. A new first bullet under rule 7
+makes the worktree the rule from the conductor's FIRST commit, with the
+S/M triage entries cross-referencing it. (#38)
+
 ## 0.1.7 — 2026-08-07
 
 ### The lease protocol nobody could follow

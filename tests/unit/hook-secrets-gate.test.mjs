@@ -1283,6 +1283,119 @@ test('BL-3: a refspec source with `~` NARROWS the range instead of widening it',
   assert.equal(isLiteralPath('HEAD~130'), false, 'the path rule is deliberately unchanged');
 });
 
+test('BL-3: `gh pr create` is sized over its own head, never over every local branch', () => {
+  // A `gh pr create` records scanPush with no remote and no refspecs, so
+  // `pushRange` fell back to `--all --not --remotes=<target>` — every
+  // unpushed commit on EVERY local branch, which has nothing to do with the
+  // branch the PR is about. Measured in a checkout carrying ~10 branches for
+  // parallel worktrees: 310 objects / 4,550,272 bytes for that fallback
+  // against 97 objects / ~105 KB for the PR's own branch, i.e. a permanent
+  // over-ceiling refusal for as long as any sibling worktree held unpushed
+  // work — and `git fetch`, the remedy that heals a stale-ref refusal on a
+  // real push, cannot change what OTHER branches hold.
+  //
+  // KILLS: reverting the ghPublishes branch to `note(dir, { scanPush: true })`.
+  assert.deepEqual(planCommand('gh pr create --fill', '/repo').targets[0].pushRefs, ['HEAD']);
+  assert.deepEqual(planCommand('gh pr create --title x --head feat/a', '/repo').targets[0].pushRefs, ['feat/a']);
+  assert.deepEqual(planCommand('gh pr create --head=feat/a --base main', '/repo').targets[0].pushRefs, ['feat/a']);
+  assert.deepEqual(planCommand('gh pr create -H feat/a --fill', '/repo').targets[0].pushRefs, ['feat/a']);
+  // pflag's ATTACHED shorthand forms, which gh accepts: review walked the
+  // first draft with them — an unrecognised head form defaulted to a
+  // NARROWING instead of the wide range, so the gate scanned the wrong
+  // branch while the command published another.
+  assert.deepEqual(planCommand('gh pr create -Hfeat/a --fill', '/repo').targets[0].pushRefs, ['feat/a']);
+  assert.deepEqual(planCommand('gh pr create -H=feat/a --fill', '/repo').targets[0].pushRefs, ['feat/a']);
+  // A cross-fork head is `owner:branch`; the ref is the branch part.
+  assert.deepEqual(planCommand('gh pr create --head owner:feat/a', '/repo').targets[0].pushRefs, ['feat/a']);
+  // A head the shell would rewrite cannot narrow: the wide fallback stands.
+  assert.equal(planCommand('gh pr create --head $B', '/repo').targets[0].pushRefs, undefined);
+  // Unreadable head SPELLINGS keep the wide range too — never a guess: a
+  // bare --head with no value, and an H buried in a short cluster (is
+  // `-dH x` a head? is `-bHello` a body value that starts with H? not
+  // decidable without gh's own flag table).
+  assert.equal(planCommand('gh pr create --fill --head', '/repo').targets[0].pushRefs, undefined);
+  assert.equal(planCommand('gh pr create -dH feat/a', '/repo').targets[0].pushRefs, undefined);
+  assert.equal(planCommand('gh pr create -bHello --fill', '/repo').targets[0].pushRefs, undefined);
+  // QUOTED spans are prose, not flags: a --body that MENTIONS --head must
+  // not steer the range, and `pr` inside a --notes string must not turn a
+  // release into a PR (both review findings against the first draft).
+  assert.deepEqual(
+    planCommand('gh pr create --fill --body "do not use --head feat/x here"', '/repo').targets[0].pushRefs,
+    ['HEAD'],
+  );
+  assert.equal(
+    planCommand('gh release create v1 --notes "closes pr 5"', '/repo').targets[0].pushRefs,
+    undefined,
+  );
+  // `gh release create` / `gh gist create` keep the wide range: they upload
+  // from disk and publish no branch, so there is no head to narrow to.
+  assert.equal(planCommand('gh release create v1', '/repo').targets[0].pushRefs, undefined);
+  // A push and a `gh pr create` on one line: NON-EMPTY refs are unioned...
+  assert.deepEqual(
+    planCommand('git push origin feat/b && gh pr create --fill', '/repo').targets[0].pushRefs,
+    ['feat/b', 'HEAD'],
+  );
+  // ...and `pushRefs: []` is pushRange's own encoding of the WIDE range
+  // (--all), which a union must never upgrade to a narrow one. Review's
+  // highest finding against the first draft: both commands below scanned
+  // HEAD only, un-scanning what `git push --all` / an unreadable refspec
+  // had just asked to publish.
+  assert.deepEqual(
+    planCommand('git push --all origin && gh pr create --fill', '/repo').targets[0].pushRefs,
+    [],
+  );
+  assert.deepEqual(
+    planCommand('git push origin $BRANCH && gh pr create --fill', '/repo').targets[0].pushRefs,
+    [],
+  );
+});
+
+test(
+  'BL-3: a `gh pr create` for a pushed branch is not refused over a SIBLING branch’s payload',
+  { skip: NEEDS_SCANNER },
+  () => {
+    // End to end, the shape the field kept hitting: the PR's branch is fully
+    // pushed (its every object already went THROUGH this gate), while a
+    // sibling branch — another worktree's story, parked locally — holds an
+    // unpushed secret. The PR publishes nothing of that sibling, so the gate
+    // must pass; under the `--all` fallback it refused, permanently, and the
+    // only route left was the manual-scan fallback outside the gate.
+    const dir = repo();
+    writeFileSync(join(dir, 'a.txt'), 'ordinary content\n');
+    git(dir, 'add', 'a.txt');
+    git(dir, 'commit', '-qm', 'base');
+    git(dir, 'branch', '-m', 'work');
+    const bare = tempDir('tyran-gate-bare-gh-');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    git(dir, 'remote', 'add', 'origin', bare);
+    git(dir, 'push', '-q', 'origin', 'work');
+    // The sibling: unpushed, and carrying the one thing the scanner always finds.
+    git(dir, 'checkout', '-qb', 'other');
+    writeFileSync(join(dir, 'k.pem'), fakeSecret());
+    git(dir, 'add', 'k.pem');
+    git(dir, 'commit', '-qm', 'parked');
+    git(dir, 'checkout', '-q', 'work');
+    assert.equal(verdictOf(runGateScript('gh pr create --fill', dir)), 'pass');
+    // And the head actually named still gets its own range scanned: the same
+    // command pointed AT the sibling branch is refused for the secret —
+    // through every spelling gh accepts, attached shorthand included.
+    for (const command of [
+      'gh pr create --head other --fill',
+      'gh pr create -Hother --fill',
+      'gh pr create -H=other --fill',
+    ]) {
+      const denied = runGateScript(command, dir);
+      assert.equal(verdictOf(denied), 'deny', command);
+      assert.match(reasonOf(denied), /private-key/, command);
+    }
+    // A `git push` that asked for the WIDE range in the same line keeps it:
+    // --all publishes the sibling too, so the secret is still caught.
+    const wide = runGateScript('git push --all origin && gh pr create --fill', dir);
+    assert.equal(verdictOf(wide), 'deny');
+    assert.match(reasonOf(wide), /private-key/);
+  },
+);
+
 test(
   'BL-3: an oversized push is refused for its SIZE, with the remedy that narrows it',
   () => {

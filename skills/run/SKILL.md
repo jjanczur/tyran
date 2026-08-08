@@ -119,9 +119,11 @@ open one.
 
 - **S (minutes):** small change, no architectural risk. Do it yourself,
   verify by running it, validate the repo, report in three sentences.
+  "Yourself" does not suspend rule 7: when the checkout may be shared with
+  other sessions, your own commits go through a worktree too.
 - **M (hours):** one feature or fix. Short interview if needed, mini-plan,
   implement (yourself or one implementer), review by a SEPARATE agent, tests,
-  report.
+  report. The same rule-7 note as S applies to work you do by hand.
 - **L (days):** multi-story initiative. Interview, plan to acceptance (gate),
   decompose into epics and stories, team sized to the hardware ceiling, live
   ledger, sequential merge.
@@ -253,6 +255,24 @@ open one.
    sets only; a git worktree per agent; shared zones (per the manifest in
    `PLAN.md`) are APPEND-ONLY and serialized; a branch per story; rebase
    before merge.
+   - **This rule binds YOUR OWN commits, not only the agents you spawn.**
+     "S/M-sized, no subagents" is not a license to commit directly in the
+     main checkout: "solo" describes your sub-agent count, never how many
+     OTHER conductor windows share that checkout tonight, and the main
+     checkout is a shared zone whether or not you delegated anything.
+     Measured: a parallel window SWITCHED the shared checkout's branch
+     mid-initiative, three conductor commits landed on that window's
+     branch, and a later `commit --amend` (a review fix-round) welded the
+     two windows' work into one commit — indistinguishable from normal
+     history without diffing parent SHAs, recovered only via reflog plus a
+     six-session coordination round. So the RULE is a worktree of your
+     own, under a lease, from your FIRST commit — exactly what you would
+     require of an implementer, not only at the final publish. The
+     fallback, for a commit you nonetheless make directly in the main
+     checkout — confirm `git branch --show-current` still names the branch
+     you started on, immediately before committing — only NARROWS the
+     window: another session can still switch branches between the check
+     and the commit. It is a mitigation, never the substitute.
    - **A fresh worktree has no dependencies, so every validation command in
      the config fails at once.** `npm run lint`, the type check and the test
      suite all exit 127 in a new worktree, and the evidence contract then

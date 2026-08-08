@@ -662,7 +662,100 @@ export function planCommand(command, startDir) {
       triggers.push('a git push (every commit not already on the target remote is scanned)');
     }
     if (ghPublishes) {
-      note(dir, { scanPush: true });
+      // `gh pr create` publishes ONE branch — the PR's head — and adds no git
+      // objects of its own: the head either was already pushed THROUGH this
+      // gate, or gh pushes it as part of creating the PR. Recording the push
+      // with no refs made `pushRange` fall back to `--all --not
+      // --remotes=<target>`, i.e. every unpushed commit on EVERY local
+      // branch. Measured in a checkout carrying ~10 branches for parallel
+      // worktrees: 310 objects / 4,550,272 bytes for that fallback against
+      // 97 objects / ~105 KB for the branch the PR was actually about — a
+      // permanent over-ceiling refusal for as long as ANY sibling worktree
+      // held unpushed work, about bytes the command would never publish. A
+      // `git fetch` cannot heal it and the refusal's own remedy ("push a
+      // smaller range") does not apply to a command that pushes nothing,
+      // which is how a gate teaches people to route around it (ADR-19).
+      //
+      // So the head ref is resolved here and handed to `pushRange`, which
+      // narrows the scan to what a push of that head would publish and
+      // already degrades to the wide range when the ref does not resolve.
+      // Review of the first draft found three ways it narrowed to the WRONG
+      // range, so every rule below is the same inversion this file keeps
+      // arriving at: enumerate what is positively readable, keep the wide
+      // range for everything else.
+      //
+      //  - The subcommand is read POSITIONALLY (`gh pr create ...`), never
+      //    from the token bag: a `--notes "closes pr 5"` on a release must
+      //    not turn it into a PR.
+      //  - QUOTED spans are stripped before flags are read — a `--title` or
+      //    `--body` argument is DATA, the same doctrine as
+      //    `stripHeredocBodies`, and the draft read a `--head` out of a
+      //    body string. The cost: a QUOTED head value (`--head "x"`) reads
+      //    as unparseable and keeps the wide range. Failing to narrow is
+      //    safe.
+      //  - Readable head spellings are enumerated: `--head x`, `--head=x`,
+      //    `-H x`, `-Hx`, `-H=x`. A short CLUSTER carrying `H` behind other
+      //    letters (`-dH x`; `-bHello`, where H merely starts a body value)
+      //    cannot be read without gh's own flag table, so it keeps the wide
+      //    range instead of defaulting to a guess.
+      //  - `pushRefs: []` is `pushRange`'s own encoding of the WIDE range
+      //    (`--all`): when an earlier `git push --all` or an
+      //    unreadable-refspec push in this same line already asked for it,
+      //    the union must not upgrade wide to narrow. Non-empty refs are
+      //    unioned, never replaced.
+      let prHead = null;
+      const stripped = tokensOf(segment.replace(/"[^"]*"|'[^']*'/g, ' '));
+      const g = stripped.findIndex(isGhProgram);
+      if (g !== -1 && stripped[g + 1] === 'pr' && stripped[g + 2] === 'create') {
+        prHead = 'HEAD';
+        let unreadable = false;
+        for (let k = g + 3; k < stripped.length; k++) {
+          const token = stripped[k];
+          let value = null;
+          if (token === '--head' || token === '-H') {
+            const next = stripped[k + 1];
+            if (next === undefined || next.startsWith('-')) {
+              unreadable = true;
+              continue;
+            }
+            value = next;
+            k++;
+          } else if (token.startsWith('--head=')) {
+            value = token.slice('--head='.length);
+          } else if (token.startsWith('-H') && token.length > 2) {
+            // pflag's attached shorthand: `-Hother`, `-H=other`. H first in
+            // the cluster is unambiguously the head flag.
+            value = token[2] === '=' ? token.slice(3) : token.slice(2);
+          } else if (/^-[A-Za-z]+H/.test(token)) {
+            unreadable = true;
+            continue;
+          } else {
+            continue;
+          }
+          if (value === '') {
+            unreadable = true;
+            continue;
+          }
+          // A cross-fork head is `owner:branch`; the ref is the branch part.
+          const ref = value.includes(':') ? value.slice(value.lastIndexOf(':') + 1) : value;
+          // Same rule as a push refspec: a head the shell would rewrite
+          // cannot narrow the range.
+          if (isLiteralRef(ref)) prHead = ref;
+          else unreadable = true;
+        }
+        if (unreadable) prHead = null;
+      }
+      const existing = targets.get(dir);
+      const priorWide =
+        existing !== undefined &&
+        existing.scanPush === true &&
+        !(Array.isArray(existing.pushRefs) && existing.pushRefs.length > 0);
+      if (prHead !== null && !priorWide) {
+        const prior = existing?.pushRefs ?? [];
+        note(dir, { scanPush: true, pushRefs: [...new Set([...prior, prHead])] });
+      } else {
+        note(dir, { scanPush: true });
+      }
       triggers.push('a gh command that publishes');
       if (words.has('release') || words.has('gist')) {
         // These upload files from DISK that may be in no commit at all —

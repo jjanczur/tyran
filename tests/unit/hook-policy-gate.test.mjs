@@ -1379,6 +1379,30 @@ test('B2: an ordinary command is not slowed down or refused by the path rules', 
   }
 });
 
+test('B2: a journal `--data` argument is prose, exactly like a commit message', async () => {
+  // `journal.mjs append` takes its event payload as `--data '{...}'` — a JSON
+  // blob of prose. Without `--data` in MESSAGE_FLAGS, a journal entry merely
+  // DESCRIBING a dotenv-shaped filename was indistinguishable to this gate
+  // from a command publishing one, and the refusal reproduced across two
+  // initiatives on one install: the ledger of record could not say "applied
+  // the migration against the test env file" by that file's name. A journal
+  // that must talk around facts is failing at its one job.
+  //
+  // KILLS: removing `--data` from MESSAGE_FLAGS / stripMessageArguments.
+  const dir = deployRepo();
+  for (const command of [
+    `node scripts/journal.mjs append .tyran/state/x/journal.jsonl decision x --actor conductor --data '{"text":"applied migration 160 against .env.test, TEST first, then PROD"}'`,
+    `node scripts/journal.mjs append j.jsonl decision x --data='{"text":"anchored grep on .env.local returned 1 line"}'`,
+  ]) {
+    assert.equal(await ask(bashInput(command, dir), dir), PASS, command);
+  }
+  // The flag exempts its ARGUMENT, never the rest of the command line: a
+  // credential-shaped path outside the quoted blob still refuses.
+  const got = await ask(bashInput(`cat .env --data 'x'`, dir), dir);
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /credential-shaped/);
+});
+
 test('B3: the refusal names the protected glob that ACTUALLY matched', async () => {
   // THE REPAIRING MUTANT LIVES HERE, and the reason is the finding rather than
   // the bug. Round two probed `classifyPath` with a one-rule policy to ask

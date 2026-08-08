@@ -275,11 +275,17 @@ refused. Raising it into the validator's list would close that and would change
 what every policy file is allowed to say — a separate decision, deliberately
 not taken here.
 
-The argument of `-m` / `--message` / `-F` / `--file` / `-t` / `--template` is
-removed from the text first, so `git commit -m "fix .env loading"` is not a
-refusal. That is the same move `stripHeredocBodies` makes in the shared lexer,
-for the same measured reason: a commit message is data, and lexing data as a
-program was the largest single source of false alarms there.
+The argument of `-m` / `--message` / `-F` / `--file` / `-t` / `--template` /
+`--data` is removed from the text first, so `git commit -m "fix .env loading"`
+is not a refusal — and neither is a `journal.mjs append ... --data '{...}'`
+whose prose merely *mentions* a dotenv-shaped filename. That last one was
+measured twice on one install (a journal entry describing a migration run
+against a test env file was refused as if it published the file), and its
+cost was the worst kind: conductors stopped writing certain filenames into
+their own ledger, which is the journal failing at its one job. This is the
+same move `stripHeredocBodies` makes in the shared lexer, for the same
+measured reason: a commit message is data, and lexing data as a program was
+the largest single source of false alarms there.
 
 ### The declared floor for the shell rules
 

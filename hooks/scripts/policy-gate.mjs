@@ -1250,8 +1250,17 @@ function escapeRoute(cls, unsupervised) {
  * direction of its incompleteness is a FALSE REFUSAL, never a silent pass: a
  * message flag this list misses produces an over-strict gate, not a hole.
  * That is the only shape of enumeration this file allows.
+ *
+ * `--data` is here for the same reason as `-m`, and the cost of its absence
+ * was measured twice on one install: `journal.mjs append ... --data '{...}'`
+ * carries a JSON blob of PROSE — a decision's text, a report's summary — and
+ * a journal entry merely DESCRIBING a dotenv-shaped filename ("applied the
+ * migration against .env.test") was indistinguishable to this gate from a
+ * command PUBLISHING that file. The refusal pushed conductors into a
+ * convention of never writing certain filenames into their own ledger, which
+ * is the journal failing at its one job of recording what happened.
  */
-const MESSAGE_FLAGS = Object.freeze(['-m', '--message', '-F', '--file', '-t', '--template', '-am', '-ma']);
+const MESSAGE_FLAGS = Object.freeze(['-m', '--message', '-F', '--file', '-t', '--template', '-am', '-ma', '--data']);
 
 /**
  * Remove the ARGUMENT of a message-bearing option before the tokens are taken.
@@ -1271,7 +1280,7 @@ const MESSAGE_FLAGS = Object.freeze(['-m', '--message', '-F', '--file', '-t', '-
  */
 export function stripMessageArguments(command) {
   return String(command).replace(
-    /(^|\s)(-m|--message|-F|--file|-t|--template|-am|-ma)(=|\s+)("[^"]*"|'[^']*'|\S+)/g,
+    /(^|\s)(-m|--message|-F|--file|-t|--template|-am|-ma|--data)(=|\s+)("[^"]*"|'[^']*'|\S+)/g,
     '$1',
   );
 }

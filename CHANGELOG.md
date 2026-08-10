@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.1.9 — 2026-08-10
+
+### `.tyran/` was tracked, and an entire initiative inside it was not
+
+`untrackedTyranDir` is all-or-nothing: one tracked file under `.tyran/` and
+the repo reports healthy. Measured on a real install whose `.tyran/` had been
+tracked for weeks — one initiative directory of six files, including its plan
+and the gate event recording two production database migrations, had NEVER
+been committed, and a second was 33 events behind its committed copy. Both
+passed. `journal.mjs append` writes the working tree and nothing else, so an
+initiative nobody committed is one `git clean -fd` from having never happened,
+and iron rule 1 asks for exactly the commit that nothing was measuring.
+
+`doctor --state` now checks each initiative separately. `initiative-untracked`
+is a **warning** — git has never seen this ledger, wrong at any moment.
+`initiative-uncommitted` is **info** and never fails the check, because that
+is what an initiative in flight looks like ten seconds after any append; it
+earns its keep at a merge boundary. Under a wholly untracked `.tyran/` the
+directory-level finding still reports alone, rather than repeating itself once
+per initiative.
+
+### Four things the conductor skill was letting agents rediscover
+
+- **Interactive shell aliases hang an agent until the tool timeout.** An
+  agent's shell starts from the user's profile, so `alias cp='cp -i'` asks a
+  question nobody answers. Fired three times in one session, in three
+  different agents, and none recognised it first time — the symptom is a
+  timeout, which points at the machine instead of the alias. STEP 0 now probes
+  for it.
+- **A `Test timed out` measured under concurrency is not evidence.** The
+  hardware ceiling bounds agent count, not concurrent heavy phases, so an
+  agent can respect it and still report a red the machine caused. Five such
+  failures in one session, all gone on a serial re-run. Re-run serially before
+  reporting.
+- **An agent that dies on a terminal API error is resumed, not respawned** —
+  its context, its corrected premises and its uncommitted diff survive.
+- **Gitignored env files are missing from a fresh worktree too, and fail
+  quieter than dependencies**: 127 is loud, a skipped gated spec is not, so
+  the worktree reports a cleaner baseline than the repo has.
+
 ## 0.1.8 — 2026-08-08
 
 ### The secrets gate scanned everything except what the command published

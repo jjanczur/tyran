@@ -36,7 +36,7 @@
  * dead writes no state to be inconsistent with.
  */
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHooks, DEFAULT_PLUGIN_ROOT } from './hooks-check.mjs';
 import { readJournal, validateJournal, pairSpawns, tail } from './journal.mjs';
@@ -169,6 +169,9 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'projection-blocked': 'warning',
     'projection-failed': 'error',
     'projection-unreadable': 'error',
+    // the ledger in git
+    'initiative-untracked': 'warning',
+    'initiative-uncommitted': 'info',
     // configuration
     'config-missing': 'info',
     'config-invalid': 'error',
@@ -1009,6 +1012,42 @@ export function untrackedTyranDir(repoRoot, run) {
   return run(['ls-files', '--', '.tyran']).trim() === '';
 }
 
+/**
+ * Is ONE initiative's ledger in git, and is what git has current?
+ *
+ * `untrackedTyranDir` above is all-or-nothing: any tracked file under
+ * `.tyran/` and it reports healthy. That is the wrong granularity for the
+ * thing iron rule 1 actually asks for. Measured on a real install: `.tyran/`
+ * had been tracked for weeks, and inside it one initiative's directory — six
+ * files, including the plan and the gate event recording two production
+ * database migrations — had NEVER been committed, while a second was 33
+ * events behind its committed copy. The whole-directory check passed on both.
+ * `journal.mjs append` writes the working tree and nothing else, so an
+ * initiative nobody committed is one `git clean -fd` from having never
+ * happened.
+ *
+ * The two states are deliberately different findings, because only one of
+ * them is a defect:
+ *
+ *   - `untracked` — git has never seen this ledger. Wrong at any moment.
+ *   - `uncommitted` — tracked, with local changes. That is what an initiative
+ *     in flight looks like ten seconds after any append, so it reports as
+ *     `info` and never fails the check. It earns its place at the end: rule 1
+ *     says commit the ledger at every merge, and this is the one thing that
+ *     says out loud whether you did.
+ *
+ * `status --porcelain` counts untracked children too, so a half-committed
+ * directory reads as `uncommitted` rather than passing on its tracked half.
+ *
+ * Returns null when git cannot answer — same reasoning as above: "this is not
+ * a git repository" is not evidence that a file is untracked.
+ */
+export function initiativeGitState(run, relDir) {
+  if (run(['rev-parse', '--is-inside-work-tree']).trim() !== 'true') return null;
+  if (run(['ls-files', '--', relDir]).trim() === '') return 'untracked';
+  return run(['status', '--porcelain', '--', relDir]).trim() === '' ? 'committed' : 'uncommitted';
+}
+
 export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAULT_STALE_HOURS, run = null } = {}) {
   const root = resolve(dir);
   if (!existsSync(root)) {
@@ -1038,7 +1077,8 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     checked.push('config.yaml: absent');
   }
 
-  const untracked = untrackedTyranDir(repoRoot, run ?? gitRunner(repoRoot));
+  const git = run ?? gitRunner(repoRoot);
+  const untracked = untrackedTyranDir(repoRoot, git);
   if (untracked === true) {
     findings.push(
       finding(
@@ -1103,6 +1143,35 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
       }
       const result = checkInitiative(stateDir, name, { now, staleHours });
       findings.push(...result.findings);
+      // Only when `.tyran/` as a whole IS tracked. Under a wholly untracked
+      // `.tyran/` every initiative would repeat the directory-level finding
+      // above, and a check that says the same thing N+1 times is a check
+      // people learn to scroll past.
+      if (untracked === false) {
+        const state = initiativeGitState(git, relative(repoRoot, path));
+        if (state === 'untracked') {
+          findings.push(
+            finding(
+              'initiative-untracked',
+              show(path),
+              'this initiative’s ledger is not in git — `journal.mjs append` writes the working tree ' +
+                'and nothing else, so an initiative nobody committed is one `git clean -fd` from ' +
+                'having never happened',
+              `git add ${sq(relative(repoRoot, path))} && git commit -m ${sq(`chore(tyran): record the ${name} ledger`)}`,
+            ),
+          );
+        } else if (state === 'uncommitted') {
+          findings.push(
+            finding(
+              'initiative-uncommitted',
+              show(path),
+              'ledger has uncommitted changes — ordinary mid-initiative, a gap at a merge boundary ' +
+                '(iron rule 1: stage and commit the ledger at every merge, not once at the end)',
+              `git add ${sq(relative(repoRoot, path))} && git commit -m ${sq(`chore(tyran): ${name} ledger`)}`,
+            ),
+          );
+        }
+      }
       initiatives.push(`${show(name)} (${result.events} event(s))`);
     }
   }

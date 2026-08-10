@@ -70,6 +70,13 @@ English regardless.
      server start vanish on restart, so restarts stop being deterministic;
    - probe the toolchain with `command -v` for every tool the plan names, and
      confirm your own file-writing path works before you rely on it;
+   - **probe for interactive aliases** — `alias cp mv rm 2>/dev/null` — because
+     an agent's shell is started from the user's profile, so `alias cp='cp -i'`
+     turns a copy into a question with nobody to answer it and the tool call
+     burns its whole timeout. Put `\cp` / `command cp` in the handoff when one
+     is set. Measured: three times in one session, in three different agents,
+     and none of them recognised it the first time — the symptom is a timeout,
+     which points at the machine rather than at the alias;
    - **dry-run every automaton** for one no-op iteration before you trust it
      with unattended work. Trust dialogs and missing dependencies surface
      then, not at 3am.
@@ -186,6 +193,18 @@ open one.
    premises about DATA by measuring the real thing read-only: a field being in
    the schema is not the same as the field being in the data. Correct a wrong
    premise and report the correction EXPLICITLY"; (7) when to escalate.
+   - **A `Test timed out` measured while another heavy phase was running is
+     not evidence of a defect.** Re-run it serially, report the serial result,
+     and say the first run was concurrent. The hardware ceiling in STEP 0
+     bounds AGENT count, not concurrent heavy phases, so an agent can respect
+     it and still produce a red that only the machine caused — measured twice
+     in one session, once by the conductor and once by a reviewer, five
+     failures between them, all gone on a serial re-run.
+   - **An agent that dies on a terminal API error is RESUMED, not respawned.**
+     Its context, its corrected premises and its uncommitted diff all survive
+     the death; a fresh agent on the same handoff repeats work that is already
+     on disk. Two agents died mid-story in one session here and both came back
+     with their work intact.
 3. **Quality gates.** Review is done by an agent who is NOT the author — when
    that is impossible (a limit, an outage), you spot-check AND the ledger
    carries an explicit **"NO INDEPENDENT REVIEW"** stamp; staying quiet about
@@ -282,6 +301,11 @@ open one.
      manifest and lockfile are already a SHARED ZONE nobody may edit, so the
      dependencies are guaranteed identical, and a per-worktree install is how
      a lockfile drifts. Say in the handoff which directory you linked.
+     **Gitignored environment files are missing for the same reason, and their
+     absence is QUIETER**: a missing dependency exits 127, a missing `.env`
+     makes gated specs SKIP, so the worktree reports a cleaner baseline than
+     the repo really has and the difference reads as good news. Link those
+     too, and name them in the handoff.
    - **`.tyran/state/**` lives in the main checkout only.** An agent told to
      append to `NOTES.md` from inside a worktree must use the absolute
      main-repo path, or it writes into a copy nobody reads.

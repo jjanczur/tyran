@@ -718,6 +718,83 @@ test('outside a git work tree the question has NO answer, and none is invented',
   assert.deepEqual(byCode(runStateChecks({ dir, run: fakeGit({}) }), 'tyran-dir-untracked'), []);
 });
 
+// --- the quieter one -----------------------------------------------------
+//
+// `.tyran/` tracked as a whole says nothing about ONE initiative inside it.
+// Measured: a `.tyran/` tracked for weeks with an initiative directory that
+// had never been committed — plan, notes and a gate event recording two
+// production migrations, all invisible to git while the directory-level
+// check reported healthy.
+
+const TRACKED_TYRAN = { [IN_TREE]: 'true\n', 'ls-files -- .tyran': '.tyran/config.yaml\n' };
+
+test('an initiative whose ledger git has never seen is a warning', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const run = fakeGit({ ...TRACKED_TYRAN, 'ls-files -- .tyran/state/demo': '' });
+  const found = byCode(runStateChecks({ dir, run }), 'initiative-untracked');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].fix, /git add/);
+});
+
+test('a tracked, clean ledger produces no finding of either kind', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const run = fakeGit({
+    ...TRACKED_TYRAN,
+    'ls-files -- .tyran/state/demo': '.tyran/state/demo/journal.jsonl\n',
+    'status --porcelain -- .tyran/state/demo': '',
+  });
+  const result = runStateChecks({ dir, run });
+  assert.deepEqual(byCode(result, 'initiative-untracked'), []);
+  assert.deepEqual(byCode(result, 'initiative-uncommitted'), []);
+});
+
+test('uncommitted ledger changes are INFO — that is what an initiative in flight looks like', () => {
+  // `info` never fails the check, deliberately: every `journal.mjs append`
+  // produces this state within seconds, and a warning that is always on is a
+  // warning nobody reads. It earns its keep at a merge boundary, where rule 1
+  // says the ledger should already be committed.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const run = fakeGit({
+    ...TRACKED_TYRAN,
+    'ls-files -- .tyran/state/demo': '.tyran/state/demo/journal.jsonl\n',
+    'status --porcelain -- .tyran/state/demo': ' M .tyran/state/demo/journal.jsonl\n',
+  });
+  const found = byCode(runStateChecks({ dir, run }), 'initiative-uncommitted');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'info');
+});
+
+test('outside a git work tree neither ledger question is answered', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const result = runStateChecks({ dir, run: fakeGit({}) });
+  assert.deepEqual(byCode(result, 'initiative-untracked'), []);
+  assert.deepEqual(byCode(result, 'initiative-uncommitted'), []);
+});
+
+test('a wholly untracked .tyran/ says so ONCE, not once per initiative', () => {
+  // Without the `untracked === false` guard this repo reports the same defect
+  // N+1 times — the directory finding plus one per initiative — and the
+  // per-initiative advice (`git add .tyran/state/x`) would be worse advice
+  // than the directory one it repeats.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir, 'one'), '');
+  writeFileSync(journalPathFor(dir, 'two'), '');
+  const run = fakeGit({ [IN_TREE]: 'true\n', 'ls-files -- .tyran': '' });
+  const result = runStateChecks({ dir, run });
+  assert.equal(byCode(result, 'tyran-dir-untracked').length, 1);
+  assert.deepEqual(byCode(result, 'initiative-untracked'), []);
+});
+
 test('a repo with no autonomy policy is told its writes are all refused', () => {
   // `error`, not `info`. The policy gate fails closed on this exact state, so
   // a `.tyran/` with no policy under it is a repository where every tool call
@@ -1179,6 +1256,8 @@ const EXPECTED_SEVERITY = {
   'policy-kernel-downgrade': 'error',
   'policy-rule-dead': 'warning',
   'policy-rule-overruled': 'warning',
+  'initiative-untracked': 'warning',
+  'initiative-uncommitted': 'info',
   'no-state-dir': 'info',
   'state-not-a-directory': 'error',
   'state-unreadable': 'error',

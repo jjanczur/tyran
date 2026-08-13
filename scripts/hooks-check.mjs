@@ -650,7 +650,7 @@ export function shebangInterpreter(firstLine) {
  * also be reported as "no shebang", which would bury the finding that
  * actually says what to do.
  */
-function checkHookFile(path, where, { env }) {
+function checkHookFile(path, where, { env, dispatcher = null }) {
   const findings = [];
   let stat;
   try {
@@ -688,6 +688,34 @@ function checkHookFile(path, where, { env }) {
   // and is the same on every machine. Raised in review as a CI hazard that
   // would have disarmed the mutant for this guard; measuring the bits removes
   // the dependency instead of hoping about the runner.
+  // A command of the form `node "<script>"` dispatches through the named
+  // interpreter, so neither the mode bits nor a shebang decide whether it can
+  // run — the file only has to exist and be readable, and `node` itself has
+  // to resolve. Registering this way is the sanctioned route for a hook file
+  // an agent authored: the policy gate refuses agent-run chmod on hook paths,
+  // deliberately, so the exec bit cannot be set from inside a session.
+  if (dispatcher !== null) {
+    if (!interpreterExists(dispatcher, env)) {
+      findings.push(
+        finding(
+          'hook-interpreter-absent',
+          where,
+          `the command dispatches through "${q(dispatcher)}", which is not on PATH and is not an ` +
+            'existing absolute path. The spawn fails in the non-blocking way, so the action proceeds.',
+          `command -v ${q(dispatcher)}`,
+        ),
+      );
+    }
+    try {
+      readFileSync(path, 'utf8');
+    } catch (err) {
+      findings.push(
+        finding('hook-file-unreadable', where, `cannot read the hook file (${q(err.code ?? err.message)})`),
+      );
+    }
+    return findings;
+  }
+
   let executable = (stat.mode & 0o111) !== 0;
   if (executable) {
     try {
@@ -1265,20 +1293,29 @@ export function checkHooks({ root = DEFAULT_PLUGIN_ROOT, env = process.env } = {
           );
           return;
         }
-        const program = substitute(lexed.argv[0] ?? '', vars);
+        // `node "<script>"` dispatches through the interpreter: the SCRIPT is
+        // the file to check, and mode bits/shebang stop being requirements
+        // (checkHookFile handles that under `dispatcher`).
+        let programWord = lexed.argv[0] ?? '';
+        let dispatcher = null;
+        if (substitute(programWord, vars) === 'node' && typeof lexed.argv[1] === 'string') {
+          dispatcher = 'node';
+          programWord = lexed.argv[1];
+        }
+        const program = substitute(programWord, vars);
         if (program === '' || /\$\{/.test(program)) {
           findings.push(
             finding(
               'hook-command-not-modellable',
               where,
-              `the command's program word "${q(lexed.argv[0] ?? '')}" still contains a variable this check ` +
+              `the command's program word "${q(programWord)}" still contains a variable this check ` +
                 'cannot resolve, so the file it names is unknown here.',
             ),
           );
           return;
         }
         const path = resolve(pluginRoot, program);
-        const fileFindings = checkHookFile(path, `${where} -> ${q(path)}`, { env });
+        const fileFindings = checkHookFile(path, `${where} -> ${q(path)}`, { env, dispatcher });
         findings.push(...fileFindings);
 
         // Only cross-check the declared event when the file was readable —

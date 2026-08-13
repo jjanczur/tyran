@@ -42,6 +42,16 @@
             "timeout": 8
           }
         ]
+      },
+      {
+        "matcher": ".+|^$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/usage-gate.mjs\"",
+            "timeout": 8
+          }
+        ]
       }
     ],
     "Stop": [

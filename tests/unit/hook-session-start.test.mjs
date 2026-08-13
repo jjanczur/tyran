@@ -282,24 +282,44 @@ test('checkHooks flags a manifest that re-declares the standard hooks.json (the 
   assert.ok(result.counts.error >= 1, 'a re-declared standard hooks file must be an error');
 });
 
-test('every registered hook command resolves to an executable file with a shebang', () => {
+/**
+ * A registered command is either the bare quoted script (spawned directly, so
+ * it needs the exec bit and a shebang) or `node "<script>"` — the sanctioned
+ * form for a hook file authored inside a session, where the policy gate
+ * (correctly) refuses agent-run chmod on hook paths. Dispatched scripts need
+ * only to exist and be readable; node does the running.
+ */
+function scriptPathOf(command) {
+  const dispatched = command.startsWith('node ');
+  const path = (dispatched ? command.slice('node '.length) : command)
+    .replaceAll('"', '')
+    .replace('${CLAUDE_PLUGIN_ROOT}', REPO_ROOT);
+  return { path, dispatched };
+}
+
+test('every registered hook command resolves to a runnable file', () => {
   const config = hooksConfig();
   let checked = 0;
+  let dispatchedCount = 0;
   for (const entries of Object.values(config.hooks)) {
     for (const entry of entries) {
       for (const hook of entry.hooks) {
         assert.equal(hook.type, 'command');
-        const path = hook.command
-          .replaceAll('"', '')
-          .replace('${CLAUDE_PLUGIN_ROOT}', REPO_ROOT);
-        const mode = statSync(path).mode;
-        assert.ok(mode & 0o111, `${path} is not executable; the platform would fail to spawn it`);
-        assert.match(readFileSync(path, 'utf8').split('\n')[0], /^#!/, `${path} has no shebang`);
+        const { path, dispatched } = scriptPathOf(hook.command);
+        if (dispatched) {
+          assert.ok(readFileSync(path, 'utf8').length > 0, `${path} is not readable`);
+          dispatchedCount++;
+        } else {
+          const mode = statSync(path).mode;
+          assert.ok(mode & 0o111, `${path} is not executable; the platform would fail to spawn it`);
+          assert.match(readFileSync(path, 'utf8').split('\n')[0], /^#!/, `${path} has no shebang`);
+        }
         checked++;
       }
     }
   }
   assert.ok(checked > 0, 'a registration test that checked nothing is not a test');
+  assert.ok(dispatchedCount >= 1, 'the usage gate registers node-dispatched; if that changed, update this pin');
 });
 
 test('the plugin-root placeholder is quoted, because the command runs through a shell', () => {
@@ -310,7 +330,7 @@ test('the plugin-root placeholder is quoted, because the command runs through a 
   for (const entries of Object.values(config.hooks)) {
     for (const entry of entries) {
       for (const hook of entry.hooks) {
-        assert.match(hook.command, /^"[^"]*\$\{CLAUDE_PLUGIN_ROOT\}[^"]*"$/, hook.command);
+        assert.match(hook.command, /^(node )?"[^"]*\$\{CLAUDE_PLUGIN_ROOT\}[^"]*"$/, hook.command);
       }
     }
   }
@@ -352,7 +372,7 @@ test("each hook's internal deadline is strictly shorter than its platform timeou
   for (const entries of Object.values(hooksConfig().hooks)) {
     for (const entry of entries) {
       for (const hook of entry.hooks) {
-        const path = hook.command.replaceAll('"', '').replace('${CLAUDE_PLUGIN_ROOT}', REPO_ROOT);
+        const { path } = scriptPathOf(hook.command);
         const module = await import(path);
         assert.equal(
           typeof module.DEADLINE_MS,

@@ -123,10 +123,11 @@ test('the same store and paths produce the same brief, byte for byte', () => {
 
 // ------------------------------------------------------------------ budget
 
-test('a budget cut always ends with an explicit omission line', () => {
+test('a budget cut always ends with an explicit omission line naming the budget', () => {
   const entries = Array.from({ length: 5 }, (_, i) => entry({ id: `K-${i + 1}` }));
   const brief = renderBrief(entries, 5, { budget: 150 });
-  assert.match(brief, /omitted \(budget 150\)/);
+  assert.match(brief, /omitted \(4 by the 150-codepoint budget\)/);
+  assert.match(brief, /raise --budget/);
   assert.match(brief, /1 of 5 entries/);
 });
 
@@ -136,12 +137,25 @@ test('the first entry is kept even when it alone exceeds the budget', () => {
   assert.match(brief, /K-BIG/, 'a brief that omits everything explains nothing');
 });
 
-test('a --limit cut is also counted as omitted', () => {
+test('a --limit cut names --limit, not the budget that did no cutting', () => {
   const entries = Array.from({ length: 4 }, (_, i) => entry({ id: `K-${i + 1}` }));
-  const { selected, matched } = selectEntries(entries, { paths: ['x.ts'], limit: 2 });
-  const brief = renderBrief(selected, matched, { budget: DEFAULT_BUDGET });
+  const { selected, matched, limited } = selectEntries(entries, { paths: ['x.ts'], limit: 2 });
+  assert.equal(limited, 2);
+  const brief = renderBrief(selected, matched, { budget: DEFAULT_BUDGET, limited });
   assert.match(brief, /2 of 4 entries/);
-  assert.match(brief, /2 matching entries omitted/);
+  assert.match(brief, /omitted \(2 by --limit\)/);
+  assert.match(brief, /raise --limit/);
+  assert.doesNotMatch(brief, /raise --budget/, 'the budget did not do this cutting');
+});
+
+test('the budget is charged in codepoints — the unit the oversize warning predicts', () => {
+  // 120 astral codepoints are 240 UTF-16 units; a budget of 200 must KEEP an
+  // entry whose codepoint cost fits, or the warning threshold and the budget
+  // measure two different things.
+  const astral = entry({ id: 'K-A', text: '\u{1D400}'.repeat(100) });
+  const brief = renderBrief([astral], 1, { budget: 200 });
+  assert.match(brief, /K-A/);
+  assert.match(brief, /1 of 1 entry/);
 });
 
 test('no matches is an explicit statement, never empty output', () => {
@@ -215,4 +229,17 @@ test('usage errors are exit 2: unknown flag, unknown kind, bad numbers, no subco
   assert.equal(cli(['brief', 'x', '--dir', d, '--limit', '-3']).code, 2);
   assert.equal(cli([]).code, 2);
   assert.match(cli(['brief', 'x', '--dir', d, '--kinds', 'vibes']).stderr, /fact \| convention \| gotcha/);
+});
+
+test('a value flag never eats a following flag — --dir --json is a usage error, not an empty brief', () => {
+  const r = cli(['brief', 'x', '--dir', '--json']);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--dir needs a value/);
+});
+
+test('--dir naming a FILE is exit 2 — an empty brief must not claim the store was consulted', () => {
+  const d = store({ 'k.yaml': [entry()] });
+  const r = cli(['brief', 'x', '--dir', join(d, 'k.yaml')]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /not a directory/);
 });

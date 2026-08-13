@@ -63,8 +63,8 @@ knowledge brief with entry ids, and every report owes a verdict on them.
 Increment `used` for each id that was handed off, `helpful` for the ids
 reported as having helped, `outdated_reports` for the ids reported wrong —
 here, at close, in the one place licensed to write these files. Keep entries
-under the size the schema warns about; an oversized entry crowds every brief
-it matches.
+under the size `doctor --state` warns about (`knowledge-entry-oversized`,
+4 000 codepoints); an oversized entry crowds every brief it matches.
 
 Write what a competent newcomer would get wrong, not what the code already
 says. "The test suite takes 9 minutes, so do not run it per file" is worth an

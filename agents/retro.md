@@ -64,12 +64,12 @@ next retro relitigating the same idea.
 - **Scripts and harnesses** worth reusing — gates, comparators, probes,
   report generators. A one-off harness from an initiative either becomes a
   general tool or gets deleted; do not leave dead files behind.
-- **Knowledge upkeep:** every handoff carried a knowledge brief with entry
-  ids and every report owes a verdict on them — fold those verdicts into the
-  entries' counters (`used` for handed off, `helpful` for helped,
-  `outdated_reports` for wrong), and retire or split entries the schema
-  warns are oversized. An entry whose counters say it stopped earning its
-  keep is a deletion candidate, which satisfies the deletion preference.
+- **Knowledge upkeep:** fold the reports' knowledge-brief verdicts into the
+  entries' counters (the fold procedure lives in `skills/retro/SKILL.md`,
+  step 3 — one home, not two), and retire or split entries
+  `doctor --state` flags as `knowledge-entry-oversized`. An entry whose
+  counters say it stopped earning its keep is a deletion candidate, which
+  satisfies the deletion preference.
 - **Documentation that pays forward:** the repo's detected configuration,
   protocols, runbooks. **Every initiative should leave the repo better
   described than it found it** — that is the part that makes each next

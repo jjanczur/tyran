@@ -418,18 +418,19 @@ test('no legacy directory, no legacy finding', () => {
 test('lease files committed to git are a warning naming the first file and the count', () => {
   const root = repo();
   const dir = scaffold(root);
-  const gitStub = (args) => {
-    if (args[0] === 'rev-parse') return 'true\n';
-    if (args[0] === 'ls-files') {
-      return [
-        '.tyran/config.yaml',
-        '.tyran/state/demo/journal.jsonl',
-        '.tyran/state/demo/locks/worktree-a.lease',
-        '.tyran/initiatives/legacy/locks/slot-1.lease',
-      ].join('\n') + '\n';
-    }
-    return '';
+  // Keyed on the FULL argv, so the pathspec is pinned: a regression that
+  // drops `-- .tyran` (or hard-codes the name) asks a question this stub
+  // does not answer and gets '', which fails the assertion below.
+  const answers = {
+    'rev-parse --is-inside-work-tree': 'true\n',
+    'ls-files -- .tyran': [
+      '.tyran/config.yaml',
+      '.tyran/state/demo/journal.jsonl',
+      '.tyran/state/demo/locks/worktree-a.lease',
+      '.tyran/initiatives/legacy/locks/slot-1.lease',
+    ].join('\n') + '\n',
   };
+  const gitStub = (args) => answers[args.join(' ')] ?? '';
   const result = runStateChecks({ dir, run: gitStub });
   const found = byCode(result, 'lease-file-tracked');
   assert.equal(found.length, 1);
@@ -448,9 +449,36 @@ test('lease files on disk but not in git are finding-free — the canonical loca
   regenerate(journal);
   mkdirSync(join(dir, 'state', 'demo', 'locks'), { recursive: true });
   writeFileSync(join(dir, 'state', 'demo', 'locks', 'worktree-a.lease'), 'holder: impl-1\n');
-  const result = runStateChecks({ dir });
+  // Git ANSWERS here — tracked config and journal, but not the on-disk lease.
+  // Without an answering stub the mkdtemp fixture is not a git repo, gitRunner
+  // returns '' for everything, and the 'not in git' leg is satisfied
+  // vacuously by a runner that could never say otherwise.
+  const answers = {
+    'rev-parse --is-inside-work-tree': 'true\n',
+    'ls-files -- .tyran': '.tyran/config.yaml\n.tyran/state/demo/journal.jsonl\n',
+  };
+  const result = runStateChecks({ dir, run: (args) => answers[args.join(' ')] ?? '' });
   assert.deepEqual(byCode(result, 'lease-file-tracked'), []);
   assert.deepEqual(byCode(result, 'state-stray-file'), [], 'locks/ under an initiative is not a stray');
+});
+
+test('a custom-named state dir keeps both git checks asking about THAT name', () => {
+  const root = repo();
+  const dir = join(root, 'my-tyran');
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  writeFileSync(join(dir, 'config.yaml'), readFileSync(join(TEMPLATES, 'config.yaml')));
+  const asked = [];
+  const gitStub = (args) => {
+    asked.push(args.join(' '));
+    if (args[0] === 'rev-parse') return 'true\n';
+    return 'my-tyran/config.yaml\n';
+  };
+  runStateChecks({ dir, run: gitStub });
+  const lsCalls = asked.filter((a) => a.startsWith('ls-files'));
+  assert.ok(lsCalls.length >= 2, `expected both checks to ask git, saw: ${asked.join(' | ')}`);
+  for (const call of lsCalls) {
+    assert.equal(call, 'ls-files -- my-tyran', 'a check hard-coded .tyran instead of the actual dir name');
+  }
 });
 
 test('an oversized knowledge entry is a warning on a file that still validates', () => {

@@ -312,7 +312,10 @@ open one.
    - **Leases are files.** Every worktree and every heavy slot has
      `.tyran/state/<slug>/locks/<resource>.lease` holding holder,
      purpose, story and expiry — covered by the `.tyran/state/**` AUTO rule,
-     kept out of history by `.tyran/.gitignore`. A handoff BEGINS by taking the
+     kept out of history by `.tyran/.gitignore`. An install adopted before
+     0.1.9 has no such file — seed it before the first merge commit with
+     `node ${CLAUDE_PLUGIN_ROOT}/scripts/scan-repo.mjs --dir . --ensure-policy`
+     (create-only; it never overwrites an operator's own). A handoff BEGINS by taking the
      lease — an existing unexpired lease means the agent refuses to start and
      reports — and ENDS by releasing it. Assigning slots from your own memory
      is forbidden: the lead's memory is the least reliable store in the system.

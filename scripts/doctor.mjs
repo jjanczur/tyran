@@ -1004,12 +1004,15 @@ function policyFindings(path, repoRoot) {
  * evidence that a file is untracked, and reporting it as such would fire on
  * every temp directory and every fresh `git init`.
  */
-export function untrackedTyranDir(repoRoot, run) {
+export function untrackedTyranDir(repoRoot, run, tyranDirName = '.tyran') {
   if (run(['rev-parse', '--is-inside-work-tree']).trim() !== 'true') return null;
   // `ls-files` over the directory: any tracked file under it means the tree
   // travels with a worktree, which is the property being checked. Asking about
   // config.yaml alone would pass a repo that committed only the policy.
-  return run(['ls-files', '--', '.tyran']).trim() === '';
+  // The pathspec is parameterized the same way trackedLeaseFiles' is, so a
+  // --dir naming anything but `.tyran` cannot make the two checks contradict
+  // each other about what git tracks.
+  return run(['ls-files', '--', tyranDirName]).trim() === '';
 }
 
 /**
@@ -1058,7 +1061,7 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
   }
 
   const gitRun = run ?? gitRunner(repoRoot);
-  const untracked = untrackedTyranDir(repoRoot, gitRun);
+  const untracked = untrackedTyranDir(repoRoot, gitRun, basename(root));
   if (untracked === true) {
     findings.push(
       finding(
@@ -1086,7 +1089,7 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
           'knowledge-entry-oversized',
           show(file),
           warning,
-          `node scripts/knowledge.mjs brief . --dir ${sq(join(dir, 'knowledge'))}   # shows what a budgeted brief keeps`,
+          `node scripts/knowledge.mjs brief '**' --dir ${sq(join(dir, 'knowledge'))}   # shows what a budgeted brief keeps`,
         ),
       );
     }

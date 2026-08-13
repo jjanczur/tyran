@@ -342,6 +342,22 @@ test('--ensure-policy seeds the gitignore after the policy, not before', () => {
   cli(['--dir', d, '--ensure-policy'], d);
   assert.ok(existsSync(policyOf(d)), 'policy present');
   assert.ok(existsSync(join(d, ...STATE_GITIGNORE_PATH.split('/'))), 'gitignore present');
+
+  // And the ordering is OBSERVED, not narrated: make the policy seed fail
+  // (.tyran/policies exists as a regular FILE, so its mkdir throws) and the
+  // gitignore must NOT have been created — a gitignore written first would
+  // leave .tyran/ on disk with no policy, the exact lockout state, while the
+  // error message promises 'nothing was left behind'.
+  const broken = repo();
+  mkdirSync(join(broken, '.tyran'), { recursive: true });
+  writeFileSync(join(broken, '.tyran', 'policies'), 'a file where a directory belongs');
+  const r = cli(['--dir', broken, '--ensure-policy'], broken);
+  assert.equal(r.code, 2, 'a failed policy seed is exit 2');
+  assert.equal(
+    existsSync(join(broken, ...STATE_GITIGNORE_PATH.split('/'))),
+    false,
+    'the gitignore was seeded BEFORE the policy — ordering regression',
+  );
 });
 
 test('an existing policy is never overwritten, whatever it says', () => {

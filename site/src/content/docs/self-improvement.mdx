@@ -79,11 +79,10 @@ curated (pull requests to the core — reviewed by humans).
 The counters are fed by a closed loop rather than by promises. Every handoff
 carries a **knowledge brief** — `scripts/knowledge.mjs brief` selects the
 entries whose `applies_to` globs intersect the story's predicted files, into
-a character budget — and the agent's final report owes a verdict on the entry
-ids it received: helped, wrong, or unused. The retrospective folds those
-verdicts into `used`/`helpful`/`outdated_reports` at close, in the one place
-licensed to write the store. An entry nobody reports as helpful is a
-retirement candidate on evidence, not on taste.
+a budget — and the agent's final report owes a verdict on the entry ids it
+received. The retrospective folds those verdicts into the counters at close
+(the procedure lives in the retro skill, its one home). An entry nobody
+reports as helpful is a retirement candidate on evidence, not on taste.
 
 ## The one part that is not built: the update delta-review
 

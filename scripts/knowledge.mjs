@@ -96,7 +96,8 @@ export function selectEntries(entries, { paths = [], kinds = null, limit = Infin
     .filter(({ entry }) => (paths.length === 0 ? !Array.isArray(entry.applies_to) || entry.applies_to.length === 0 : entryMatches(entry, paths)))
     .sort((a, b) => (b.entry.confidence - a.entry.confidence) || (a.index - b.index))
     .map(({ entry }) => entry);
-  return { selected: ranked.slice(0, Math.max(0, limit)), matched: ranked.length };
+  const selected = ranked.slice(0, Math.max(0, limit));
+  return { selected, matched: ranked.length, limited: ranked.length - selected.length };
 }
 
 function entryLine(entry) {
@@ -111,22 +112,33 @@ function entryLine(entry) {
  * anything cut — by budget or by `--limit` — is counted in an explicit
  * trailing line. `matched` is the pre-limit match count.
  */
-export function renderBrief(selected, matched, { budget = DEFAULT_BUDGET, dir = DEFAULT_DIR } = {}) {
+export function renderBrief(selected, matched, { budget = DEFAULT_BUDGET, dir = DEFAULT_DIR, limited = 0 } = {}) {
   if (matched === 0) return `### Knowledge brief (${clean(dir)}) — no matching entries\n`;
   const lines = [];
   let used = 0;
   let kept = 0;
   for (const entry of selected) {
     const line = entryLine(entry);
-    if (used + line.length + 1 > budget && kept > 0) break;
+    // Budget is charged in CODEPOINTS, the same unit knowledgeWarnings
+    // measures entries in — an oversize warning that predicted a different
+    // quantity than the budget spends would under-measure exactly the thing
+    // it exists to predict.
+    const cost = Array.from(line).length + 1;
+    if (used + cost > budget && kept > 0) break;
     lines.push(line);
-    used += line.length + 1;
+    used += cost;
     kept += 1;
   }
   const header = `### Knowledge brief (${clean(dir)}, ${kept} of ${matched} entr${matched === 1 ? 'y' : 'ies'})`;
+  const byBudget = selected.length - kept;
+  const parts = [];
+  // Each cut names its own remedy — an omission line telling the reader to
+  // raise a budget that did not do the cutting is a remedy that cannot work.
+  if (limited > 0) parts.push(`${limited} by --limit`);
+  if (byBudget > 0) parts.push(`${byBudget} by the ${budget}-codepoint budget`);
   const omitted = matched - kept;
   const tail = omitted > 0
-    ? [`_${omitted} matching entr${omitted === 1 ? 'y' : 'ies'} omitted (budget ${budget}) — raise --budget or narrow the paths._`]
+    ? [`_${omitted} matching entr${omitted === 1 ? 'y' : 'ies'} omitted (${parts.join(', ')}) — ${limited > 0 ? 'raise --limit' : 'raise --budget'} or narrow the paths._`]
     : [];
   return [header, ...lines, ...tail].join('\n') + '\n';
 }
@@ -150,7 +162,9 @@ function parseArgs(argv) {
       flags[name] = true;
     } else if (VALUE_FLAGS.includes(name)) {
       const value = argv[i + 1];
-      if (value === undefined) throw new UsageError(`flag --${name} needs a value`);
+      if (value === undefined || value.startsWith('--')) {
+        throw new UsageError(`flag --${name} needs a value`);
+      }
       flags[name] = value;
       i += 1;
     } else {
@@ -194,7 +208,16 @@ function main() {
   const dir = resolve(flags.dir);
   if (!existsSync(dir)) {
     console.log(`### Knowledge brief — no knowledge directory at ${escapeInvisible(flags.dir)}\n`);
-    process.exit(0);
+    process.exitCode = 0;
+    return;
+  }
+  if (!statSync(dir).isDirectory()) {
+    // Absence is a fact worth an explicit line; a FILE where a directory
+    // belongs is a mistake, and exit 0 here would let an automated handoff
+    // silently carry an empty brief that claims the store was consulted.
+    console.error(`knowledge: --dir ${escapeInvisible(flags.dir)} is not a directory`);
+    process.exitCode = 2;
+    return;
   }
 
   const normalized = paths.map((p) => normalizePath(p) ?? p);
@@ -205,19 +228,24 @@ function main() {
       for (const e of errors) console.error(`  - ${escapeInvisible(String(e))}`);
     }
     console.error('knowledge: refusing to brief from a store that does not validate — a partial brief reads as a complete one');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
-  const { selected, matched } = selectEntries(entries, { paths: normalized, kinds: flags.kinds, limit: flags.limit });
+  const { selected, matched, limited } = selectEntries(entries, { paths: normalized, kinds: flags.kinds, limit: flags.limit });
   if (flags.json) {
     const payload = selected.map(({ id, kind, confidence, text, applies_to, file }) => ({
       id, kind, confidence, text, applies_to: applies_to ?? [], file,
     }));
     console.log(jsonEscapeInvisible(JSON.stringify(payload, null, 2)));
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   }
-  process.stdout.write(renderBrief(selected, matched, { budget: flags.budget, dir: flags.dir }));
-  process.exit(0);
+  // exitCode, never process.exit(): exit() does not wait for stdout to
+  // drain, and a large brief into a pipe would be TRUNCATED at the exact
+  // moment it matters most (a big store, an automated consumer).
+  process.stdout.write(renderBrief(selected, matched, { budget: flags.budget, dir: flags.dir, limited }));
+  process.exitCode = 0;
 }
 
 function canonicalPath(path) {

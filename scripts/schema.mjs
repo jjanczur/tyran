@@ -68,7 +68,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -145,7 +145,62 @@ export function validateConfig(doc) {
     }
   }
 
+  // Overnight mode: usage-limit pause/resume. Optional; absent = feature off.
+  // Operator-written policy, never scanner-inferred — no provenance wrapper.
+  if ('limits' in doc) {
+    if (!isPlainObject(doc.limits)) errors.push('limits: must be a mapping');
+    else {
+      const limits = doc.limits;
+      if (!LIMITS_MODES.includes(limits.mode)) {
+        errors.push(`limits.mode: required, one of ${LIMITS_MODES.join(' | ')}`);
+      }
+      // Floor of 50 catches the classic footgun: 0.97 (a fraction pasted where
+      // a percent belongs) would otherwise pause on the first tool call of
+      // every session.
+      for (const key of ['pause_at_percent', 'weekly_pause_at_percent']) {
+        if (key in limits && (typeof limits[key] !== 'number' || limits[key] < 50 || limits[key] > 100)) {
+          errors.push(`limits.${key}: must be a number in [50, 100]`);
+        }
+      }
+      if ('wait_max_hours' in limits && (typeof limits.wait_max_hours !== 'number' || limits.wait_max_hours <= 0 || limits.wait_max_hours > 24)) {
+        errors.push('limits.wait_max_hours: must be a number in (0, 24]');
+      }
+      if ('long_wait' in limits && !LIMITS_LONG_WAIT.includes(limits.long_wait)) {
+        errors.push(`limits.long_wait: must be one of ${LIMITS_LONG_WAIT.join(' | ')}`);
+      }
+      if ('resume_margin_minutes' in limits && (typeof limits.resume_margin_minutes !== 'number' || limits.resume_margin_minutes <= 0 || limits.resume_margin_minutes > 240)) {
+        errors.push('limits.resume_margin_minutes: must be a number in (0, 240]');
+      }
+      const knownLimits = ['mode', 'pause_at_percent', 'weekly_pause_at_percent', 'wait_max_hours', 'long_wait', 'resume_margin_minutes'];
+      for (const key of Object.keys(limits)) {
+        if (!knownLimits.includes(key)) errors.push(`limits.${key}: unknown key`);
+      }
+    }
+  }
+
   return errors;
+}
+
+export const LIMITS_MODES = Object.freeze(['off', 'warn', 'pause']);
+export const LIMITS_LONG_WAIT = Object.freeze(['hold', 'resume']);
+
+/**
+ * The limits block with defaults applied — the ONE place the defaults live.
+ * `doc` is a parsed config (or null); an absent or invalid block is `off`.
+ */
+export function limitsOf(doc) {
+  const limits = isPlainObject(doc) && isPlainObject(doc.limits) ? doc.limits : {};
+  const mode = LIMITS_MODES.includes(limits.mode) ? limits.mode : 'off';
+  return {
+    mode,
+    pause_at_percent: typeof limits.pause_at_percent === 'number' ? limits.pause_at_percent : 97,
+    weekly_pause_at_percent:
+      typeof limits.weekly_pause_at_percent === 'number' ? limits.weekly_pause_at_percent : 97,
+    wait_max_hours: typeof limits.wait_max_hours === 'number' ? limits.wait_max_hours : 5,
+    long_wait: LIMITS_LONG_WAIT.includes(limits.long_wait) ? limits.long_wait : 'hold',
+    resume_margin_minutes:
+      typeof limits.resume_margin_minutes === 'number' ? limits.resume_margin_minutes : 5,
+  };
 }
 
 /**

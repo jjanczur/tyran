@@ -526,9 +526,19 @@ test('a dead waiting watcher and a failed resume are both warnings', () => {
   const dead = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
   assert.equal(byCode(dead, 'limit-resume-watcher-dead').length, 1);
 
+  // The watcher unlinks the marker before spawning the resume, so the real
+  // failed-resume disk state has NO marker — the check must not hide behind one.
+  rmSync(join(dir, 'state', 'paused-until.json'));
   writeFileSync(join(dir, 'state', 'resume.json'), JSON.stringify({ state: 'failed', reason: 'resume-did-not-take' }));
   const failed = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
   assert.equal(byCode(failed, 'limit-resume-watcher-dead').length, 1);
+  assert.deepEqual(byCode(failed, 'limit-pause-active'), []);
+  assert.deepEqual(byCode(failed, 'limit-pause-stale'), []);
+  // `schedule` refuses without a marker, and the failed resume consumed it —
+  // a fix command must be executable in the exact state that fires it.
+  const fix = byCode(failed, 'limit-resume-watcher-dead')[0].fix;
+  assert.doesNotMatch(fix, /overnight\.mjs['"]? schedule/, 'the no-marker fix must not point at schedule');
+  assert.match(fix, /claude --resume/, 'the no-marker fix names the hand-resume path');
 });
 
 test('limits configured with no telemetry is a warning; mode off or no limits is silent', () => {
@@ -548,9 +558,24 @@ test('limits configured with no telemetry is a warning; mode off or no limits is
   );
   assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing'), []);
 
+  // a sidecar over a day old is as blind as an absent one (25h before --now)
+  writeFileSync(
+    join(dir, 'state', 'usage.json'),
+    JSON.stringify({ written_at: '2026-08-12T12:00:00.000Z', five_hour: { used_percentage: 10 } }),
+  );
+  assert.equal(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing').length, 1);
+
   writeFileSync(join(dir, 'config.yaml'), config('off'));
   writeFileSync(join(dir, 'state', 'usage.json'), '');
   assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing'), []);
+
+  // no limits block at all: nothing is configured, so nothing can be blind
+  writeFileSync(
+    join(dir, 'config.yaml'),
+    'profile: balanced\nautonomy: P1\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\n',
+  );
+  const noLimits = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  assert.deepEqual(noLimits.findings.filter((f) => f.code.startsWith('limit-')), []);
 });
 
 test('an oversized knowledge entry is a warning on a file that still validates', () => {

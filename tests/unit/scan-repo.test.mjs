@@ -318,20 +318,108 @@ test('the installed policy is the shipped template, byte for byte', () => {
   assert.equal(readFileSync(policyOf(d), 'utf8'), readFileSync(policyTemplatePath(), 'utf8'));
 });
 
-test('writing the config also seeds .tyran/.gitignore, and never overwrites one', () => {
+/** Every line ensureStateGitignore guarantees. Spelled out, not imported: a
+ * managed line dropped from the source constant must turn a test red here. */
+const MANAGED_IGNORE_LINES = [
+  'state/*/locks/',
+  'state/paused-until.json',
+  'state/resume.json',
+  'state/resume.log',
+  'state/usage.json',
+];
+
+test('writing the config also seeds .tyran/.gitignore with every managed line', () => {
   const d = repo({ 'package.json': JSON.stringify({ scripts: { test: 'node --test' } }), 'package-lock.json': '{}' });
   const ignorePath = join(d, ...STATE_GITIGNORE_PATH.split('/'));
   const { code } = cli(['--dir', d, '--write', join(d, '.tyran', 'config.yaml')], d);
   assert.equal(code, 0);
-  assert.ok(existsSync(ignorePath), 'the lease exclusion travels with the committed .tyran/');
-  assert.match(readFileSync(ignorePath, 'utf8'), /^state\/\*\/locks\/$/m);
+  assert.ok(existsSync(ignorePath), 'the exclusions travel with the committed .tyran/');
+  const seeded = readFileSync(ignorePath, 'utf8');
+  for (const line of MANAGED_IGNORE_LINES) {
+    assert.ok(seeded.split('\n').includes(line), `seed is missing ${line}`);
+  }
+  // the seed satisfies its own managed lines — a fresh file is complete
+  assert.equal(ensureStateGitignore(d).status, 'present');
 
-  // an operator's own additions survive every later run
-  const mine = '# mine\nstate/*/locks/\nscratch/\n';
+  // a file already carrying every managed line is byte-untouched, whatever
+  // else the operator put in it
+  const mine = `# mine\n${MANAGED_IGNORE_LINES.join('\n')}\nscratch/\n`;
   writeFileSync(ignorePath, mine);
   assert.equal(ensureStateGitignore(d).status, 'present');
   cli(['--dir', d, '--ensure-policy'], d);
   assert.equal(readFileSync(ignorePath, 'utf8'), mine, 'the human-authored gitignore is untouched');
+});
+
+test('--ensure-policy appends the overnight lines to a 0.1.9 gitignore', () => {
+  // The body 0.1.9 seeded, byte for byte (git show v0.1.9:scripts/scan-repo.mjs).
+  // Create-only seeding left every such install without the overnight
+  // exclusions, so the wind-down checklist's `git add .tyran/state` committed
+  // a machine-local pause marker that every clone then inherited.
+  const v019 =
+    '# Runtime files, never history. Leases record who holds a worktree or a\n' +
+    '# heavy slot RIGHT NOW; committing one makes every parallel merge conflict\n' +
+    '# on state that was stale the moment it was written.\n' +
+    'state/*/locks/\n';
+  const d = repo();
+  mkdirSync(join(d, '.tyran'), { recursive: true });
+  const ignorePath = join(d, ...STATE_GITIGNORE_PATH.split('/'));
+  writeFileSync(ignorePath, v019);
+
+  const { code, out } = cli(['--dir', d, '--ensure-policy'], d);
+  assert.equal(code, 0);
+  assert.match(out, /updated .*\.gitignore/, 'an append is reported, not silent');
+  const after = readFileSync(ignorePath, 'utf8');
+  assert.ok(after.startsWith(v019), 'existing content is byte-identical at the top');
+  assert.equal(
+    after,
+    `${v019}state/paused-until.json\nstate/resume.json\nstate/resume.log\nstate/usage.json\n`,
+    'exactly the missing managed lines, appended at the end',
+  );
+
+  // idempotent: a second run finds nothing missing and changes nothing
+  const again = cli(['--dir', d, '--ensure-policy'], d);
+  assert.doesNotMatch(again.out, /updated/);
+  assert.equal(readFileSync(ignorePath, 'utf8'), after);
+});
+
+test('a managed-line append preserves operator lines, their order, and a missing newline', () => {
+  const d = repo();
+  mkdirSync(join(d, '.tyran'), { recursive: true });
+  const ignorePath = join(d, ...STATE_GITIGNORE_PATH.split('/'));
+  writeFileSync(ignorePath, 'state/scratch/\nstate/usage.json\nstate/*/locks/\n');
+  assert.equal(ensureStateGitignore(d).status, 'updated');
+  assert.equal(
+    readFileSync(ignorePath, 'utf8'),
+    'state/scratch/\nstate/usage.json\nstate/*/locks/\n' +
+      'state/paused-until.json\nstate/resume.json\nstate/resume.log\n',
+    'operator lines keep their place; only absent managed lines are appended',
+  );
+
+  // no trailing newline must not fuse the operator's last line with the first
+  // appended one
+  writeFileSync(ignorePath, 'state/scratch/');
+  assert.equal(ensureStateGitignore(d).status, 'updated');
+  assert.equal(
+    readFileSync(ignorePath, 'utf8'),
+    `state/scratch/\n${MANAGED_IGNORE_LINES.join('\n')}\n`,
+  );
+});
+
+test('an operator negation is a decision, not a gap — the append never reverses it', () => {
+  // gitignore is last-match-wins: appending `state/usage.json` after the
+  // operator's `!state/usage.json` would silently flip the file to ignored.
+  const d = repo();
+  mkdirSync(join(d, '.tyran'), { recursive: true });
+  const ignorePath = join(d, ...STATE_GITIGNORE_PATH.split('/'));
+  writeFileSync(ignorePath, `${MANAGED_IGNORE_LINES.filter((l) => l !== 'state/usage.json').join('\n')}\n!state/usage.json\n`);
+  assert.equal(ensureStateGitignore(d).status, 'present', 'the negated line counts as answered');
+  assert.doesNotMatch(readFileSync(ignorePath, 'utf8'), /^state\/usage\.json$/m);
+});
+
+test('a directory where the gitignore should be is reported, never a crash', () => {
+  const d = repo();
+  mkdirSync(join(d, ...STATE_GITIGNORE_PATH.split('/')), { recursive: true });
+  assert.equal(ensureStateGitignore(d).status, 'unreadable');
 });
 
 test('--ensure-policy seeds the gitignore after the policy, not before', () => {

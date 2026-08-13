@@ -1,8 +1,9 @@
 # Hook I/O contract — measured, not assumed
 
-Every statement here was read out of the shipped Claude Code binary
-(**v2.1.116**), not out of documentation. It exists because a gate built on a
-guess about the platform is a gate of unknown strength (ADR-22), and because
+Every statement here was read out of the shipped Claude Code binary — §1–§16
+on **v2.1.116**, §17–§18 on **v2.1.197** — not out of documentation. It
+exists because a gate built on a guess about the platform is a gate of
+unknown strength (ADR-22), and because
 four of the facts below **contradict** the documented contract in ways that
 would each have produced a control that looks installed and cannot refuse.
 
@@ -397,10 +398,16 @@ freshness by construction.
 
 Two adjacent facts measured the same day, same version:
 
-- `claude -p --resume <session-id> "<prompt>"` resumes a session created by
-  a previous `-p` run with its context intact (the session id is unchanged);
-  interactive-to-headless resume is the mechanism the overnight watcher
-  relies on.
+- `claude -p --resume <session-id> "<prompt>"` was measured resuming a
+  session **created by a previous `-p` run**, context intact, session id
+  unchanged. The direction the overnight watcher actually relies on —
+  resuming an INTERACTIVE session headlessly — is assumed to behave the
+  same and has **not** been measured. The compensating control is that the
+  watcher never trusts the resume: it judges success by journal movement
+  (`resumeTook` in `scripts/overnight.mjs` — events after minus events
+  before), retries on a finite backoff ladder, and reports a resume that
+  exited cleanly having appended nothing as failed, loudly. A resume that
+  silently does nothing is therefore detected, never trusted.
 - Statuslines do not run under `claude -p`, so a RESUMED headless session
   has no fresh telemetry and its usage gate fails open by design. The
   overnight watcher compensates by babysitting the resumed process and

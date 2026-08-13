@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   validateConfig,
+  limitsOf,
   validateKnowledge,
   knowledgeWarnings,
   KNOWLEDGE_ENTRY_MAX_CHARS,
@@ -91,6 +92,48 @@ test('validates optional validation/shared_zones/budget shapes', () => {
   assert.ok(validateConfig({ ...minimalConfig(), validation: ['', 'ok'] }).some((e) => e.includes('validation[0]')));
   assert.ok(validateConfig({ ...minimalConfig(), shared_zones: 'not-a-list' }).some((e) => e.includes('shared_zones')));
   assert.ok(validateConfig({ ...minimalConfig(), budget: { usd: 0 } }).some((e) => e.includes('positive number')));
+});
+
+// --- limits ------------------------------------------------------------
+//
+// limitsOf feeds the usage gate directly, so a number the schema rejects must
+// resolve to the DEFAULT, never be enforced verbatim: `pause_at_percent: 0.97`
+// applied as-written is a permanent false pause on the first tool call of
+// every session.
+
+test('limitsOf treats an out-of-range number as absent — the default applies', () => {
+  assert.equal(limitsOf({ limits: { mode: 'pause', pause_at_percent: 0.97 } }).pause_at_percent, 97);
+  assert.equal(limitsOf({ limits: { mode: 'pause', weekly_pause_at_percent: 0.97 } }).weekly_pause_at_percent, 97);
+  assert.equal(limitsOf({ limits: { mode: 'pause', resume_margin_minutes: -600 } }).resume_margin_minutes, 5);
+  assert.equal(limitsOf({ limits: { mode: 'pause', wait_max_hours: -1 } }).wait_max_hours, 5);
+  assert.equal(limitsOf({ limits: { mode: 'pause', wait_max_hours: 25 } }).wait_max_hours, 5);
+  assert.equal(limitsOf({ limits: { mode: 'pause', wait_max_hours: 0 } }).wait_max_hours, 5, 'the lower bound is exclusive');
+});
+
+test('limitsOf treats a non-finite number as absent', () => {
+  // NaN and the infinities pass `typeof === 'number'`; enforced verbatim, NaN
+  // poisons every threshold comparison.
+  const got = limitsOf({ limits: { mode: 'pause', pause_at_percent: NaN, weekly_pause_at_percent: NaN, wait_max_hours: Infinity, resume_margin_minutes: -Infinity } });
+  assert.equal(got.pause_at_percent, 97);
+  assert.equal(got.weekly_pause_at_percent, 97);
+  assert.equal(got.wait_max_hours, 5);
+  assert.equal(got.resume_margin_minutes, 5);
+});
+
+test('limitsOf accepts boundary and in-range values verbatim', () => {
+  const bounds = limitsOf({ limits: { mode: 'pause', pause_at_percent: 50, weekly_pause_at_percent: 100, wait_max_hours: 24, resume_margin_minutes: 240 } });
+  assert.equal(bounds.pause_at_percent, 50);
+  assert.equal(bounds.weekly_pause_at_percent, 100);
+  assert.equal(bounds.wait_max_hours, 24);
+  assert.equal(bounds.resume_margin_minutes, 240);
+
+  const inRange = limitsOf({ limits: { mode: 'warn', pause_at_percent: 85, weekly_pause_at_percent: 92, wait_max_hours: 3.5, resume_margin_minutes: 30, long_wait: 'resume' } });
+  assert.equal(inRange.mode, 'warn');
+  assert.equal(inRange.pause_at_percent, 85);
+  assert.equal(inRange.weekly_pause_at_percent, 92);
+  assert.equal(inRange.wait_max_hours, 3.5);
+  assert.equal(inRange.resume_margin_minutes, 30);
+  assert.equal(inRange.long_wait, 'resume');
 });
 
 // --- knowledge ---------------------------------------------------------

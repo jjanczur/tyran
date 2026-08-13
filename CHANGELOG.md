@@ -26,7 +26,9 @@ Beyond it — the weekly shape — the pause is LONG: the operator is notified
 resumes without them (`limits.long_wait: hold`). The `.tyran/STOP` brake
 outranks the watcher; four new doctor codes surface active, stale, dead-
 watcher and telemetry-missing states; the overnight runtime files are
-gitignored and name-exempt from the stray-file check.
+name-exempt from the stray-file check and seeded into `.tyran/.gitignore` —
+on an install whose gitignore predates them, re-running `scan-repo.mjs`
+(`--write` or `--ensure-policy`) appends the missing lines.
 
 The gate registers `node`-dispatched because the policy gate (correctly)
 refuses agent-run `chmod` on hook paths; `hooks-check` learned to model

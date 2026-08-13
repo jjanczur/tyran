@@ -1083,22 +1083,30 @@ export function overnightFindings(dir, { now = null, configDoc = null } = {}) {
         ),
       );
     }
-    const resume = readJsonIfSmall(resumePath);
-    if (resume !== null) {
-      const waitingDead =
-        resume.state === 'waiting' && !(Number.isInteger(resume.pid) && resume.pid > 0 && processAlive(resume.pid));
-      if (waitingDead || resume.state === 'failed') {
-        findings.push(
-          finding(
-            'limit-resume-watcher-dead',
-            show(resumePath),
-            waitingDead
-              ? `resume.json says a watcher is waiting (pid ${show(String(resume.pid))}) but no such process is alive — a reboot kills detached watchers`
-              : `the last scheduled resume FAILED (${show(resume.reason ?? 'see resume.log')})`,
-            `node scripts/overnight.mjs schedule --dir ${sq(dirname(resolve(dir)))}`,
-          ),
-        );
-      }
+  }
+
+  // Outside the marker guard: the watcher unlinks the marker BEFORE spawning
+  // the resume and never restores it, so a failed resume leaves resume.json
+  // with no marker beside it.
+  const resume = readJsonIfSmall(resumePath);
+  if (resume !== null) {
+    const waitingDead =
+      resume.state === 'waiting' && !(Number.isInteger(resume.pid) && resume.pid > 0 && processAlive(resume.pid));
+    if (waitingDead || resume.state === 'failed') {
+      findings.push(
+        finding(
+          'limit-resume-watcher-dead',
+          show(resumePath),
+          waitingDead
+            ? `resume.json says a watcher is waiting (pid ${show(String(resume.pid))}) but no such process is alive — a reboot kills detached watchers`
+            : `the last scheduled resume FAILED (${show(resume.reason ?? 'see resume.log')})`,
+          // `schedule` needs the pause marker, and a failed resume has already
+          // consumed it — the fix must be executable in the state that fires.
+          marker !== null
+            ? `node scripts/overnight.mjs schedule --dir ${sq(dirname(resolve(dir)))}`
+            : `resume the session by hand (claude --resume; .tyran/state/resume.log names the attempt), then node scripts/overnight.mjs cancel --dir ${sq(dirname(resolve(dir)))} to reset the watcher state`,
+        ),
+      );
     }
   }
 

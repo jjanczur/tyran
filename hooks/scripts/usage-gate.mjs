@@ -63,7 +63,7 @@ import { limitsOf } from '../../scripts/schema.mjs';
 import { parse } from '../../scripts/yaml-lite.mjs';
 import { forJournal, locateJournal } from './evidence-gate.mjs';
 import { resolveRepoRoot } from './session-start.mjs';
-import { isUnsupervised, actorOf, stripMessageArguments } from './policy-gate.mjs';
+import { isUnsupervised, actorOf, stripMessageArguments, MESSAGE_ARGUMENT_RE } from './policy-gate.mjs';
 import { splitSegments, tokensOf } from './secrets-gate.mjs';
 import { PASS, field, main, runGate } from './hook-io.mjs';
 
@@ -161,15 +161,21 @@ export function trippedWindow(sidecar, limits) {
 
 export function markerOf(tripped, limits, nowMs, sessionId, init) {
   const resetsMs = tripped.resets_at !== null ? tripped.resets_at * 1000 : null;
-  const resumeAtMs = resetsMs !== null ? resetsMs + limits.resume_margin_minutes * 60 * 1000 : null;
-  const waitMs = resumeAtMs !== null ? resumeAtMs - nowMs : null;
-  const longWait = waitMs !== null && waitMs > limits.wait_max_hours * 3600 * 1000;
+  // No resets_at from the platform: the window is known-exhausted but the
+  // reset time is unknown. A null resume_at would be a marker nothing can
+  // self-heal — a permanent false pause — so bound it at wait_max_hours from
+  // now instead: the pause still protects the remainder, and the marker
+  // expires on its own even if every watcher dies.
+  const resumeAtMs =
+    resetsMs !== null ? resetsMs + limits.resume_margin_minutes * 60 * 1000 : nowMs + limits.wait_max_hours * 3600 * 1000;
+  const waitMs = resumeAtMs - nowMs;
+  const longWait = waitMs > limits.wait_max_hours * 3600 * 1000;
   return {
     paused_at: new Date(nowMs).toISOString(),
     window: tripped.window,
     used_percentage: tripped.used_percentage,
     resets_at: tripped.resets_at,
-    resume_at: resumeAtMs !== null ? new Date(resumeAtMs).toISOString() : null,
+    resume_at: new Date(resumeAtMs).toISOString(),
     long_wait: longWait,
     // What the scheduler should DO about a long wait — copied from config at
     // pause time so the decision is auditable next to its inputs.
@@ -188,6 +194,10 @@ export function writeMarker(repoRoot, marker) {
   renameSync(temp, join(repoRoot, MARKER_RELPATH));
 }
 
+/** No marker shape is immortal: one without a parseable resume_at (hand-made
+ * or from an older Tyran) expires this long after paused_at. */
+export const MARKER_MAX_AGE_MS = 24 * 3600 * 1000;
+
 /** An active marker, or null. Expired markers self-heal (best-effort unlink):
  * the watcher may have died with the machine, and a pause that outlives its
  * own resume time is a stall, not a protection. */
@@ -196,7 +206,11 @@ export function readMarker(repoRoot, nowMs, { unlink = unlinkSync } = {}) {
   const doc = readSmallJson(path);
   if (doc === null) return null;
   const resumeAt = Date.parse(typeof doc.resume_at === 'string' ? doc.resume_at : '');
-  if (Number.isFinite(resumeAt) && nowMs >= resumeAt) {
+  const pausedAt = Date.parse(typeof doc.paused_at === 'string' ? doc.paused_at : '');
+  const expired = Number.isFinite(resumeAt)
+    ? nowMs >= resumeAt
+    : !Number.isFinite(pausedAt) || nowMs >= pausedAt + MARKER_MAX_AGE_MS;
+  if (expired) {
     try {
       unlink(path);
     } catch {
@@ -209,15 +223,42 @@ export function readMarker(repoRoot, nowMs, { unlink = unlinkSync } = {}) {
 
 // --------------------------------------------------------------- allowlist
 
-/** Is this repo-root-relative-or-absolute path under `.tyran/state/`? */
+/** Is this repo-root-relative-or-absolute path under `.tyran/state/`?
+ * Backslashes are separators only on Windows; on POSIX `.tyran\state\x` is a
+ * literal FILENAME the Write tool would create at the repo root, so rewriting
+ * it here would allow a write that lands outside the state dir. */
 function underState(repoRoot, rawPath) {
   if (typeof rawPath !== 'string' || rawPath === '') return false;
-  const abs = resolve(repoRoot, rawPath.replace(/\\/g, '/'));
+  const normalized = process.platform === 'win32' ? rawPath.replace(/\\/g, '/') : rawPath;
+  const abs = resolve(repoRoot, normalized);
   const stateDir = join(resolve(repoRoot), '.tyran', 'state');
   return abs === stateDir || abs.startsWith(stateDir + sep);
 }
 
+/**
+ * In an ALLOWLIST context the message-argument strip must not blind the
+ * check: the real shell still expands `$( )` and backticks inside a
+ * double-quoted or bare `--data`/`-m` value, so a substitution smuggled there
+ * would run while the lexer sees only the allowed carrier command.
+ * Single-quoted values are shell-inert and stay allowed — the wind-down
+ * checklist's own appends use them. Same bounded shape as the strip itself
+ * (MESSAGE_ARGUMENT_RE), not a second parser.
+ */
+function messageArgumentsInert(command) {
+  for (const match of String(command).matchAll(MESSAGE_ARGUMENT_RE)) {
+    const value = match[4];
+    if (value.startsWith("'")) continue;
+    if (value.includes('$') || value.includes('`')) return false;
+  }
+  return true;
+}
+
+/** `git add` flags that sweep the whole tree — the refusal promises explicit
+ * paths, so the gate enforces exactly that. */
+const GIT_ADD_SWEEPERS = Object.freeze(['-A', '--all', '-u', '--update', '.']);
+
 function bashAllowed(command, repoRoot) {
+  if (!messageArgumentsInert(command)) return false;
   let segments;
   try {
     // Message arguments are DATA, not program: a journal append's --data blob
@@ -244,11 +285,22 @@ function bashAllowed(command, repoRoot) {
       // the declared floor (commands, never effects) is stated in the
       // refusal: a path assembled at runtime is invisible to this check.
       if (argv.length < 2 || !WIND_DOWN_SCRIPTS.includes(basename(argv[1]))) return false;
+      // Wind-down Writes may land under .tyran/state/**, so a script THERE
+      // with an allowed basename would close the loop on arbitrary code:
+      // Write .tyran/state/journal.mjs, then run it. Scripts under the
+      // adopted repo's .tyran/ are never the plugin's own.
+      const scriptAbs = resolve(repoRoot, argv[1]);
+      const tyranDir = join(resolve(repoRoot), '.tyran');
+      if (scriptAbs === tyranDir || scriptAbs.startsWith(tyranDir + sep)) return false;
       continue;
     }
     if (program === 'git') {
       const sub = argv.find((t, i) => i > 0 && !t.startsWith('-'));
       if (!WIND_DOWN_GIT.includes(sub)) return false;
+      // `--output` turns read-only log/diff into a file write anywhere on
+      // disk; `git add -A`/`.` sweeps the whole tree into the pause commit.
+      if (argv.some((t, i) => i > 0 && t.startsWith('--output'))) return false;
+      if (sub === 'add' && argv.some((t, i) => i > 0 && GIT_ADD_SWEEPERS.includes(t))) return false;
       continue;
     }
     return false;
@@ -324,7 +376,8 @@ export function buildRefusal(marker, { subagent = false, waitMaxHours, scriptsDi
     ` 3. node "${scriptsDir}/project.mjs" <journal> --out-dir <dir>\n` +
     ` 4. git add <explicit .tyran/state paths> && git commit\n` +
     ` 5. node "${scriptsDir}/overnight.mjs" schedule\n` +
-    ` 6. Stop. If the Stop gate asks for a retrospective, record retro.entry kind "skipped" with the reason.\n` +
+    ` 6. Stop. If the Stop gate asks for a retrospective, record a retro.entry ` +
+    `(--data '{"kind":"skipped","target":"<init>","reason":"usage-limit pause"}' — target is required).\n` +
     `The pause marker is .tyran/state/paused-until.json; an operator takes over with ` +
     `node "${scriptsDir}/overnight.mjs" cancel.`
   );

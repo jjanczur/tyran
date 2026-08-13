@@ -185,21 +185,27 @@ export const LIMITS_MODES = Object.freeze(['off', 'warn', 'pause']);
 export const LIMITS_LONG_WAIT = Object.freeze(['hold', 'resume']);
 
 /**
- * The limits block with defaults applied — the ONE place the defaults live.
- * `doc` is a parsed config (or null); an absent or invalid block is `off`.
+ * The limits block with defaults applied — the ONE place the defaults AND the
+ * accepted ranges live. `doc` is a parsed config (or null); an absent or
+ * invalid block is `off`. A value outside validateConfig's range is treated
+ * as absent (the default applies): the gate must never ENFORCE a value the
+ * schema rejects — `pause_at_percent: 0.97` enforced verbatim is a permanent
+ * false pause, the exact footgun the validator's floor of 50 exists to catch.
  */
 export function limitsOf(doc) {
   const limits = isPlainObject(doc) && isPlainObject(doc.limits) ? doc.limits : {};
   const mode = LIMITS_MODES.includes(limits.mode) ? limits.mode : 'off';
+  const inRange = (value, min, max, { minExclusive = false } = {}) =>
+    typeof value === 'number' && Number.isFinite(value) && (minExclusive ? value > min : value >= min) && value <= max;
   return {
     mode,
-    pause_at_percent: typeof limits.pause_at_percent === 'number' ? limits.pause_at_percent : 97,
+    pause_at_percent: inRange(limits.pause_at_percent, 50, 100) ? limits.pause_at_percent : 97,
     weekly_pause_at_percent:
-      typeof limits.weekly_pause_at_percent === 'number' ? limits.weekly_pause_at_percent : 97,
-    wait_max_hours: typeof limits.wait_max_hours === 'number' ? limits.wait_max_hours : 5,
+      inRange(limits.weekly_pause_at_percent, 50, 100) ? limits.weekly_pause_at_percent : 97,
+    wait_max_hours: inRange(limits.wait_max_hours, 0, 24, { minExclusive: true }) ? limits.wait_max_hours : 5,
     long_wait: LIMITS_LONG_WAIT.includes(limits.long_wait) ? limits.long_wait : 'hold',
     resume_margin_minutes:
-      typeof limits.resume_margin_minutes === 'number' ? limits.resume_margin_minutes : 5,
+      inRange(limits.resume_margin_minutes, 0, 240, { minExclusive: true }) ? limits.resume_margin_minutes : 5,
   };
 }
 

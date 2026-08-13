@@ -62,14 +62,16 @@ protocol that survived them, mechanized.
 
 ## Configuration
 
+Overnight mode is driven by the optional `limits:` block in
+`.tyran/config.yaml`. The annotated reference for all six keys — defaults,
+accepted ranges, and the quoted-`'off'` rule — lives in
+[the configuration reference](configuration.md). Enabling the pause is
+minimal:
+
 ```yaml
-limits:
-  mode: 'off'                # off | warn | pause   (quoted — bare off is YAML for false)
-  pause_at_percent: 97       # five-hour window, [50, 100]
-  weekly_pause_at_percent: 97
-  wait_max_hours: 5          # beyond this, a pause is LONG: notify + hold
-  long_wait: hold            # hold | resume — what a long pause does
-  resume_margin_minutes: 5
+limits:               # all six keys, defaults and ranges: see the reference
+  mode: pause
+  pause_at_percent: 97
 ```
 
 `warn` surfaces through doctor and never denies. The default is `off`
@@ -89,9 +91,13 @@ agents writing your settings — so this step is yours. In your user settings
 ```
 
 `/tyran:setup` prints this snippet with the path resolved. If you already
-have a statusline you like, pipe through it and add
-`node …/statusline.mjs --sidecar-only` (it prints nothing) so the sidecar
-still updates. npm installs can use `npx @jjanczur/tyran statusline`.
+have a statusline you like, tee the platform's JSON payload into the
+sidecar writer *before* your own statusline consumes it:
+`tee >(node /absolute/path/to/tyran/scripts/statusline.mjs --sidecar-only) | existing-statusline.sh`
+— `--sidecar-only` prints nothing, so your display is untouched. The order
+matters: the sidecar writer parses the platform payload, and what an
+existing statusline emits is a rendered display line, not that JSON. npm
+installs can use `npx @jjanczur/tyran statusline`.
 
 ## The operator's handles
 
@@ -112,11 +118,15 @@ aborts instead of resuming. A supervised operator is never bound by the gate
 |---|---|---|
 | `usage.json` | the statusline helper | latest platform-reported window telemetry |
 | `paused-until.json` | the usage gate | the durable pause: window, percent, resume time, long-wait decision |
-| `resume.json` | the scheduler | watcher state: waiting/holding/resuming/done/failed, pid |
+| `resume.json` | the scheduler | watcher state (waiting · holding · resuming · done · failed · skipped · aborted-stop · cancelled), pid |
 | `resume.log` | the scheduler | the watcher's append-only trace |
 
-All four are machine-local runtime, excluded from history by
-`.tyran/.gitignore`, and exempt — by name — from doctor's stray-file check.
+All four are machine-local runtime, exempt — by name — from doctor's
+stray-file check, and kept out of history by `.tyran/.gitignore`. That
+ignore file is seeded at adoption and brought up to date by re-running the
+scanner (`node scripts/scan-repo.mjs --ensure-policy` or `--write`) — an
+install that adopted before this feature should re-run it once so the four
+entries exist.
 
 ## Reliability, stated plainly
 

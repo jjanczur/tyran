@@ -19,9 +19,12 @@
  *
  * A statusline is a UI element: it must never break the UI. Every failure
  * path exits 0, silently. `--sidecar-only` prints nothing at all, so an
- * operator with an existing statusline can compose:
- *   existing-statusline.sh | tee >(node .../statusline.mjs --sidecar-only)
- * (the payload is consumed from stdin either way).
+ * operator with an existing statusline can tee the platform's JSON payload
+ * into this writer BEFORE their own statusline consumes it:
+ *   tee >(node .../statusline.mjs --sidecar-only) | existing-statusline.sh
+ * The order matters: this writer parses the platform payload, and what an
+ * existing statusline emits is a rendered display line, not JSON — teeing
+ * after it would silently never update the sidecar.
  *
  * CLI: node statusline.mjs [--sidecar-only]     # payload on stdin
  * Exit: always 0

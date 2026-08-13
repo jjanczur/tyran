@@ -29,9 +29,9 @@ the resolved map. See [the roster](agents.md).
 
 **Does Tyran phone home / need accounts / install anything globally?**
 No. Zero runtime dependencies, no build step, no external services. It never
-writes into `~/.claude` beyond Claude Code's own plugin mechanism. Optional
-integrations (gitleaks binary, ralph-tui for overnight runs) are detected,
-never bundled.
+writes into `~/.claude` beyond Claude Code's own plugin mechanism. The one
+optional integration (the gitleaks binary) is detected, never bundled.
+Overnight runs are native — see [overnight mode](overnight.md).
 
 **What happens to what Tyran learned when I update the plugin?**
 Nothing — that's the point of the three-layer design. Your `.tyran/` data and

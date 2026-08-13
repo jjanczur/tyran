@@ -72,6 +72,16 @@ export const MAX_SLEEP_CHUNK_MS = 15 * 60 * 1000;
 export const SIDECAR_FRESH_MS = 10 * 60 * 1000;
 /** Babysitting ladder after a resume that visibly did not take. */
 export const RESUME_BACKOFFS_MS = Object.freeze([5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]);
+/** Hard ceiling on a single `claude -p` attempt before the babysitter reclaims it. */
+export const RESUME_ATTEMPT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+/**
+ * The longest a live watcher can legitimately still be running past its
+ * resume_at: every attempt on the ladder may consume the full per-attempt
+ * timeout, plus the backoff sleeps between attempts. Derived from those
+ * constants so a ladder change cannot leave this window stale.
+ */
+export const WATCHER_MAX_OVERRUN_MS =
+  (RESUME_BACKOFFS_MS.length + 1) * RESUME_ATTEMPT_TIMEOUT_MS + RESUME_BACKOFFS_MS.reduce((a, b) => a + b, 0);
 
 class UsageError extends Error {}
 
@@ -94,7 +104,9 @@ export function skipReason({ stopped, markerExists, journalEvents, pausedAtIso }
   let laterCheckpoint = false;
   for (const e of journalEvents ?? []) {
     const ts = Date.parse(e?.ts ?? '') || 0;
-    if (e?.ev === 'gate' && e?.data?.kind === 'usage-limit') {
+    // Only this pause's gate events count: a gate closed before pausedAt
+    // belongs to an earlier cycle and says nothing about the current one.
+    if (e?.ev === 'gate' && e?.data?.kind === 'usage-limit' && ts > pausedAt) {
       const result = String(e?.data?.result ?? '').toLowerCase();
       gateOpen = !['pass', 'passed', 'ok', 'green', 'approved', 'closed', 'answered'].includes(result);
     }
@@ -206,6 +218,29 @@ export function pidAlive(pid) {
   }
 }
 
+/** A heartbeat older than this cannot be the live watcher's: it stamps every
+ * loop iteration, and the sleep chunk is capped at MAX_SLEEP_CHUNK_MS. */
+export const HEARTBEAT_FRESH_MS = 2 * MAX_SLEEP_CHUNK_MS;
+
+/**
+ * Whether resume.json's recorded watcher can still BE the watcher. A pid
+ * check alone survives reboots: recycling can hand the number to an unrelated
+ * process. The heartbeat is liveness the clock cannot fake — a recycled pid
+ * never writes one, while a real watcher that overslept a day stamps it again
+ * on its first iteration after the machine wakes. States from an older Tyran
+ * carry no heartbeat; for those, past resume_at + WATCHER_MAX_OVERRUN_MS no
+ * real watcher can still be running. Within those windows a recycled pid is
+ * indistinguishable from ours — full process identity is not portable in
+ * zero-dependency Node; this is the floor.
+ */
+export function watcherAlive(state, nowMs = Date.now()) {
+  if (state?.state !== 'waiting' || !pidAlive(state?.pid)) return false;
+  const heartbeatMs = Date.parse(typeof state.heartbeat_at === 'string' ? state.heartbeat_at : '');
+  if (Number.isFinite(heartbeatMs)) return nowMs - heartbeatMs <= HEARTBEAT_FRESH_MS;
+  const resumeAtMs = Date.parse(typeof state.resume_at === 'string' ? state.resume_at : '');
+  return !(Number.isFinite(resumeAtMs) && nowMs > resumeAtMs + WATCHER_MAX_OVERRUN_MS);
+}
+
 /**
  * Best-effort desktop notification — macOS osascript, then notify-send.
  * Text is OUR OWN words and numbers only; nothing foreign is interpolated.
@@ -255,7 +290,7 @@ function doSchedule(repo, flags) {
     process.exit(1);
   }
   const state = readSmallJson(join(repo, RESUME_STATE_RELPATH));
-  if (state?.state === 'waiting' && pidAlive(state.pid)) {
+  if (watcherAlive(state)) {
     console.error(`overnight: a watcher is already waiting (pid ${state.pid}, resumes ${state.resume_at}) — cancel it first`);
     process.exit(1);
   }
@@ -283,8 +318,25 @@ function doSchedule(repo, flags) {
     return;
   }
 
+  // The gate legally writes session_id: null (a pause with no live session).
+  // A watcher spawned for such a marker has nothing it could ever resume.
+  if (typeof marker.session_id !== 'string' || !SESSION_ID_RE.test(marker.session_id)) {
+    console.error('overnight: the marker carries no usable session id — resume by hand');
+    process.exit(1);
+  }
+
   const logFd = openSync(join(repo, RESUME_LOG_RELPATH), 'a');
-  const child = spawn(process.execPath, [SELF, '--wait', '--dir', repo], {
+  const watcherArgv = [
+    SELF,
+    '--wait',
+    '--dir',
+    repo,
+    ...(typeof flags.prompt === 'string' ? ['--prompt', flags.prompt] : []),
+    ...(typeof flags.cmd === 'string' ? ['--cmd', flags.cmd] : []),
+    ...(typeof flags['chunk-ms'] === 'number' ? ['--chunk-ms', String(flags['chunk-ms'])] : []),
+    ...(typeof flags['backoff-ms'] === 'number' ? ['--backoff-ms', String(flags['backoff-ms'])] : []),
+  ];
+  const child = spawn(process.execPath, watcherArgv, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
   });
@@ -294,7 +346,7 @@ function doSchedule(repo, flags) {
     pid: child.pid,
     window: marker.window ?? null,
     resume_at: resumeAt,
-    session_id: typeof marker.session_id === 'string' && SESSION_ID_RE.test(marker.session_id) ? marker.session_id : null,
+    session_id: marker.session_id,
     started_at: new Date().toISOString(),
   });
   const body = `Paused on the ${windowName} usage limit; resuming automatically ${resumeAt ?? 'after the reset'} (${humanWait(waitMs)}).`;
@@ -304,7 +356,13 @@ function doSchedule(repo, flags) {
 }
 
 async function doWait(repo, flags) {
-  const chunkMs = typeof flags['chunk-ms'] === 'number' ? flags['chunk-ms'] : MAX_SLEEP_CHUNK_MS;
+  // Capped: the heartbeat's freshness window is derived from the maximum
+  // chunk, so a longer custom sleep would make a live watcher look dead.
+  const chunkMs = Math.min(typeof flags['chunk-ms'] === 'number' ? flags['chunk-ms'] : MAX_SLEEP_CHUNK_MS, MAX_SLEEP_CHUNK_MS);
+  // --backoff-ms replaces every rung: the real ladder's first rung is minutes,
+  // which puts the retry path beyond the reach of any test that keeps it real.
+  const backoffs =
+    typeof flags['backoff-ms'] === 'number' ? RESUME_BACKOFFS_MS.map(() => flags['backoff-ms']) : RESUME_BACKOFFS_MS;
   const prompt = typeof flags.prompt === 'string' ? flags.prompt : null;
   const cmd = typeof flags.cmd === 'string' ? flags.cmd : 'claude';
 
@@ -323,6 +381,11 @@ async function doWait(repo, flags) {
     }
     const sleepMs = nextSleepMs(Date.now(), resumeAtMs, chunkMs);
     if (sleepMs > 0) {
+      // The heartbeat is what lets schedule/cancel trust an alive pid: a
+      // recycled pid never stamps one, and a watcher that overslept a day
+      // stamps it again the instant the machine wakes.
+      const state = readSmallJson(join(repo, RESUME_STATE_RELPATH)) ?? {};
+      writeStateFile(repo, { ...state, state: 'waiting', pid: process.pid, resume_at: marker.resume_at ?? null, heartbeat_at: new Date().toISOString() });
       await new Promise((r) => setTimeout(r, sleepMs));
       continue;
     }
@@ -368,19 +431,31 @@ async function doWait(repo, flags) {
       continue;
     }
 
-    // Go. Clear the marker first so the resumed session's gate starts clean.
+    // Build the argv BEFORE touching the marker: the gate legally writes
+    // session_id: null, and a marker that cannot be resumed must survive on
+    // disk so doctor's stale-pause warning has its evidence.
+    let argv;
+    try {
+      argv = resumeArgv(marker.session_id, prompt ?? defaultPrompt(init), { cmd });
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      log(repo, 'failed: bad-session-id');
+      writeStateFile(repo, { state: 'failed', reason: 'bad-session-id', at: new Date().toISOString() });
+      notifyDesktop('Tyran: resume FAILED', 'The pause marker carries no usable session id — resume the session by hand.');
+      return;
+    }
+    // Go. Clear the marker so the resumed session's gate starts clean.
     try {
       unlinkSync(join(repo, MARKER_RELPATH));
     } catch {
       /* best effort */
     }
-    const argv = resumeArgv(marker.session_id, prompt ?? defaultPrompt(init), { cmd });
     const eventsBefore = journalEventCount(journalPath);
     for (let attempt = 0; ; attempt++) {
       log(repo, `resuming attempt=${attempt + 1} argv=${argv[0]} session=${marker.session_id}`);
       writeStateFile(repo, { state: 'resuming', attempt: attempt + 1, at: new Date().toISOString() });
       notifyDesktop('Tyran: resuming', `The usage window has reset; resuming the paused session${init ? ` (${init})` : ''}.`);
-      const child = spawnSync(argv[0], argv.slice(1), { cwd: repo, encoding: 'utf8', timeout: 6 * 60 * 60 * 1000 });
+      const child = spawnSync(argv[0], argv.slice(1), { cwd: repo, encoding: 'utf8', timeout: RESUME_ATTEMPT_TIMEOUT_MS });
       const eventsAfter = journalEventCount(journalPath);
       const took =
         eventsBefore === null || eventsAfter === null
@@ -391,7 +466,7 @@ async function doWait(repo, flags) {
         writeStateFile(repo, { state: 'done', at: new Date().toISOString() });
         return;
       }
-      if (attempt >= RESUME_BACKOFFS_MS.length) {
+      if (attempt >= backoffs.length) {
         writeStateFile(repo, { state: 'failed', reason: 'resume-did-not-take', exit: child.status, at: new Date().toISOString() });
         notifyDesktop('Tyran: resume FAILED', 'The scheduled resume did not take (no journal movement). See .tyran/state/resume.log.');
         return;
@@ -401,7 +476,7 @@ async function doWait(repo, flags) {
         writeStateFile(repo, { state: 'aborted-stop', at: new Date().toISOString() });
         return;
       }
-      await new Promise((r) => setTimeout(r, RESUME_BACKOFFS_MS[attempt]));
+      await new Promise((r) => setTimeout(r, backoffs[attempt]));
     }
   }
 }
@@ -423,14 +498,14 @@ function doStatus(repo) {
     console.log('no active pause marker');
   }
   if (state !== null) {
-    const alive = state.state === 'waiting' ? ` (pid ${state.pid} ${pidAlive(state.pid) ? 'alive' : 'DEAD'})` : '';
+    const alive = state.state === 'waiting' ? ` (pid ${state.pid} ${watcherAlive(state) ? 'alive' : 'DEAD'})` : '';
     console.log(`watcher: ${escapeInvisible(String(state.state))}${alive}`);
   }
 }
 
 function doCancel(repo, flags) {
   const state = readSmallJson(join(repo, RESUME_STATE_RELPATH));
-  if (state?.state === 'waiting' && pidAlive(state.pid)) {
+  if (watcherAlive(state)) {
     try {
       process.kill(state.pid, 'SIGTERM');
       console.log(`overnight: watcher pid ${state.pid} cancelled`);
@@ -454,7 +529,8 @@ function doCancel(repo, flags) {
 // ------------------------------------------------------------------- CLI
 
 const BOOLEAN_FLAGS = ['force-resume', 'clear', 'wait'];
-const VALUE_FLAGS = ['dir', 'prompt', 'cmd', 'chunk-ms'];
+const NUMERIC_FLAGS = ['chunk-ms', 'backoff-ms'];
+const VALUE_FLAGS = ['dir', 'prompt', 'cmd', ...NUMERIC_FLAGS];
 
 function parseArgs(argv) {
   const flags = {};
@@ -470,7 +546,13 @@ function parseArgs(argv) {
     else if (VALUE_FLAGS.includes(name)) {
       const value = argv[i + 1];
       if (value === undefined) throw new UsageError(`flag --${name} needs a value`);
-      flags[name] = name === 'chunk-ms' ? Number(value) : value;
+      if (NUMERIC_FLAGS.includes(name)) {
+        // NaN or a non-positive number would make nextSleepMs fire the watcher
+        // immediately — hours early — instead of failing here, loudly.
+        const ms = Number(value);
+        if (!Number.isFinite(ms) || ms <= 0) throw new UsageError(`flag --${name} needs a positive number of milliseconds`);
+        flags[name] = ms;
+      } else flags[name] = value;
       i += 1;
     } else throw new UsageError(`unknown flag --${name}`);
   }

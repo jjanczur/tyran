@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.1.13 — 2026-08-13
+
+### Six concurrent decisions, two ids
+
+`append` took the write lock; issuing the `D-<n>` or `F-<n>` a caller omitted
+happened before it, in the CLI. Issuing an id is read-compute-write, so every
+concurrent writer read the same journal, computed the same next number, and
+then serialized on the lock to write it. Measured on a fresh journal, seven
+runs of six simultaneous `decision` appends: **1 to 4 distinct ids for 6
+events**, and in the worst run all six carried the same id. Ids are how the
+ledger references itself — "see D-2" —
+in a file that is never rewritten, so every collision is ambiguous
+permanently: neither `validate` nor the projections can say which `D-2` a
+later event meant, and the premise of the whole design is many agents writing
+one ledger at once.
+
+The id is now issued inside the lock, from the snapshot that call has already
+read for the timestamp clamp and the spawn guard — no second read per append,
+which a long journal would pay for on every event. The contract is unchanged:
+an explicit `data.id` still wins, `"id":""` is still treated as absent, and
+only `decision` and `finding` are issued one. The same six-process race now
+measures 6 distinct ids for 6 events, and eight genuinely concurrent
+processes pin it in the suite.
+
+The exported `append()` moved with the CLI, not behind it: before this release
+a `decision` without `data.id` was rejected outright — `invalid event: data.id
+is required for ev "decision"` — so every programmatic caller had to compute an
+id first and then carry it across exactly the gap this release closes. Omitting
+`data.id` is now the safe call rather than an error.
+
+What is atomic is exactly the ids `append` ISSUES — `decision` and `finding`,
+where `data.id` was omitted or empty: two of those, concurrent, can no longer
+be handed one number. Nothing else moved. `next-id` previews a value while
+holding nothing, so an id read there and appended later still loses to any
+writer that appended in between — both journal doc surfaces say so, and a
+caller that can let `append` issue the id should. An explicit `data.id` is
+written verbatim and stays the caller's to keep unique: a journal whose three
+`decision` events all carry `D-2` validates `ok`. `ticket.created` is
+deliberately outside the issued set — a ticket id comes from the plan, which
+numbers its own stories — so there is no atomic path for a `T-` id at all, and
+`skills/run/SKILL.md` now says the conductor is the single writer for ticket
+creation. And an id at or past 2^53 saturates `max+1`: seeded with
+`D-9007199254740992`, `append` issues that same number to every decision after
+it, and a 400-digit id yields `D-Infinity` — arithmetic byte-identical to the
+previous release, named here rather than changed here.
 ## 0.1.12 — 2026-08-13
 
 ### The board: every ticket in a lane, every question in front of you

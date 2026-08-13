@@ -158,9 +158,14 @@ open one.
      away from having never happened.
    - **IDs never come from memory** — omit `id` from a `decision` event's
      `--data` (or leave it empty) and `append` issues the next one itself.
+     `append` issues it under the same lock it writes with, so two concurrent
+     appends can no longer be handed one number — prefer omitting `id`
+     wherever you do not need the value beforehand.
      `journal.mjs next-id <file> <prefix>` exists to preview a value ahead of
      time (prefix `D` → `D-7`); it is not a required preliminary step before
-     `append`. After a compaction, memory hands out the same number twice.
+     `append`, and it holds nothing — an id read there and appended later
+     still loses to any writer that appended in between. After a compaction,
+     memory hands out the same number twice.
    - **Authorizations and stops are `decision` events.** What you may do
      without asking, and the CLOSED list of situations where you halt, live
      in the journal with the date and the operator's own words. Outside that

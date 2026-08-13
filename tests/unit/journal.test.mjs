@@ -147,6 +147,32 @@ test('rejects missing/invalid top-level fields', () => {
   assert.ok(validateEvent(ev({ data: [] })).length > 0);
 });
 
+test('a non-object data is REFUSED by name, and refused before an id is issued', () => {
+  // MUTANT 1: drop `!Array.isArray(data)` from isDataObject — an array is an
+  // object to typeof and takes string properties, so `--data '["a"]'` would be
+  // WRITTEN, carrying a shape no reader expects.
+  // MUTANT 2: drop the isDataObject term from the issuance guard — issuing an
+  // id onto null/a string crashes with a raw TypeError instead of naming the
+  // problem, and the crash happens before validation can report it.
+  for (const data of [null, [], ['a'], 'str', 5, true]) {
+    const errs = validateEvent(ev({ data }));
+    assert.ok(
+      errs.some((e) => e.includes('data must be a JSON object')),
+      `data=${JSON.stringify(data)} must be refused by name, got ${JSON.stringify(errs)}`,
+    );
+  }
+  // Through the CLI, where issuance runs: the refusal must be the validator's
+  // sentence, never a TypeError from building an id on a non-object.
+  const file = tmp();
+  for (const raw of ['null', '"str"', '5', '["array","as","data"]']) {
+    const out = spawnSync(process.execPath, [SCRIPT, 'append', file, 'decision', 'demo', '--data', raw], { encoding: 'utf8' });
+    assert.equal(out.status, 1, `--data ${raw} must exit 1`);
+    assert.match(out.stderr, /data must be a JSON object/, `--data ${raw} must name the problem`);
+    assert.doesNotMatch(out.stderr, /Cannot (read|create)/, `--data ${raw} must not crash raw`);
+  }
+  assert.deepEqual(readJournal(file).events, [], 'nothing may be written by a refused append');
+});
+
 test('enforces per-type required data keys but allows extras', () => {
   const bad = validateEvent(ev({ ev: 'report', data: { agent: 'x' } }));
   assert.ok(bad.some((e) => e.includes('data.verdict')));
@@ -348,6 +374,54 @@ test('20 truly concurrent processes: intact lines AND monotonic timestamps', asy
   const result = validateJournal(f);
   assert.deepEqual(result.errors, []);
   assert.equal(result.ok, true); // ts monotonic BY CONSTRUCTION under the lock
+});
+
+// An issued id is the referencing mechanism of the whole ledger — "see D-2" —
+// in a file that is never rewritten, so a number handed out twice is ambiguous
+// forever. Issuing one is read-compute-write, which is only atomic under the
+// same lock as the write.
+//
+// Kills the mutant that issues the id BEFORE the lock is taken (`nextId(file,
+// …)` in the CLI, then `append`): measured on that code over seven runs, 6
+// simultaneous decision appends against one fresh journal issued between 1 and
+// 4 distinct ids for 6 events. Sequential appends cannot see it — every writer
+// must read before any of them has written.
+test('8 truly concurrent appends issue 8 DISTINCT decision ids', { timeout: 60_000 }, async () => {
+  const f = tmp();
+  const launched = [];
+  const finished = [];
+  const t0 = Date.now();
+  const procs = Array.from({ length: 8 }, (_, i) => {
+    const p = spawn(process.execPath, [
+      SCRIPT, 'append', f, 'decision', 'demo', '--actor', `p${i}`, '--data', JSON.stringify({ text: `d${i}` }),
+    ]);
+    launched.push(Date.now() - t0);
+    let err = '';
+    p.stderr.on('data', (d) => (err += d));
+    return new Promise((res, rej) => {
+      p.on('close', (code) => {
+        finished.push(Date.now() - t0);
+        code === 0 ? res() : rej(new Error(`p${i} exit ${code}: ${err}`));
+      });
+    });
+  });
+  await Promise.all(procs);
+
+  // the same overlap proof the ADR-18 race uses: without it, 8 appends that
+  // happened to serialize would pass while proving nothing
+  assert.ok(
+    Math.max(...launched) < Math.min(...finished),
+    `not concurrent: last launch ${Math.max(...launched)}ms >= first exit ${Math.min(...finished)}ms`,
+  );
+  const ids = query(f, { ev: 'decision' }).map((e) => e.data.id);
+  assert.equal(ids.length, 8, 'every writer must have appended exactly one event');
+  assert.equal(new Set(ids).size, ids.length, `ids issued twice: ${ids.join(', ')}`);
+  // contiguous, not merely distinct: max+1 under the lock can produce nothing else
+  assert.deepEqual([...ids].sort(), ['D-1', 'D-2', 'D-3', 'D-4', 'D-5', 'D-6', 'D-7', 'D-8']);
+  const { badLines, truncatedTail } = readJournal(f);
+  assert.deepEqual(badLines, []);
+  assert.equal(truncatedTail, false);
+  assert.equal(validateJournal(f).ok, true);
 });
 
 test('stamped ts is clamped to last event; explicit past ts is caller-owned', () => {
@@ -1021,6 +1095,26 @@ test('an explicit empty data.id is issued by CLI append, not stored blank', () =
   execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"","text":"picked a default"}']);
   execFileSync(process.execPath, [SCRIPT, 'append', f, 'decision', 'demo', '--data', '{"id":"","text":"second"}']);
   assert.deepEqual(query(f, { ev: 'decision' }).map((e) => e.data.id), ['D-1', 'D-2']);
+});
+
+test('append itself issues the id — explicit wins, "" is absent, other types get none', () => {
+  // Every assertion goes through `append`, never the CLI: the mutant this
+  // kills is issuance moved back out to any caller (which is outside the write
+  // lock), and the CLI tests above stay green under exactly that mutant.
+  const f = tmp();
+  const decide = (data) => append(f, { ev: 'decision', init: 'demo', actor: 'c', data });
+  assert.equal(decide({ text: 'issued' }).data.id, 'D-1');
+  assert.equal(decide({ id: '', text: 'empty is not explicit' }).data.id, 'D-2');
+  assert.equal(decide({ id: 'D-99', text: 'mine' }).data.id, 'D-99');
+  assert.equal(decide({ text: 'after the explicit one' }).data.id, 'D-100');
+  const mine = { text: 'the caller keeps its own object' };
+  decide(mine);
+  assert.equal(mine.id, undefined);
+  // only the types in ID_ISSUED_FOR are issued one
+  const checkpoint = append(f, { ev: 'checkpoint', init: 'demo', actor: 'c', data: { phase: 'p', next_steps: [] } });
+  assert.equal('id' in checkpoint.data, false);
+  assert.deepEqual(query(f, { ev: 'decision' }).map((e) => e.data.id), ['D-1', 'D-2', 'D-99', 'D-100', 'D-101']);
+  assert.equal(validateJournal(f).ok, true);
 });
 
 test('a review cannot close a colliding non-reviewer spawn', () => {

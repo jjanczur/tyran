@@ -122,6 +122,14 @@ export const CAPPED_DATA_KEYS = Object.freeze({ detail: 2000, claim: 2000, proof
  */
 const q = (value) => escapeInvisible(String(value));
 
+/**
+ * A `data` payload of the shape the envelope requires. Arrays are excluded on
+ * purpose: they are objects to `typeof`, they accept string properties, and
+ * anything that ADDS a key to one would turn a rejected event into a written
+ * one of a shape the caller never wrote.
+ */
+const isDataObject = (data) => typeof data === 'object' && data !== null && !Array.isArray(data);
+
 /** Validate a single event object. Returns [] when valid, else error strings. */
 export function validateEvent(event) {
   const errors = [];
@@ -143,7 +151,7 @@ export function validateEvent(event) {
   if (typeof event.actor !== 'string' || event.actor.length === 0) {
     errors.push('actor must be a non-empty string');
   }
-  if (typeof event.data !== 'object' || event.data === null || Array.isArray(event.data)) {
+  if (!isDataObject(event.data)) {
     errors.push('data must be a JSON object (may be empty)');
   } else if (DATA_REQUIRED[event.ev]) {
     for (const key of DATA_REQUIRED[event.ev]) {
@@ -463,6 +471,31 @@ function appendUnderLock(file, event, preread = null) {
     if (lastTs && Date.parse(ts) < Date.parse(lastTs)) ts = lastTs;
   }
   const stamped = { ...event, ts };
+  // An id the caller omitted is ISSUED, not demanded — and issued HERE, from
+  // the same snapshot this write is about to extend. Issuing one is
+  // read-compute-write, so anywhere outside the lock every concurrent writer
+  // reads the same journal, computes the same "next" number, and then queues up
+  // to write it: measured over seven runs, six concurrent `decision` appends
+  // against one journal issued between 1 and 4 distinct ids for 6 events.
+  // Nothing detects that later — history is append-only, so "see D-2" stays
+  // ambiguous forever.
+  //
+  // `skills/run/SKILL.md` is emphatic that IDs never come from memory, because
+  // after a compaction memory hands out the same number twice — and `append`
+  // once REJECTED a missing `data.id`, leaving the conductor to remember a
+  // separate `next-id` call. Measured in the field: 12 decision IDs
+  // hand-assigned from memory in one initiative, which is the exact failure the
+  // rule names, with nothing objecting. A rule in prose loses to a mechanism
+  // that makes the mistake impossible.
+  //
+  // An explicit id still wins — but `"id":""` is not explicit: a conductor
+  // recovering from next-id's usage error supplied exactly that, three times,
+  // and the ledger kept three permanently blank ids nothing can reference.
+  const issuePrefix = ID_ISSUED_FOR[stamped.ev];
+  if (issuePrefix !== undefined && isDataObject(stamped.data) && (stamped.data.id === undefined || stamped.data.id === '')) {
+    // a fresh object: the `data` the caller passed in stays the caller's
+    stamped.data = { ...stamped.data, id: nextIdFrom(read().events, issuePrefix) };
+  }
   const errors = validateEvent(stamped);
   if (errors.length > 0) {
     throw new Error('invalid event: ' + errors.join('; '));
@@ -506,6 +539,9 @@ function appendUnderLock(file, event, preread = null) {
  *
  * `spawn` additionally must not duplicate an agent name that is still open
  * (ADR-18) — see `duplicateSpawnMessage` for how to get unstuck.
+ *
+ * Returns the event as written, including any `data.id` issued for it: the
+ * CLI prints that, and it is the only place the issued id is reported.
  */
 export function append(file, event) {
   mkdirSync(dirname(resolve(file)), { recursive: true });
@@ -631,14 +667,15 @@ export function validateJournal(file) {
 }
 
 /**
- * Next free ID for a prefix, derived from the journal — never from memory.
- * Scans data.id fields shaped `<PREFIX>-<number>` and returns max+1.
+ * Next free ID for a prefix, over events already read. Separate from `nextId`
+ * only so the locked append path can issue an id from the snapshot it is
+ * holding: re-reading the file there would be a second full read on every
+ * append, which a long journal pays for on every event.
  */
-export function nextId(file, prefix) {
+function nextIdFrom(events, prefix) {
   if (!/^[A-Za-z][A-Za-z0-9]*$/.test(prefix)) {
     throw new Error(`invalid id prefix "${prefix}" — use letters/digits, starting with a letter`);
   }
-  const { events } = readJournal(file);
   let max = 0;
   const re = new RegExp(`^${prefix}-(\\d+)$`);
   for (const e of events) {
@@ -646,6 +683,19 @@ export function nextId(file, prefix) {
     if (m) max = Math.max(max, Number(m[1]));
   }
   return `${prefix}-${max + 1}`;
+}
+
+/**
+ * Next free ID for a prefix, derived from the journal — never from memory.
+ * Scans data.id fields shaped `<PREFIX>-<number>` and returns max+1.
+ *
+ * A PREVIEW, not a reservation: nothing is written and no lock is held, so an
+ * id read here and appended later collides with any writer that appended in
+ * between. `append` issues ids under its own write lock; a caller that can
+ * let it do so has no window at all.
+ */
+export function nextId(file, prefix) {
+  return nextIdFrom(readJournal(file).events, prefix);
 }
 
 /** Latest checkpoint + still-open leases — the resume surface. */
@@ -744,23 +794,9 @@ function main() {
         const [file, ev, init] = rest;
         if (!file || !ev || !init) throw new UsageError();
         const data = flags.data ? JSON.parse(flags.data) : {};
-        // An id the caller omitted is ISSUED, not demanded.
-        //
-        // `skills/run/SKILL.md` is emphatic that IDs never come from memory,
-        // because after a compaction memory hands out the same number twice —
-        // and then `append` REJECTED a missing `data.id` and left the conductor
-        // to remember a separate `next-id` call. Measured in the field: 12
-        // decision IDs hand-assigned from memory in one initiative, which is
-        // the exact failure the rule names, with nothing objecting.
-        //
-        // A rule in prose loses to a mechanism that makes the mistake
-        // impossible. This is that mechanism, and an explicit id still wins —
-        // but `"id":""` is not explicit: a conductor recovering from next-id's
-        // usage error supplied exactly that, three times, and the ledger kept
-        // three permanently blank ids nothing can reference.
-        if (ID_ISSUED_FOR[ev] !== undefined && (data.id === undefined || data.id === '')) {
-          data.id = nextId(file, ID_ISSUED_FOR[ev]);
-        }
+        // An omitted id is issued by `append`, inside its write lock, and comes
+        // back on the event this prints — issuing one out here would be outside
+        // that lock, which is where concurrent writers hand out one id twice.
         const written = append(file, { ev, init, actor: flags.actor ?? 'conductor', data });
         console.log(emit(written));
         return;

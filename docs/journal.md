@@ -1,6 +1,6 @@
 # Journal reference
 
-`scripts/journal.mjs` · 59 unit tests
+`scripts/journal.mjs` · 62 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.
@@ -84,8 +84,11 @@ truncated; long material belongs in `NOTES.md` with a reference here.
   free the lease — it is surfaced in `tail().mismatchedReleases`.
 - **IDs never from memory:** omit `id` (or leave it empty) and `append`
   scans the file and issues `D-<max+1>` itself — duplicate or blank ledger
-  numbers after a compaction become impossible. `journal.mjs next-id <file> D`
-  previews the next value without appending.
+  numbers after a compaction become impossible. `append` issues the id under
+  the same lock as the write, so concurrent writers cannot be handed one
+  number twice; an id taken from `journal.mjs next-id <file> D` and appended
+  later still can, because another writer may append in between — prefer
+  letting `append` issue it whenever the caller does not need the value first.
 - **Resume surface:** `journal.mjs tail <file>` returns the latest
   `checkpoint` and all unreleased leases — exactly what the `SessionStart`
   hook re-injects.

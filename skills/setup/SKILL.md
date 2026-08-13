@@ -135,3 +135,23 @@ Until it is committed there is a second hazard worth naming in your report: an
 agent that runs `git add -A` on a story branch sweeps the untracked `.tyran/`
 into that branch, and a four-way parallel run ends with four conflicting
 copies of the config. Stage explicit paths until this commit exists.
+
+## 7. Offer overnight mode — and say plainly what the operator must do
+
+Overnight mode (`docs/overnight.md`) pauses autonomous work near the
+subscription usage limit and resumes after the window resets. It is OFF by
+default because its telemetry is a statusline the plugin cannot install:
+`.claude/settings.json` in user scope is the operator's file, and the policy
+gate refuses agents writing the in-repo one — so print the snippet with the
+plugin path RESOLVED and let the human paste it:
+
+```json
+{ "statusLine": { "type": "command",
+  "command": "node <resolved-plugin-root>/scripts/statusline.mjs" } }
+```
+
+Then show the `limits:` block to enable (`mode: 'pause'` — quoted, bare
+`off`/`on` are YAML booleans) and note that `doctor --state` reports
+`limit-telemetry-missing` if the pause is configured while the statusline is
+not installed. Do not attempt the settings write yourself; the refusal is
+the boundary working.

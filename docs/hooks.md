@@ -14,9 +14,11 @@ Two files, two jobs:
 | [`hooks/HOOK-CONTRACT-MEASURED.md`](../hooks/HOOK-CONTRACT-MEASURED.md) | what the platform actually does, read out of the shipped binary |
 
 Gates shipped so far: [the evidence gate](evidence-gate.md) (`SubagentStop`),
-the secrets gate (`PreToolUse`, below), and
+the secrets gate (`PreToolUse`, below),
 [the policy gate](policy-gate.md) (`PreToolUse`) — the autonomy classes and
-the deployment class, plus the one rule that guards a *read*. Probes:
+the deployment class, plus the one rule that guards a *read* — and
+[the usage gate](overnight.md) (`PreToolUse`) — the wind-down near the
+subscription window, registered `node`-dispatched. Probes:
 `session-start.mjs` (`SessionStart`).
 
 ## The rule that decides everything: gates and probes

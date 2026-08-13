@@ -37,6 +37,21 @@ validation:                # detected from package.json / Makefile / CI
 
 shared_zones:              # append-only files, serialized by the conductor
   - messages/*.json
+
+main_writable_paths:       # OPTIONAL. Out-of-repo paths the MAIN thread may
+  - '~/.claude/plans/**'   # write, on top of the built-ins (the memory store,
+                           # ~/.claude/plans/, and the session scratchpad). A
+                           # `~` expands to home; globs are the usual `*`/`**`.
+                           # Never widens what a SUBAGENT may do — the gate
+                           # enforces the actor split; this only lists paths.
+
+limits:                    # OPTIONAL. Overnight mode (see the Overnight page):
+  mode: 'off'              # off | warn | pause — quoted, bare off is YAML false
+  pause_at_percent: 97     # five-hour window, [50, 100]
+  weekly_pause_at_percent: 97
+  wait_max_hours: 5        # beyond this a pause is LONG: notify + hold
+  long_wait: hold          # hold | resume
+  resume_margin_minutes: 5
 ```
 
 ## Cost profiles

@@ -68,6 +68,10 @@ export const COMMANDS = {
     'schema.mjs',
     'Validate .tyran/ config, knowledge, and policy files against their schemas.',
   ],
+  knowledge: [
+    'knowledge.mjs',
+    'Select the knowledge entries that apply to a set of paths and print a paste-ready brief for a handoff.',
+  ],
   'stop-check': [
     'stop-check.mjs',
     'Check the .tyran/STOP operator brake that halts a running initiative before its next spawn or merge.',

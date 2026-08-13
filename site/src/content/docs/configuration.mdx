@@ -148,6 +148,26 @@ round-trip can never change what a file means.
 `provenance[]` entries need both `source` (where it was learned) and
 `reference` (which run, file or commit proves it).
 
+Knowledge is **read back** by `scripts/knowledge.mjs brief`, which selects
+the entries whose `applies_to` globs intersect the paths a story is about to
+touch, ranks them by confidence, cuts to a character budget, and prints a
+block the conductor pastes verbatim into a handoff:
+
+```bash
+node scripts/knowledge.mjs brief src/lib/feed/pagination.ts 'src/app/**' \
+  --kinds gotcha,convention --budget 3000
+```
+
+The budget is why entry size matters: `doctor --state` warns
+(`knowledge-entry-oversized`) when a single entry's `text` exceeds 4000
+characters, because one document-sized entry crowds out every other entry a
+brief would have carried. Keep an entry a fact; put the essay in `docs/` and
+the pointer here.
+
+Lease files (`state/*/locks/`) are runtime, not history: `/tyran:setup` seeds
+`.tyran/.gitignore` to keep them out of git, and `doctor --state` warns
+(`lease-file-tracked`) if any are committed anyway.
+
 ### Policy precedence
 
 `policies/autonomy.yaml` needs an explicit `default:` class for paths no

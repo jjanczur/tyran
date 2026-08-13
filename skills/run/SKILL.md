@@ -166,7 +166,7 @@ open one.
      chasing you instead of reading reports.
 2. **Fresh context per task.** Handoffs are SELF-CONTAINED; the agent
    disappears afterwards. Never ask the operator to compact. **Every handoff
-   carries seven things:** (1) the role and one story, one goal; (2) paths to
+   carries eight things:** (1) the role and one story, one goal; (2) paths to
    the files of record; (3) the iron rules copied VERBATIM, not linked;
    (4) the lease protocol (rule 7); (5) the **evidence contract** — the report
    must contain raw command output (exit codes, `X passed / Y failed`); a
@@ -185,7 +185,12 @@ open one.
    premises of this handoff in the code — and
    premises about DATA by measuring the real thing read-only: a field being in
    the schema is not the same as the field being in the data. Correct a wrong
-   premise and report the correction EXPLICITLY"; (7) when to escalate.
+   premise and report the correction EXPLICITLY"; (7) when to escalate;
+   (8) the **knowledge brief** — the output of
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs" brief <files the story will touch>`
+   pasted VERBATIM, entry ids included. The report owes a verdict on those ids
+   — helped, wrong, or unused — which the retrospective folds into the
+   entries' counters.
 3. **Quality gates.** Review is done by an agent who is NOT the author — when
    that is impossible (a limit, an outage), you spot-check AND the ledger
    carries an explicit **"NO INDEPENDENT REVIEW"** stamp; staying quiet about
@@ -305,13 +310,17 @@ open one.
      Siblings of the checkout (`../<repo>-<slug>`) sidestep it, whatever
      convention the repo already had.
    - **Leases are files.** Every worktree and every heavy slot has
-     `.tyran/initiatives/<slug>/locks/<resource>.lease` holding holder,
-     purpose, story and expiry. A handoff BEGINS by taking the lease — an
-     existing unexpired lease means the agent refuses to start and reports —
-     and ENDS by releasing it. Assigning slots from your own memory is
-     forbidden: the lead's memory is the least reliable store in the system.
+     `.tyran/state/<slug>/locks/<resource>.lease` holding holder,
+     purpose, story and expiry — covered by the `.tyran/state/**` AUTO rule,
+     kept out of history by `.tyran/.gitignore`. An install adopted before
+     0.1.9 has no such file — seed it before the first merge commit with
+     `node ${CLAUDE_PLUGIN_ROOT}/scripts/scan-repo.mjs --dir . --ensure-policy`
+     (create-only; it never overwrites an operator's own). A handoff BEGINS by taking the
+     lease — an existing unexpired lease means the agent refuses to start and
+     reports — and ENDS by releasing it. Assigning slots from your own memory
+     is forbidden: the lead's memory is the least reliable store in the system.
      If the policy gate refuses the lease write — an install whose repo-local
-     `autonomy.yaml` predates the `locks/**` AUTO rule — fall back to
+     `autonomy.yaml` predates that rule — fall back to
      `lease.acquired`/`lease.released` events in the journal, same holder,
      purpose and expiry, conductor-written, rather than working unleased.
    - **Preflight a heavy slot** on acquisition: check free disk against a

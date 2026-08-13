@@ -118,6 +118,11 @@ reason is the one failure mode of this whole setup that is **silent**:
 git add .tyran && git commit -m "chore: adopt Tyran"
 ```
 
+The scan also seeded `.tyran/.gitignore` (excluding `state/*/locks/`), so this
+`git add` stays clean: lease files record who holds a resource RIGHT NOW, and a
+committed lease conflicts on every parallel merge. Commit the `.gitignore`
+with the rest.
+
 `git worktree add` does not carry untracked files. Tyran's parallel model is
 worktrees, so an uncommitted `.tyran/` means every worktree the conductor
 creates has no config and no policy — and a repo with no `.tyran/` is a repo

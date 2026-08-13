@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 79 unit tests
+`scripts/doctor.mjs --state` · 85 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -76,6 +76,7 @@ possible to change one and keep the suite green.
 | `config-unreadable` · `knowledge-unreadable` · `policy-unreadable` | error | the file could not be read at all (errno printed) |
 | `policies-unreadable` | error | `policies/` could not be listed (errno printed) — **not** "zero policies" |
 | `knowledge-not-a-directory` · `policies-not-a-directory` | warning | the path exists but is not a directory, so nothing in it was checked |
+| `knowledge-entry-oversized` | warning | an entry's `text` exceeds the size a budgeted brief can carry — it validates, but it crowds out every other entry `knowledge.mjs brief` would select |
 | `policy-kernel-downgrade` | error | a rule that tries to lower a protected kernel path |
 | `policy-rule-dead` | warning | a rule glob that can never match any path |
 | `policy-rule-overruled` | warning | a rule that quietly fails to cover part of what it looks like it covers |
@@ -83,6 +84,8 @@ possible to change one and keep the suite green.
 | `state-not-a-directory` | error | `state/` exists but is not a directory |
 | `state-unreadable` | error | `state/` could not be listed (errno printed) |
 | `state-stray-file` | warning | something under `state/` is not an initiative directory |
+| `state-legacy-initiatives-dir` | warning | a `.tyran/initiatives/` directory from before 0.1.9 — initiative files live under `state/`, and nothing mechanical reads the old location |
+| `lease-file-tracked` | warning | lease files are committed to git — a lease records who holds a resource right now, so a committed one conflicts on every parallel merge |
 
 ## Guarantees
 

@@ -253,7 +253,11 @@ echo "wrong branch — hold everything" > .tyran/STOP
   tunes Tyran's own playbook, through an anti-bloat filter with four
   questions, a hard cap of three edits per retrospective, and a stated
   preference for deleting rules over adding them — so *"I changed nothing"*
-  is a correct outcome, and so is declining the retro entirely. **You are
+  is a correct outcome, and so is declining the retro entirely. What was
+  learned reaches the agent that needs it: every handoff carries a budgeted
+  **knowledge brief** of the entries that apply to the files at hand, and
+  each agent's report grades the entries it received, so the store is
+  pruned on evidence. **You are
   never blocked twice**, whichever you choose. This is a gate rather than a
   sentence in a skill because the retro is the step most easily skipped: it
   happens after the merge, when the interesting part is over.
@@ -355,9 +359,9 @@ Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/
 command stays `tyran` either way; only the registry name is scoped, the same
 pattern as `@angular/cli` giving you `ng`. `bin/tyran.mjs` exposes the same
 scripts the plugin's hooks and skills already call — `doctor`, `scan-repo`,
-`tiers`, `journal`, `schema`, `stop-check`, `scan-control-chars`,
-`desc-budget` — for a shell or a CI job with no Claude Code session. Zero
-dependencies; `--help` lists them.
+`tiers`, `journal`, `schema`, `knowledge`, `stop-check`,
+`scan-control-chars`, `desc-budget` — for a shell or a CI job with no Claude
+Code session. Zero dependencies; `--help` lists them.
 
 ```bash
 npx @jjanczur/tyran doctor --hooks     # is any gate installed but unable to fire?

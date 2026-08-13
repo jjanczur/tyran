@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import {
   validateConfig,
   validateKnowledge,
+  knowledgeWarnings,
+  KNOWLEDGE_ENTRY_MAX_CHARS,
   validatePolicy,
   validateFile,
   classifyPath,
@@ -127,6 +129,29 @@ test('validates usage counters and optional fields', () => {
 
 test('requires entries to be a list', () => {
   assert.ok(validateKnowledge({}).some((e) => e.includes('entries')));
+});
+
+test('knowledgeWarnings flags an oversized entry without touching the error contract', () => {
+  const atLimit = knowledgeEntry({ text: 'x'.repeat(KNOWLEDGE_ENTRY_MAX_CHARS) });
+  const over = knowledgeEntry({ id: 'K-2', text: 'y'.repeat(KNOWLEDGE_ENTRY_MAX_CHARS + 1) });
+  const doc = { entries: [atLimit, over] };
+  // errors unchanged — an oversized entry still VALIDATES
+  assert.deepEqual(validateKnowledge(doc), []);
+  const warnings = knowledgeWarnings(doc);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^K-2: /);
+  assert.match(warnings[0], new RegExp(String(KNOWLEDGE_ENTRY_MAX_CHARS + 1)));
+  // exactly at the limit is silent
+  assert.deepEqual(knowledgeWarnings({ entries: [atLimit] }), []);
+});
+
+test('knowledgeWarnings measures codepoints, not UTF-16 units, and survives junk', () => {
+  // 4000 astral codepoints are 8000 UTF-16 units — still exactly at the limit.
+  const astral = knowledgeEntry({ text: '𝐀'.repeat(KNOWLEDGE_ENTRY_MAX_CHARS) });
+  assert.deepEqual(knowledgeWarnings({ entries: [astral] }), []);
+  // malformed docs yield no warnings rather than a throw
+  assert.deepEqual(knowledgeWarnings(null), []);
+  assert.deepEqual(knowledgeWarnings({ entries: [null, { text: 42 }, 'nope'] }), []);
 });
 
 // --- policy ------------------------------------------------------------

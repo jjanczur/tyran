@@ -23,8 +23,10 @@ import {
   hardwareLine,
   hookHealth,
   readInitiatives,
+  readPauseMarker,
   renderContext,
   renderHookWarning,
+  renderPauseNotice,
   resolveRepoRoot,
   runDoctor,
 } from '../../hooks/scripts/session-start.mjs';
@@ -184,6 +186,41 @@ test('a corrupt journal degrades to a partial summary rather than an exception',
 });
 
 // -------------------------------------------------------------- budget
+
+// --------------------------------------------------- the pause notice
+
+test('an active pause renders in the HEADER, so no budget cut can drop it', () => {
+  const marker = { window: 'seven_day', resume_at: '2026-08-15T21:05:00.000Z', long_wait: true };
+  const notice = renderPauseNotice(marker, '2026-08-13T14:00:00.000Z');
+  assert.match(notice, /PAUSED on the weekly usage limit/);
+  assert.match(notice, /LONG pause/);
+
+  // Placement: the notice must appear BEFORE the first `### ` section, which
+  // is the region fitBudget unconditionally keeps.
+  const context = renderContext({
+    repoRoot: '/r',
+    initiatives: [{ name: 'demo', state: null, error: 'x' }],
+    doctor: { available: true, counts: { error: 0, warning: 0, info: 0 }, findings: [] },
+    hardware: 'h',
+    nowIso: '2026-08-13T14:00:00.000Z',
+    pause: marker,
+  });
+  assert.ok(context.indexOf('PAUSED') < context.indexOf('### '), 'the pause notice sits after the sections');
+  const fitted = fitBudget(context, 200);
+  assert.match(fitted, /PAUSED/, 'a budget cut dropped the pause notice');
+});
+
+test('a stale marker renders the STALE variant, and garbage markers read as absent', () => {
+  const notice = renderPauseNotice({ window: 'five_hour', resume_at: '2026-08-13T10:00:00.000Z' }, '2026-08-13T14:00:00.000Z');
+  assert.match(notice, /PAUSED-STALE/);
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-pause-'));
+  mkdirSync(join(dir, '.tyran', 'state'), { recursive: true });
+  assert.equal(readPauseMarker(join(dir, '.tyran')), null);
+  writeFileSync(join(dir, '.tyran', 'state', 'paused-until.json'), '{broken');
+  assert.equal(readPauseMarker(join(dir, '.tyran')), null);
+  writeFileSync(join(dir, '.tyran', 'state', 'paused-until.json'), JSON.stringify({ window: 'five_hour', resume_at: 'x' }));
+  assert.notEqual(readPauseMarker(join(dir, '.tyran')), null);
+});
 
 test('the working budget cuts on a section boundary and says how much it dropped', () => {
   const text = ['## head', '', '### one', 'a'.repeat(400), '### two', 'b'.repeat(400), '### three', 'c'.repeat(400)].join(

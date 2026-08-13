@@ -86,6 +86,10 @@ possible to change one and keep the suite green.
 | `state-stray-file` | warning | something under `state/` is not an initiative directory |
 | `state-legacy-initiatives-dir` | warning | a `.tyran/initiatives/` directory from before 0.1.9 — initiative files live under `state/`, and nothing mechanical reads the old location |
 | `lease-file-tracked` | warning | lease files are committed to git — a lease records who holds a resource right now, so a committed one conflicts on every parallel merge |
+| `limit-pause-active` | info | a usage-limit pause marker is present and its resume time has not passed — autonomous work is deliberately wound down |
+| `limit-pause-stale` | warning | the pause marker's resume time has passed and the marker remains — the watcher died (reboot) or was never scheduled |
+| `limit-resume-watcher-dead` | warning | `resume.json` says a watcher is waiting but no such process is alive, or the last scheduled resume failed |
+| `limit-telemetry-missing` | warning | `limits.mode` is `warn` or `pause` but the usage telemetry sidecar is absent or over a day old — the gate fails open, so the configured pause protects nothing |
 
 ## Guarantees
 

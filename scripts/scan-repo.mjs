@@ -512,8 +512,14 @@ export const STATE_GITIGNORE_PATH = '.tyran/.gitignore';
 const STATE_GITIGNORE_BODY =
   '# Runtime files, never history. Leases record who holds a worktree or a\n' +
   '# heavy slot RIGHT NOW; committing one makes every parallel merge conflict\n' +
-  '# on state that was stale the moment it was written.\n' +
-  'state/*/locks/\n';
+  '# on state that was stale the moment it was written. The overnight files\n' +
+  '# are machine-local by nature: another clone has a different watcher pid,\n' +
+  '# a different telemetry stream, and no business inheriting this one\'s pause.\n' +
+  'state/*/locks/\n' +
+  'state/paused-until.json\n' +
+  'state/resume.json\n' +
+  'state/resume.log\n' +
+  'state/usage.json\n';
 
 /**
  * Create-only write of `.tyran/.gitignore` excluding lease files. A nested

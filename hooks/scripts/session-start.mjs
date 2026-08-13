@@ -17,7 +17,7 @@
  * worse bug than the missing summary.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -168,15 +168,19 @@ function rows(list, render) {
  * 120 characters under the platform's hard ceiling. Escaping first means the
  * length fitBudget sees is the length that ships.
  */
-export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso }) {
-  if (initiatives.length === 0) return '';
+export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso, pause = null }) {
+  if (initiatives.length === 0 && pause === null) return '';
   const lines = [
     '## Tyran state (injected by the session-start probe)',
     '',
     `Repo: ${inlinePlain(repoRoot)} · as of ${inlinePlain(nowIso)}`,
     `Machine: ${inlinePlain(hardware)}`,
-    '',
   ];
+  // The pause notice lives in the HEADER, before any `### ` section, because
+  // fitBudget always keeps the preamble and drops sections from the end — a
+  // paused session must never lose the one line that says why it is paused.
+  if (pause !== null) lines.push(renderPauseNotice(pause, nowIso));
+  lines.push('');
 
   for (const { name, state, error } of initiatives) {
     lines.push(`### Initiative \`${inlinePlain(name)}\``);
@@ -309,6 +313,40 @@ export function fitBudget(text, budget = CONTEXT_BUDGET) {
   return `${out}\n\n[tyran session-start: ${dropped} further section(s) omitted to stay inside the ${budget}-character working budget; read .tyran/state/ for the rest]`;
 }
 
+/**
+ * One line about an active usage-limit pause — or a stale one, which is the
+ * variant that actually needs a human. Everything through inlinePlain; only
+ * marker fields the overnight tooling itself wrote are shown.
+ */
+export function renderPauseNotice(marker, nowIso) {
+  const resumeAtMs = Date.parse(typeof marker.resume_at === 'string' ? marker.resume_at : '');
+  const nowMs = Date.parse(nowIso);
+  if (Number.isFinite(resumeAtMs) && Number.isFinite(nowMs) && resumeAtMs < nowMs) {
+    return (
+      `PAUSED-STALE: the usage-limit pause marker's resume time (${inlinePlain(marker.resume_at)}) has ` +
+      'PASSED — run `node scripts/overnight.mjs status` and reschedule or clear it.'
+    );
+  }
+  const window = marker.window === 'seven_day' ? 'weekly' : 'five-hour';
+  return (
+    `PAUSED on the ${window} usage limit until ${inlinePlain(marker.resume_at ?? 'the window resets')}` +
+    (marker.long_wait === true ? ' — a LONG pause; the scheduler holds unless told otherwise' : '') +
+    '. Operator takeover: `node scripts/overnight.mjs cancel --clear`.'
+  );
+}
+
+/** The pause marker, if one is active. Garbage reads as absent. */
+export function readPauseMarker(stateDir) {
+  try {
+    const path = join(stateDir, 'state', 'paused-until.json');
+    if (!existsSync(path)) return null;
+    const doc = JSON.parse(readFileSync(path, 'utf8'));
+    return doc !== null && typeof doc === 'object' && !Array.isArray(doc) ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function buildContext({ input, now = new Date(), env = process.env, health = hookHealth } = {}) {
   // Said even in a repository that has nothing to do with Tyran: the claim
   // being corrected is about the PLUGIN the user installed, not about this
@@ -328,6 +366,7 @@ export async function buildContext({ input, now = new Date(), env = process.env,
       doctor: runDoctor(stateDir, nowIso),
       hardware: hardwareLine(),
       nowIso,
+      pause: readPauseMarker(stateDir),
     }),
   );
 }

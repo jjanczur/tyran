@@ -35,7 +35,7 @@
  * with no answer inside the state directory, because a plugin whose hooks are
  * dead writes no state to be inconsistent with.
  */
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHooks, DEFAULT_PLUGIN_ROOT } from './hooks-check.mjs';
@@ -196,6 +196,11 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'state-stray-file': 'warning',
     'state-legacy-initiatives-dir': 'warning',
     'lease-file-tracked': 'warning',
+    // overnight mode
+    'limit-pause-active': 'info',
+    'limit-pause-stale': 'warning',
+    'limit-resume-watcher-dead': 'warning',
+    'limit-telemetry-missing': 'warning',
   }),
 );
 
@@ -1031,6 +1036,121 @@ export function trackedLeaseFiles(run, tyranDirName = '.tyran') {
   return listing.split('\n').filter((line) => line !== '' && lease.test(line));
 }
 
+/** The repo-global overnight runtime files that legally live at state/ level. */
+export const OVERNIGHT_RUNTIME_FILES = Object.freeze([
+  'paused-until.json',
+  'resume.json',
+  'resume.log',
+  'usage.json',
+]);
+
+/**
+ * Overnight-mode consistency: the pause marker, the resume watcher, and the
+ * telemetry a configured gate depends on. Deterministic: staleness questions
+ * are answered only against an explicit `now` (the SessionStart probe passes
+ * one); without it a marker is reported as present, never as stale — doctor
+ * never reads the wall clock.
+ */
+export function overnightFindings(dir, { now = null, configDoc = null } = {}) {
+  const findings = [];
+  const referenceMs = now !== null ? Date.parse(now) : null;
+  const markerPath = join(dir, 'state', 'paused-until.json');
+  const resumePath = join(dir, 'state', 'resume.json');
+  const sidecarPath = join(dir, 'state', 'usage.json');
+
+  const marker = readJsonIfSmall(markerPath);
+  if (marker !== null) {
+    const resumeAtMs = Date.parse(typeof marker.resume_at === 'string' ? marker.resume_at : '');
+    const stale = referenceMs !== null && Number.isFinite(resumeAtMs) && resumeAtMs < referenceMs;
+    if (stale) {
+      findings.push(
+        finding(
+          'limit-pause-stale',
+          show(markerPath),
+          `the pause marker's resume time (${show(marker.resume_at)}) has PASSED and the marker is still ` +
+            'here — the watcher died with the machine, or was never scheduled. Autonomous work stays ' +
+            'wound down until this is resolved; the usage gate also self-clears it on the next tool call',
+          `node scripts/overnight.mjs status --dir ${sq(dirname(resolve(dir)))}   # then schedule again, or let the gate self-clear`,
+        ),
+      );
+    } else {
+      findings.push(
+        finding(
+          'limit-pause-active',
+          show(markerPath),
+          `paused on the ${show(marker.window)} usage window until ${show(marker.resume_at)}` +
+            (marker.long_wait === true ? ' — a LONG pause; the scheduler holds unless told otherwise' : ''),
+        ),
+      );
+    }
+    const resume = readJsonIfSmall(resumePath);
+    if (resume !== null) {
+      const waitingDead =
+        resume.state === 'waiting' && !(Number.isInteger(resume.pid) && resume.pid > 0 && processAlive(resume.pid));
+      if (waitingDead || resume.state === 'failed') {
+        findings.push(
+          finding(
+            'limit-resume-watcher-dead',
+            show(resumePath),
+            waitingDead
+              ? `resume.json says a watcher is waiting (pid ${show(String(resume.pid))}) but no such process is alive — a reboot kills detached watchers`
+              : `the last scheduled resume FAILED (${show(resume.reason ?? 'see resume.log')})`,
+            `node scripts/overnight.mjs schedule --dir ${sq(dirname(resolve(dir)))}`,
+          ),
+        );
+      }
+    }
+  }
+
+  // A configured control that cannot see is the silent-absence class.
+  const limits = knowsLimits(configDoc);
+  if (limits !== null && limits.mode !== 'off') {
+    const sidecar = readJsonIfSmall(sidecarPath);
+    const writtenMs = sidecar !== null ? Date.parse(typeof sidecar.written_at === 'string' ? sidecar.written_at : '') : NaN;
+    const ancient = referenceMs !== null && Number.isFinite(writtenMs) && referenceMs - writtenMs > 24 * 3600 * 1000;
+    if (sidecar === null || ancient) {
+      findings.push(
+        finding(
+          'limit-telemetry-missing',
+          show(sidecarPath),
+          `limits.mode is "${show(limits.mode)}" but the usage telemetry sidecar is ${sidecar === null ? 'absent' : 'over a day old'} — ` +
+            'the gate fails open without it, so the configured pause protects nothing. The statusline ' +
+            'helper is operator-installed; see docs/overnight.md',
+          `node scripts/statusline.mjs --sidecar-only   # wired into the user-settings statusLine command`,
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
+function readJsonIfSmall(path) {
+  try {
+    if (!existsSync(path) || statSync(path).size > 64 * 1024) return null;
+    const doc = JSON.parse(readFileSync(path, 'utf8'));
+    return doc !== null && typeof doc === 'object' && !Array.isArray(doc) ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The limits block when the config carries a usable one, else null. */
+function knowsLimits(configDoc) {
+  if (configDoc === null || typeof configDoc !== 'object') return null;
+  const limits = configDoc.limits;
+  if (limits === null || typeof limits !== 'object' || Array.isArray(limits)) return null;
+  return typeof limits.mode === 'string' ? limits : null;
+}
+
 export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAULT_STALE_HOURS, run = null } = {}) {
   const root = resolve(dir);
   if (!existsSync(root)) {
@@ -1045,8 +1165,11 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
   const checked = [];
 
   const configPath = join(dir, 'config.yaml');
+  let configDoc = null;
   if (existsSync(configPath)) {
-    findings.push(...checkSchemaFile('config', configPath).findings);
+    const configResult = checkSchemaFile('config', configPath);
+    findings.push(...configResult.findings);
+    configDoc = configResult.doc;
     checked.push('config.yaml: checked');
   } else {
     findings.push(
@@ -1130,6 +1253,10 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     for (const name of sortedNames(names)) {
       const path = join(stateDir, name);
       if (!isDirectory(path)) {
+        // Named exemption, not a silent skip: the overnight runtime files
+        // live at the state/ level by design (repo-global, machine-local,
+        // gitignored) and are checked by overnightFindings instead.
+        if (OVERNIGHT_RUNTIME_FILES.includes(name)) continue;
         findings.push(
           finding(
             'state-stray-file',
@@ -1162,6 +1289,9 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     );
   }
   checked.push(`initiatives/ (legacy): ${isDirectory(legacyDir) ? 'PRESENT' : 'absent'}`);
+
+  findings.push(...overnightFindings(dir, { now, configDoc }));
+  checked.push('overnight: checked');
 
   const trackedLeases = trackedLeaseFiles(gitRun, basename(root));
   if (trackedLeases.length > 0) {

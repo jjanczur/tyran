@@ -343,7 +343,7 @@ Tyran does, and that is the point of the "small curated core" row above —
 oh-my-claudecode's own issue #2943 is titled "50+ skills exceeding context
 description budget", which is the bill that arrives with the larger number.
 Tyran's fourteen are held under a description budget CI enforces on every
-push (4340 of 5000 characters, and a test fails if this sentence and the
+push (4352 of 5000 characters, and a test fails if this sentence and the
 script ever disagree). That ceiling was 4000 for the first eight skills and
 was raised once, deliberately, with the reason in the changelog — the
 distinction being that #2943 describes a budget that was <i>exceeded</i>, and
@@ -359,7 +359,7 @@ Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/
 command stays `tyran` either way; only the registry name is scoped, the same
 pattern as `@angular/cli` giving you `ng`. `bin/tyran.mjs` exposes the same
 scripts the plugin's hooks and skills already call — `doctor`, `scan-repo`,
-`tiers`, `journal`, `schema`, `knowledge`, `stop-check`,
+`tiers`, `journal`, `schema`, `knowledge`, `board`, `overnight`, `statusline`, `stop-check`,
 `scan-control-chars`, `desc-budget` — for a shell or a CI job with no Claude
 Code session. Zero dependencies; `--help` lists them.
 
@@ -440,7 +440,9 @@ underlying script does.
       telemetry sidecar, a wind-down gate near the subscription window, and a
       watcher that resumes (or, on a days-away weekly reset, notifies and
       holds) — see [docs/overnight.md](docs/overnight.md)
-- [ ] Read-only dashboard (phase C)
+- [x] Read-only dashboard: the kanban board — `BOARD.md`/`board.json` next to
+      every journal, one cross-initiative `board.html` in the landing page's
+      own palette, refreshed on every subagent stop, plus `board.mjs --serve`
 
 ## Where this came from
 

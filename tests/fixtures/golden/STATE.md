@@ -43,12 +43,14 @@
 | Gate | Latest result | At | Evidence |
 |---|---|---|---|
 | plan-approval | open | 2026-07-26T09:35:00.000Z | waiting for the operator |
+| pricing-copy | WAITING_ON_OPERATOR | 2026-07-26T09:41:55.000Z | &mdash; |
 
 ## All gates
 
 | Gate | Latest result | Events | At |
 |---|---|---|---|
 | plan-approval | open | 1 | 2026-07-26T09:35:00.000Z |
+| pricing-copy | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:55.000Z |
 | tests | pass | 1 | 2026-07-26T09:34:00.000Z |
 
 ## Open leases
@@ -89,10 +91,10 @@
 
 ## Journal integrity
 
-- **Events folded:** 23
+- **Events folded:** 24
 - **Unknown event types:** 0
 - **Non-object lines skipped:** 0
 - **Corrupt lines skipped:** 0
 - **Truncated final line:** no
 - **Timespan:** 2026-07-26T09:00:00.000Z → 2026-07-26T09:42:00.000Z
-- **Events by type:** `checkpoint` 1 · `decision` 1 · `error` 1 · `finding` 1 · `gate` 2 · `init.created` 1 · `lease.acquired` 2 · `lease.released` 2 · `merge` 1 · `plan.accepted` 1 · `progress` 1 · `report` 1 · `retro.entry` 1 · `review` 1 · `spawn` 2 · `ticket.created` 3 · `ticket.status` 1
+- **Events by type:** `checkpoint` 1 · `decision` 1 · `error` 1 · `finding` 1 · `gate` 3 · `init.created` 1 · `lease.acquired` 2 · `lease.released` 2 · `merge` 1 · `plan.accepted` 1 · `progress` 1 · `report` 1 · `retro.entry` 1 · `review` 1 · `spawn` 2 · `ticket.created` 3 · `ticket.status` 1

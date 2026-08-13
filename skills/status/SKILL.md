@@ -1,5 +1,5 @@
 ---
-description: Where is the work right now. Regenerates STATE.md and PROGRESS.md from the journal and answers with the progress line, the agents still running, the open gates and the resume steps. Read-only. Use for /tyran:status or when asked what is going on.
+description: Where is the work right now. Regenerates the projections and the kanban board from the journal and answers with the progress line, the agents still running, the open gates and the resume steps. Read-only. Use for /tyran:status or when asked what is going on.
 ---
 
 # Status
@@ -9,6 +9,7 @@ Answer from the journal, never from memory.
 ```bash
 J=$(ls -t .tyran/state/*/journal.jsonl 2>/dev/null | head -1)
 node "${CLAUDE_PLUGIN_ROOT}/scripts/project.mjs" "$J" --out-dir "$(dirname "$J")"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/board.mjs" --dir .tyran
 node "${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs" tail "$J"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs" open-spawns "$J"
 ```
@@ -27,6 +28,9 @@ Then report, in this order and no longer than a screen:
 5. Any lease released by someone who did not hold it. The projection surfaces
    these; they mean two agents believed they owned the same worktree.
 6. The resume steps from the last checkpoint.
+
+End by pointing the operator at `.tyran/state/board.html` — the kanban view
+of everything above, refreshed on every subagent stop and every merge.
 
 If there is no journal, say exactly that and suggest `/tyran:setup`. Do not
 reconstruct a status from the git log — a plausible status is worse than none,

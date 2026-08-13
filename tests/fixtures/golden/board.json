@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "initiative": "demo",
+  "progress": {
+    "percent": 33,
+    "merged": 1,
+    "tickets": 3,
+    "phase": "E2"
+  },
+  "paused": null,
+  "asks": [
+    {
+      "kind": "pricing-copy",
+      "ticket": "T-10",
+      "question": "flat fee or per-seat on the team plan?",
+      "recommendation": "per-seat",
+      "default": "per-seat ships Friday if no answer",
+      "since": "2026-07-26T09:41:55.000Z"
+    }
+  ],
+  "agents": [
+    {
+      "agent": "impl-2",
+      "role": "implementer",
+      "ticket": "T-2",
+      "state": "blocked",
+      "detail": "waiting on the worktree lease",
+      "next": null,
+      "last_signal": "2026-07-26T09:41:40.000Z"
+    }
+  ],
+  "lanes": {
+    "waiting-operator": [],
+    "paused-limit": [],
+    "blocked": [
+      {
+        "id": "T-2",
+        "title": "schemas | with a pipe and `backticks`",
+        "agents": [
+          "impl-2"
+        ],
+        "since": "2026-07-26T09:36:01.000Z",
+        "annotation": "waiting on the worktree lease"
+      }
+    ],
+    "changes-requested": [],
+    "in-review": [],
+    "in-progress": [],
+    "ready": [],
+    "backlog": [],
+    "parked": [
+      {
+        "id": "T-10",
+        "title": "projections",
+        "agents": [],
+        "since": "2026-07-26T09:41:50.000Z",
+        "annotation": "pricing question open"
+      }
+    ],
+    "done": [
+      {
+        "id": "T-1",
+        "title": "journal module",
+        "agents": [],
+        "since": "2026-07-26T09:32:00.000Z",
+        "annotation": null
+      }
+    ]
+  }
+}

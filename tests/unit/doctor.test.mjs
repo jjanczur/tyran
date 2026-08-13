@@ -1442,6 +1442,7 @@ const EXPECTED_SEVERITY = {
   'projection-blocked': 'warning',
   'projection-failed': 'error',
   'projection-unreadable': 'error',
+  'board-absent': 'info',
   'config-missing': 'info',
   'config-invalid': 'error',
   'config-unreadable': 'error',

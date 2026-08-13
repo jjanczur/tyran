@@ -30,6 +30,13 @@ import {
   writeAtomic,
   writeAllAtomic,
   ticketStatus,
+  BOARD_FILE,
+  BOARD_JSON_FILE,
+  boardOf,
+  renderBoard,
+  boardJson,
+  LANES,
+  WAITING_RE,
 } from '../../scripts/project.mjs';
 
 /** First line of every projection — used to spot a half-written document. */
@@ -398,6 +405,110 @@ test('a blockage opens on blocked and clears on the same agent next movement sig
   }
 });
 
+// ------------------------------------------------------------------ board
+
+const T = (id, over = {}) => ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id, ...over } });
+const laneFor = (events, id) => {
+  const board = boardOf(fold({ events }));
+  for (const [lane, cards] of board.lanes) if (cards.some((c) => c.id === id)) return lane;
+  return null;
+};
+
+test('each lane derives from the events the plan names, strongest first', () => {
+  // done > override > ask > blocked > in-review > in-progress > ready > backlog
+  assert.equal(laneFor([T('T-1'), ev({ ev: 'merge', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-1', sha: 'a' } })], 'T-1'), 'done');
+  assert.equal(laneFor([T('T-1'), ev({ ev: 'ticket.status', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-1', column: 'parked' } })], 'T-1'), 'parked');
+  assert.equal(
+    laneFor([T('T-1'), ev({ ev: 'gate', ts: '2026-07-26T09:01:00.000Z', data: { kind: 'k', result: 'WAITING_ON_OPERATOR', ticket: 'T-1' } })], 'T-1'),
+    'waiting-operator',
+  );
+  assert.equal(
+    laneFor([T('T-1'), ev({ ev: 'progress', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'a', state: 'blocked', ticket: 'T-1' } })], 'T-1'),
+    'blocked',
+  );
+  assert.equal(
+    laneFor([T('T-1'), ev({ ev: 'error', ts: '2026-07-26T09:01:00.000Z', data: { class: 'agent-terminated', ticket: 'T-1' } })], 'T-1'),
+    'blocked',
+  );
+  assert.equal(
+    laneFor([
+      T('T-1'),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'a', role: 'implementer', ticket: 'T-1' } }),
+      ev({ ev: 'report', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'a', verdict: 'done', ticket: 'T-1' } }),
+    ], 'T-1'),
+    'in-review',
+  );
+  assert.equal(
+    laneFor([
+      T('T-1'),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'a', role: 'implementer', ticket: 'T-1' } }),
+    ], 'T-1'),
+    'in-progress',
+  );
+  // deps: all merged = ready; an unknown dep is UNMET (a typo must not schedule)
+  const depBase = [T('T-2', { deps: ['T-1'] }), T('T-1'), ev({ ev: 'merge', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-1', sha: 'a' } })];
+  assert.equal(laneFor(depBase, 'T-2'), 'ready');
+  assert.equal(laneFor([T('T-3', { deps: ['T-99'] })], 'T-3'), 'backlog');
+});
+
+test('changes-requested vs approved-awaiting-merge, and paused-limit bites only running work', () => {
+  const reviewed = (verdict) => [
+    T('T-1'),
+    ev({ ev: 'spawn', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'a', role: 'implementer', ticket: 'T-1' } }),
+    ev({ ev: 'report', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'a', verdict: 'done', ticket: 'T-1' } }),
+    ev({ ev: 'review', ts: '2026-07-26T09:03:00.000Z', data: { ticket: 'T-1', verdict, by: 'r' } }),
+  ];
+  assert.equal(laneFor(reviewed('CHANGES-REQUESTED'), 'T-1'), 'changes-requested');
+  assert.equal(laneFor(reviewed('APPROVE'), 'T-1'), 'in-review');
+
+  const paused = [
+    T('T-1'),
+    ev({ ev: 'spawn', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'a', role: 'implementer', ticket: 'T-1' } }),
+    T('T-2'),
+    ev({ ev: 'gate', ts: '2026-07-26T09:02:00.000Z', data: { kind: 'usage-limit', result: 'WAITING_ON_RESET' } }),
+  ];
+  assert.equal(laneFor(paused, 'T-1'), 'paused-limit', 'running work suspends');
+  assert.equal(laneFor(paused, 'T-2'), 'ready', 'idle tickets are not paused, they are simply not running');
+  const board = boardOf(fold({ events: paused }));
+  assert.equal(board.paused.kind, 'usage-limit');
+});
+
+test('WAITING_RE variants match; an answered ask leaves the queue and closes the gate', () => {
+  for (const yes of ['WAITING_ON_OPERATOR', 'waiting-on-owner', 'Waiting_On_Human']) {
+    assert.ok(WAITING_RE.test(yes), yes);
+  }
+  assert.ok(!WAITING_RE.test('waiting-for-ci'));
+  const asked = [
+    ev({ ev: 'gate', ts: '2026-07-26T09:01:00.000Z', data: { kind: 'pricing', result: 'WAITING_ON_OPERATOR', question: 'q?', recommendation: 'r', default: 'd' } }),
+  ];
+  const open = boardOf(fold({ events: asked }));
+  assert.equal(open.asks.length, 1);
+  assert.equal(open.asks[0].question, 'q?');
+  const answered = [...asked, ev({ ev: 'gate', ts: '2026-07-26T09:02:00.000Z', data: { kind: 'pricing', result: 'answered' } })];
+  assert.equal(boardOf(fold({ events: answered })).asks.length, 0);
+});
+
+test('board.json is schema 1, parses back, renders byte-identically twice, and escapes invisibles', () => {
+  const events = [T('T-1', { title: 'x' + String.fromCodePoint(0xe0041) + 'y' })];
+  const state = fold({ events });
+  const one = boardJson(state);
+  const two = boardJson(state);
+  assert.equal(one, two);
+  const parsed = JSON.parse(one);
+  assert.equal(parsed.schema, 1);
+  assert.ok(!one.includes(String.fromCodePoint(0xe0041)), 'raw TAG codepoint in board.json');
+  assert.ok(one.includes('\\uDB40'), 'the invisible survives as an escape, not deleted');
+  assert.deepEqual(Object.keys(parsed.lanes), [...LANES]);
+});
+
+test('golden: BOARD.md and board.json are byte-identical to the committed projections', () => {
+  const read = { events: readFileSync(FIXTURE, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) };
+  const { files } = renderProjections(read);
+  assert.equal(files[BOARD_FILE], readFileSync(join(GOLDEN_DIR, BOARD_FILE), 'utf8'));
+  assert.equal(files[BOARD_JSON_FILE], readFileSync(join(GOLDEN_DIR, BOARD_JSON_FILE), 'utf8'));
+});
+
+
 test('a TICKETLESS blockage clears on movement too, not only a ticketed one', () => {
   // MUTANT: restrict the clear to blockages that carry a ticket. A reviewer or
   // a scout blocked on something with no ticket then stays blocked forever,
@@ -564,6 +675,32 @@ test('a ticket.status for an unknown ticket is refused out loud and moves NOTHIN
   );
   // the events folded, and the type census still counts them
   assert.equal(typo.byType.get('ticket.status'), 1);
+});
+
+test('an error naming an unknown ticket is recorded but binds to NOTHING', () => {
+  // MUTANT: bind with `ticketOf(data.ticket, ts)`. `data.ticket` is optional
+  // metadata on an error, so a typo mints a ticket the denominator counts and
+  // no merge can ever close — 100% falls to 67% permanently, and the board
+  // shows a `blocked` card for an id that never existed.
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-10' } }),
+    ev({ ev: 'merge', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-10', sha: 'abc' } }),
+  ];
+  const typo = fold({
+    events: [...base, ev({ ev: 'error', ts: '2026-07-26T09:02:00.000Z', data: { class: 'tool-failure', ticket: 'T-1O' } })],
+  });
+  assert.equal(typo.percent, 100, 'an error moved the percent');
+  assert.deepEqual(typo.ticketList.map((t) => t.id), ['T-10'], 'an error invented a ticket');
+  assert.equal(typo.errors.length, 1, 'the error itself must still be recorded');
+  assert.ok(
+    warnings(typo).some((w) => /error names unknown ticket "T-1O"/.test(w)),
+    `no warning named the unbound error: ${warnings(typo)}`,
+  );
+  // a KNOWN ticket still binds, so the blocked lane keeps working
+  const known = fold({
+    events: [...base, ev({ ev: 'error', ts: '2026-07-26T09:02:00.000Z', data: { class: 'tool-failure', ticket: 'T-10' } })],
+  });
+  assert.equal(known.ticketList[0].error.class, 'tool-failure');
 });
 
 test('the Agents table shows the last signal only on running rows', () => {
@@ -917,8 +1054,8 @@ test('concurrent projections never leave a partial or temporary file', async () 
       }),
     ),
   );
-  assert.deepEqual(readdirSync(out).sort(), [PROGRESS_FILE, STATE_FILE].sort());
-  for (const name of [STATE_FILE, PROGRESS_FILE]) {
+  assert.deepEqual(readdirSync(out).sort(), [BOARD_FILE, BOARD_JSON_FILE, PROGRESS_FILE, STATE_FILE].sort());
+  for (const name of [STATE_FILE, PROGRESS_FILE, BOARD_FILE, BOARD_JSON_FILE]) {
     assert.deepEqual(readFileSync(join(out, name)), readFileSync(join(GOLDEN_DIR, name)));
   }
 });

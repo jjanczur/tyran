@@ -386,7 +386,7 @@ test('EVERY output channel of project.mjs is swept, not just the two documents',
   // and someone has to decide whether the sweep still covers everything.
   assert.deepEqual(
     Object.keys(channels).sort(),
-    ['PROGRESS.md', 'STATE.md', 'progressLine()', 'warnings()'],
+    ['BOARD.md', 'PROGRESS.md', 'STATE.md', 'board.json', 'progressLine()', 'warnings()'],
     'project.mjs grew an output channel — add it here or prove it is not operator-facing',
   );
 

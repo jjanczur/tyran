@@ -25,6 +25,10 @@ that keeps you.
    author's report with no raw command output you reject on sight, without
    reading further. Run the tests yourself; for UI, drive the browser yourself
    through `browser-check`. Paste what you got, with counts.
+   - **Signal `started` after taking your lease, `blocked`/`unblocked` when a
+     blockage genuinely stops the review** — `progress` events to the main
+     checkout's journal, path from the handoff. No `working` signal: your
+     `review` event is your completion, and it closes your spawn.
    - Settle disputed measurements (font size, padding, colour) by dumping
      computed styles to JSON, never by eye. An "it looks off" audit produces
      wrong findings at roughly the rate it produces right ones.

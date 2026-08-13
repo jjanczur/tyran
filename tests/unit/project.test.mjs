@@ -29,6 +29,7 @@ import {
   checkFile,
   writeAtomic,
   writeAllAtomic,
+  ticketStatus,
 } from '../../scripts/project.mjs';
 
 /** First line of every projection — used to spot a half-written document. */
@@ -363,17 +364,76 @@ test('a lease released by a non-holder stays open and is reported', () => {
   assert.equal(state.mismatchedReleases.length, 1);
 });
 
+test('a blockage opens on blocked, clears on movement and on stronger lifecycle events', () => {
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+    ev({ ev: 'progress', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'impl-1', state: 'blocked', ticket: 'T-1', detail: 'lease held' } }),
+  ];
+  const open = fold({ events: base });
+  assert.equal(open.blockages.size, 1);
+  assert.equal(open.blockages.get('T-1').detail, 'lease held');
+
+  const unblocked = fold({ events: [...base, ev({ ev: 'progress', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-1', state: 'unblocked' } })] });
+  assert.equal(unblocked.blockages.size, 0, 'unblocked clears');
+
+  const reported = fold({ events: [...base, ev({ ev: 'report', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-1', verdict: 'done', ticket: 'T-1' } })] });
+  assert.equal(reported.blockages.size, 0, 'a report by the same agent clears');
+
+  const merged = fold({ events: [...base, ev({ ev: 'merge', ts: '2026-07-26T09:02:00.000Z', data: { ticket: 'T-1', sha: 'abc' } })] });
+  assert.equal(merged.blockages.size, 0, 'a merge on the ticket clears');
+
+  // a ticketless blockage keys on the agent and still clears on movement
+  const agentOnly = fold({ events: [ev({ ev: 'progress', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'impl-2', state: 'blocked' } })] });
+  assert.equal(agentOnly.blockages.size, 1);
+});
+
+test('a ticket.status override wins the status line, clears on lifecycle, and NEVER moves the percent', () => {
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:01.000Z', data: { id: 'T-2' } }),
+    ev({ ev: 'ticket.status', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-1', column: 'parked', reason: 'pricing open' } }),
+  ];
+  const parked = fold({ events: base });
+  const t1 = parked.ticketList.find((t) => t.id === 'T-1');
+  assert.match(ticketStatus(t1), /^parked \(set by ticket\.status\)$/);
+  assert.equal(parked.percent, 0, 'an override is a lane, not progress');
+
+  const merged = fold({ events: [...base, ev({ ev: 'merge', ts: '2026-07-26T09:02:00.000Z', data: { ticket: 'T-1', sha: 'abc' } })] });
+  const t1m = merged.ticketList.find((t) => t.id === 'T-1');
+  assert.match(ticketStatus(t1m), /^merged /, 'merge clears the override');
+  assert.equal(merged.percent, 50);
+});
+
+test('the Agents table shows the last signal only on running rows', () => {
+  const events = [
+    ev({ ev: 'spawn', ts: '2026-07-26T09:00:00.000Z', data: { agent: 'impl-1', role: 'implementer' } }),
+    ev({ ev: 'progress', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'impl-1', state: 'working' } }),
+    ev({ ev: 'spawn', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-2', role: 'implementer' } }),
+    ev({ ev: 'progress', ts: '2026-07-26T09:03:00.000Z', data: { agent: 'impl-2', state: 'working' } }),
+    ev({ ev: 'report', ts: '2026-07-26T09:04:00.000Z', data: { agent: 'impl-2', verdict: 'done' } }),
+  ];
+  const text = renderProjections({ events }).files[STATE_FILE];
+  const rows = text.split('\n').filter((l) => l.startsWith('| impl-'));
+  const running = rows.find((l) => l.startsWith('| impl-1'));
+  const done = rows.find((l) => l.startsWith('| impl-2'));
+  assert.match(running, /working at 2026-07-26T09:01:00\.000Z/);
+  assert.ok(!/working at/.test(done), 'a signal that outlived the report is stale and must not render');
+});
+
 test('every event type of the closed set is folded into a section (no silent loss)', () => {
   const sample = {
     'init.created': {},
     'plan.accepted': {},
     'ticket.created': { id: 'T-1' },
+    'ticket.status': { ticket: 'T-1', column: 'parked' },
     spawn: { agent: 'a', role: 'implementer' },
     report: { agent: 'a', verdict: 'done' },
+    progress: { agent: 'a', state: 'blocked', ticket: 'T-1', detail: 'waiting on a lease' },
     gate: { kind: 'tests', result: 'pass' },
     review: { ticket: 'T-1', verdict: 'APPROVE', by: 'r' },
     merge: { ticket: 'T-1', sha: 'abc' },
     decision: { id: 'D-1', text: 't' },
+    finding: { area: 'src/**', claim: 'c', proof: 'p' },
     'lease.acquired': { resource: 'r', holder: 'h' },
     'lease.released': { resource: 'r', holder: 'h' },
     checkpoint: { phase: 'F1', next_steps: ['s'] },

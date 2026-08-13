@@ -13,10 +13,22 @@
 
 ## Agents
 
-| Agent | Role | Model | Ticket | Worktree | Status | Spawned |
+| Agent | Role | Model | Ticket | Worktree | Status | Spawned | Last signal |
+|---|---|---|---|---|---|---|---|
+| impl-1 | implementer | work | T-1 | tyran-s1 | reported: done | 2026-07-26T09:04:01.000Z | &mdash; |
+| impl-2 | implementer | work | T-2 | tyran-s2 | **running (no report yet)** | 2026-07-26T09:36:01.000Z | blocked at 2026-07-26T09:41:40.000Z |
+
+## Open blockages
+
+| Ticket | Agent | Detail | Since |
+|---|---|---|---|
+| T-2 | impl-2 | waiting on the worktree lease | 2026-07-26T09:41:40.000Z |
+
+## Findings
+
+| Id | Area | Claim | Proof | Ticket | By | At |
 |---|---|---|---|---|---|---|
-| impl-1 | implementer | work | T-1 | tyran-s1 | reported: done | 2026-07-26T09:04:01.000Z |
-| impl-2 | implementer | work | T-2 | tyran-s2 | **running (no report yet)** | 2026-07-26T09:36:01.000Z |
+| F-1 | scripts/** | the suite needs the quoted glob | MODULE_NOT_FOUND without it | &mdash; | impl-2 | 2026-07-26T09:41:45.000Z |
 
 ## Ledger
 
@@ -24,7 +36,7 @@
 |---|---|---|---|---|---|
 | `T-1` | journal module | merged (88ea8cb) | &mdash; | impl-1 | 2026-07-26T09:32:00.000Z |
 | `T-2` | schemas &#124; with a pipe and &#96;backticks&#96; | in progress | T-1 | impl-2 | 2026-07-26T09:36:01.000Z |
-| `T-10` | projections | open | T-1 | &mdash; | 2026-07-26T09:02:02.000Z |
+| `T-10` | projections | parked (set by ticket.status) | T-1 | &mdash; | 2026-07-26T09:41:50.000Z |
 
 ## Open gates
 
@@ -77,10 +89,10 @@
 
 ## Journal integrity
 
-- **Events folded:** 20
+- **Events folded:** 23
 - **Unknown event types:** 0
 - **Non-object lines skipped:** 0
 - **Corrupt lines skipped:** 0
 - **Truncated final line:** no
 - **Timespan:** 2026-07-26T09:00:00.000Z → 2026-07-26T09:42:00.000Z
-- **Events by type:** `checkpoint` 1 · `decision` 1 · `error` 1 · `gate` 2 · `init.created` 1 · `lease.acquired` 2 · `lease.released` 2 · `merge` 1 · `plan.accepted` 1 · `report` 1 · `retro.entry` 1 · `review` 1 · `spawn` 2 · `ticket.created` 3
+- **Events by type:** `checkpoint` 1 · `decision` 1 · `error` 1 · `finding` 1 · `gate` 2 · `init.created` 1 · `lease.acquired` 2 · `lease.released` 2 · `merge` 1 · `plan.accepted` 1 · `progress` 1 · `report` 1 · `retro.entry` 1 · `review` 1 · `spawn` 2 · `ticket.created` 3 · `ticket.status` 1

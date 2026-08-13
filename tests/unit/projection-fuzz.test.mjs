@@ -102,6 +102,8 @@ const DATA_KEYS = [
   'id', 'title', 'text', 'agent', 'role', 'model', 'ticket', 'worktree', 'verdict',
   'kind', 'result', 'evidence', 'evidence_ref', 'resource', 'holder', 'phase',
   'next_steps', 'deps', 'by', 'sha', 'mode', 'target', 'confidence', 'class', 'detail',
+  // the 17-event set's additions — hostile payloads must reach their branches
+  'state', 'column', 'area', 'claim', 'proof', 'next',
 ];
 
 function hostileEvent(rand) {

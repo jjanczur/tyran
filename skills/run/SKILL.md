@@ -164,10 +164,25 @@ open one.
      list: decide and record. Without this you ask a second time for consent
      you already have, which is the most common reason an operator ends up
      chasing you instead of reading reports.
+   - **Operator messages mid-run queue; none is dropped silently.** Triage
+     each at the next natural pause: which initiative (or a new one), what
+     size, then a `ticket.created` with `title`, `deps` and `files_predicted`
+     (numbered from the plan), or a `decision` when it changes course rather
+     than adds work. Confirm in one line — "queued as T-9". A thought that
+     never reached the journal does not exist. `ticket.status` is your lane
+     override for the three states no lifecycle event can derive (`blocked`,
+     `waiting-operator`, `parked`); the next report, review or merge clears
+     it.
+   - **Scout `DURABLE:` findings, you journal** as `finding` events (a claim
+     plus its proof) — scouts write nothing themselves. Implementers and
+     reviewers append their own.
 2. **Fresh context per task.** Handoffs are SELF-CONTAINED; the agent
    disappears afterwards. Never ask the operator to compact. **Every handoff
    carries eight things:** (1) the role and one story, one goal; (2) paths to
-   the files of record; (3) the iron rules copied VERBATIM, not linked;
+   the files of record — including the ABSOLUTE path of the initiative
+   journal in the MAIN checkout and the initiative slug, because worktree
+   agents append their `progress` and `finding` events there;
+   (3) the iron rules copied VERBATIM, not linked;
    (4) the lease protocol (rule 7); (5) the **evidence contract** — the report
    must contain raw command output (exit codes, `X passed / Y failed`); a
    paraphrase like "tests are green" with no log is a REJECTED report. Final
@@ -252,6 +267,12 @@ open one.
    (XL); product, visual and irreversible decisions, put in plain language
    with your recommendation; anything hard to undo or visible outside the
    repo. **"Shall I continue?" is forbidden.**
+   **Every question to the operator lands in the journal before (or as) you
+   ask it**: a `gate` event, `result: WAITING_ON_OPERATOR`, `data` carrying
+   `question`, `recommendation`, `default` and `ticket` when it has one — a
+   question that lives only in chat has to be re-litigated after every
+   compaction. When answered, append the same `kind` with `result: answered`
+   plus a `decision` recording the answer in the operator's words.
    **Check the brake before every spawn and every merge:**
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/stop-check.mjs` — exit 1 means the
    operator created `.tyran/STOP`. Halt, report where you got to, and do not

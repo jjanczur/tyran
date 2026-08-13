@@ -40,12 +40,15 @@ export const EVENT_TYPES = Object.freeze([
   'init.created',
   'plan.accepted',
   'ticket.created',
+  'ticket.status',
   'spawn',
   'report',
+  'progress',
   'gate',
   'review',
   'merge',
   'decision',
+  'finding',
   'lease.acquired',
   'lease.released',
   'checkpoint',
@@ -58,23 +61,50 @@ export const EVENT_TYPES = Object.freeze([
  * prefix to issue it under. `ticket.created` is deliberately absent: a ticket
  * id comes from the plan, which numbers its own stories.
  */
-export const ID_ISSUED_FOR = Object.freeze(Object.assign(Object.create(null), { decision: 'D' }));
+export const ID_ISSUED_FOR = Object.freeze(Object.assign(Object.create(null), { decision: 'D', finding: 'F' }));
 
 /** Per-type required keys inside `data` (data may always carry extra keys). */
 export const DATA_REQUIRED = Object.freeze({
   'ticket.created': ['id'],
+  'ticket.status': ['ticket', 'column'],
   spawn: ['agent', 'role'],
   report: ['agent', 'verdict'],
+  progress: ['agent', 'state'],
   gate: ['kind', 'result'],
   review: ['ticket', 'verdict', 'by'],
   merge: ['ticket', 'sha'],
   decision: ['id', 'text'],
+  finding: ['area', 'claim'],
   'lease.acquired': ['resource', 'holder'],
   'lease.released': ['resource', 'holder'],
   checkpoint: ['phase', 'next_steps'],
   'retro.entry': ['kind', 'target'],
   error: ['class'],
 });
+
+/**
+ * Closed VALUE sets inside `data`, for the same reason the event set is
+ * closed: an unknown value must be a loud rejection at append time, not a
+ * surprise in a projection. Hard errors are safe here because both types are
+ * new — no legacy journal can retroactively fail `validate`.
+ *
+ * `ticket.status.column` is deliberately NARROW: only the lanes no lifecycle
+ * event can ever derive. Anything broader would be a second source of truth
+ * against the derived board (`done` is what `merge` means; an override saying
+ * so would let the two disagree).
+ */
+export const DATA_ENUMS = Object.freeze({
+  progress: Object.freeze({ state: Object.freeze(['started', 'working', 'blocked', 'unblocked']) }),
+  'ticket.status': Object.freeze({ column: Object.freeze(['blocked', 'waiting-operator', 'parked']) }),
+});
+
+/**
+ * Free-text keys with a size ceiling, in codepoints. REJECTED at append,
+ * never truncated — the journal does not silently shorten anything. Long
+ * material belongs in NOTES.md with a reference here. `validateJournal`
+ * reports historical oversizes as warnings only (no retroactive errors).
+ */
+export const CAPPED_DATA_KEYS = Object.freeze({ detail: 2000, claim: 2000, proof: 2000 });
 
 /**
  * A journal-derived value on its way into a HUMAN-READABLE MESSAGE.
@@ -130,8 +160,35 @@ export function validateEvent(event) {
         errors.push(`data.id must be a string for ev "${q(event.ev)}" (got ${typeof event.data.id})`);
       }
     }
+    const enums = DATA_ENUMS[event.ev];
+    if (enums) {
+      for (const [key, allowed] of Object.entries(enums)) {
+        if (key in event.data && !allowed.includes(event.data[key])) {
+          // Name the whole set, same as the closed event set above: the agent
+          // recovering from this error has no other source of truth.
+          errors.push(
+            `data.${q(key)} "${q(event.data[key])}" is not valid for ev "${q(event.ev)}" — valid: ${allowed.join(', ')}`,
+          );
+        }
+      }
+    }
   }
   return errors;
+}
+
+/**
+ * The oversize problem of one capped data key, or null. Codepoints, not
+ * UTF-16 units, same as every other length rule in this repo.
+ */
+export function cappedKeyProblem(data) {
+  if (data === null || typeof data !== 'object') return null;
+  for (const [key, cap] of Object.entries(CAPPED_DATA_KEYS)) {
+    const value = data[key];
+    if (typeof value === 'string' && Array.from(value).length > cap) {
+      return `data.${key} is ${Array.from(value).length} codepoints (cap ${cap}) — put the full text in NOTES.md and reference it here`;
+    }
+  }
+  return null;
 }
 
 // -------------------------------------------------- spawn ↔ report pairing
@@ -410,7 +467,10 @@ function appendUnderLock(file, event, preread = null) {
   if (errors.length > 0) {
     throw new Error('invalid event: ' + errors.join('; '));
   }
-  if (stamped.ev === 'spawn' || stamped.ev === 'report') {
+  if (stamped.ev === 'spawn' || stamped.ev === 'report' || stamped.ev === 'progress') {
+    // `progress` joins the guard because data.agent is how a signal attaches
+    // to the agent row in the fold — a non-canonical name would silently
+    // fail to attach rather than error anywhere.
     const problem = agentNameProblem(stamped.data.agent);
     if (problem) {
       throw new Error(
@@ -418,6 +478,10 @@ function appendUnderLock(file, event, preread = null) {
           `between spawn and report (got ${JSON.stringify(stamped.data.agent)})`,
       );
     }
+  }
+  {
+    const oversize = cappedKeyProblem(stamped.data);
+    if (oversize) throw new Error(`invalid event: ${oversize}`);
   }
   if (stamped.ev === 'spawn') {
     // ADR-18: refuse a second OPEN spawn for one agent name. Same lock as the
@@ -556,6 +620,13 @@ export function validateJournal(file) {
   for (const [raw, problem] of badNames) {
     warnings.push(`unusable data.agent ${q(raw)}: ${problem} — excluded from spawn↔report pairing`);
   }
+  // Historical oversizes are warnings, never errors: the cap is enforced at
+  // append time, and a hand-edited file must stay visible without turning a
+  // whole journal's `validate` red retroactively.
+  events.forEach((e, i) => {
+    const oversize = cappedKeyProblem(e?.data);
+    if (oversize) warnings.push(`event ${i + 1}: ${oversize}`);
+  });
   return { ok: errors.length === 0, errors, warnings, count: events.length, truncatedTail };
 }
 

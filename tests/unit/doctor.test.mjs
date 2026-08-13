@@ -481,6 +481,38 @@ test('a custom-named state dir keeps both git checks asking about THAT name', ()
   }
 });
 
+// ------------------------------------------------------- progress signals
+
+test('an agent blocked past the threshold is a warning; a moving agent is not', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'init.created', {}),
+    ev('2026-07-26T09:01:00.000Z', 'spawn', { agent: 'impl-1', role: 'implementer' }),
+    ev('2026-07-26T09:02:00.000Z', 'progress', { agent: 'impl-1', state: 'blocked', detail: 'lease held' }),
+  ]);
+  regenerate(journal);
+  const blocked = runStateChecks({ dir, now: '2026-07-26T10:30:00.000Z' });
+  const found = byCode(blocked, 'spawn-blocked');
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /lease held/);
+  assert.deepEqual(byCode(blocked, 'spawn-open'), [], 'blocked outranks the plain open row');
+
+  // an unblocked signal clears it back to spawn-open
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'init.created', {}),
+    ev('2026-07-26T09:01:00.000Z', 'spawn', { agent: 'impl-1', role: 'implementer' }),
+    ev('2026-07-26T09:02:00.000Z', 'progress', { agent: 'impl-1', state: 'blocked', detail: 'lease held' }),
+    ev('2026-07-26T09:40:00.000Z', 'progress', { agent: 'impl-1', state: 'unblocked' }),
+  ]);
+  regenerate(journal);
+  const moving = runStateChecks({ dir, now: '2026-07-26T10:30:00.000Z' });
+  assert.deepEqual(byCode(moving, 'spawn-blocked'), []);
+  assert.equal(byCode(moving, 'spawn-open').length, 1);
+  assert.match(byCode(moving, 'spawn-open')[0].message, /last signal/);
+});
+
 // ---------------------------------------------------------- overnight mode
 
 const PAUSE_MARKER = (over = {}) => ({
@@ -1355,6 +1387,7 @@ const EXPECTED_SEVERITY = {
   'check-failed': 'error',
   'spawn-open': 'info',
   'spawn-stale': 'warning',
+  'spawn-blocked': 'warning',
   'spawn-duplicate': 'warning',
   'spawn-orphan-report': 'warning',
   'agent-name-unusable': 'warning',

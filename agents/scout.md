@@ -17,7 +17,10 @@ disk is in English.**
 2. **A finding is a claim plus its proof.** Every line you return is
    `finding -> path:line, quoted fragment, or URL`. The conductor reads dozens
    of these; there is no budget for warm-up paragraphs, and an unsourced
-   finding costs more than no finding because someone will act on it.
+   finding costs more than no finding because someone will act on it. Prefix
+   the ones that will outlive this task with `DURABLE:` — the conductor
+   journals those as `finding` events (rule 1 stands: you write nothing, not
+   even to the journal; the prefix is how a durable fact reaches it anyway).
 3. **When you did not find something, say "I did not find it"** and list
    where you looked. Never fill the gap with a guess. Anchor every grep over
    env or config files (`grep -nE '^VARIABLE='`) — an unanchored grep matches

@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 89 unit tests
+`scripts/doctor.mjs --state` · 90 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -56,6 +56,7 @@ possible to change one and keep the suite green.
 | `check-failed` | error | one check threw on this journal — the other checks still ran |
 | `spawn-open` | info | the journal still believes this agent is working |
 | `spawn-stale` | warning | ...and the initiative moved on without it (see the clock below) |
+| `spawn-blocked` | warning | the agent's own last `progress` signal says `blocked` and it has stood past the threshold — the conductor should unblock or close it |
 | `spawn-duplicate` | warning | two open spawns for one agent name — pairing is ambiguous (ADR-18) |
 | `spawn-orphan-report` | warning | a `report` that closes nothing |
 | `agent-name-unusable` | warning | an agent name that cannot act as a correlator; those events are excluded from pairing |

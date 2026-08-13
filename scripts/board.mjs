@@ -84,6 +84,20 @@ export function readInitiativeBoards(tyranDir) {
     if (!existsSync(journal)) continue;
     try {
       const state = fold(readJournal(journal));
+      // `readJournal` does NOT throw on unparseable content — it returns zero
+      // events and counts the damage — so the catch below never sees a corrupt
+      // journal. Without this guard a damaged file renders as an initiative
+      // with nothing wrong, which is the one output this board must never
+      // produce. Same condition the CLI and the refresh probe refuse on.
+      if (state.total === 0 && (state.corruptLines + state.malformed > 0 || state.truncatedTail)) {
+        const damage = [
+          state.corruptLines > 0 ? `${state.corruptLines} corrupt line(s)` : null,
+          state.malformed > 0 ? `${state.malformed} non-object line(s)` : null,
+          state.truncatedTail ? 'a truncated final line' : null,
+        ].filter(Boolean).join(', ');
+        errors.push({ name, error: `0 readable events and ${damage} — the journal is damaged` });
+        continue;
+      }
       initiatives.push({ name, state, board: boardOf(state) });
     } catch (err) {
       errors.push({ name, error: String(err?.message ?? err) });
@@ -248,6 +262,18 @@ function main() {
     // fresh. No filesystem path is ever derived from the URL.
     const server = createServer((req, res) => {
       try {
+        // Binding to loopback is not enough on its own: any web page the
+        // operator visits can resolve its own hostname to 127.0.0.1 and read
+        // this board — which carries journal content from foreign
+        // repositories — straight out of the browser (DNS rebinding). A
+        // browser cannot forge the Host header, so pinning it to the literal
+        // loopback names closes that path.
+        const host = String(req.headers.host ?? '').replace(/:\d+$/, '');
+        if (host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]') {
+          res.writeHead(403, { 'content-type': 'text/plain' });
+          res.end('forbidden: this board answers to 127.0.0.1 only\n');
+          return;
+        }
         const { files } = renderAll(dir);
         if (req.url === '/' || req.url === '/index.html') {
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -263,6 +289,16 @@ function main() {
         res.writeHead(500, { 'content-type': 'text/plain' });
         res.end(`board render failed: ${String(err?.message ?? err)}\n`);
       }
+    });
+    // A busy port is an ordinary operator mistake, not a crash worth a stack
+    // trace over.
+    server.on('error', (err) => {
+      console.error(
+        err?.code === 'EADDRINUSE'
+          ? `board: port ${flags.port} is already in use — pass --port <n> for another`
+          : `board: could not serve: ${String(err?.message ?? err)}`,
+      );
+      process.exitCode = 2;
     });
     server.listen(flags.port, '127.0.0.1', () => {
       console.log(`board: serving http://127.0.0.1:${flags.port}/ (read-only; Ctrl-C to stop)`);

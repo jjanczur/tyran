@@ -1,6 +1,6 @@
 # Projections reference
 
-`scripts/project.mjs` · 63 unit tests, including byte-exact
+`scripts/project.mjs` · 64 unit tests, including byte-exact
 golden files
 
 The journal stays the only source of truth; everything on this page is a

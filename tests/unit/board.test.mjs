@@ -65,14 +65,51 @@ test('two initiatives merge into one payload with per-card provenance and honest
   assert.match(md, /## Waiting on you/);
 });
 
-test('an unreadable journal is a VISIBLE error entry, and the rest still renders', () => {
+test('a DAMAGED journal is a visible error entry, never a healthy empty initiative', () => {
+  // MUTANT: fold and push to `initiatives` without the damage guard. Because
+  // `readJournal` counts corruption instead of throwing, the catch never
+  // fires, and a corrupt file renders as an initiative with nothing wrong —
+  // the board reading "all is well" exactly when it is not.
   const dir = tree({ good: demo(), broken: 'not json at all\n{ neither' });
   const { initiatives, errors } = readInitiativeBoards(dir);
-  // readJournal tolerates bad lines; a truly throwing journal is rare, so
-  // simulate the throw path directly through crossBoard's contract:
-  const payload = crossBoard({ initiatives, errors: [...errors, { name: 'exploded', error: 'EACCES' }] });
-  assert.match(renderCrossMd(payload), /UNREADABLE.*exploded.*EACCES/);
-  assert.ok(initiatives.some((i) => i.name === 'good'));
+  assert.deepEqual(initiatives.map((i) => i.name), ['good'], 'a damaged journal was folded in as an initiative');
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].name, 'broken');
+  // the fixture's last line has no newline, so it is a truncated tail rather
+  // than a second corrupt line — the message names what was actually found
+  assert.match(errors[0].error, /0 readable events and 1 corrupt line\(s\), a truncated final line/);
+  const md = renderCrossMd(crossBoard({ initiatives, errors }));
+  assert.match(md, /UNREADABLE.*broken/, 'the damaged initiative must be named in the board');
+  // an IO-level throw still reaches the same visible entry
+  const thrown = crossBoard({ initiatives, errors: [...errors, { name: 'exploded', error: 'EACCES' }] });
+  assert.match(renderCrossMd(thrown), /UNREADABLE.*exploded.*EACCES/);
+});
+
+test('the page NAMES an unreadable initiative and escapes what the JSON restored', () => {
+  // MUTANT 1: drop the errors block from the client — a damaged initiative
+  // becomes invisible on the one artifact built for the operator, which is
+  // the same silence the fold guard exists to break.
+  // MUTANT 2: render with String(text) instead of show(text) — board.json's
+  // escaping is lossless, so JSON.parse hands the browser back a raw
+  // right-to-left override, which mirrors the rest of the line.
+  const html = renderBoardHtml(
+    JSON.stringify({
+      schema: 1,
+      as_of: '2026-07-26T09:00:00.000Z',
+      totals: { agents: 0, initiatives: 1, tickets: 0, merged: 0, percent: 0 },
+      asks: [],
+      agents: [],
+      paused: [],
+      lanes: {},
+      errors: [{ name: 'broken', error: '0 readable events' }],
+    }),
+  );
+  assert.match(html, /Unreadable/, 'the page must have an unreadable section');
+  assert.match(html, /data\.errors/, 'the client must read data.errors');
+  // the escaper is generated from the ONE forbidden table, and covers astral
+  assert.match(html, /new RegExp\('\[\\u\{0\}/, 'the client escaper must be generated from FORBIDDEN');
+  assert.match(html, /\\u\{E0000\}-\\u\{E007F\}/, 'the TAG block must reach the client class');
+  assert.match(html, /textContent = show\(text\)/, 'every rendered value must go through the escaper');
 });
 
 test('the initiative ceiling refuses loudly instead of quietly truncating', () => {

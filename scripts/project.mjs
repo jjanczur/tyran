@@ -267,6 +267,7 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
     findings: [],
     // `ticket.status` events naming a ticket no other event mentions
     unknownOverrides: [],
+    unknownErrorTickets: [],
   };
 
   /**
@@ -538,12 +539,25 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
       case 'retro.entry':
         state.retro.push({ kind: data.kind ?? null, target: data.target ?? null, confidence: data.confidence ?? null, ts });
         break;
-      case 'error':
+      case 'error': {
         state.errors.push({ class: data.class ?? null, detail: data.detail ?? null, ts, actor });
+        // `data.ticket` is optional metadata on an error, so a typo here is a
+        // typo nothing rejected at append. Binding it to a ticket the journal
+        // has never seen would MINT that ticket, and a minted ticket is one
+        // the denominator counts and no `merge` can ever close — the headline
+        // percent falls and never recovers. Same rule as `ticket.status`
+        // above, for the same reason; the error itself is still rendered in
+        // the Errors table either way, so nothing is lost by not binding it.
         if (data.ticket != null) {
-          ticketOf(data.ticket, ts).error = { class: data.class ?? null, detail: data.detail ?? null, ts };
+          const key = String(data.ticket);
+          if (state.tickets.has(key)) {
+            ticketOf(key, ts).error = { class: data.class ?? null, detail: data.detail ?? null, ts };
+          } else {
+            state.unknownErrorTickets.push({ ticket: key, ts });
+          }
         }
         break;
+      }
       default:
         state.unknownTypes.set(ev, (state.unknownTypes.get(ev) ?? 0) + 1);
     }
@@ -823,6 +837,9 @@ export function warnings(state) {
   // only thing that can tell them why.
   for (const { ticket } of state.unknownOverrides) {
     out.push(`ticket.status for unknown ticket "${inlinePlain(ticket)}" — ignored (an override never invents a ticket)`);
+  }
+  for (const { ticket } of state.unknownErrorTickets) {
+    out.push(`error names unknown ticket "${inlinePlain(ticket)}" — the error is recorded, but not bound to a ticket`);
   }
   if (state.initiatives.length > 1) {
     out.push(

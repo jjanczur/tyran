@@ -677,6 +677,32 @@ test('a ticket.status for an unknown ticket is refused out loud and moves NOTHIN
   assert.equal(typo.byType.get('ticket.status'), 1);
 });
 
+test('an error naming an unknown ticket is recorded but binds to NOTHING', () => {
+  // MUTANT: bind with `ticketOf(data.ticket, ts)`. `data.ticket` is optional
+  // metadata on an error, so a typo mints a ticket the denominator counts and
+  // no merge can ever close — 100% falls to 67% permanently, and the board
+  // shows a `blocked` card for an id that never existed.
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-10' } }),
+    ev({ ev: 'merge', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-10', sha: 'abc' } }),
+  ];
+  const typo = fold({
+    events: [...base, ev({ ev: 'error', ts: '2026-07-26T09:02:00.000Z', data: { class: 'tool-failure', ticket: 'T-1O' } })],
+  });
+  assert.equal(typo.percent, 100, 'an error moved the percent');
+  assert.deepEqual(typo.ticketList.map((t) => t.id), ['T-10'], 'an error invented a ticket');
+  assert.equal(typo.errors.length, 1, 'the error itself must still be recorded');
+  assert.ok(
+    warnings(typo).some((w) => /error names unknown ticket "T-1O"/.test(w)),
+    `no warning named the unbound error: ${warnings(typo)}`,
+  );
+  // a KNOWN ticket still binds, so the blocked lane keeps working
+  const known = fold({
+    events: [...base, ev({ ev: 'error', ts: '2026-07-26T09:02:00.000Z', data: { class: 'tool-failure', ticket: 'T-10' } })],
+  });
+  assert.equal(known.ticketList[0].error.class, 'tool-failure');
+});
+
 test('the Agents table shows the last signal only on running rows', () => {
   const events = [
     ev({ ev: 'spawn', ts: '2026-07-26T09:00:00.000Z', data: { agent: 'impl-1', role: 'implementer' } }),

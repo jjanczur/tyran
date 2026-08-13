@@ -66,16 +66,33 @@ protocol that survived them, mechanized.
 ## Configuration
 
 Overnight mode is driven by the optional `limits:` block in
-`.tyran/config.yaml`. The annotated reference for all six keys — defaults,
+`.tyran/config.yaml`. The annotated reference for all seven keys — defaults,
 accepted ranges, and the quoted-`'off'` rule — lives in
 [the configuration reference](../configuration/). Enabling the pause is
 minimal:
 
 ```yaml
-limits:               # all six keys, defaults and ranges: see the reference
+limits:               # all seven keys, defaults and ranges: see the reference
   mode: pause
   pause_at_percent: 97
 ```
+
+### Keeping the machine awake (`limits.keep_awake`, default `false`)
+
+A watcher whose whole job is to be asleep for hours is waiting through exactly
+the interval a laptop chooses to suspend in — and a suspended machine takes the
+watcher, and the network, with it. With `keep_awake: true` the wait is wrapped
+in a system-sleep inhibitor: `caffeinate -is` on macOS,
+`systemd-inhibit --what=idle:sleep` on Linux. **Never `caffeinate -d`** — that
+would also block the screen lock, and a machine left running overnight that
+never locks is a security regression; the display and the lock stay exactly as
+you set them. The inhibitor is released on every exit path, including `SIGINT`
+and `SIGTERM`; `SIGKILL` is the one signal nothing can catch, and it would leak
+the inhibitor until the process table clears it. An unsupported platform or a
+missing binary degrades to a no-op rather than refusing to wait —
+keeping the machine awake is an optimization on the real work, never a
+precondition for it. `overnight.mjs schedule` says which way the knob is set,
+as a warning and never a refusal.
 
 `warn` surfaces through doctor and never denies. The default is `off`
 because the pause depends on operator-installed telemetry; enabling it

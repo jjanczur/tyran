@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   MARKER_RELPATH,
+  RESUME_LOG_RELPATH,
   RESUME_STATE_RELPATH,
   RESUME_BACKOFFS_MS,
   SIDECAR_RELPATH,
@@ -55,18 +56,16 @@ const marker = (over = {}) => ({
   ...over,
 });
 
+// spawnSync, not execFileSync: the latter discards stderr on the SUCCESS path,
+// and the keep-awake warning is stderr on a command that exits 0.
 function run(args, { cwd, env = {} } = {}) {
-  try {
-    const stdout = execFileSync(process.execPath, [SCRIPT, ...args], {
-      encoding: 'utf8',
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { code: 0, stdout, stderr: '' };
-  } catch (err) {
-    return { code: err.status, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
-  }
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    cwd,
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
 // -------------------------------------------------------------- the policy
@@ -373,6 +372,102 @@ test('at wake, fresh telemetry over the weekly threshold holds instead of burnin
   // resets_at is epoch SECONDS; the margin is the default 5 resume_margin_minutes
   assert.equal(state.resume_at, new Date(resetsAt * 1000 + 5 * 60 * 1000).toISOString());
   assert.equal(existsSync(calls), false, 'no resume attempt was made');
+});
+
+// ------------------------------------------------------------- keep-awake
+
+/**
+ * A watcher that sleeps for hours is defeated by a laptop that does the same.
+ * The knob is off by default, so the only thing standing between an operator
+ * and a silently lost night is the warning below — which is why it is a
+ * warning and never a refusal: it is their machine and their call.
+ */
+
+test('schedule WARNS when keep-awake is off, naming the risk and the key — and still schedules', () => {
+  // M15: drop the warning. The operator schedules an overnight wait on a
+  // machine whose screensaver starts in five minutes, learns nothing, and
+  // finds the work unfinished in the morning with an API error in the log.
+  const dir = repo();
+  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ resume_at: new Date(Date.now() + 3600e3).toISOString() })));
+  const r = run(['schedule', '--dir', dir]);
+  const state = JSON.parse(readFileSync(join(dir, RESUME_STATE_RELPATH), 'utf8'));
+  try {
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stderr, /keep-awake is OFF/);
+    assert.match(r.stderr, /sleeps.+watcher sleeps with it/s, 'the warning names the risk, not just the setting');
+    assert.match(r.stderr, /limits\.keep_awake: true in \.tyran\/config\.yaml/, 'and the exact key that fixes it');
+    // M16: turn it into a refusal. A tool that will not do the work until the
+    // machine is configured its way is a tool that gets worked around.
+    assert.equal(state.state, 'waiting', 'a warning, never a refusal — the watcher was scheduled anyway');
+  } finally {
+    if (pidAlive(state?.pid)) {
+      try {
+        process.kill(state.pid, 'SIGTERM');
+      } catch {
+        /* it finished on its own */
+      }
+    }
+  }
+});
+
+test('with the knob on, schedule says so instead of warning', () => {
+  // M17: print the warning unconditionally. A warning that fires when the
+  // thing it warns about is already handled is a warning people stop reading.
+  const dir = repo();
+  writeFileSync(join(dir, '.tyran', 'config.yaml'), 'limits:\n  mode: pause\n  keep_awake: true\n');
+  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ resume_at: new Date(Date.now() + 3600e3).toISOString() })));
+  const r = run(['schedule', '--dir', dir]);
+  const state = JSON.parse(readFileSync(join(dir, RESUME_STATE_RELPATH), 'utf8'));
+  try {
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /keep-awake is OFF/);
+    assert.match(r.stdout, /keep-awake is on/);
+    assert.match(r.stdout, /screen lock are untouched/, 'the security trade is stated where it is made');
+  } finally {
+    if (pidAlive(state?.pid)) {
+      try {
+        process.kill(state.pid, 'SIGTERM');
+      } catch {
+        /* it finished on its own */
+      }
+    }
+  }
+});
+
+test('the watcher wraps its OWN wait in the inhibitor when the knob is on', () => {
+  // M18: leave the knob wired to nothing but the schedule message. `schedule`
+  // reports that the machine will stay awake while the watcher acquires
+  // nothing — a feature that ships, reads as working, and does not work. The
+  // note is written before the spawn, so this holds on every platform,
+  // including the ones with no inhibitor at all.
+  const dir = repo();
+  writeFileSync(join(dir, '.tyran', 'config.yaml'), 'limits:\n  mode: pause\n  keep_awake: true\n');
+  const journal = join(dir, '.tyran', 'state', 'demo', 'journal.jsonl');
+  writeFileSync(journal, JSON.stringify({ ts: new Date(NOW).toISOString(), ev: 'init.created', init: 'demo', actor: 'conductor', data: {} }) + '\n');
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const stub = join(bin, 'claude');
+  writeFileSync(
+    stub,
+    `#!/bin/sh\nprintf '%s\\n' '{"ts":"${new Date(NOW + 1000).toISOString()}","ev":"checkpoint","init":"demo","actor":"conductor","data":{"phase":"resumed","next_steps":["x"]}}' >> "${journal}"\n`,
+  );
+  chmodSync(stub, 0o755);
+
+  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ resume_at: new Date(Date.now() - 1000).toISOString() })));
+  const r = run(['--wait', '--dir', dir, '--cmd', stub, '--chunk-ms', '50']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(JSON.parse(readFileSync(join(dir, RESUME_STATE_RELPATH), 'utf8')).state, 'done');
+  assert.match(readFileSync(join(dir, RESUME_LOG_RELPATH), 'utf8'), /keep-awake: (holding the system awake|no inhibitor)/);
+});
+
+test('with the knob off the watcher acquires nothing — the default changes no machine', () => {
+  // M19: default the knob on. Every repo that adopts Tyran starts refusing to
+  // let its owner's laptop sleep, without anyone having asked for it.
+  const dir = repo();
+  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ session_id: null, resume_at: new Date(Date.now() - 1000).toISOString() })));
+  const r = run(['--wait', '--dir', dir, '--chunk-ms', '50']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(readFileSync(join(dir, RESUME_LOG_RELPATH), 'utf8'), /keep-awake/);
 });
 
 test('numeric flags refuse junk that would wake the watcher hours early', () => {

@@ -70,6 +70,24 @@ rules:
     class: GATED
     reason: overriding a core agent freezes it at the version it was copied from
 
+  # Operator-owned prose, loaded into every session in this repository. The
+  # gate is otherwise SILENT at the repo root — the governed prefixes are
+  # `.tyran/`, `.claude/` and the enforcement-script directory, and a root file
+  # matches none of them — so without this rule a subagent could rewrite the law
+  # it is bound by and no gate would have an opinion. An explicit rule outranks
+  # the prefix test, which is why one line here is enough.
+  #
+  # It bans the HAND, not the mechanism. GATED denies a subagent
+  # unconditionally, so no agent free-hand rewrites this file with Write or
+  # Edit; `scripts/mistakes.mjs promote --law` still passes, because it is a
+  # Bash command and a repo-root file is not in the shell-protected globs.
+  # That asymmetry is the design: the law changes only through the mechanism
+  # that requires evidence — five recorded occurrences of one signature — and
+  # it changes only inside the `tyran:rules` fence.
+  - path: CLAUDE.md
+    class: GATED
+    reason: operator-owned prose loaded into every session; only mistakes.mjs writes it, and only inside its fence
+
   - path: .tyran/STOP
     class: KERNEL
     reason: the brake an operator uses to halt a running initiative; a loop that can clear its own stop signal has none

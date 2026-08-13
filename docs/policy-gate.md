@@ -60,6 +60,20 @@ outside the repository is still `KERNEL`, and `hooks/**` and
 `.tyran/policies/**` are still refused unconditionally, before any rule is
 consulted.
 
+The shipped template uses that exception exactly once, for a file at the repo
+root: **`CLAUDE.md` is `GATED`.** Until it was added, a subagent could rewrite
+the law it was bound by and no gate had an opinion — the root is outside every
+governed prefix, so the `default:` never reached it. The rule bans the *hand*,
+not the mechanism: a free-hand `Write` from a subagent is denied, while
+`scripts/mistakes.mjs promote --law` — a `Bash` command, and a repo-root file
+is not in the shell-protected globs — still writes its own fenced region, and
+only after five recorded occurrences of one signature
+([self-improvement](self-improvement.md)). Seeding is create-only, so a repo
+adopted before this release keeps the older, silent behaviour until it copies
+the rule from `templates/policies/autonomy.yaml`; a repo that dislikes the
+trade deletes four lines from its own policy and accepts one permission prompt
+fewer.
+
 **`GATED` passes in a supervised main loop, and asks under `acceptEdits`.**
 On `PreToolUse` a gate has three answers: `deny`, silence, and
 `permissionDecision: "ask"`, which renders the user's own prompt even in a

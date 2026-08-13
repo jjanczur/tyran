@@ -23,7 +23,9 @@
  * ## What the watcher defends against (measured platform facts)
  *
  *  - Machine sleep: chunked sleeps re-read the wall clock; an overslept
- *    laptop fires late, never never. Reboot kills the watcher — the marker
+ *    laptop fires late, never never. Under `limits.keep_awake` it does not
+ *    oversleep at all — the wait is wrapped in a system-sleep inhibitor
+ *    (scripts/keepawake.mjs). Reboot still kills the watcher — the marker
  *    then goes stale, doctor reports it, and the gate self-heals it.
  *  - Blind resumed sessions: statuslines do not run under `claude -p`
  *    (measured 2.1.197), so a resumed session has NO fresh telemetry. The
@@ -56,6 +58,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkStop } from './stop-check.mjs';
 import { readJournal } from './journal.mjs';
+import { withKeepAwake } from './keepawake.mjs';
 import { limitsOf } from './schema.mjs';
 import { parse } from './yaml-lite.mjs';
 import { escapeInvisible } from './invisible.mjs';
@@ -325,6 +328,19 @@ function doSchedule(repo, flags) {
     process.exit(1);
   }
 
+  // A warning, never a refusal: the operator is about to leave a machine
+  // waiting for hours, and whether it stays awake is their call to make with
+  // the risk named. Only on the watch path — a hold waits for nothing.
+  if (readLimitsFile(repo).keep_awake === true) {
+    console.log('overnight: keep-awake is on — the system stays awake while the watcher waits (the display and the screen lock are untouched).');
+  } else {
+    console.error(
+      'overnight: keep-awake is OFF — if this machine sleeps before the reset, the watcher sleeps with it and the ' +
+        'resume fires late or never. Set limits.keep_awake: true in .tyran/config.yaml to hold the SYSTEM awake ' +
+        'while it waits; the display and the screen lock are untouched.',
+    );
+  }
+
   const logFd = openSync(join(repo, RESUME_LOG_RELPATH), 'a');
   const watcherArgv = [
     SELF,
@@ -366,6 +382,17 @@ async function doWait(repo, flags) {
   const prompt = typeof flags.prompt === 'string' ? flags.prompt : null;
   const cmd = typeof flags.cmd === 'string' ? flags.cmd : 'claude';
 
+  // The whole point of this process is to be asleep for hours, and a laptop
+  // that suspends during that window is the measured way an overnight run
+  // dies. Opt-in, and released on every exit path including SIGTERM — which
+  // is what `cancel` sends — so the inhibitor can never outlive the wait.
+  return withKeepAwake(
+    { enabled: readLimitsFile(repo).keep_awake === true, onNote: (message) => log(repo, message) },
+    () => runWaitLoop(repo, { chunkMs, backoffs, prompt, cmd }),
+  );
+}
+
+async function runWaitLoop(repo, { chunkMs, backoffs, prompt, cmd }) {
   for (;;) {
     const marker = readSmallJson(join(repo, MARKER_RELPATH));
     if (marker === null) {

@@ -319,6 +319,27 @@ export function detectAutonomy(dir, run = gitRunner(dir)) {
   );
 }
 
+/**
+ * What the host `CLAUDE.md` says about the mistakes ledger, read-only.
+ *
+ * `present: false` deliberately produces NO question: Tyran does not create a
+ * CLAUDE.md for a repository that has none, and the seeded MISTAKES.md header
+ * carries the instruction itself, so the loop still closes without one.
+ */
+export function detectClaudeMd(dir) {
+  const path = join(dir, CLAUDE_MD_PATH);
+  if (!existsSync(path)) return { path: CLAUDE_MD_PATH, present: false, hasMistakesPointer: false };
+  let text = '';
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    // Unreadable is not absent, and it is not a reason to fail a scan: the
+    // only thing riding on this field is whether one question gets asked.
+    return { path: CLAUDE_MD_PATH, present: true, hasMistakesPointer: false };
+  }
+  return { path: CLAUDE_MD_PATH, present: true, hasMistakesPointer: text.includes(MISTAKES_PATH) };
+}
+
 /** The whole scan. Returns `{config, languages, questions}`. */
 export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
   const pkg = readPackageJson(dir);
@@ -326,6 +347,7 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
   const validation = detectValidation(dir, pkg, manager?.value);
   const autonomy = detectAutonomy(dir, run);
   const languages = detectLanguages(dir, run);
+  const claudeMd = detectClaudeMd(dir);
 
   const config = {
     profile: 'balanced',
@@ -339,8 +361,16 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
   if (autonomy.needs_confirmation) questions.push({ field: 'autonomy', asked: autonomy.source });
   if (validation.needs_confirmation) questions.push({ field: 'validation', asked: validation.source });
   if (manager?.needs_confirmation) questions.push({ field: 'package manager', asked: manager.source });
+  if (claudeMd.present && !claudeMd.hasMistakesPointer) {
+    questions.push({
+      field: 'CLAUDE.md pointer',
+      asked:
+        'CLAUDE.md exists and does not mention MISTAKES.md — one line makes every session in this repo log ' +
+        'its own mistakes, and only you can add it',
+    });
+  }
 
-  return { config, languages, packageManager: manager, questions };
+  return { config, languages, packageManager: manager, claudeMd, questions };
 }
 
 /**
@@ -508,6 +538,56 @@ export function ensureAutonomyPolicy(repoRoot, { templatePath = policyTemplatePa
   return { path, status: 'created' };
 }
 
+/**
+ * The repository's incident log, and the operator prose that can point at it.
+ * Both at the ROOT: a human, a reviewer on GitHub and a session that has never
+ * heard of Tyran all have to be able to find them.
+ */
+export const MISTAKES_PATH = 'MISTAKES.md';
+export const CLAUDE_MD_PATH = 'CLAUDE.md';
+
+/** The shipped MISTAKES.md template, from this script's REAL location. */
+export function mistakesTemplatePath() {
+  const self = canonicalPath(fileURLToPath(import.meta.url));
+  return join(dirname(self), '..', 'templates', MISTAKES_PATH);
+}
+
+/**
+ * Seed the repository's `MISTAKES.md` from the shipped template if it is
+ * absent. Returns `{ path, status: 'created' | 'present' | 'failed', error }`.
+ *
+ * Create-only, and that is the whole opt-out: a repository that does not want
+ * this file deletes it, and nothing here puts it back except an explicit
+ * re-run of setup. No config knob, because a knob for a file you can delete is
+ * a second way to say the same thing.
+ *
+ * Three deliberate differences from `ensureAutonomyPolicy`:
+ *
+ *  - it lands at the repo ROOT, not under `.tyran/`, so it is called
+ *    unconditionally rather than gated on `underTyranDir`;
+ *  - a write failure is a REPORTED status, not a `BootstrapError`. An absent
+ *    policy makes the gate refuse every write; an absent incident log breaks
+ *    nothing. Refusing to configure a repository because its incident log
+ *    could not be created would be the tail wagging the dog;
+ *  - the header is shipped rather than authored on first use, because the
+ *    parser depends on its shape and a header written by a model drifts.
+ */
+export function ensureMistakesFile(repoRoot, { templatePath = mistakesTemplatePath() } = {}) {
+  const path = join(resolve(repoRoot), MISTAKES_PATH);
+  if (existsSync(path)) return { path, status: 'present', error: null };
+  try {
+    // `wx` and not a bare write: `existsSync` above answers about the past,
+    // and this file is a repository's incident history. The exclusive flag is
+    // what makes "create-only" true against a racing second setup rather than
+    // merely likely.
+    writeFileSync(path, readFileSync(templatePath, 'utf8'), { flag: 'wx' });
+  } catch (error) {
+    if (error.code === 'EEXIST') return { path, status: 'present', error: null };
+    return { path, status: 'failed', error: error.message };
+  }
+  return { path, status: 'created', error: null };
+}
+
 export const STATE_GITIGNORE_PATH = '.tyran/.gitignore';
 export const STATE_GITIGNORE_LINES = Object.freeze([
   'state/*/locks/',
@@ -600,6 +680,7 @@ function main() {
         : `scan-repo: ${escapeInvisible(seeded.path)} already exists — left untouched`,
     );
     reportStateGitignore(seedStateGitignore(dir));
+    reportMistakes(ensureMistakesFile(dir));
     return;
   }
 
@@ -618,6 +699,9 @@ function main() {
       }
       reportStateGitignore(seedStateGitignore(dir));
     }
+    // Unconditional, unlike the two above: MISTAKES.md is not under `.tyran/`,
+    // so `underTyranDir` has nothing to say about whether it should exist.
+    reportMistakes(ensureMistakesFile(dir));
     try {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, renderConfig(result.config));
@@ -650,6 +734,22 @@ function reportStateGitignore({ path, status }) {
     console.error(`scan-repo: updated ${escapeInvisible(path)} (appended missing runtime exclusions)`);
   } else if (status === 'unreadable') {
     console.error(`scan-repo: could not read ${escapeInvisible(path)} — runtime exclusions were NOT updated`);
+  }
+}
+
+/**
+ * A file landing in someone's working tree unannounced is a bad way to meet a
+ * tool, and a file that FAILED to land silently is worse: the repository would
+ * simply never learn anything and nothing would say why.
+ */
+function reportMistakes({ path, status, error }) {
+  if (status === 'created') {
+    console.error(
+      `scan-repo: created ${escapeInvisible(path)} — the repository's incident log ` +
+        '(delete it if you do not want one)',
+    );
+  } else if (status === 'failed') {
+    console.error(`scan-repo: could not create ${escapeInvisible(path)} (${escapeInvisible(String(error))}) — the scan continues`);
   }
 }
 

@@ -186,7 +186,12 @@ open one.
    - **Scout `DURABLE:` findings, you journal** as `finding` events — the
      required keys are `area` + `claim` (the area is the path or subsystem the
      scout's proof points at), plus that `proof` — scouts write nothing
-     themselves. Implementers and reviewers append their own.
+     themselves. Implementers and reviewers append their own. An operator
+     CORRECTION — a premise you had wrong, a step they had to undo — is a
+     `finding` too, with `area: process`: it is the densest mistake signal
+     there is, and the retrospective is where it becomes a `MISTAKES.md`
+     entry. A correction that lives only in the chat log dies at the next
+     compaction.
 2. **Fresh context per task.** Handoffs are SELF-CONTAINED; the agent
    disappears afterwards. Never ask the operator to compact. **Every handoff
    carries eight things:** (1) the role and one story, one goal; (2) paths to

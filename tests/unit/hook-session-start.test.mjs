@@ -23,8 +23,10 @@ import {
   hardwareLine,
   hookHealth,
   readInitiatives,
+  readPauseMarker,
   renderContext,
   renderHookWarning,
+  renderPauseNotice,
   resolveRepoRoot,
   runDoctor,
 } from '../../hooks/scripts/session-start.mjs';
@@ -185,6 +187,41 @@ test('a corrupt journal degrades to a partial summary rather than an exception',
 
 // -------------------------------------------------------------- budget
 
+// --------------------------------------------------- the pause notice
+
+test('an active pause renders in the HEADER, so no budget cut can drop it', () => {
+  const marker = { window: 'seven_day', resume_at: '2026-08-15T21:05:00.000Z', long_wait: true };
+  const notice = renderPauseNotice(marker, '2026-08-13T14:00:00.000Z');
+  assert.match(notice, /PAUSED on the weekly usage limit/);
+  assert.match(notice, /LONG pause/);
+
+  // Placement: the notice must appear BEFORE the first `### ` section, which
+  // is the region fitBudget unconditionally keeps.
+  const context = renderContext({
+    repoRoot: '/r',
+    initiatives: [{ name: 'demo', state: null, error: 'x' }],
+    doctor: { available: true, counts: { error: 0, warning: 0, info: 0 }, findings: [] },
+    hardware: 'h',
+    nowIso: '2026-08-13T14:00:00.000Z',
+    pause: marker,
+  });
+  assert.ok(context.indexOf('PAUSED') < context.indexOf('### '), 'the pause notice sits after the sections');
+  const fitted = fitBudget(context, 200);
+  assert.match(fitted, /PAUSED/, 'a budget cut dropped the pause notice');
+});
+
+test('a stale marker renders the STALE variant, and garbage markers read as absent', () => {
+  const notice = renderPauseNotice({ window: 'five_hour', resume_at: '2026-08-13T10:00:00.000Z' }, '2026-08-13T14:00:00.000Z');
+  assert.match(notice, /PAUSED-STALE/);
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-pause-'));
+  mkdirSync(join(dir, '.tyran', 'state'), { recursive: true });
+  assert.equal(readPauseMarker(join(dir, '.tyran')), null);
+  writeFileSync(join(dir, '.tyran', 'state', 'paused-until.json'), '{broken');
+  assert.equal(readPauseMarker(join(dir, '.tyran')), null);
+  writeFileSync(join(dir, '.tyran', 'state', 'paused-until.json'), JSON.stringify({ window: 'five_hour', resume_at: 'x' }));
+  assert.notEqual(readPauseMarker(join(dir, '.tyran')), null);
+});
+
 test('the working budget cuts on a section boundary and says how much it dropped', () => {
   const text = ['## head', '', '### one', 'a'.repeat(400), '### two', 'b'.repeat(400), '### three', 'c'.repeat(400)].join(
     '\n',
@@ -282,24 +319,44 @@ test('checkHooks flags a manifest that re-declares the standard hooks.json (the 
   assert.ok(result.counts.error >= 1, 'a re-declared standard hooks file must be an error');
 });
 
-test('every registered hook command resolves to an executable file with a shebang', () => {
+/**
+ * A registered command is either the bare quoted script (spawned directly, so
+ * it needs the exec bit and a shebang) or `node "<script>"` — the sanctioned
+ * form for a hook file authored inside a session, where the policy gate
+ * (correctly) refuses agent-run chmod on hook paths. Dispatched scripts need
+ * only to exist and be readable; node does the running.
+ */
+function scriptPathOf(command) {
+  const dispatched = command.startsWith('node ');
+  const path = (dispatched ? command.slice('node '.length) : command)
+    .replaceAll('"', '')
+    .replace('${CLAUDE_PLUGIN_ROOT}', REPO_ROOT);
+  return { path, dispatched };
+}
+
+test('every registered hook command resolves to a runnable file', () => {
   const config = hooksConfig();
   let checked = 0;
+  let dispatchedCount = 0;
   for (const entries of Object.values(config.hooks)) {
     for (const entry of entries) {
       for (const hook of entry.hooks) {
         assert.equal(hook.type, 'command');
-        const path = hook.command
-          .replaceAll('"', '')
-          .replace('${CLAUDE_PLUGIN_ROOT}', REPO_ROOT);
-        const mode = statSync(path).mode;
-        assert.ok(mode & 0o111, `${path} is not executable; the platform would fail to spawn it`);
-        assert.match(readFileSync(path, 'utf8').split('\n')[0], /^#!/, `${path} has no shebang`);
+        const { path, dispatched } = scriptPathOf(hook.command);
+        if (dispatched) {
+          assert.ok(readFileSync(path, 'utf8').length > 0, `${path} is not readable`);
+          dispatchedCount++;
+        } else {
+          const mode = statSync(path).mode;
+          assert.ok(mode & 0o111, `${path} is not executable; the platform would fail to spawn it`);
+          assert.match(readFileSync(path, 'utf8').split('\n')[0], /^#!/, `${path} has no shebang`);
+        }
         checked++;
       }
     }
   }
   assert.ok(checked > 0, 'a registration test that checked nothing is not a test');
+  assert.ok(dispatchedCount >= 1, 'the usage gate registers node-dispatched; if that changed, update this pin');
 });
 
 test('the plugin-root placeholder is quoted, because the command runs through a shell', () => {
@@ -310,7 +367,7 @@ test('the plugin-root placeholder is quoted, because the command runs through a 
   for (const entries of Object.values(config.hooks)) {
     for (const entry of entries) {
       for (const hook of entry.hooks) {
-        assert.match(hook.command, /^"[^"]*\$\{CLAUDE_PLUGIN_ROOT\}[^"]*"$/, hook.command);
+        assert.match(hook.command, /^(node )?"[^"]*\$\{CLAUDE_PLUGIN_ROOT\}[^"]*"$/, hook.command);
       }
     }
   }
@@ -352,7 +409,7 @@ test("each hook's internal deadline is strictly shorter than its platform timeou
   for (const entries of Object.values(hooksConfig().hooks)) {
     for (const entry of entries) {
       for (const hook of entry.hooks) {
-        const path = hook.command.replaceAll('"', '').replace('${CLAUDE_PLUGIN_ROOT}', REPO_ROOT);
+        const { path } = scriptPathOf(hook.command);
         const module = await import(path);
         assert.equal(
           typeof module.DEADLINE_MS,

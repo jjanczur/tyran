@@ -373,3 +373,12 @@ open one.
   a lease still held by an agent that has already reported. An orphaned lease
   blocks the next initiative from a resource nobody is using, and the person
   who hits it has no way to know it is stale.
+- **A usage-gate refusal is a wind-down order, not an obstacle.** Near the
+  subscription window the gate refuses everything except checkpointing;
+  its refusal text IS the checklist — follow it verbatim, in order, then
+  stop. Never route around the allowlist: the point of pausing at 97% is
+  that the last 3% pays for a clean checkpoint instead of a corpse. The
+  scheduler resumes the session after the reset (or notifies and holds on a
+  long, weekly-shaped wait — `docs/overnight.md`); a resumed session starts
+  from the `usage-limit-pause` checkpoint and first closes the open
+  usage-limit gate with `result: passed`.

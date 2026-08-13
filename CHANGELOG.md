@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.10 — 2026-08-13
+
+### Overnight mode: the usage cliff becomes a wind-down
+
+Both subscription windows were hit live while this was being built — a
+five-hour wall at 12:15 and the weekly wall at 15:30, each killing a
+four-agent review fleet mid-flight — which is the exact failure this
+feature removes. A new `PreToolUse` usage gate reads the telemetry sidecar
+that an operator-installed statusline helper (`scripts/statusline.mjs`)
+maintains, and near the threshold refuses everything except a closed
+wind-down set; the refusal text is the checkpoint checklist itself.
+Measured on 2.1.197 and recorded in the hook contract: the hook payload
+carries NO rate-limit data, so the statusline is the only telemetry source,
+and every unknown fails open — no telemetry, stale telemetry, a malformed
+config or a supervised operator can never produce a false pause.
+
+Time-until-reset decides what happens next (`limits.wait_max_hours`,
+default 5). Within it, `scripts/overnight.mjs` spawns a detached watcher
+that sleeps to the reset and resumes the paused session with
+`claude -p --resume`, then babysits it — a resumed headless session has no
+statusline, so success is judged by journal movement, never exit codes.
+Beyond it — the weekly shape — the pause is LONG: the operator is notified
+(desktop notification, session-start banner, doctor) and by default nothing
+resumes without them (`limits.long_wait: hold`). The `.tyran/STOP` brake
+outranks the watcher; four new doctor codes surface active, stale, dead-
+watcher and telemetry-missing states; the overnight runtime files are
+name-exempt from the stray-file check and seeded into `.tyran/.gitignore` —
+on an install whose gitignore predates them, re-running `scan-repo.mjs`
+(`--write` or `--ensure-policy`) appends the missing lines.
+
+The gate registers `node`-dispatched because the policy gate (correctly)
+refuses agent-run `chmod` on hook paths; `hooks-check` learned to model
+interpreter dispatch.
+
 ## 0.1.9 — 2026-08-13
 
 ### One layout for an initiative's files

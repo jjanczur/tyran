@@ -1,0 +1,156 @@
+# Overnight mode
+
+Pause autonomous work *before* the subscription usage window is exhausted,
+and resume it after the window resets — so an initiative can run through the
+night without an operator watching the meter.
+
+The platform's own behaviour at the limit is a cliff: API calls start
+failing mid-flight and agents die between a write and its commit. Overnight
+mode converts the cliff into a wind-down. Both windows were hit live on
+2026-08-13 while this feature was being built; the design below is the
+protocol that survived them, mechanized.
+
+## How it works, end to end
+
+1. **Telemetry.** The operator registers `scripts/statusline.mjs` as their
+   statusline command (see below). On every statusline refresh it tees the
+   platform's `rate_limits` — the five-hour and seven-day windows, percent
+   used and reset times — into `.tyran/state/usage.json`. Only numbers and a
+   shape-validated session id are copied, never free strings. This sidecar is
+   the ONLY telemetry source: measured on Claude Code 2.1.197, the hook
+   payload carries no usage data, and Tyran deliberately does not estimate
+   from transcripts.
+2. **The gate.** A `PreToolUse` hook (`usage-gate`) compares the sidecar
+   against `limits:` in `.tyran/config.yaml`. Below threshold, absent
+   telemetry, stale telemetry, `mode: off`, a malformed config, a supervised
+   operator — every unknown **fails open**; the gate never produces a false
+   pause. Past the threshold for an autonomous actor it writes a durable
+   pause marker (`.tyran/state/paused-until.json`) and switches to the
+   **wind-down allowlist**: reads, writes under `.tyran/state/**`, the
+   journal/project/overnight/stop-check scripts, and `git
+   status/add/commit/diff/log`. Everything else is refused — and the refusal
+   text is the wind-down checklist itself, with absolute paths the allowlist
+   will accept back.
+3. **The wind-down.** The conductor follows the checklist: a `checkpoint`
+   event (`phase: usage-limit-pause`), a `gate` event (`kind: usage-limit`,
+   `result: WAITING_ON_RESET` — which renders as an open gate in `STATE.md`
+   with zero new machinery), regenerated projections, a commit of the state
+   files, then `overnight.mjs schedule`, then stop.
+4. **Wait or hold — the two windows differ.** The deciding variable is time
+   until reset, against `limits.wait_max_hours` (default 5):
+   - **within it** (the five-hour window's shape): `schedule` spawns a
+     detached watcher that sleeps to the reset and resumes the paused
+     session with `claude -p --resume <session-id> --permission-mode
+     acceptEdits`. The operator gets a desktop notification with the resume
+     time.
+   - **beyond it** (the weekly window's shape): this is a **long pause**.
+     The operator is notified — window, reset time, how far away — and by
+     default (`limits.long_wait: hold`) nothing resumes without them.
+     Nobody should read "resuming soon" when the truth is days.
+     `long_wait: resume` (or `overnight.mjs schedule --force-resume`) opts
+     into true multi-day autonomy, still with the loud notification.
+5. **The resume.** The watcher re-checks the world at wake: the `.tyran/STOP`
+   brake wins outright; a vanished marker or a journal showing the
+   usage-limit gate already closed means someone resumed manually and the
+   watcher stands down; fresh telemetry showing the weekly window still
+   exhausted defers again (or holds, beyond `wait_max_hours`). Then it
+   clears the marker and spawns the resume — and **babysits** it: a resumed
+   headless session has no statusline, hence no fresh telemetry, so success
+   is judged by **journal movement**, never by exit code. A resume that
+   appended nothing is retried on a finite backoff ladder and then reported
+   as failed, loudly.
+
+## Configuration
+
+Overnight mode is driven by the optional `limits:` block in
+`.tyran/config.yaml`. The annotated reference for all six keys — defaults,
+accepted ranges, and the quoted-`'off'` rule — lives in
+[the configuration reference](configuration.md). Enabling the pause is
+minimal:
+
+```yaml
+limits:               # all six keys, defaults and ranges: see the reference
+  mode: pause
+  pause_at_percent: 97
+```
+
+`warn` surfaces through doctor and never denies. The default is `off`
+because the pause depends on operator-installed telemetry; enabling it
+without the statusline yields a `limit-telemetry-missing` warning rather
+than silent uselessness.
+
+## Installing the statusline (operator-only, by design)
+
+A plugin cannot register a statusline, and Tyran's policy gate refuses
+agents writing your settings — so this step is yours. In your user settings
+(`~/.claude/settings.json`):
+
+```json
+{ "statusLine": { "type": "command",
+  "command": "node /absolute/path/to/tyran/scripts/statusline.mjs" } }
+```
+
+`/tyran:setup` prints this snippet with the path resolved. If you already
+have a statusline you like, tee the platform's JSON payload into the
+sidecar writer *before* your own statusline consumes it:
+`tee >(node /absolute/path/to/tyran/scripts/statusline.mjs --sidecar-only) | existing-statusline.sh`
+— `--sidecar-only` prints nothing, so your display is untouched. The order
+matters: the sidecar writer parses the platform payload, and what an
+existing statusline emits is a rendered display line, not that JSON. npm
+installs can use `npx @jjanczur/tyran statusline`.
+
+## The operator's handles
+
+```bash
+node scripts/overnight.mjs status            # marker + watcher, one screen
+node scripts/overnight.mjs cancel            # stop the scheduled resume
+node scripts/overnight.mjs cancel --clear    # ...and take over: clears the marker
+node scripts/overnight.mjs schedule --force-resume   # resume despite a long-wait hold
+```
+
+The `.tyran/STOP` brake outranks everything: a watcher that finds it at wake
+aborts instead of resuming. A supervised operator is never bound by the gate
+— your own interactive work continues during a pause.
+
+## Files
+
+| file (under `.tyran/state/`) | written by | meaning |
+|---|---|---|
+| `usage.json` | the statusline helper | latest platform-reported window telemetry |
+| `paused-until.json` | the usage gate | the durable pause: window, percent, resume time, long-wait decision |
+| `resume.json` | the scheduler | watcher state (waiting · holding · resuming · done · failed · skipped · aborted-stop · cancelled), pid |
+| `resume.log` | the scheduler | the watcher's append-only trace |
+
+All four are machine-local runtime, exempt — by name — from doctor's
+stray-file check, and kept out of history by `.tyran/.gitignore`. That
+ignore file is seeded at adoption and brought up to date by re-running the
+scanner (`node scripts/scan-repo.mjs --ensure-policy` or `--write`) — an
+install that adopted before this feature should re-run it once so the four
+entries exist.
+
+## Reliability, stated plainly
+
+1. The detached watcher **does not survive a reboot**. Machine sleep delays
+   it (chunked sleeps re-read the clock); power loss kills it. The marker
+   then goes stale, doctor says so (`limit-pause-stale`), the session-start
+   notice says so, and the gate self-clears it on the next session's first
+   tool call after the reset. Operators who need reboot survival can wrap
+   `overnight.mjs --wait` in launchd/cron; nothing is auto-installed.
+2. Telemetry is **event-driven**: it updates when the statusline fires, so
+   the gate acts on the last message's numbers, not this instant's. A single
+   long generation can cross the threshold unseen — the session survives
+   the hard limit (measured), and the watcher still resumes it.
+3. The gate binds at **tool-call granularity** and reads commands, never
+   effects — the same declared floor as every other Tyran gate.
+4. The supervised-operator exemption inherits the platform's
+   `permission_mode` semantics: `default` means "the platform may prompt",
+   so an allow-listed autonomous flow under `default` escapes the pause.
+   Fail-open, and stated rather than implied.
+5. Like every gate here, a deleted hook fails open; `doctor --hooks` and the
+   session-start warning are the detection layer.
+
+## Doctor findings
+
+`limit-pause-active` (info) · `limit-pause-stale` (warning) ·
+`limit-resume-watcher-dead` (warning) · `limit-telemetry-missing` (warning)
+— see [the doctor reference](doctor.md) for the full table.

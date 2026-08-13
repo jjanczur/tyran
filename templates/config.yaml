@@ -42,3 +42,23 @@ validation:
 
 # Files multiple agents may touch: append-only, serialized by the conductor.
 shared_zones: []
+
+# Overnight mode — pause autonomous work near the subscription usage limits
+# and resume after the window resets (docs/overnight.md). Requires the
+# operator-installed statusline helper (scripts/statusline.mjs), which is the
+# only place the platform exposes usage telemetry; without it the gate is
+# silent and doctor says so.
+#
+#   mode: off | warn | pause     warn surfaces, never denies; pause winds down
+#   wait_max_hours: 5            reset further away than this = a LONG pause:
+#                                notify and hold rather than silently waiting
+#                                days (the weekly window). Within it: schedule
+#                                the resume and say when.
+#   long_wait: hold | resume     what the scheduler does beyond wait_max_hours
+limits:
+  mode: 'off' # quoted — bare off is YAML for false
+  pause_at_percent: 97
+  weekly_pause_at_percent: 97
+  wait_max_hours: 5
+  long_wait: hold
+  resume_margin_minutes: 5

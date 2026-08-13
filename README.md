@@ -436,7 +436,10 @@ underlying script does.
       published as numbers rather than as a table of intentions)
 - [ ] Update delta-review: reconcile a new core version with what your repo
       has learned locally
-- [ ] Overnight mode (ralph-tui integration)
+- [x] Overnight mode: usage-limit pause + scheduled resume — the statusline
+      telemetry sidecar, a wind-down gate near the subscription window, and a
+      watcher that resumes (or, on a days-away weekly reset, notifies and
+      holds) — see [docs/overnight.md](docs/overnight.md)
 - [ ] Read-only dashboard (phase C)
 
 ## Where this came from

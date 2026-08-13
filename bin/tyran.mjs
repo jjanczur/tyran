@@ -72,6 +72,14 @@ export const COMMANDS = {
     'knowledge.mjs',
     'Select the knowledge entries that apply to a set of paths and print a paste-ready brief for a handoff.',
   ],
+  overnight: [
+    'overnight.mjs',
+    'Schedule and run the usage-limit resume watcher: wait for the window reset, then resume the paused session.',
+  ],
+  statusline: [
+    'statusline.mjs',
+    'Statusline helper that tees platform rate-limit telemetry into .tyran/state/usage.json for the usage gate.',
+  ],
   'stop-check': [
     'stop-check.mjs',
     'Check the .tyran/STOP operator brake that halts a running initiative before its next spawn or merge.',

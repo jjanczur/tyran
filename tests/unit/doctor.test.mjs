@@ -481,6 +481,103 @@ test('a custom-named state dir keeps both git checks asking about THAT name', ()
   }
 });
 
+// ---------------------------------------------------------- overnight mode
+
+const PAUSE_MARKER = (over = {}) => ({
+  paused_at: '2026-08-13T12:00:00.000Z',
+  window: 'five_hour',
+  used_percentage: 98,
+  resume_at: '2026-08-13T14:00:00.000Z',
+  long_wait: false,
+  ...over,
+});
+
+test('an active pause marker is info; a marker past its resume time is a warning', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  writeFileSync(join(dir, 'state', 'paused-until.json'), JSON.stringify(PAUSE_MARKER()));
+  const active = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  assert.equal(byCode(active, 'limit-pause-active').length, 1);
+  assert.deepEqual(byCode(active, 'limit-pause-stale'), []);
+
+  const stale = runStateChecks({ dir, now: '2026-08-13T15:00:00.000Z' });
+  assert.equal(byCode(stale, 'limit-pause-stale').length, 1);
+  assert.equal(stale.ok, false);
+  assert.doesNotMatch(byCode(stale, 'limit-pause-stale')[0].fix ?? '', /\brm\b|\bmv\b|>\s*\S/);
+});
+
+test('without an explicit --now a marker is reported present, never stale — no wall clock', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  writeFileSync(join(dir, 'state', 'paused-until.json'), JSON.stringify(PAUSE_MARKER({ resume_at: '1999-01-01T00:00:00.000Z' })));
+  const result = runStateChecks({ dir });
+  assert.equal(byCode(result, 'limit-pause-active').length, 1);
+  assert.deepEqual(byCode(result, 'limit-pause-stale'), []);
+});
+
+test('a dead waiting watcher and a failed resume are both warnings', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  writeFileSync(join(dir, 'state', 'paused-until.json'), JSON.stringify(PAUSE_MARKER()));
+  writeFileSync(join(dir, 'state', 'resume.json'), JSON.stringify({ state: 'waiting', pid: 99999999 }));
+  const dead = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  assert.equal(byCode(dead, 'limit-resume-watcher-dead').length, 1);
+
+  // The watcher unlinks the marker before spawning the resume, so the real
+  // failed-resume disk state has NO marker — the check must not hide behind one.
+  rmSync(join(dir, 'state', 'paused-until.json'));
+  writeFileSync(join(dir, 'state', 'resume.json'), JSON.stringify({ state: 'failed', reason: 'resume-did-not-take' }));
+  const failed = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  assert.equal(byCode(failed, 'limit-resume-watcher-dead').length, 1);
+  assert.deepEqual(byCode(failed, 'limit-pause-active'), []);
+  assert.deepEqual(byCode(failed, 'limit-pause-stale'), []);
+  // `schedule` refuses without a marker, and the failed resume consumed it —
+  // a fix command must be executable in the exact state that fires it.
+  const fix = byCode(failed, 'limit-resume-watcher-dead')[0].fix;
+  assert.doesNotMatch(fix, /overnight\.mjs['"]? schedule/, 'the no-marker fix must not point at schedule');
+  assert.match(fix, /claude --resume/, 'the no-marker fix names the hand-resume path');
+});
+
+test('limits configured with no telemetry is a warning; mode off or no limits is silent', () => {
+  const root = repo();
+  const dir = scaffold(root, { config: false });
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  const config = (mode) =>
+    `profile: balanced\nautonomy: P1\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\nlimits:\n  mode: '${mode}'\n`;
+  writeFileSync(join(dir, 'config.yaml'), config('pause'));
+  const missing = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  assert.equal(byCode(missing, 'limit-telemetry-missing').length, 1);
+
+  // fresh telemetry silences it
+  writeFileSync(
+    join(dir, 'state', 'usage.json'),
+    JSON.stringify({ written_at: '2026-08-13T12:59:00.000Z', five_hour: { used_percentage: 10 } }),
+  );
+  assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing'), []);
+
+  // a sidecar over a day old is as blind as an absent one (25h before --now)
+  writeFileSync(
+    join(dir, 'state', 'usage.json'),
+    JSON.stringify({ written_at: '2026-08-12T12:00:00.000Z', five_hour: { used_percentage: 10 } }),
+  );
+  assert.equal(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing').length, 1);
+
+  writeFileSync(join(dir, 'config.yaml'), config('off'));
+  writeFileSync(join(dir, 'state', 'usage.json'), '');
+  assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing'), []);
+
+  // no limits block at all: nothing is configured, so nothing can be blind
+  writeFileSync(
+    join(dir, 'config.yaml'),
+    'profile: balanced\nautonomy: P1\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\n',
+  );
+  const noLimits = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  assert.deepEqual(noLimits.findings.filter((f) => f.code.startsWith('limit-')), []);
+});
+
 test('an oversized knowledge entry is a warning on a file that still validates', () => {
   const root = repo();
   const dir = scaffold(root, { knowledge: false });
@@ -1293,6 +1390,10 @@ const EXPECTED_SEVERITY = {
   'state-stray-file': 'warning',
   'state-legacy-initiatives-dir': 'warning',
   'lease-file-tracked': 'warning',
+  'limit-pause-active': 'info',
+  'limit-pause-stale': 'warning',
+  'limit-resume-watcher-dead': 'warning',
+  'limit-telemetry-missing': 'warning',
 };
 
 test('every finding code has exactly one pinned severity', () => {

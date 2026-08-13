@@ -1,8 +1,9 @@
 # Hook I/O contract — measured, not assumed
 
-Every statement here was read out of the shipped Claude Code binary
-(**v2.1.116**), not out of documentation. It exists because a gate built on a
-guess about the platform is a gate of unknown strength (ADR-22), and because
+Every statement here was read out of the shipped Claude Code binary — §1–§16
+on **v2.1.116**, §17–§18 on **v2.1.197** — not out of documentation. It
+exists because a gate built on a guess about the platform is a gate of
+unknown strength (ADR-22), and because
 four of the facts below **contradict** the documented contract in ways that
 would each have produced a control that looks installed and cannot refuse.
 
@@ -375,3 +376,49 @@ Two consequences worth carrying into every later gate:
    `Bash` input is reading a program, and a program's output cannot be known
    without running it. Escape decoding closes the obvious spelling; the class
    stays open by construction and must be declared, not implied.
+
+## 17. The PreToolUse payload carries NO usage telemetry (measured 2.1.197)
+
+Measured 2026-08-13 with a dump hook (`cat > file`) registered in a scratch
+repository, one live tool call. The complete PreToolUse stdin payload:
+
+```
+session_id · transcript_path · cwd · prompt_id · permission_mode ·
+effort.level · hook_event_name · tool_name · tool_input · tool_use_id
+```
+
+**No `rate_limits` field, in any shape.** The statusline JSON is therefore
+the only programmatic source of subscription-window telemetry, and a plugin
+cannot register a statusline — the operator does. Every consumer of usage
+data in this plugin (the usage gate, doctor, the overnight scheduler) reads
+the sidecar `scripts/statusline.mjs` writes, and treats its absence as
+UNKNOWN, which fails open. If a later platform version adds `rate_limits`
+to hook stdin, re-measure and prefer it — stdin beats a sidecar on
+freshness by construction.
+
+Two adjacent facts measured the same day, same version:
+
+- `claude -p --resume <session-id> "<prompt>"` was measured resuming a
+  session **created by a previous `-p` run**, context intact, session id
+  unchanged. The direction the overnight watcher actually relies on —
+  resuming an INTERACTIVE session headlessly — is assumed to behave the
+  same and has **not** been measured. The compensating control is that the
+  watcher never trusts the resume: it judges success by journal movement
+  (`resumeTook` in `scripts/overnight.mjs` — events after minus events
+  before), retries on a finite backoff ladder, and reports a resume that
+  exited cleanly having appended nothing as failed, loudly. A resume that
+  silently does nothing is therefore detected, never trusted.
+- Statuslines do not run under `claude -p`, so a RESUMED headless session
+  has no fresh telemetry and its usage gate fails open by design. The
+  overnight watcher compensates by babysitting the resumed process and
+  judging success by journal movement, never by exit code.
+
+## 18. Both windows, hit live, while this section was being written
+
+The five-hour window (12:15) and then the weekly window (15:30) killed two
+four-agent review fleets on 2026-08-13. Observed behaviour, confirming the
+docs: the parent session SURVIVES — only new subagent work fails, with the
+platform's own message naming the window and its reset time. The main loop
+retained enough headroom to wind down in order: commit, checkpoint, notify
+the operator, schedule the resume. That ordering is exactly the wind-down
+checklist the usage gate prints, rehearsed by hand before it was shipped.

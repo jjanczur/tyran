@@ -509,23 +509,61 @@ export function ensureAutonomyPolicy(repoRoot, { templatePath = policyTemplatePa
 }
 
 export const STATE_GITIGNORE_PATH = '.tyran/.gitignore';
+export const STATE_GITIGNORE_LINES = Object.freeze([
+  'state/*/locks/',
+  'state/paused-until.json',
+  'state/resume.json',
+  'state/resume.log',
+  'state/usage.json',
+]);
 const STATE_GITIGNORE_BODY =
   '# Runtime files, never history. Leases record who holds a worktree or a\n' +
   '# heavy slot RIGHT NOW; committing one makes every parallel merge conflict\n' +
-  '# on state that was stale the moment it was written.\n' +
-  'state/*/locks/\n';
+  '# on state that was stale the moment it was written. The overnight files\n' +
+  '# are machine-local by nature: another clone has a different watcher pid,\n' +
+  '# a different telemetry stream, and no business inheriting this one\'s pause.\n' +
+  `${STATE_GITIGNORE_LINES.join('\n')}\n`;
 
 /**
- * Create-only write of `.tyran/.gitignore` excluding lease files. A nested
- * gitignore rather than a line in the host's, because `.tyran/` is committed
- * and travels into every worktree — the exclusion has to travel with it.
- * Returns `{ path, status: 'created' | 'present' }`; never overwrites, so an
- * operator's own additions survive re-running setup.
+ * Seed `.tyran/.gitignore` excluding runtime files. A nested gitignore rather
+ * than a line in the host's, because `.tyran/` is committed and travels into
+ * every worktree — the exclusion has to travel with it. An existing file gains
+ * any managed line it lacks, APPENDED at the end (matched by exact trimmed
+ * line): create-only seeding left every 0.1.9 install without the overnight
+ * exclusions, and the wind-down checklist's `git add .tyran/state` then
+ * committed a machine-local pause marker that every clone inherited. Existing
+ * content — operator additions included — is never reordered or rewritten,
+ * and a `!`-negated managed line is an operator decision this never reverses.
+ * Returns `{ path, status: 'created' | 'updated' | 'present' | 'unreadable' }`.
  */
 export function ensureStateGitignore(repoRoot) {
   const root = resolve(repoRoot);
   const path = join(root, ...STATE_GITIGNORE_PATH.split('/'));
-  if (existsSync(path)) return { path, status: 'present' };
+  if (existsSync(path)) {
+    let existing;
+    try {
+      existing = readFileSync(path, 'utf8');
+    } catch {
+      // A directory or unreadable file at this path is the operator's to
+      // resolve; crashing the scan over an ignore nicety helps nobody.
+      return { path, status: 'unreadable' };
+    }
+    const have = new Set(existing.split('\n').map((line) => line.trim()));
+    // `!line` is the operator explicitly TRACKING that file; appending the
+    // plain line after it would win by last-match and silently reverse them.
+    const missing = STATE_GITIGNORE_LINES.filter((line) => !have.has(line) && !have.has(`!${line}`));
+    if (missing.length === 0) return { path, status: 'present' };
+    try {
+      const glue = existing === '' || existing.endsWith('\n') ? '' : '\n';
+      writeFileSync(path, `${existing}${glue}${missing.join('\n')}\n`);
+    } catch (error) {
+      throw new BootstrapError(
+        `could not write ${escapeInvisible(path)}: ${error.message}`,
+        'check the directory permissions; re-running this command is safe',
+      );
+    }
+    return { path, status: 'updated' };
+  }
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, STATE_GITIGNORE_BODY);
@@ -561,10 +599,7 @@ function main() {
         ? `scan-repo: created ${escapeInvisible(seeded.path)} from the shipped template`
         : `scan-repo: ${escapeInvisible(seeded.path)} already exists — left untouched`,
     );
-    const ignored = seedStateGitignore(dir);
-    if (ignored.status === 'created') {
-      console.error(`scan-repo: created ${escapeInvisible(ignored.path)} (lease files stay out of history)`);
-    }
+    reportStateGitignore(seedStateGitignore(dir));
     return;
   }
 
@@ -581,10 +616,7 @@ function main() {
       if (seeded.status === 'created') {
         console.error(`scan-repo: created ${escapeInvisible(seeded.path)} from the shipped template`);
       }
-      const ignored = seedStateGitignore(dir);
-      if (ignored.status === 'created') {
-        console.error(`scan-repo: created ${escapeInvisible(ignored.path)} (lease files stay out of history)`);
-      }
+      reportStateGitignore(seedStateGitignore(dir));
     }
     try {
       mkdirSync(dirname(path), { recursive: true });
@@ -607,6 +639,17 @@ function seedPolicy(dir) {
     console.error(`scan-repo: ${error.message}`);
     console.error(`scan-repo: ${error.remedy}`);
     process.exit(2);
+  }
+}
+
+/** A silent line only when nothing changed — every other shape is reported. */
+function reportStateGitignore({ path, status }) {
+  if (status === 'created') {
+    console.error(`scan-repo: created ${escapeInvisible(path)} (lease files stay out of history)`);
+  } else if (status === 'updated') {
+    console.error(`scan-repo: updated ${escapeInvisible(path)} (appended missing runtime exclusions)`);
+  } else if (status === 'unreadable') {
+    console.error(`scan-repo: could not read ${escapeInvisible(path)} — runtime exclusions were NOT updated`);
   }
 }
 

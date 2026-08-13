@@ -1278,11 +1278,10 @@ const MESSAGE_FLAGS = Object.freeze(['-m', '--message', '-F', '--file', '-t', '-
  * Deliberately NOT a general quote-aware lexer — this repository has one lexer
  * and is not getting a second. What is skipped is a bounded, named shape.
  */
+export const MESSAGE_ARGUMENT_RE = /(^|\s)(-m|--message|-F|--file|-t|--template|-am|-ma|--data)(=|\s+)("[^"]*"|'[^']*'|\S+)/g;
+
 export function stripMessageArguments(command) {
-  return String(command).replace(
-    /(^|\s)(-m|--message|-F|--file|-t|--template|-am|-ma|--data)(=|\s+)("[^"]*"|'[^']*'|\S+)/g,
-    '$1',
-  );
+  return String(command).replace(MESSAGE_ARGUMENT_RE, '$1');
 }
 
 /**

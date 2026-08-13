@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.11 — 2026-08-13
+
+### The journal learns what agents are doing, finding, and waiting on
+
+The closed event set grows 14 → 17 — the reviewed core change the journal
+page names. `progress` is the agent's own mid-run signal (`started` ·
+`working` · `blocked` · `unblocked`, a closed list emitted at four named
+points, never part of spawn↔report pairing); `finding` is a claim about a named
+area plus the proof for it, queryable by other agents (`F-<n>` ids issued
+by `append`);
+`ticket.status` is the conductor's lane override for exactly the three
+states no lifecycle event can derive (`blocked` · `waiting-operator` ·
+`parked`), cleared automatically by the next report, review or merge and
+never counted as progress. Both new value sets are closed and rejected at
+append naming the whole set; the free-text keys `detail`/`claim`/`proof`
+cap at 2 000 codepoints — rejected, never truncated.
+
+STATE.md gains `Open blockages` and `Findings` sections and a per-agent
+`Last signal` column; doctor gains `spawn-blocked` (an agent whose own last
+signal says blocked, past a threshold); the agent contracts gain the
+emission points, the anti-duplication grep, and the implementer's "what you
+did NOT do" report section; operator questions and mid-run ticket intake
+now land as journal events, so the coming board can render them.
+
 ## 0.1.10 — 2026-08-13
 
 ### Overnight mode: the usage cliff becomes a wind-down

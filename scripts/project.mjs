@@ -178,6 +178,37 @@ function list(items) {
 
 // ------------------------------------------------------------------ fold
 
+/** The open blockage this agent reported clears when the agent moves on. */
+function clearBlockageBy(state, agent) {
+  state.blockages.delete(String(agent));
+}
+
+/** A `review`/`merge` settles the ticket for EVERY agent blocked on it. */
+function clearBlockagesOn(state, ticketId) {
+  for (const [key, blockage] of state.blockages) {
+    // A ticketless blockage is keyed to its agent and belongs to no ticket —
+    // the `(no ticket)` pseudo-ticket of a review/merge without `data.ticket`
+    // is a different thing and must not sweep it up.
+    if (blockage.ticket != null && String(blockage.ticket) === ticketId) state.blockages.delete(key);
+  }
+}
+
+/**
+ * A `report` — and a `review`, which is the reviewer's completion event —
+ * ENDS that agent's stint, so everything still keyed by its name goes with it.
+ *
+ * ADR-18 permits a later `spawn` to reuse the name once the prior one is
+ * closed, and that is the standard close-spawn recovery path, not an exotic
+ * journal. Kept, these records render against the NEXT incarnation: a fresh
+ * agent that has emitted nothing showed as `blocked at <old ts>` while
+ * `## Open blockages` said _none_ — one document contradicting itself. Cleared
+ * here, at fold time, so no reader has to compare timestamps of its own.
+ */
+function closeAgent(state, agent) {
+  clearBlockageBy(state, agent);
+  state.progressByAgent.delete(String(agent));
+}
+
 /**
  * Fold a journal read into the projection state. Pure: no clock, no I/O.
  * Every closed-set event type must hit a branch here; anything else is
@@ -210,6 +241,25 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
     milestones: [],
     unusableAgentNames: [],
     ambiguousAgents: [],
+    // agent name -> latest self-reported signal (last one wins)
+    progressByAgent: new Map(),
+    // agent name -> that agent's open blockage, the ticket inside the value.
+    //
+    // Keyed by AGENT and not by ticket, because one agent has at most one live
+    // blockage (last-blocked-wins, exactly like its last signal) while one
+    // ticket can block SEVERAL agents. Under ticket keys the second agent's
+    // record replaced the first's, and the second agent's next movement signal
+    // then deleted a blockage its owner had never cleared — so an agent stayed
+    // stuck with nothing anywhere saying so. The ticket survives as rendered
+    // context and as what `review`/`merge` match against.
+    //
+    // Cleared by `unblocked`/`started`/`working` from the SAME agent, by that
+    // agent's report/review, and by a `review`/`merge` on the ticket — AT FOLD
+    // TIME, so no reader needs temporal reasoning of its own.
+    blockages: new Map(),
+    findings: [],
+    // `ticket.status` events naming a ticket no other event mentions
+    unknownOverrides: [],
   };
 
   /**
@@ -259,6 +309,7 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         report: null,
         review: null,
         merge: null,
+        override: null,
         lastTs: seenTs ?? null,
       });
     }
@@ -357,8 +408,59 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           });
         }
         if (data.ticket != null) {
-          ticketOf(data.ticket, ts).report = { verdict: data.verdict ?? null, ts, by: data.agent ?? actor };
+          const t = ticketOf(data.ticket, ts);
+          t.report = { verdict: data.verdict ?? null, ts, by: data.agent ?? actor };
+          t.override = null; // a lifecycle event outranks a hand-set lane
         }
+        if (data.agent != null) closeAgent(state, data.agent);
+        break;
+      }
+      case 'progress': {
+        const agent = String(data.agent ?? '(no agent)');
+        state.progressByAgent.set(agent, {
+          state: data.state ?? null,
+          ticket: data.ticket ?? null,
+          detail: data.detail ?? null,
+          next: data.next ?? null,
+          ts,
+        });
+        if (data.state === 'blocked') {
+          state.blockages.set(agent, { ticket: data.ticket ?? null, agent, detail: data.detail ?? null, ts });
+        } else {
+          // started / working / unblocked all say "this agent is moving";
+          // whatever it reported itself blocked on is no longer blocking.
+          clearBlockageBy(state, agent);
+        }
+        break;
+      }
+      case 'finding':
+        state.findings.push({
+          id: data.id ?? null,
+          area: data.area ?? null,
+          claim: data.claim ?? null,
+          proof: data.proof ?? null,
+          ticket: data.ticket ?? null,
+          confidence: data.confidence ?? null,
+          ts,
+          actor,
+        });
+        break;
+      case 'ticket.status': {
+        // An override is a LANE, not progress: it must never move the percent.
+        // Minting a ledger ticket for an id no other event mentions did exactly
+        // that — one mistyped id (`T-1O` for `T-10`) enlarged the denominator
+        // and dropped the headline percent, while the ticket the operator meant
+        // to park stayed unparked. So the override lands only on a ticket the
+        // journal already knows; an unknown one is refused OUT LOUD (see
+        // `warnings()`) rather than inventing the ticket it names, because a
+        // silent exclusion is the failure ADR-19 correction 1 forbids.
+        const key = String(data.ticket ?? '(no ticket)');
+        if (!state.tickets.has(key)) {
+          state.unknownOverrides.push({ ticket: key, ts });
+          break;
+        }
+        const t = ticketOf(key, ts);
+        t.override = { column: data.column ?? null, reason: data.reason ?? null, until: data.until ?? null, ts };
         break;
       }
       case 'gate': {
@@ -376,20 +478,26 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
       // `review`/`merge` require data.ticket, but a hand-written or older
       // journal may omit it — bucket those under a visible pseudo-ticket
       // instead of dropping the event (silent loss is the worse failure).
-      case 'review':
-        ticketOf(data.ticket ?? '(no ticket)', ts).review = {
-          verdict: data.verdict ?? null,
-          by: data.by ?? actor,
-          ts,
-        };
+      case 'review': {
+        const t = ticketOf(data.ticket ?? '(no ticket)', ts);
+        t.review = { verdict: data.verdict ?? null, by: data.by ?? actor, ts };
+        t.override = null;
+        clearBlockagesOn(state, t.id);
+        // The review is the REVIEWER's completion event, as a report is the
+        // implementer's: pairSpawns closes the reviewer's spawn on `data.by`,
+        // and the same correlator closes what that spawn left behind. Without
+        // it a reviewer's ticketless blockage outlived its own review with no
+        // later event that could ever clear it.
+        if (data.by != null) closeAgent(state, data.by);
         break;
-      case 'merge':
-        ticketOf(data.ticket ?? '(no ticket)', ts).merge = {
-          sha: data.sha ?? null,
-          mode: data.mode ?? null,
-          ts,
-        };
+      }
+      case 'merge': {
+        const t = ticketOf(data.ticket ?? '(no ticket)', ts);
+        t.merge = { sha: data.sha ?? null, mode: data.mode ?? null, ts };
+        t.override = null;
+        clearBlockagesOn(state, t.id);
         break;
+      }
       case 'decision':
         state.decisions.push({ id: data.id ?? '(no id)', text: data.text ?? null, ts, actor });
         break;
@@ -433,6 +541,10 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
 
 /** Human-readable status of one ticket, derived from the strongest signal. */
 export function ticketStatus(t) {
+  // A hand-set lane outranks derivation — but only until the next stronger
+  // lifecycle event, which clears it AT FOLD TIME. It never touches the
+  // merged count or the percent: an override is a lane, not progress.
+  if (t.override) return `${t.override.column ?? '(no column)'} (set by ticket.status)`;
   if (t.merge) return `merged (${t.merge.sha ?? 'no sha'})`;
   if (t.review) return `review: ${t.review.verdict ?? 'no verdict'}`;
   if (t.report) return `reported: ${t.report.verdict ?? 'no verdict'}`;
@@ -476,6 +588,11 @@ export function warnings(state) {
   if (state.malformed > 0) out.push(`${state.malformed} line(s) parsed to a non-object value — they were skipped`);
   for (const [ev, n] of sortByKey([...state.unknownTypes.entries()], (e) => e[0])) {
     out.push(`unknown event type "${inlinePlain(ev)}" x${n} — counted but not folded (newer Tyran?)`);
+  }
+  // The lane the operator meant to set is NOT set, and the id they typed is the
+  // only thing that can tell them why.
+  for (const { ticket } of state.unknownOverrides) {
+    out.push(`ticket.status for unknown ticket "${inlinePlain(ticket)}" — ignored (an override never invents a ticket)`);
   }
   if (state.initiatives.length > 1) {
     out.push(
@@ -529,17 +646,54 @@ function renderState(state) {
   parts.push('\n## Agents\n\n');
   parts.push(
     table(
-      ['Agent', 'Role', 'Model', 'Ticket', 'Worktree', 'Status', 'Spawned'],
-      sortByKey(state.agents, (a) => `${a.agent} ${a.spawnTs ?? ''}`).map((a) => [
-        inline(a.agent),
-        inline(a.role),
-        inline(a.model),
-        inline(a.ticket),
-        inline(a.worktree),
-        a.status === 'running'
-          ? '**running (no report yet)**'
-          : `${inline(a.status)}${a.verdict == null ? '' : `: ${inline(a.verdict)}`}`,
-        inline(a.spawnTs),
+      ['Agent', 'Role', 'Model', 'Ticket', 'Worktree', 'Status', 'Spawned', 'Last signal'],
+      sortByKey(state.agents, (a) => `${a.agent} ${a.spawnTs ?? ''}`).map((a) => {
+        // A signal that outlived its report is stale by definition, and cannot
+        // be read here: the report deleted it at fold time (see `closeAgent`),
+        // and only running rows carry a signal at all. The filter alone was not
+        // enough — a re-spawned name is running again.
+        const signal = a.status === 'running' ? state.progressByAgent.get(a.agent) : null;
+        return [
+          inline(a.agent),
+          inline(a.role),
+          inline(a.model),
+          inline(a.ticket),
+          inline(a.worktree),
+          a.status === 'running'
+            ? '**running (no report yet)**'
+            : `${inline(a.status)}${a.verdict == null ? '' : `: ${inline(a.verdict)}`}`,
+          inline(a.spawnTs),
+          signal ? `${inline(signal.state)} at ${inline(signal.ts)}` : inline(null),
+        ];
+      }),
+    ),
+  );
+
+  parts.push('\n## Open blockages\n\n');
+  parts.push(
+    table(
+      ['Ticket', 'Agent', 'Detail', 'Since'],
+      sortByKey([...state.blockages.values()], (b) => `${b.ticket ?? ''} ${b.agent}`).map((b) => [
+        inline(b.ticket),
+        inline(b.agent),
+        inline(b.detail),
+        inline(b.ts),
+      ]),
+    ),
+  );
+
+  parts.push('\n## Findings\n\n');
+  parts.push(
+    table(
+      ['Id', 'Area', 'Claim', 'Proof', 'Ticket', 'By', 'At'],
+      state.findings.map((f) => [
+        inline(f.id),
+        inline(f.area),
+        inline(f.claim),
+        inline(f.proof),
+        inline(f.ticket),
+        inline(f.actor),
+        inline(f.ts),
       ]),
     ),
   );

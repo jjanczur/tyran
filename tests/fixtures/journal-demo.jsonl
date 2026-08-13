@@ -17,4 +17,7 @@
 {"ts":"2026-07-26T09:40:00.000Z","ev":"error","init":"demo","actor":"impl-2","data":{"class":"flaky-test","detail":"race in withLock under 20 concurrent processes"}}
 {"ts":"2026-07-26T09:41:00.000Z","ev":"retro.entry","init":"demo","actor":"tyran-retro","data":{"kind":"skill","target":"skills/tyran/SKILL.md","confidence":"medium"}}
 {"ts":"2026-07-26T09:41:30.000Z","ev":"lease.released","init":"demo","actor":"intruder","data":{"resource":"worktree:tyran-s2","holder":"intruder"}}
+{"ts":"2026-07-26T09:41:40.000Z","ev":"progress","init":"demo","actor":"impl-2","data":{"agent":"impl-2","state":"blocked","ticket":"T-2","detail":"waiting on the worktree lease"}}
+{"ts":"2026-07-26T09:41:45.000Z","ev":"finding","init":"demo","actor":"impl-2","data":{"id":"F-1","area":"scripts/**","claim":"the suite needs the quoted glob","proof":"MODULE_NOT_FOUND without it"}}
+{"ts":"2026-07-26T09:41:50.000Z","ev":"ticket.status","init":"demo","actor":"conductor","data":{"ticket":"T-10","column":"parked","reason":"pricing question open"}}
 {"ts":"2026-07-26T09:42:00.000Z","ev":"checkpoint","init":"demo","actor":"conductor","data":{"phase":"E2","next_steps":["re-read STATE.md","finish the T-2 review","then start T-10"]}}

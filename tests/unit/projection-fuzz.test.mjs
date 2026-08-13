@@ -102,17 +102,74 @@ const DATA_KEYS = [
   'id', 'title', 'text', 'agent', 'role', 'model', 'ticket', 'worktree', 'verdict',
   'kind', 'result', 'evidence', 'evidence_ref', 'resource', 'holder', 'phase',
   'next_steps', 'deps', 'by', 'sha', 'mode', 'target', 'confidence', 'class', 'detail',
+  // the 17-event set's additions
+  'state', 'column', 'area', 'claim', 'proof', 'next',
 ];
 
-function hostileEvent(rand) {
+/**
+ * Two of those keys are CORRELATORS rather than free text, and a hostile string
+ * never matches a correlator: an Open-blockages row opens only on the exact
+ * value `blocked`, and a Last-signal cell needs a `spawn` and a `progress`
+ * naming ONE agent with no report in between. Drawn from `hostileValue` alone,
+ * both tables were rendered only in their EMPTY shape — measured at 0 rows in
+ * all 300 cases — so an unescaped `b.detail` or `signal.state` would have gone
+ * unnoticed by the very fuzz that claims to cover them.
+ *
+ * The pools restore the reach without softening the payload: every agent name
+ * here is itself a hostile fragment that `journal.agentNameProblem` accepts as
+ * a correlator. One name is drawn PER CASE, not per event — a case is one
+ * journal, one journal is one initiative, and drawing per event left the reach
+ * to chance (measured: a spawn and a progress agreed on a name in 0 of 300
+ * cases, the mulberry32 counter sampled at a near-constant stride). The
+ * coverage counters below fail if the reach is ever lost again.
+ */
+const PROGRESS_STATES = ['blocked', 'working', 'started', 'unblocked'];
+const AGENT_NAMES = [
+  '| injected | columns |',
+  '<script>alert(1)</script>',
+  '![beacon](https://evil.example/leak.png)',
+];
+
+const pick = (rand, pool) => pool[Math.floor(rand() * pool.length)];
+
+/**
+ * The four types that correlate with EACH OTHER by agent name. Drawn uniformly
+ * from all 17, a `spawn` and a `progress` land in one case (1-6 events) about
+ * twice in 300 — so one event in five comes from here instead. The 12.5% below
+ * keeps the unknown-event-type rate at the 10% overall it has always been.
+ */
+const LIFECYCLE_TYPES = ['spawn', 'progress', 'report', 'review'];
+
+function hostileType(rand) {
+  if (rand() < 0.2) return pick(rand, LIFECYCLE_TYPES);
+  return rand() < 0.875 ? pick(rand, EVENT_TYPES) : hostileString(rand);
+}
+
+function hostileEvent(rand, agent = AGENT_NAMES[0]) {
+  const ev = hostileType(rand);
   const data = {};
   const keys = 1 + Math.floor(rand() * 5);
-  for (let i = 0; i < keys; i++) {
-    data[DATA_KEYS[Math.floor(rand() * DATA_KEYS.length)]] = hostileValue(rand);
+  for (let i = 0; i < keys; i++) data[DATA_KEYS[Math.floor(rand() * DATA_KEYS.length)]] = hostileValue(rand);
+  // The events that OPEN state get the case's agent four times in five, on the
+  // key they correlate by (`data.by` for a review, `data.agent` for the rest);
+  // the events that CLOSE it get it half as often, because a closed spawn
+  // renders no Last-signal cell at all and a closed blockage no row. The
+  // remaining draws keep the fully hostile shape, where those keys hold
+  // arbitrary JSON.
+  const opens = ev === 'spawn' || ev === 'progress';
+  const closes = ev === 'report' || ev === 'review';
+  if ((opens && rand() < 0.8) || (closes && rand() < 0.4)) {
+    if (ev === 'review') data.by = agent;
+    else data.agent = agent;
+  }
+  // `blocked` gets half the draws on its own: it is the only value that OPENS
+  // an Open-blockages row, and the other three exist to close one.
+  if (ev === 'progress' && rand() < 0.8) {
+    data.state = rand() < 0.5 ? 'blocked' : pick(rand, PROGRESS_STATES);
   }
   return {
     ts: rand() < 0.9 ? '2026-01-01T00:00:0' + Math.floor(rand() * 10) + '.000Z' : hostileString(rand),
-    ev: rand() < 0.9 ? EVENT_TYPES[Math.floor(rand() * EVENT_TYPES.length)] : hostileString(rand),
+    ev,
     init: rand() < 0.5 ? 'demo' : hostileString(rand),
     actor: hostileString(rand),
     data,
@@ -146,6 +203,15 @@ function tableColumnProblems(markdown) {
   return problems;
 }
 
+/** The data rows of one `## <heading>` table — no header, no separator. */
+function tableRows(markdown, heading) {
+  const section = (markdown.split(`\n## ${heading}\n`)[1] ?? '').split('\n## ')[0];
+  return section
+    .split('\n')
+    .filter((l) => l.startsWith('|') && !/^\|[-|]+\|$/.test(l))
+    .slice(1);
+}
+
 function checkDocument(name, markdown, caseNo, events) {
   const context = () => `case ${caseNo} (seed ${SEED}) ${name}\nevents: ${JSON.stringify(events)}`;
 
@@ -174,12 +240,65 @@ function checkDocument(name, markdown, caseNo, events) {
 
 test(`fuzz: hostile journal data cannot break the projections (seed ${SEED}, ${CASES} cases)`, () => {
   const rand = rng(SEED);
+  const reached = { blockageRow: 0, signalCell: 0, findingRow: 0, overrideStatus: 0 };
   for (let caseNo = 0; caseNo < CASES; caseNo++) {
-    const events = Array.from({ length: 1 + Math.floor(rand() * 6) }, () => hostileEvent(rand));
+    // one case is one journal, so one agent name (see AGENT_NAMES)
+    const agent = pick(rand, AGENT_NAMES);
+    const events = Array.from({ length: 1 + Math.floor(rand() * 6) }, () => hostileEvent(rand, agent));
     const { files, warnings } = renderProjections({ events });
     checkDocument(STATE_FILE, files[STATE_FILE], caseNo, events);
     checkDocument(PROGRESS_FILE, files[PROGRESS_FILE], caseNo, events);
     checkWarnings(warnings, caseNo, events);
+
+    const state = files[STATE_FILE];
+    reached.blockageRow += tableRows(state, 'Open blockages').length;
+    reached.findingRow += tableRows(state, 'Findings').length;
+    // the Last signal cell is the last column of the Agents table
+    reached.signalCell += tableRows(state, 'Agents').filter((r) => r.split('|').at(-2).trim() !== '&mdash;').length;
+    reached.overrideStatus += tableRows(state, 'Ledger').filter((r) => r.includes('(set by ticket.status)')).length;
+  }
+  // COVERAGE, not decoration: a fuzz is worth exactly the branches it reaches,
+  // and each of these four was rendered zero times until the generator learned
+  // to produce correlators. A future edit that loses one fails HERE, loudly,
+  // instead of quietly reducing this file to a test of empty tables.
+  for (const [branch, hits] of Object.entries(reached)) {
+    assert.ok(hits > 0, `no case rendered ${branch} — the hostile payload never reached that branch`);
+  }
+});
+
+/**
+ * The two cells whose content the random corpus cannot make hostile.
+ *
+ * A blockage row exists only while `data.state` is exactly `blocked`, and the
+ * Last-signal cell renders the state of the LAST progress event — so the fuzz
+ * reaches both branches (the counters above prove it) but fills the state cell
+ * with a correlator every time. Rendering `signal.state` raw therefore survived
+ * all 300 cases. Directed and deterministic, like the malformed-lines case:
+ * one agent blocked with a hostile detail, one agent whose latest signal IS a
+ * hostile payload, and every field around them hostile too.
+ */
+test('directed: hostile payloads inside a blockage row and a Last-signal cell', () => {
+  const [blockedAgent, movingAgent] = AGENT_NAMES;
+  for (const payload of HOSTILE) {
+    const label = `directed ${JSON.stringify(payload)}`;
+    const events = [
+      { ts: '2026-01-01T00:00:00.000Z', ev: 'spawn', init: payload, actor: payload,
+        data: { agent: blockedAgent, role: payload, model: payload, ticket: payload, worktree: payload } },
+      { ts: '2026-01-01T00:00:01.000Z', ev: 'spawn', init: 'demo', actor: payload,
+        data: { agent: movingAgent, role: payload } },
+      { ts: '2026-01-01T00:00:02.000Z', ev: 'progress', init: 'demo', actor: payload,
+        data: { agent: blockedAgent, state: 'blocked', ticket: payload, detail: payload, next: payload } },
+      { ts: payload, ev: 'progress', init: 'demo', actor: payload,
+        data: { agent: movingAgent, state: payload, detail: payload } },
+    ];
+    const { files, warnings } = renderProjections({ events });
+    const state = files[STATE_FILE];
+    assert.equal(tableRows(state, 'Open blockages').length, 1, `no blockage row — ${label}`);
+    const signals = tableRows(state, 'Agents').map((r) => r.split('|').at(-2).trim());
+    assert.equal(signals.filter((s) => s !== '&mdash;').length, 2, `no Last-signal cell — ${label}`);
+    checkDocument(STATE_FILE, state, label, events);
+    checkDocument(PROGRESS_FILE, files[PROGRESS_FILE], label, events);
+    checkWarnings(warnings, label, events);
   }
 });
 
@@ -211,7 +330,7 @@ test(`fuzz: the same seed renders the same bytes twice (determinism)`, () => {
     const rand = rng(SEED);
     const out = [];
     for (let i = 0; i < 50; i++) {
-      const events = Array.from({ length: 1 + Math.floor(rand() * 6) }, () => hostileEvent(rand));
+      const events = Array.from({ length: 1 + Math.floor(rand() * 6) }, () => hostileEvent(rand, pick(rand, AGENT_NAMES)));
       const { files } = renderProjections({ events });
       out.push(files[STATE_FILE], files[PROGRESS_FILE]);
     }

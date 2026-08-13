@@ -1,6 +1,6 @@
 # Journal reference
 
-`scripts/journal.mjs` · 54 unit tests
+`scripts/journal.mjs` · 59 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.
@@ -29,24 +29,35 @@ contents are moved, one initiative directory at a time, under `state/`.
 | `actor` | string | who wrote the event (agent name or `conductor`) |
 | `data` | object | free-form, but each type's required keys are enforced |
 
-## Closed event set (14)
+## Closed event set (17)
 
 | `ev` | Required `data` keys | Meaning |
 |---|---|---|
 | `init.created` | — | initiative opened |
 | `plan.accepted` | — | plan gate passed; routing snapshot frozen |
 | `ticket.created` | `id` | unit of work (+ `deps[]`, `files_predicted[]`) |
+| `ticket.status` | `ticket`, `column` | conductor-only lane override; `column` ∈ `blocked` · `waiting-operator` · `parked` — only the lanes no lifecycle event can derive. Cleared by the next `report`/`review`/`merge` |
 | `spawn` | `agent`, `role` | agent started (+ `model`, `ticket`, `worktree`); `agent` must have no open spawn — see below |
 | `report` | `agent`, `verdict` | agent finished (+ `evidence[]: {cmd, exit, counts}`); closes that agent's open spawn |
+| `progress` | `agent`, `state` | the agent's own mid-run signal; `state` ∈ `started` · `working` · `blocked` · `unblocked` (+ `ticket`, `detail`, `next`). Never part of spawn↔report pairing |
 | `gate` | `kind`, `result` | quality gate outcome (+ `evidence_ref`) |
 | `review` | `ticket`, `verdict`, `by` | independent review verdict (closes the reviewer’s open spawn — role `reviewer` only) |
 | `merge` | `ticket`, `sha` | merged (+ `mode`) |
 | `decision` | `id`, `text` | ledger entry (`append` issues the id when omitted or empty) |
+| `finding` | `area`, `claim` | a claim about one `area`, with its proof, queryable by other agents (+ `proof`, `ticket`, `confidence`; `append` issues `F-<n>` ids) |
 | `lease.acquired` | `resource`, `holder` | worktree / heavy-slot lease taken |
 | `lease.released` | `resource`, `holder` | lease returned |
 | `checkpoint` | `phase`, `next_steps` | resume surface (re-injected after compaction) |
 | `retro.entry` | `kind`, `target` | self-improvement ledger (+ `confidence`) |
 | `error` | `class` | failure record (+ `detail`) |
+
+Two value rules ride the schema, enforced at append time: the `progress.state`
+and `ticket.status.column` sets are CLOSED (an unknown value is rejected
+naming the whole set, exactly like an unknown `ev`), and the free-text keys
+`detail`, `claim` and `proof` are capped at 2 000 codepoints — rejected, never
+truncated; long material belongs in `NOTES.md` with a reference here.
+`validateJournal` reports historical oversizes as warnings only.
+
 
 ## Guarantees
 

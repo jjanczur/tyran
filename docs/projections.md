@@ -1,6 +1,6 @@
 # Projections reference
 
-`scripts/project.mjs` · 48 unit tests, including byte-exact
+`scripts/project.mjs` · 58 unit tests, including byte-exact
 golden files
 
 The journal stays the only source of truth; everything on this page is a
@@ -102,8 +102,10 @@ catch.
 | Section | Built from |
 |---|---|
 | Checkpoint | the last `checkpoint` event (+ `plan.accepted`, and the last event of any type) |
-| Agents | `spawn`, closed by the next `report` for the same agent name |
-| Ledger | `ticket.created`, `spawn`, `report`, `review`, `merge` |
+| Agents | `spawn`, closed by the next `report` for the same agent name; the Last signal column is the agent's latest `progress` event, shown on running rows only |
+| Open blockages | `progress` with `state: blocked` — cleared by the same agent's next movement signal and by `report`/`review`/`merge` |
+| Findings | `finding` events, in journal order |
+| Ledger | `ticket.created`, `ticket.status` (a lane override that never moves the percent, and never invents a ticket — one naming an id no other event created is ignored, loudly), `spawn`, `report`, `review`, `merge` |
 | Gates | `gate` — the latest event per `kind` |
 | Leases | `lease.acquired` / `lease.released` |
 | Decisions · Retro · Errors | `decision` · `retro.entry` · `error` |

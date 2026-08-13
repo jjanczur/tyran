@@ -17,6 +17,10 @@ to disk is in English.**
    the process itself).
 2. The agents' reports from this initiative: corrected premises, escalations,
    open doubts. This is the densest source of signal you have.
+   Alongside them, the journal's `finding` events (`journal.mjs query <file>
+   --ev finding`) — the claims agents recorded WITH proof, mid-run. Promote
+   the recurring ones into `.tyran/knowledge/` through the filter below; the
+   rest die with the initiative, which is correct.
 3. `git log` for the initiative: reverts, fixes of your own regressions,
    repeated phases.
 4. The current state of `skills/`, `agents/`, `scripts/` and the docs — **so

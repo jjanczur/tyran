@@ -29,6 +29,7 @@ import {
   checkFile,
   writeAtomic,
   writeAllAtomic,
+  ticketStatus,
 } from '../../scripts/project.mjs';
 
 /** First line of every projection — used to spot a half-written document. */
@@ -363,17 +364,238 @@ test('a lease released by a non-holder stays open and is reported', () => {
   assert.equal(state.mismatchedReleases.length, 1);
 });
 
+/**
+ * ONE CLEARING RULE PER TEST.
+ *
+ * These were two tests that named more rules than they exercised: blockages
+ * were only ever cleared by `report` and `merge`, the override only by `merge`,
+ * and the ticketless blockage was asserted to OPEN and never to clear. A single
+ * mutant could therefore delete three clauses at once — the override-clear on
+ * `report`, both clears on `review`, and the ticketless case in
+ * `clearBlockageBy` — and stay green. Each clause now has a test that dies
+ * alone, and each names the mutant that must kill it.
+ */
+const blocked = (agent, over = {}) =>
+  ev({ ev: 'progress', ts: '2026-07-26T09:01:00.000Z', data: { agent, state: 'blocked', detail: 'lease held', ...over } });
+
+test('a blockage opens on blocked and clears on the same agent next movement signal', () => {
+  // MUTANT: drop the `else` arm of the progress branch — the blockage then
+  // survives every signal short of a report.
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+    blocked('impl-1', { ticket: 'T-1' }),
+  ];
+  const open = fold({ events: base });
+  assert.equal(open.blockages.size, 1);
+  assert.equal(open.blockages.get('impl-1').detail, 'lease held');
+  assert.equal(open.blockages.get('impl-1').ticket, 'T-1');
+
+  for (const state of ['unblocked', 'working', 'started']) {
+    const moved = fold({
+      events: [...base, ev({ ev: 'progress', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-1', state } })],
+    });
+    assert.equal(moved.blockages.size, 0, `${state} must clear the blockage`);
+  }
+});
+
+test('a TICKETLESS blockage clears on movement too, not only a ticketed one', () => {
+  // MUTANT: restrict the clear to blockages that carry a ticket. A reviewer or
+  // a scout blocked on something with no ticket then stays blocked forever,
+  // because nothing else will ever key on it.
+  const base = [blocked('impl-2')];
+  const open = fold({ events: base });
+  assert.equal(open.blockages.size, 1);
+  assert.equal(open.blockages.get('impl-2').ticket, null);
+
+  const moved = fold({
+    events: [...base, ev({ ev: 'progress', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-2', state: 'working' } })],
+  });
+  assert.equal(moved.blockages.size, 0);
+});
+
+test('a report clears its own agent blockage — ticketed or not', () => {
+  // MUTANT: remove `closeAgent`/`clearBlockageBy` from the report branch.
+  for (const over of [{ ticket: 'T-1' }, {}]) {
+    const state = fold({
+      events: [
+        blocked('impl-1', over),
+        ev({ ev: 'report', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-1', verdict: 'done', ticket: 'T-1' } }),
+      ],
+    });
+    assert.equal(state.blockages.size, 0, `a report left a ${over.ticket ? 'ticketed' : 'ticketless'} blockage open`);
+  }
+});
+
+test('a report clears the lane override on the ticket it reports', () => {
+  // MUTANT: remove `t.override = null` from the report branch — a parked lane
+  // then outranks the report that finished the work.
+  const state = fold({
+    events: [
+      ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+      ev({ ev: 'ticket.status', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-1', column: 'parked' } }),
+      ev({ ev: 'report', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-1', verdict: 'done', ticket: 'T-1' } }),
+    ],
+  });
+  assert.match(ticketStatus(state.ticketList.find((t) => t.id === 'T-1')), /^reported: done$/);
+});
+
+test('a review clears the reviewer own blockage, the blockage on its ticket, and the lane override', () => {
+  // MUTANTS, three of them, and each assertion here kills exactly one:
+  //  - drop `closeAgent(state, data.by)`: the reviewer's TICKETLESS blockage
+  //    survives its own review, and no later event can ever clear it (the
+  //    review IS the reviewer's last event);
+  //  - drop `clearBlockagesOn`: the implementer stays blocked on a ticket that
+  //    has been reviewed;
+  //  - drop `t.override = null`: a parked lane outranks the verdict.
+  const review = ev({
+    ev: 'review',
+    ts: '2026-07-26T09:03:00.000Z',
+    data: { ticket: 'T-1', verdict: 'APPROVE', by: 'rev-1' },
+  });
+  const state = fold({
+    events: [
+      ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:00:30.000Z', data: { agent: 'rev-1', role: 'reviewer', ticket: 'T-1' } }),
+      blocked('rev-1', { detail: 'waiting for CI' }), // no ticket: keyed to the agent
+      blocked('impl-1', { ticket: 'T-1' }),
+      ev({ ev: 'ticket.status', ts: '2026-07-26T09:02:00.000Z', data: { ticket: 'T-1', column: 'parked' } }),
+      review,
+    ],
+  });
+  assert.deepEqual([...state.blockages.keys()], [], 'a review left a blockage open');
+  assert.match(ticketStatus(state.ticketList.find((t) => t.id === 'T-1')), /^review: APPROVE$/);
+  // and the review closed the reviewer's spawn, so its signal is gone with it
+  assert.equal(state.progressByAgent.has('rev-1'), false);
+  assert.equal(state.agents.find((a) => a.agent === 'rev-1').status, 'reported');
+});
+
+test('two agents blocked on one ticket are two blockages, and only their owner clears one', () => {
+  // MUTANT: key blockages by ticket id. B's record then REPLACES A's, and B's
+  // next movement signal deletes a blockage A never cleared — A is stuck with
+  // `## Open blockages` reading _none_.
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+    blocked('impl-a', { ticket: 'T-1', detail: 'A stuck' }),
+    blocked('impl-b', { ticket: 'T-1', detail: 'B stuck' }),
+  ];
+  const both = fold({ events: base });
+  assert.equal(both.blockages.size, 2);
+  assert.deepEqual([...both.blockages.values()].map((b) => b.detail).sort(), ['A stuck', 'B stuck']);
+
+  const bMoved = fold({
+    events: [...base, ev({ ev: 'progress', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-b', state: 'working' } })],
+  });
+  assert.deepEqual(
+    [...bMoved.blockages.values()].map((b) => `${b.agent}:${b.detail}`),
+    ['impl-a:A stuck'],
+    "B's movement erased A's blockage",
+  );
+  // both rows are visible in the document, not just in the state
+  const rows = renderProjections({ events: base }).files[STATE_FILE]
+    .split('## Open blockages\n')[1]
+    .split('\n## ')[0]
+    .split('\n')
+    .filter((l) => l.startsWith('| T-1 '));
+  assert.equal(rows.length, 2, 'two agents blocked on one ticket rendered as one row');
+});
+
+test('a re-spawned agent name inherits nothing from the incarnation that already closed', () => {
+  // MUTANT: leave `progressByAgent`/`blockages` keyed by the name after the
+  // report. The new running row then reads `blocked at <old ts>` while
+  // `## Open blockages` reads _none_ — the document contradicting itself about
+  // an agent that has emitted no signal at all. ADR-18 permits the reuse, and
+  // close-spawn recovery produces exactly this journal.
+  const events = [
+    ev({ ev: 'spawn', ts: '2026-07-26T09:00:00.000Z', data: { agent: 'impl-1', role: 'implementer', ticket: 'T-1' } }),
+    blocked('impl-1', { ticket: 'T-1' }),
+    ev({ ev: 'report', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-1', verdict: 'done', ticket: 'T-1' } }),
+    ev({ ev: 'spawn', ts: '2026-07-26T09:03:00.000Z', data: { agent: 'impl-1', role: 'implementer', ticket: 'T-2' } }),
+  ];
+  const state = fold({ events });
+  assert.equal(state.blockages.size, 0);
+  assert.equal(state.progressByAgent.has('impl-1'), false, 'the closed incarnation kept its signal');
+
+  const text = renderProjections({ events }).files[STATE_FILE];
+  const running = text.split('\n').find((l) => l.startsWith('| impl-1') && l.includes('running'));
+  assert.match(running, /&mdash; \|$/, 'the fresh spawn rendered a signal it never emitted');
+  assert.ok(!/blocked at/.test(text));
+  assert.ok(text.split('## Open blockages\n')[1].startsWith('\n_none_'));
+});
+
+test('a ticket.status override wins the status line, a merge clears it, and it NEVER moves the percent', () => {
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-1' } }),
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:01.000Z', data: { id: 'T-2' } }),
+    ev({ ev: 'ticket.status', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-1', column: 'parked', reason: 'pricing open' } }),
+  ];
+  const parked = fold({ events: base });
+  const t1 = parked.ticketList.find((t) => t.id === 'T-1');
+  assert.match(ticketStatus(t1), /^parked \(set by ticket\.status\)$/);
+  assert.equal(parked.percent, 0, 'an override is a lane, not progress');
+
+  const merged = fold({ events: [...base, ev({ ev: 'merge', ts: '2026-07-26T09:02:00.000Z', data: { ticket: 'T-1', sha: 'abc' } })] });
+  const t1m = merged.ticketList.find((t) => t.id === 'T-1');
+  assert.match(ticketStatus(t1m), /^merged /, 'merge clears the override');
+  assert.equal(merged.percent, 50);
+});
+
+test('a ticket.status for an unknown ticket is refused out loud and moves NOTHING', () => {
+  // MUTANT: mint the ticket with `ticketOf()`. One mistyped id then enlarges
+  // the denominator — 100% becomes 50% — and the operator's primary signal
+  // moved because of a lane override, which is the one thing an override is
+  // documented never to do.
+  const base = [
+    ev({ ev: 'ticket.created', ts: '2026-07-26T09:00:00.000Z', data: { id: 'T-10' } }),
+    ev({ ev: 'merge', ts: '2026-07-26T09:01:00.000Z', data: { ticket: 'T-10', sha: 'abc' } }),
+  ];
+  const before = fold({ events: base });
+  assert.equal(before.percent, 100);
+
+  const typo = fold({
+    events: [...base, ev({ ev: 'ticket.status', ts: '2026-07-26T09:02:00.000Z', data: { ticket: 'T-1O', column: 'parked' } })],
+  });
+  assert.equal(typo.percent, 100, 'a lane override moved the percent');
+  assert.deepEqual(typo.ticketList.map((t) => t.id), ['T-10'], 'a lane override invented a ticket');
+  assert.equal(typo.merged, 1);
+  // refused, never silently (ADR-19 correction 1)
+  assert.ok(
+    warnings(typo).some((w) => /ticket\.status for unknown ticket "T-1O"/.test(w)),
+    `no warning named the ignored override: ${warnings(typo)}`,
+  );
+  // the events folded, and the type census still counts them
+  assert.equal(typo.byType.get('ticket.status'), 1);
+});
+
+test('the Agents table shows the last signal only on running rows', () => {
+  const events = [
+    ev({ ev: 'spawn', ts: '2026-07-26T09:00:00.000Z', data: { agent: 'impl-1', role: 'implementer' } }),
+    ev({ ev: 'progress', ts: '2026-07-26T09:01:00.000Z', data: { agent: 'impl-1', state: 'working' } }),
+    ev({ ev: 'spawn', ts: '2026-07-26T09:02:00.000Z', data: { agent: 'impl-2', role: 'implementer' } }),
+    ev({ ev: 'progress', ts: '2026-07-26T09:03:00.000Z', data: { agent: 'impl-2', state: 'working' } }),
+    ev({ ev: 'report', ts: '2026-07-26T09:04:00.000Z', data: { agent: 'impl-2', verdict: 'done' } }),
+  ];
+  const text = renderProjections({ events }).files[STATE_FILE];
+  const rows = text.split('\n').filter((l) => l.startsWith('| impl-'));
+  const running = rows.find((l) => l.startsWith('| impl-1'));
+  const done = rows.find((l) => l.startsWith('| impl-2'));
+  assert.match(running, /working at 2026-07-26T09:01:00\.000Z/);
+  assert.ok(!/working at/.test(done), 'a signal that outlived the report is stale and must not render');
+});
+
 test('every event type of the closed set is folded into a section (no silent loss)', () => {
   const sample = {
     'init.created': {},
     'plan.accepted': {},
     'ticket.created': { id: 'T-1' },
+    'ticket.status': { ticket: 'T-1', column: 'parked' },
     spawn: { agent: 'a', role: 'implementer' },
     report: { agent: 'a', verdict: 'done' },
+    progress: { agent: 'a', state: 'blocked', ticket: 'T-1', detail: 'waiting on a lease' },
     gate: { kind: 'tests', result: 'pass' },
     review: { ticket: 'T-1', verdict: 'APPROVE', by: 'r' },
     merge: { ticket: 'T-1', sha: 'abc' },
     decision: { id: 'D-1', text: 't' },
+    finding: { area: 'src/**', claim: 'c', proof: 'p' },
     'lease.acquired': { resource: 'r', holder: 'h' },
     'lease.released': { resource: 'r', holder: 'h' },
     checkpoint: { phase: 'F1', next_steps: ['s'] },

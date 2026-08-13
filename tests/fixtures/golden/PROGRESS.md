@@ -9,7 +9,7 @@ Initiative: **demo** · see `STATE.md` for the full state.
 
 - [x] `T-1` — merged (88ea8cb) — journal module
 - [ ] `T-2` — in progress — schemas &#124; with a pipe and &#96;backticks&#96;
-- [ ] `T-10` — open — projections
+- [ ] `T-10` — parked (set by ticket.status) — projections
 
 ## Open gates
 

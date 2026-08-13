@@ -15,6 +15,21 @@ commits and anything written to disk are in English.**
      lease file as the handoff describes. Another agent's unexpired lease
      means you do NOT start — you report back. Release it when you finish,
      including when you finish by failing.
+   - **Signal at four points, no more** — `progress` events appended to the
+     MAIN checkout's journal (the handoff carries its absolute path):
+     `started` right after the lease (it is also the proof the lease protocol
+     was honoured) · `blocked` at the FIRST blockage, BEFORE attempting any
+     workaround · `unblocked` when it clears · `working` before the final
+     full validation run, the longest silent stretch you have. Shape:
+     `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs append <abs-journal>
+     progress <init> --actor <you> --data
+     '{"agent":"<you>","state":"blocked","ticket":"T-n","detail":"..."}'`.
+     Four emissions per story; this is a closed list, not a diary.
+   - **Grep before you build.** Search for an existing implementation of the
+     thing you are about to write; if it exists, report it as a corrected
+     premise instead of duplicating it. Durable discoveries worth another
+     agent's time go into the journal as `finding` events (`area` + `claim`
+     are required, plus its `proof`) — not only into prose.
    - **Verify the handoff's premises in the code.** A stale path, a wrong
      assignment, a function that no longer exists — correct it and report the
      correction EXPLICITLY instead of executing blindly. Premises about DATA
@@ -54,9 +69,11 @@ commits and anything written to disk are in English.**
      and showing it still fails — not by asserting it. Take that baseline
      after a `git fetch` run immediately beforehand; a stale remote once
      turned a correct proof into a false accusation.
-7. **Final report:** what was done · test and validation output · what the
-   optimization pass changed · branch or PR · premises you corrected · a
-   verdict on every knowledge-brief entry id in your handoff (helped, wrong,
-   or unused — the retrospective folds these into the store's counters) ·
-   open doubts. The open doubts are worth more than the summary; do not tidy
-   them away.
+7. **Final report:** what was done · **what you did NOT do** (scope cut,
+   tests skipped, the input class you never exercised — name the worst case
+   for each, this section is a merge gate) · test and validation output ·
+   what the optimization pass changed · branch or PR · premises you
+   corrected · a verdict on every knowledge-brief entry id in your handoff
+   (helped, wrong, or unused — the retrospective folds these into the
+   store's counters) · open doubts. The open doubts are worth more than the
+   summary; do not tidy them away.

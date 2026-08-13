@@ -57,14 +57,43 @@ test('progress and ticket.status enums reject out-of-set values, naming the whol
   assert.ok(Object.isFrozen(DATA_ENUMS) && Object.isFrozen(DATA_ENUMS.progress.state));
 });
 
-test('an oversized capped key is REJECTED at append and only WARNED about in history', () => {
+/**
+ * The capped set is closed, and the table below spells it out INSTEAD OF
+ * iterating `CAPPED_DATA_KEYS`: a loop over the map under test silently skips
+ * whatever was deleted from it. Measured — with `detail` and `proof` dropped
+ * from `CAPPED_DATA_KEYS` the whole suite stayed green while both doc surfaces
+ * kept claiming all three keys are capped.
+ *
+ * Each key is carried by an event that legitimately holds it, so the rejection
+ * is the cap and not some other missing requirement.
+ */
+const OVERSIZED_EVENT_BY_KEY = [
+  ['detail', (big) => ({ ev: 'progress', data: { agent: 'impl-1', state: 'blocked', detail: big } })],
+  ['claim', (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: big } })],
+  ['proof', (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: 'c', proof: big } })],
+];
+
+test('EVERY capped key is REJECTED at append and only WARNED about in history', () => {
+  assert.deepEqual(
+    Object.keys(CAPPED_DATA_KEYS).sort(),
+    OVERSIZED_EVENT_BY_KEY.map(([key]) => key).sort(),
+    'the capped key set changed — docs/journal.md and its site mirror name these three',
+  );
+  for (const [key, build] of OVERSIZED_EVENT_BY_KEY) {
+    const cap = CAPPED_DATA_KEYS[key];
+    assert.equal(cap, 2000, `both doc surfaces claim a 2 000-codepoint cap for data.${key}`);
+    const file = tmp();
+    const big = 'x'.repeat(cap + 1);
+    assert.throws(
+      () => append(file, ev({ ...build(big), ts: undefined })),
+      new RegExp(`data\\.${key} is ${cap + 1} codepoints \\(cap ${cap}\\)`),
+      `an oversized data.${key} must be rejected at append, naming the key and the cap`,
+    );
+    assert.deepEqual(readJournal(file).events, [], `a rejected append must write nothing (data.${key})`);
+  }
+  // the same event hand-written into the file: validate stays ok, warns loudly
   const file = tmp();
   const big = 'x'.repeat(CAPPED_DATA_KEYS.claim + 1);
-  assert.throws(
-    () => append(file, ev({ ev: 'finding', ts: undefined, data: { id: 'F-1', area: 'a', claim: big } })),
-    /codepoints \(cap 2000\)/,
-  );
-  // the same event hand-written into the file: validate stays ok, warns loudly
   writeFileSync(file, JSON.stringify(ev({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: big } })) + '\n');
   const result = validateJournal(file);
   assert.equal(result.ok, true, 'no retroactive errors');

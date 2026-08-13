@@ -44,7 +44,7 @@ contents are moved, one initiative directory at a time, under `state/`.
 | `review` | `ticket`, `verdict`, `by` | independent review verdict (closes the reviewer’s open spawn — role `reviewer` only) |
 | `merge` | `ticket`, `sha` | merged (+ `mode`) |
 | `decision` | `id`, `text` | ledger entry (`append` issues the id when omitted or empty) |
-| `finding` | `area`, `claim` | a claim plus its proof, queryable by other agents (+ `proof`, `ticket`, `confidence`; `append` issues `F-<n>` ids) |
+| `finding` | `area`, `claim` | a claim about one `area`, with its proof, queryable by other agents (+ `proof`, `ticket`, `confidence`; `append` issues `F-<n>` ids) |
 | `lease.acquired` | `resource`, `holder` | worktree / heavy-slot lease taken |
 | `lease.released` | `resource`, `holder` | lease returned |
 | `checkpoint` | `phase`, `next_steps` | resume surface (re-injected after compaction) |

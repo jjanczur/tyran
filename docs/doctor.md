@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 90 unit tests
+`scripts/doctor.mjs --state` · 92 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -56,7 +56,7 @@ possible to change one and keep the suite green.
 | `check-failed` | error | one check threw on this journal — the other checks still ran |
 | `spawn-open` | info | the journal still believes this agent is working |
 | `spawn-stale` | warning | ...and the initiative moved on without it (see the clock below) |
-| `spawn-blocked` | warning | the agent's own last `progress` signal says `blocked` and it has stood past the threshold — the conductor should unblock or close it |
+| `spawn-blocked` | warning | the agent's own last `progress` signal says `blocked` and it has stood past the threshold (see the clock below) — the conductor should unblock or close it |
 | `spawn-duplicate` | warning | two open spawns for one agent name — pairing is ambiguous (ADR-18) |
 | `spawn-orphan-report` | warning | a `report` that closes nothing |
 | `agent-name-unusable` | warning | an agent name that cannot act as a correlator; those events are excluded from pairing |
@@ -163,6 +163,12 @@ node scripts/doctor.mjs --state --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
 `--stale-hours` moves the threshold (default 4).
+
+`spawn-blocked` reads the same journal clock against a threshold of its own: a
+self-reported `blocked` signal that has stood for **1 hour** of journal time.
+That hour is fixed — `--stale-hours` moves staleness only. A signal counts
+only for the spawn it was emitted during, so a re-spawned agent name does not
+inherit the blockage its previous incarnation's report already cleared.
 
 ## Dead policy rules
 

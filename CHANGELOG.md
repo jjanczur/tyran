@@ -7,8 +7,9 @@
 The closed event set grows 14 → 17 — the reviewed core change the journal
 page names. `progress` is the agent's own mid-run signal (`started` ·
 `working` · `blocked` · `unblocked`, a closed list emitted at four named
-points, never part of spawn↔report pairing); `finding` is a claim plus its
-proof, queryable by other agents (`F-<n>` ids issued by `append`);
+points, never part of spawn↔report pairing); `finding` is a claim about a named
+area plus the proof for it, queryable by other agents (`F-<n>` ids issued
+by `append`);
 `ticket.status` is the conductor's lane override for exactly the three
 states no lifecycle event can derive (`blocked` · `waiting-operator` ·
 `parked`), cleared automatically by the next report, review or merge and

@@ -513,6 +513,47 @@ test('an agent blocked past the threshold is a warning; a moving agent is not', 
   assert.match(byCode(moving, 'spawn-open')[0].message, /last signal/);
 });
 
+test('a blocked agent that is ALSO stale reports blocked, not stale', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'spawn', { agent: 'impl-1', role: 'implementer' }),
+    ev('2026-07-26T09:02:00.000Z', 'progress', { agent: 'impl-1', state: 'blocked', detail: 'registry 503' }),
+  ]);
+  regenerate(journal);
+  // The operationally important case — blocked all night — trips BOTH clocks:
+  // 15 h open (threshold 4) and 15 h blocked (threshold 1). Only one row may
+  // survive, and it must be the one carrying the reason the agent is stuck.
+  const overnight = runStateChecks({ dir, now: '2026-07-27T00:00:00.000Z' });
+  assert.equal(byCode(overnight, 'spawn-blocked').length, 1);
+  assert.match(byCode(overnight, 'spawn-blocked')[0].message, /registry 503/);
+  assert.deepEqual(byCode(overnight, 'spawn-stale'), [], 'blocked outranks stale, not only the plain open row');
+});
+
+test('a signal from a closed incarnation does not follow the name onto the next spawn', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  // ADR-18 permits a name to be re-spawned once its previous spawn is closed,
+  // and `close-spawn` recovery writes exactly this report. The report cleared
+  // the blockage — the fold says so — so the fresh spawn is a plain open row.
+  writeJournal(journal, [
+    ev('2026-07-26T00:10:00.000Z', 'spawn', { agent: 'impl-1', role: 'implementer', ticket: 'T-1' }),
+    ev('2026-07-26T00:20:00.000Z', 'progress', { agent: 'impl-1', state: 'blocked', detail: 'waiting on lease' }),
+    ev('2026-07-26T00:30:00.000Z', 'report', { agent: 'impl-1', verdict: 'done' }),
+    ev('2026-07-26T02:00:00.000Z', 'spawn', { agent: 'impl-1', role: 'implementer', ticket: 'T-2' }),
+    ev('2026-07-26T02:05:00.000Z', 'checkpoint', { phase: 'build', next_steps: [] }),
+  ]);
+  regenerate(journal);
+  const result = runStateChecks({ dir });
+  assert.deepEqual(byCode(result, 'spawn-blocked'), [], 'the blockage died with the incarnation that reported it');
+  const open = byCode(result, 'spawn-open');
+  assert.equal(open.length, 1);
+  assert.match(open[0].message, /T-2/);
+  assert.doesNotMatch(open[0].message, /last signal/, 'this spawn has signalled nothing yet');
+});
+
 // ---------------------------------------------------------- overnight mode
 
 const PAUSE_MARKER = (over = {}) => ({

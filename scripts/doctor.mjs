@@ -697,7 +697,15 @@ function spawnFindings(journalPath, at, dirName, events, reference, staleHours) 
     for (const spawn of open.get(agent)) {
       const age = reference === null ? null : hoursBetween(spawn.ts, reference);
       const where = `${show(spawn.data.ticket ?? 'no ticket')}, role ${show(spawn.data.role)}`;
-      const signal = signals.get(agent) ?? null;
+      // `lastSignals` is keyed by agent NAME, and ADR-18 permits a name to be
+      // re-spawned once its previous spawn is closed — so the latest signal
+      // under this name may belong to an incarnation that has already
+      // reported, whose blockage the report cleared. Only a signal emitted
+      // during THIS spawn describes the agent running now; a pair that cannot
+      // be ordered (a hand-edited timestamp) is not evidence either.
+      const latest = signals.get(agent) ?? null;
+      const sinceSpawn = latest === null ? null : hoursBetween(spawn.ts, latest.ts);
+      const signal = sinceSpawn !== null && sinceSpawn >= 0 ? latest : null;
       const blockedHours =
         signal?.state === 'blocked' && reference !== null ? hoursBetween(signal.ts, reference) : null;
       if (blockedHours !== null && blockedHours >= DEFAULT_BLOCKED_HOURS) {

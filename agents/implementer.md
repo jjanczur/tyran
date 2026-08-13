@@ -21,14 +21,15 @@ commits and anything written to disk are in English.**
      was honoured) · `blocked` at the FIRST blockage, BEFORE attempting any
      workaround · `unblocked` when it clears · `working` before the final
      full validation run, the longest silent stretch you have. Shape:
-     `node <journal-script> append <abs-journal> progress <init> --actor <you>
-     --data '{"agent":"<you>","state":"blocked","ticket":"T-n","detail":"..."}'`.
+     `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs append <abs-journal>
+     progress <init> --actor <you> --data
+     '{"agent":"<you>","state":"blocked","ticket":"T-n","detail":"..."}'`.
      Four emissions per story; this is a closed list, not a diary.
    - **Grep before you build.** Search for an existing implementation of the
      thing you are about to write; if it exists, report it as a corrected
      premise instead of duplicating it. Durable discoveries worth another
-     agent's time go into the journal as `finding` events — a claim plus its
-     proof — not only into prose.
+     agent's time go into the journal as `finding` events (`area` + `claim`
+     are required, plus its `proof`) — not only into prose.
    - **Verify the handoff's premises in the code.** A stale path, a wrong
      assignment, a function that no longer exists — correct it and report the
      correction EXPLICITLY instead of executing blindly. Premises about DATA

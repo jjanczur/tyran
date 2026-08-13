@@ -166,16 +166,19 @@ open one.
      chasing you instead of reading reports.
    - **Operator messages mid-run queue; none is dropped silently.** Triage
      each at the next natural pause: which initiative (or a new one), what
-     size, then a `ticket.created` with `title`, `deps` and `files_predicted`
-     (numbered from the plan), or a `decision` when it changes course rather
-     than adds work. Confirm in one line — "queued as T-9". A thought that
-     never reached the journal does not exist. `ticket.status` is your lane
-     override for the three states no lifecycle event can derive (`blocked`,
-     `waiting-operator`, `parked`); the next report, review or merge clears
-     it.
-   - **Scout `DURABLE:` findings, you journal** as `finding` events (a claim
-     plus its proof) — scouts write nothing themselves. Implementers and
-     reviewers append their own.
+     size, then a `ticket.created` carrying `id` — the one key `append` does
+     NOT issue for you, so read it from the journal and never from memory:
+     `journal.mjs next-id <abs-journal> T` returns the next one, continuing
+     the plan's numbering — plus `title`, `deps` and `files_predicted`; or a
+     `decision` when it changes course rather than adds work. Confirm in one
+     line — "queued as T-9". A thought that never reached the journal does
+     not exist. `ticket.status` is your lane override for the three states no
+     lifecycle event can derive (`blocked`, `waiting-operator`, `parked`);
+     the next report, review or merge clears it.
+   - **Scout `DURABLE:` findings, you journal** as `finding` events — the
+     required keys are `area` + `claim` (the area is the path or subsystem the
+     scout's proof points at), plus that `proof` — scouts write nothing
+     themselves. Implementers and reviewers append their own.
 2. **Fresh context per task.** Handoffs are SELF-CONTAINED; the agent
    disappears afterwards. Never ask the operator to compact. **Every handoff
    carries eight things:** (1) the role and one story, one goal; (2) paths to

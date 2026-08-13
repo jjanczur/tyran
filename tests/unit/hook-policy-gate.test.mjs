@@ -179,7 +179,11 @@ const MATRIX = [
   // The lease rule exists because iron rule 7's take-your-own-lease protocol
   // was unsatisfiable without it — measured on two initiatives. This row is
   // what stops a future template edit from silently reintroducing that.
-  { cls: 'AUTO (leases)', path: '.tyran/initiatives/demo/locks/worktree-a.lease', supervised: 'pass', unsupervised: 'pass' },
+  // Since 0.1.9 the canonical lease location is `.tyran/state/<slug>/locks/`,
+  // covered by the `.tyran/state/**` rule; the `.tyran/initiatives/` row pins
+  // the dated legacy alias that installs adopted at <= 0.1.8 still rely on.
+  { cls: 'AUTO (leases)', path: '.tyran/state/demo/locks/worktree-a.lease', supervised: 'pass', unsupervised: 'pass' },
+  { cls: 'AUTO (leases, legacy)', path: '.tyran/initiatives/demo/locks/worktree-a.lease', supervised: 'pass', unsupervised: 'pass' },
   { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
   { cls: 'KERNEL', path: 'hooks/scripts/secrets-gate.mjs', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'KERNEL', path: '.tyran/policies/autonomy.yaml', supervised: 'deny', unsupervised: 'deny' },

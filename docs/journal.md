@@ -6,7 +6,13 @@ This page is the schema contract; extending the event set is a reviewed core
 change.
 
 The journal is the append-only source of truth for an initiative:
-`.tyran/state/<initiative>/journal.jsonl`, one JSON event per line.
+`.tyran/state/<initiative>/journal.jsonl`, one JSON event per line. The same
+directory holds the initiative's authored files (`PLAN.md`, `NOTES.md`,
+`RETRO.md`) and its runtime leases (`locks/`, excluded from history by
+`.tyran/.gitignore`). Installs adopted at ≤ 0.1.8 may still have a
+`.tyran/initiatives/` directory; nothing mechanical reads it, and
+`doctor --state` reports it (`state-legacy-initiatives-dir`) until its
+contents are moved, one initiative directory at a time, under `state/`.
 
 ## Event envelope
 

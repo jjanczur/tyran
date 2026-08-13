@@ -508,6 +508,36 @@ export function ensureAutonomyPolicy(repoRoot, { templatePath = policyTemplatePa
   return { path, status: 'created' };
 }
 
+export const STATE_GITIGNORE_PATH = '.tyran/.gitignore';
+const STATE_GITIGNORE_BODY =
+  '# Runtime files, never history. Leases record who holds a worktree or a\n' +
+  '# heavy slot RIGHT NOW; committing one makes every parallel merge conflict\n' +
+  '# on state that was stale the moment it was written.\n' +
+  'state/*/locks/\n';
+
+/**
+ * Create-only write of `.tyran/.gitignore` excluding lease files. A nested
+ * gitignore rather than a line in the host's, because `.tyran/` is committed
+ * and travels into every worktree — the exclusion has to travel with it.
+ * Returns `{ path, status: 'created' | 'present' }`; never overwrites, so an
+ * operator's own additions survive re-running setup.
+ */
+export function ensureStateGitignore(repoRoot) {
+  const root = resolve(repoRoot);
+  const path = join(root, ...STATE_GITIGNORE_PATH.split('/'));
+  if (existsSync(path)) return { path, status: 'present' };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, STATE_GITIGNORE_BODY);
+  } catch (error) {
+    throw new BootstrapError(
+      `could not write ${escapeInvisible(path)}: ${error.message}`,
+      'check the directory permissions; re-running this command is safe',
+    );
+  }
+  return { path, status: 'created' };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const flag = (name, fallback) => {
@@ -531,6 +561,10 @@ function main() {
         ? `scan-repo: created ${escapeInvisible(seeded.path)} from the shipped template`
         : `scan-repo: ${escapeInvisible(seeded.path)} already exists — left untouched`,
     );
+    const ignored = seedStateGitignore(dir);
+    if (ignored.status === 'created') {
+      console.error(`scan-repo: created ${escapeInvisible(ignored.path)} (lease files stay out of history)`);
+    }
     return;
   }
 
@@ -546,6 +580,10 @@ function main() {
       const seeded = seedPolicy(dir);
       if (seeded.status === 'created') {
         console.error(`scan-repo: created ${escapeInvisible(seeded.path)} from the shipped template`);
+      }
+      const ignored = seedStateGitignore(dir);
+      if (ignored.status === 'created') {
+        console.error(`scan-repo: created ${escapeInvisible(ignored.path)} (lease files stay out of history)`);
       }
     }
     try {
@@ -564,6 +602,23 @@ function main() {
 function seedPolicy(dir) {
   try {
     return ensureAutonomyPolicy(dir);
+  } catch (error) {
+    if (!(error instanceof BootstrapError)) throw error;
+    console.error(`scan-repo: ${error.message}`);
+    console.error(`scan-repo: ${error.remedy}`);
+    process.exit(2);
+  }
+}
+
+/**
+ * `ensureStateGitignore`, with a BootstrapError turned into exit 2. Both call
+ * sites run this AFTER `seedPolicy` on purpose: it creates `.tyran/` when
+ * absent, and `.tyran/` without a policy under it is the state that refuses
+ * every subsequent write.
+ */
+function seedStateGitignore(dir) {
+  try {
+    return ensureStateGitignore(dir);
   } catch (error) {
     if (!(error instanceof BootstrapError)) throw error;
     console.error(`scan-repo: ${error.message}`);

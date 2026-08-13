@@ -12,7 +12,7 @@ to disk is in English.**
 
 ## Inputs, in this order
 
-1. `.tyran/initiatives/<slug>/PLAN.md` (the ledger — what went smoothly, what
+1. `.tyran/state/<slug>/PLAN.md` (the ledger — what went smoothly, what
    came back) and `NOTES.md` (decisions, deviations, the agents' signals about
    the process itself).
 2. The agents' reports from this initiative: corrected premises, escalations,
@@ -64,6 +64,12 @@ next retro relitigating the same idea.
 - **Scripts and harnesses** worth reusing — gates, comparators, probes,
   report generators. A one-off harness from an initiative either becomes a
   general tool or gets deleted; do not leave dead files behind.
+- **Knowledge upkeep:** every handoff carried a knowledge brief with entry
+  ids and every report owes a verdict on them — fold those verdicts into the
+  entries' counters (`used` for handed off, `helpful` for helped,
+  `outdated_reports` for wrong), and retire or split entries the schema
+  warns are oversized. An entry whose counters say it stopped earning its
+  keep is a deletion candidate, which satisfies the deletion preference.
 - **Documentation that pays forward:** the repo's detected configuration,
   protocols, runbooks. **Every initiative should leave the repo better
   described than it found it** — that is the part that makes each next
@@ -78,7 +84,7 @@ behaviour visible to users of the product.
 ## Product
 
 1. The implemented changes — surgical, each with its reason.
-2. `.tyran/initiatives/<slug>/RETRO.md`: what worked (keep it) · what failed
+2. `.tyran/state/<slug>/RETRO.md`: what worked (keep it) · what failed
    (with the cost) · **implemented** · **rejected and why** · candidates for
    later.
 3. A five-line report for the conductor: candidates, implemented, rejected,

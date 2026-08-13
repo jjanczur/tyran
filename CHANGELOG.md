@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.9 — 2026-08-13
+
+### One layout for an initiative's files
+
+The core disagreed with itself about where an initiative's files live:
+`agents/retro.md` read `PLAN.md`/`NOTES.md` and wrote `RETRO.md` under
+`.tyran/initiatives/<slug>/`, and iron rule 7 put leases there too — while
+every mechanical consumer (journal, projections, doctor, the hooks) reads
+`.tyran/state/<slug>/`, which is also where real installs put those files.
+Everything now names `state/`; leases move to `.tyran/state/<slug>/locks/`,
+already covered by the `.tyran/state/**` AUTO rule. The template keeps the
+`.tyran/initiatives/*/locks/**` rule as a dated legacy alias for installs
+adopted at ≤ 0.1.8, and `doctor --state` reports a leftover legacy directory
+(`state-legacy-initiatives-dir`).
+
+Because `state/` is committed and leases must not be, `scan-repo` (and so
+`/tyran:setup`) now seeds a create-only `.tyran/.gitignore` excluding
+`state/*/locks/`, and doctor warns when lease files are tracked anyway
+(`lease-file-tracked`).
+
+### The knowledge store gets its missing reader
+
+`.tyran/knowledge/` had a writer (the retrospective), a schema, and no
+reader — the loop was write-only, and the measured cost was a 137 KB store
+nothing consumed. `scripts/knowledge.mjs brief` (also `npx @jjanczur/tyran
+knowledge brief`) selects entries whose `applies_to` globs intersect a
+story's predicted files, ranks by confidence, cuts to a character budget
+with an explicit omission line, and prints a block the conductor pastes
+verbatim into a handoff — item (8) of the handoff contract. Reports owe a
+verdict on the entry ids they received; the retrospective folds the verdicts
+into the `used`/`helpful`/`outdated_reports` counters at close. Oversized
+entries (over 4 000 characters) now draw a `knowledge-entry-oversized`
+doctor warning, because one document-sized entry crowds out every other
+entry a budgeted brief would have carried.
+
 ## 0.1.8 — 2026-08-08
 
 ### The secrets gate scanned everything except what the command published

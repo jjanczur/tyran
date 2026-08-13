@@ -36,7 +36,7 @@
  * dead writes no state to be inconsistent with.
  */
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHooks, DEFAULT_PLUGIN_ROOT } from './hooks-check.mjs';
 import { readJournal, validateJournal, pairSpawns, tail } from './journal.mjs';
@@ -48,7 +48,7 @@ import {
   PROGRESS_FILE,
   STATE_FILE,
 } from './project.mjs';
-import { classifyPath, normalizePath, validateFile, MANDATORY_KERNEL_PATHS } from './schema.mjs';
+import { classifyPath, normalizePath, validateFile, knowledgeWarnings, MANDATORY_KERNEL_PATHS } from './schema.mjs';
 import { gitRunner } from './scan-repo.mjs';
 
 /** Severity order is also the report order. `info` never fails the check. */
@@ -176,6 +176,7 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'knowledge-invalid': 'error',
     'knowledge-unreadable': 'error',
     'knowledge-not-a-directory': 'warning',
+    'knowledge-entry-oversized': 'warning',
     // Not `info`, which is what it was: with `.tyran/` on disk and no policy
     // under it the gate refuses every write in the repository. A severity that
     // does not fail the check reports a locked-out repo as a note.
@@ -193,6 +194,8 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'state-not-a-directory': 'error',
     'state-unreadable': 'error',
     'state-stray-file': 'warning',
+    'state-legacy-initiatives-dir': 'warning',
+    'lease-file-tracked': 'warning',
   }),
 );
 
@@ -1009,6 +1012,22 @@ export function untrackedTyranDir(repoRoot, run) {
   return run(['ls-files', '--', '.tyran']).trim() === '';
 }
 
+/**
+ * Lease files committed to git. A lease records who holds a worktree or a
+ * heavy slot RIGHT NOW; committing one makes every parallel merge conflict on
+ * state that was stale the moment it was written, and a checkout resurrects
+ * it as a phantom holder. Filtered in JS rather than via a wildcard pathspec
+ * — git's pathspec globbing is exactly the kind of subtlety this tool exists
+ * to not depend on. Returns [] when git cannot answer: "not a git repository"
+ * is not evidence that a lease is tracked.
+ */
+export function trackedLeaseFiles(run, tyranDirName = '.tyran') {
+  const listing = run(['ls-files', '--', tyranDirName]);
+  if (listing === '') return [];
+  const lease = /\/(?:state|initiatives)\/[^/]+\/locks\//;
+  return listing.split('\n').filter((line) => line !== '' && lease.test(line));
+}
+
 export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAULT_STALE_HOURS, run = null } = {}) {
   const root = resolve(dir);
   if (!existsSync(root)) {
@@ -1038,7 +1057,8 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     checked.push('config.yaml: absent');
   }
 
-  const untracked = untrackedTyranDir(repoRoot, run ?? gitRunner(repoRoot));
+  const gitRun = run ?? gitRunner(repoRoot);
+  const untracked = untrackedTyranDir(repoRoot, gitRun);
   if (untracked === true) {
     findings.push(
       finding(
@@ -1055,7 +1075,22 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
 
   const knowledge = yamlFilesIn(join(dir, 'knowledge'), 'knowledge');
   findings.push(...knowledge.findings);
-  for (const file of knowledge.files) findings.push(...checkSchemaFile('knowledge', file).findings);
+  for (const file of knowledge.files) {
+    const schemaResult = checkSchemaFile('knowledge', file);
+    findings.push(...schemaResult.findings);
+    // Advisory, on files that already validate: an oversized entry is legal,
+    // it just crowds every budgeted brief it appears in.
+    for (const warning of knowledgeWarnings(schemaResult.doc)) {
+      findings.push(
+        finding(
+          'knowledge-entry-oversized',
+          show(file),
+          warning,
+          `node scripts/knowledge.mjs brief . --dir ${sq(join(dir, 'knowledge'))}   # shows what a budgeted brief keeps`,
+        ),
+      );
+    }
+  }
   checked.push(`knowledge/: ${knowledge.files.length} file(s)`);
 
   const policies = yamlFilesIn(join(dir, 'policies'), 'policies');
@@ -1109,6 +1144,36 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
   checked.push(
     initiatives.length === 0 ? 'state/: no initiatives' : `state/: ${initiatives.join(', ')}`,
   );
+
+  const legacyDir = join(dir, 'initiatives');
+  if (isDirectory(legacyDir)) {
+    findings.push(
+      finding(
+        'state-legacy-initiatives-dir',
+        show(legacyDir),
+        'legacy layout — initiative files (PLAN.md, NOTES.md, RETRO.md, locks/) live under ' +
+          'state/<initiative>/ since 0.1.9. Mechanical consumers read only state/, so anything ' +
+          'kept here is invisible to the projections, the retrospective and the session summary',
+        `ls -la ${sq(legacyDir)}   # relocate the contents by hand, one initiative directory at a time, into ${sq(join(dir, 'state'))} — see docs/journal.md`,
+      ),
+    );
+  }
+  checked.push(`initiatives/ (legacy): ${isDirectory(legacyDir) ? 'PRESENT' : 'absent'}`);
+
+  const trackedLeases = trackedLeaseFiles(gitRun, basename(root));
+  if (trackedLeases.length > 0) {
+    findings.push(
+      finding(
+        'lease-file-tracked',
+        show(trackedLeases[0]) + (trackedLeases.length > 1 ? ` (+${trackedLeases.length - 1} more)` : ''),
+        `${trackedLeases.length} lease file(s) committed to git — a lease records who holds a resource ` +
+          'RIGHT NOW, so a committed one conflicts on every parallel merge and resurrects as a phantom ' +
+          'holder on every checkout',
+        `git ls-files -- ${sq(basename(root))}   # list them; keep 'state/*/locks/' in .tyran/.gitignore and un-track the files by hand — see docs/configuration.md`,
+      ),
+    );
+  }
+  checked.push(`lease files tracked by git: ${trackedLeases.length}`);
 
   return summarize(dir, findings, checked);
 }

@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+/**
+ * knowledge — the READER for `.tyran/knowledge/`.
+ *
+ * The knowledge store had a writer (the retrospective) and a schema, and no
+ * reader: nothing put a learned fact in front of the agent about to need it,
+ * so the loop was write-only and the file grew without pressure. Measured on
+ * a real install: 137 KB, 31 entries, and the largest single entry 13 KB —
+ * nothing that size can be pasted into a handoff, so in practice nothing was.
+ *
+ * `brief` closes the loop: select the entries whose `applies_to` globs
+ * intersect the paths a story is about to touch (`ticket.created`'s
+ * `files_predicted` is the intended source), rank by confidence, cut to a
+ * character budget, and print a Markdown block ready to paste VERBATIM into a
+ * handoff. Entry ids are part of the output on purpose — the agent's report
+ * owes a verdict on them (helped / wrong / unused), which is what the
+ * retrospective folds into the `used`/`helpful`/`outdated_reports` counters.
+ *
+ * The budget is the design, not a safety valve: it is the pressure that keeps
+ * entries scoped. An entry with `applies_to: ['**']` and a page of prose
+ * crowds out eight useful ones, VISIBLY — and the omission line names the
+ * cost. Omission is never silent.
+ *
+ * Selection is symmetric on purpose: `applies_to` holds globs and the inputs
+ * are often globs too (`files_predicted` may say `src/lib/**`), so an entry
+ * matches when either side's glob matches the other side as a literal. One
+ * line of generosity instead of a second glob engine.
+ *
+ * CLI:
+ *   node knowledge.mjs brief [<path>...] [--dir .tyran/knowledge]
+ *        [--kinds fact,convention,gotcha,command,decision]
+ *        [--limit N] [--budget CHARS] [--json]
+ * Exit: 0 briefed (including "no matches") · 1 invalid knowledge file · 2 usage/IO
+ */
+import { existsSync, readdirSync, statSync, realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { validateFile, globMatches, normalizePath, KNOWLEDGE_KINDS } from './schema.mjs';
+import { escapeInvisible, jsonEscapeInvisible } from './invisible.mjs';
+
+export const DEFAULT_DIR = join('.tyran', 'knowledge');
+export const DEFAULT_BUDGET = 4000;
+
+class UsageError extends Error {}
+
+/** Untrusted YAML value on its way into a terminal or a handoff: one line, visible. */
+function clean(value) {
+  return escapeInvisible(String(value)).replace(/\s+/g, ' ').trim();
+}
+
+/** The knowledge files of a directory, sorted for determinism. */
+export function knowledgeFiles(dir) {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
+  return readdirSync(dir)
+    .filter((name) => /\.ya?ml$/i.test(name))
+    .sort()
+    .map((name) => join(dir, name));
+}
+
+/**
+ * Load every entry of every knowledge file, or report the files that fail
+ * validation. Returns `{entries, invalid}` where `invalid` is
+ * `[{file, errors}]` — an invalid file is a LOUD result, never a silent skip:
+ * a brief that quietly dropped a file would read as "nothing to know".
+ */
+export function loadEntries(dir) {
+  const entries = [];
+  const invalid = [];
+  for (const file of knowledgeFiles(dir)) {
+    const result = validateFile('knowledge', file);
+    if (!result.ok) {
+      invalid.push({ file, errors: result.errors });
+      continue;
+    }
+    for (const entry of result.doc.entries) entries.push({ ...entry, file });
+  }
+  return { entries, invalid };
+}
+
+/** Does this entry apply to any of the given repo paths? */
+export function entryMatches(entry, paths) {
+  const globs = Array.isArray(entry.applies_to) ? entry.applies_to.filter((g) => typeof g === 'string') : [];
+  if (globs.length === 0) return true; // no applies_to = repo-global by schema
+  return globs.some((glob) => paths.some((path) => globMatches(glob, path) || globMatches(path, glob)));
+}
+
+/**
+ * Select and rank: kind filter, path intersection, confidence descending with
+ * file order breaking ties. No clock and no randomness — the same store and
+ * the same paths produce the same brief, byte for byte.
+ */
+export function selectEntries(entries, { paths = [], kinds = null, limit = Infinity } = {}) {
+  const ranked = entries
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => kinds === null || kinds.includes(entry.kind))
+    .filter(({ entry }) => (paths.length === 0 ? !Array.isArray(entry.applies_to) || entry.applies_to.length === 0 : entryMatches(entry, paths)))
+    .sort((a, b) => (b.entry.confidence - a.entry.confidence) || (a.index - b.index))
+    .map(({ entry }) => entry);
+  return { selected: ranked.slice(0, Math.max(0, limit)), matched: ranked.length };
+}
+
+function entryLine(entry) {
+  const applies = Array.isArray(entry.applies_to) && entry.applies_to.length > 0
+    ? ` _(applies to: ${entry.applies_to.map(clean).join(', ')})_`
+    : '';
+  return `- **[${clean(entry.id)}]** (${clean(entry.kind)}, ${entry.confidence}) ${clean(entry.text)}${applies}`;
+}
+
+/**
+ * The paste-ready Markdown block. Entries are cut at `budget` characters;
+ * anything cut — by budget or by `--limit` — is counted in an explicit
+ * trailing line. `matched` is the pre-limit match count.
+ */
+export function renderBrief(selected, matched, { budget = DEFAULT_BUDGET, dir = DEFAULT_DIR } = {}) {
+  if (matched === 0) return `### Knowledge brief (${clean(dir)}) — no matching entries\n`;
+  const lines = [];
+  let used = 0;
+  let kept = 0;
+  for (const entry of selected) {
+    const line = entryLine(entry);
+    if (used + line.length + 1 > budget && kept > 0) break;
+    lines.push(line);
+    used += line.length + 1;
+    kept += 1;
+  }
+  const header = `### Knowledge brief (${clean(dir)}, ${kept} of ${matched} entr${matched === 1 ? 'y' : 'ies'})`;
+  const omitted = matched - kept;
+  const tail = omitted > 0
+    ? [`_${omitted} matching entr${omitted === 1 ? 'y' : 'ies'} omitted (budget ${budget}) — raise --budget or narrow the paths._`]
+    : [];
+  return [header, ...lines, ...tail].join('\n') + '\n';
+}
+
+// ---------------------------------------------------------------- CLI
+
+const VALUE_FLAGS = ['dir', 'kinds', 'limit', 'budget'];
+const BOOLEAN_FLAGS = ['json'];
+
+function parseArgs(argv) {
+  const flags = { dir: DEFAULT_DIR, kinds: null, limit: Infinity, budget: DEFAULT_BUDGET, json: false };
+  const paths = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg.startsWith('--')) {
+      paths.push(arg);
+      continue;
+    }
+    const name = arg.slice(2);
+    if (BOOLEAN_FLAGS.includes(name)) {
+      flags[name] = true;
+    } else if (VALUE_FLAGS.includes(name)) {
+      const value = argv[i + 1];
+      if (value === undefined) throw new UsageError(`flag --${name} needs a value`);
+      flags[name] = value;
+      i += 1;
+    } else {
+      throw new UsageError(`unknown flag --${name}`);
+    }
+  }
+  if (flags.kinds !== null) {
+    flags.kinds = String(flags.kinds).split(',').map((k) => k.trim()).filter((k) => k !== '');
+    const bad = flags.kinds.filter((k) => !KNOWLEDGE_KINDS.includes(k));
+    if (bad.length > 0) {
+      throw new UsageError(`unknown kind(s) ${bad.join(', ')} — valid: ${KNOWLEDGE_KINDS.join(' | ')}`);
+    }
+  }
+  for (const numeric of ['limit', 'budget']) {
+    if (typeof flags[numeric] === 'string') {
+      const n = Number(flags[numeric]);
+      if (!Number.isFinite(n) || n <= 0) throw new UsageError(`--${numeric} must be a positive number`);
+      flags[numeric] = n;
+    }
+  }
+  return { flags, paths };
+}
+
+function main() {
+  const [command, ...rest] = process.argv.slice(2);
+  const usage = 'usage: knowledge.mjs brief [<path>...] [--dir <knowledge-dir>] [--kinds k,k] [--limit N] [--budget CHARS] [--json]';
+  if (command !== 'brief') {
+    console.error(usage);
+    process.exit(2);
+  }
+  let parsed;
+  try {
+    parsed = parseArgs(rest);
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error;
+    console.error(`knowledge: ${error.message}`);
+    console.error(usage);
+    process.exit(2);
+  }
+  const { flags, paths } = parsed;
+  const dir = resolve(flags.dir);
+  if (!existsSync(dir)) {
+    console.log(`### Knowledge brief — no knowledge directory at ${escapeInvisible(flags.dir)}\n`);
+    process.exit(0);
+  }
+
+  const normalized = paths.map((p) => normalizePath(p) ?? p);
+  const { entries, invalid } = loadEntries(dir);
+  if (invalid.length > 0) {
+    for (const { file, errors } of invalid) {
+      console.error(`knowledge: INVALID ${escapeInvisible(file)}`);
+      for (const e of errors) console.error(`  - ${escapeInvisible(String(e))}`);
+    }
+    console.error('knowledge: refusing to brief from a store that does not validate — a partial brief reads as a complete one');
+    process.exit(1);
+  }
+
+  const { selected, matched } = selectEntries(entries, { paths: normalized, kinds: flags.kinds, limit: flags.limit });
+  if (flags.json) {
+    const payload = selected.map(({ id, kind, confidence, text, applies_to, file }) => ({
+      id, kind, confidence, text, applies_to: applies_to ?? [], file,
+    }));
+    console.log(jsonEscapeInvisible(JSON.stringify(payload, null, 2)));
+    process.exit(0);
+  }
+  process.stdout.write(renderBrief(selected, matched, { budget: flags.budget, dir: flags.dir }));
+  process.exit(0);
+}
+
+function canonicalPath(path) {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+function isMainModule(moduleUrl) {
+  if (!process.argv[1]) return false;
+  return canonicalPath(process.argv[1]) === canonicalPath(fileURLToPath(moduleUrl));
+}
+
+if (isMainModule(import.meta.url)) main();

@@ -58,6 +58,14 @@ confidence, its provenance, and the paths it applies to. The counters
 retire an entry that stopped earning its keep — knowledge that only ever
 grows is a context tax with a good story attached.
 
+**Fold the counters from the agents' reports.** Every handoff carried a
+knowledge brief with entry ids, and every report owes a verdict on them.
+Increment `used` for each id that was handed off, `helpful` for the ids
+reported as having helped, `outdated_reports` for the ids reported wrong —
+here, at close, in the one place licensed to write these files. Keep entries
+under the size the schema warns about; an oversized entry crowds every brief
+it matches.
+
 Write what a competent newcomer would get wrong, not what the code already
 says. "The test suite takes 9 minutes, so do not run it per file" is worth an
 entry. "This is a Next.js app" is not: the next agent can see that.

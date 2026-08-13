@@ -74,6 +74,15 @@ that stop earning their keep get degraded or retired by later retros. Two
 learning loops run at different speeds: fast and local (your repo), slow and
 curated (pull requests to the core — reviewed by humans).
 
+The counters are fed by a closed loop rather than by promises. Every handoff
+carries a **knowledge brief** — `scripts/knowledge.mjs brief` selects the
+entries whose `applies_to` globs intersect the story's predicted files, into
+a character budget — and the agent's final report owes a verdict on the entry
+ids it received: helped, wrong, or unused. The retrospective folds those
+verdicts into `used`/`helpful`/`outdated_reports` at close, in the one place
+licensed to write the store. An entry nobody reports as helpful is a
+retirement candidate on evidence, not on taste.
+
 ## The one part that is not built: the update delta-review
 
 > **Not built yet.** Everything above runs today. What does not exist is the

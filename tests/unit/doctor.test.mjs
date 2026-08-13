@@ -394,6 +394,85 @@ test('a stray file under state/ is reported instead of being skipped', () => {
   assert.equal(result.ok, false);
 });
 
+// ------------------------------------------------------------ legacy layout
+
+test('a legacy .tyran/initiatives/ directory is a warning with a non-destructive fix', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  mkdirSync(join(dir, 'initiatives', 'old-slug', 'locks'), { recursive: true });
+  const result = runStateChecks({ dir });
+  const found = byCode(result, 'state-legacy-initiatives-dir');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].message, /state\/<initiative>\//);
+  assert.doesNotMatch(found[0].fix ?? '', /\brm\b|\bmv\b|>\s*\S/);
+  assert.equal(result.ok, false);
+});
+
+test('no legacy directory, no legacy finding', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  assert.deepEqual(byCode(runStateChecks({ dir }), 'state-legacy-initiatives-dir'), []);
+});
+
+test('lease files committed to git are a warning naming the first file and the count', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const gitStub = (args) => {
+    if (args[0] === 'rev-parse') return 'true\n';
+    if (args[0] === 'ls-files') {
+      return [
+        '.tyran/config.yaml',
+        '.tyran/state/demo/journal.jsonl',
+        '.tyran/state/demo/locks/worktree-a.lease',
+        '.tyran/initiatives/legacy/locks/slot-1.lease',
+      ].join('\n') + '\n';
+    }
+    return '';
+  };
+  const result = runStateChecks({ dir, run: gitStub });
+  const found = byCode(result, 'lease-file-tracked');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].where, /worktree-a\.lease/);
+  assert.match(found[0].where, /\+1 more/);
+  assert.match(found[0].message, /2 lease file\(s\)/);
+  assert.doesNotMatch(found[0].fix ?? '', /\brm\b|\bmv\b|>\s*\S/);
+});
+
+test('lease files on disk but not in git are finding-free — the canonical location is legal', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [ev('2026-07-26T09:00:00.000Z', 'init.created', {})]);
+  regenerate(journal);
+  mkdirSync(join(dir, 'state', 'demo', 'locks'), { recursive: true });
+  writeFileSync(join(dir, 'state', 'demo', 'locks', 'worktree-a.lease'), 'holder: impl-1\n');
+  const result = runStateChecks({ dir });
+  assert.deepEqual(byCode(result, 'lease-file-tracked'), []);
+  assert.deepEqual(byCode(result, 'state-stray-file'), [], 'locks/ under an initiative is not a stray');
+});
+
+test('an oversized knowledge entry is a warning on a file that still validates', () => {
+  const root = repo();
+  const dir = scaffold(root, { knowledge: false });
+  mkdirSync(join(dir, 'knowledge'), { recursive: true });
+  const big = 'x'.repeat(4001);
+  writeFileSync(
+    join(dir, 'knowledge', 'big.yaml'),
+    `entries:\n  - id: K-1\n    kind: fact\n    text: '${big}'\n    confidence: 0.5\n` +
+      `    provenance:\n      - source: 'test'\n        reference: 'test'\n`,
+  );
+  const result = runStateChecks({ dir });
+  assert.deepEqual(byCode(result, 'knowledge-invalid'), [], 'oversize is advisory, not a schema error');
+  const oversized = byCode(result, 'knowledge-entry-oversized');
+  assert.equal(oversized.length, 1);
+  assert.equal(oversized[0].severity, 'warning');
+  assert.match(oversized[0].message, /K-1/);
+  assert.match(oversized[0].message, /4001/);
+  assert.doesNotMatch(oversized[0].fix ?? '', /\brm\b|\bmv\b|>\s*\S/);
+});
+
 // -------------------------------------------------------- one init per file
 
 test('events from a foreign initiative are an error naming the directory contract', () => {
@@ -1170,6 +1249,7 @@ const EXPECTED_SEVERITY = {
   'knowledge-invalid': 'error',
   'knowledge-unreadable': 'error',
   'knowledge-not-a-directory': 'warning',
+  'knowledge-entry-oversized': 'warning',
   'tyran-dir-untracked': 'warning',
   'policy-missing': 'error',
   'policy-invalid': 'error',
@@ -1183,6 +1263,8 @@ const EXPECTED_SEVERITY = {
   'state-not-a-directory': 'error',
   'state-unreadable': 'error',
   'state-stray-file': 'warning',
+  'state-legacy-initiatives-dir': 'warning',
+  'lease-file-tracked': 'warning',
 };
 
 test('every finding code has exactly one pinned severity', () => {

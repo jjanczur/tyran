@@ -204,6 +204,36 @@ export function validateKnowledge(doc) {
 }
 
 /**
+ * The size above which a knowledge entry stops being a brief-able fact and
+ * starts being a document. `knowledge.mjs brief` selects entries into a
+ * character budget; one 10 KB entry crowds out eight useful ones, visibly.
+ */
+export const KNOWLEDGE_ENTRY_MAX_CHARS = 4000;
+
+/**
+ * Advisory findings on a knowledge file that already validates. A separate
+ * export rather than more `validateKnowledge` errors on purpose: a warning
+ * must never flip `ok` for the existing consumers (validateFile, doctor, CI
+ * template validation), or every install with one wordy entry goes red.
+ */
+export function knowledgeWarnings(doc) {
+  if (!isPlainObject(doc) || !Array.isArray(doc.entries)) return [];
+  const warnings = [];
+  doc.entries.forEach((entry, i) => {
+    if (!isPlainObject(entry) || typeof entry.text !== 'string') return;
+    const size = Array.from(entry.text).length;
+    if (size > KNOWLEDGE_ENTRY_MAX_CHARS) {
+      const id = isNonEmptyString(entry.id) ? entry.id : `entries[${i}]`;
+      warnings.push(
+        `${id}: text is ${size} characters (max ${KNOWLEDGE_ENTRY_MAX_CHARS} before it crowds a brief) — ` +
+          'split it, or move the bulk into a doc and keep the pointer here',
+      );
+    }
+  });
+  return warnings;
+}
+
+/**
  * Paths that MUST be classified KERNEL. A policy that downgrades any of
  * these would let the self-improvement loop disable its own enforcement,
  * so the validator rejects it — the boundary cannot be edited away, only

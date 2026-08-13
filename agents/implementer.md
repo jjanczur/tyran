@@ -55,6 +55,8 @@ commits and anything written to disk are in English.**
      after a `git fetch` run immediately beforehand; a stale remote once
      turned a correct proof into a false accusation.
 7. **Final report:** what was done · test and validation output · what the
-   optimization pass changed · branch or PR · premises you corrected · open
-   doubts. The open doubts are worth more than the summary; do not tidy them
-   away.
+   optimization pass changed · branch or PR · premises you corrected · a
+   verdict on every knowledge-brief entry id in your handoff (helped, wrong,
+   or unused — the retrospective folds these into the store's counters) ·
+   open doubts. The open doubts are worth more than the summary; do not tidy
+   them away.

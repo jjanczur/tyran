@@ -26,6 +26,8 @@ import {
   BootstrapError,
   POLICY_PATH,
   ensureAutonomyPolicy,
+  ensureStateGitignore,
+  STATE_GITIGNORE_PATH,
   policyTemplatePath,
   underTyranDir,
 } from '../../scripts/scan-repo.mjs';
@@ -314,6 +316,32 @@ test('the installed policy is the shipped template, byte for byte', () => {
   const d = repo();
   ensureAutonomyPolicy(d);
   assert.equal(readFileSync(policyOf(d), 'utf8'), readFileSync(policyTemplatePath(), 'utf8'));
+});
+
+test('writing the config also seeds .tyran/.gitignore, and never overwrites one', () => {
+  const d = repo({ 'package.json': JSON.stringify({ scripts: { test: 'node --test' } }), 'package-lock.json': '{}' });
+  const ignorePath = join(d, ...STATE_GITIGNORE_PATH.split('/'));
+  const { code } = cli(['--dir', d, '--write', join(d, '.tyran', 'config.yaml')], d);
+  assert.equal(code, 0);
+  assert.ok(existsSync(ignorePath), 'the lease exclusion travels with the committed .tyran/');
+  assert.match(readFileSync(ignorePath, 'utf8'), /^state\/\*\/locks\/$/m);
+
+  // an operator's own additions survive every later run
+  const mine = '# mine\nstate/*/locks/\nscratch/\n';
+  writeFileSync(ignorePath, mine);
+  assert.equal(ensureStateGitignore(d).status, 'present');
+  cli(['--dir', d, '--ensure-policy'], d);
+  assert.equal(readFileSync(ignorePath, 'utf8'), mine, 'the human-authored gitignore is untouched');
+});
+
+test('--ensure-policy seeds the gitignore after the policy, not before', () => {
+  // Ordering is the guarantee: .tyran/ on disk with no policy under it is the
+  // state that refuses every write, so nothing may create the directory ahead
+  // of the policy. With a virgin repo, --ensure-policy must leave BOTH files.
+  const d = repo();
+  cli(['--dir', d, '--ensure-policy'], d);
+  assert.ok(existsSync(policyOf(d)), 'policy present');
+  assert.ok(existsSync(join(d, ...STATE_GITIGNORE_PATH.split('/'))), 'gitignore present');
 });
 
 test('an existing policy is never overwritten, whatever it says', () => {

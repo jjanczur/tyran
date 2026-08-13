@@ -138,8 +138,11 @@ open one.
    `.tyran/state/<initiative>/journal.jsonl`:
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs append <journal> <event>
    <initiative> --actor conductor --data '{...}'`. Regenerate the readable
-   views with `scripts/project.mjs`; `STATE.md` and `PROGRESS.md` are
-   GENERATED — never hand-edit them. Authored, alongside the journal:
+   views with `scripts/project.mjs` at every merge — `BOARD.md` and
+   `board.json` are part of the set — and the cross-initiative board with
+   `scripts/board.mjs`; every one of them is GENERATED — never hand-edit.
+   Moving a ticket on the board IS appending an event; there is no other way.
+   Authored, alongside the journal:
    `PLAN.md` (decomposition plus the **manifest of
    shared zones**) and `NOTES.md` (side observations, defaults you adopted,
    and **signals about the PROCESS itself**: what slowed the work, what the

@@ -134,6 +134,7 @@ export default defineConfig({
             { label: 'Journal', slug: 'journal' },
             { label: 'Projections', slug: 'projections' },
             { label: 'Doctor', slug: 'doctor' },
+            { label: 'The board', slug: 'board' },
             { label: 'Overnight mode', slug: 'overnight' },
             { label: 'FAQ', slug: 'faq' },
           ],

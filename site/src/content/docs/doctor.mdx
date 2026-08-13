@@ -77,6 +77,7 @@ possible to change one and keep the suite green.
 | `projection-blocked` | warning | the journal cannot be projected at all, so drift is not a meaningful question |
 | `projection-unreadable` | error | a projection exists but could not be read (errno printed) |
 | `projection-failed` | error | rendering the projection threw |
+| `board-absent` | info | no `BOARD.md` / `board.json` yet — every install older than the board feature; regenerating the projections creates them |
 | `config-missing` | info | the repo has not been set up (yet) |
 | `tyran-dir-untracked` | warning | nothing under `.tyran/` is tracked by git — worktrees get no config and no policy, so agents run there with no autonomy class at all |
 | `policy-missing` | error | `.tyran/` exists with no `policies/autonomy.yaml` under it — the policy gate fails closed on this state, so every write in the repo is refused until the file is there |

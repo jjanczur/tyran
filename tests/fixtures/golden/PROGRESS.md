@@ -14,6 +14,7 @@ Initiative: **demo** · see `STATE.md` for the full state.
 ## Open gates
 
 - **plan-approval** — open (2026-07-26T09:35:00.000Z)
+- **pricing-copy** — WAITING_ON_OPERATOR (2026-07-26T09:41:55.000Z)
 
 ## Milestones
 
@@ -24,4 +25,5 @@ Initiative: **demo** · see `STATE.md` for the full state.
 | 2026-07-26T09:32:00.000Z | `merge` | T-1 → 88ea8cb |
 | 2026-07-26T09:34:00.000Z | `gate` | tests → pass |
 | 2026-07-26T09:35:00.000Z | `gate` | plan-approval → open |
+| 2026-07-26T09:41:55.000Z | `gate` | pricing-copy → WAITING_ON_OPERATOR |
 | 2026-07-26T09:42:00.000Z | `checkpoint` | phase E2 |

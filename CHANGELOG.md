@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.12 — 2026-08-13
+
+### The board: every ticket in a lane, every question in front of you
+
+The read-only dashboard the roadmap promised, built the only way this state
+layer allows: as a projection. `BOARD.md`/`board.json` render next to every
+journal with the other projections; `scripts/board.mjs` folds every
+initiative into one `.tyran/state/BOARD.md`, `board.json` (schema 1) and
+`board.html` — a self-contained page in the landing page's own stone/gold/
+glow palette that refreshes itself, puts the waiting-on-you queue first
+(question, recommendation, default), lights the agent strip with each
+agent's own last signal, and computes ages in the browser so the artefact
+itself stays clock-free and byte-checkable. `--serve` adds a loopback-only
+always-fresh viewer.
+
+Lanes derive strongest-verdict-first from events that already exist —
+`merge`, reviews, reports, running spawns, dep satisfaction (an unknown dep
+refuses to schedule), blockages, `ticket.status` overrides, operator asks
+(`WAITING_ON_OPERATOR` gates; `answered` joins the pass set), and the
+overnight pause. A `SubagentStop` probe re-renders after every agent, with
+the CLI's own damaged-journal refusal mirrored so an empty render never
+clobbers good state; doctor gains `board-absent` (info) and drift coverage
+for the new pair; an unreadable initiative is a visible UNREADABLE entry.
+
 ## 0.1.11 — 2026-08-13
 
 ### The journal learns what agents are doing, finding, and waiting on

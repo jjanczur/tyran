@@ -147,7 +147,7 @@ test('the summary carries checkpoint, resume steps, open gates, leases and agent
   assert.match(context, /1\. re-read STATE\.md/);
   assert.match(context, /3\. then start T-10/);
   assert.doesNotMatch(context, /4\. /, 'only the first three steps belong in a resume summary');
-  assert.match(context, /Open gates \(1\):[\s\S]*plan-approval/);
+  assert.match(context, /Open gates \(2\):[\s\S]*plan-approval/);
   assert.match(context, /Open leases \(1\)[\s\S]*worktree:tyran-s2 held by impl-2/);
   assert.match(context, /still believes are working \(1\):[\s\S]*impl-2 \(implementer\)/);
   assert.match(context, /cores · \d+ GiB RAM/);

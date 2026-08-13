@@ -80,6 +80,10 @@ export const COMMANDS = {
     'statusline.mjs',
     'Statusline helper that tees platform rate-limit telemetry into .tyran/state/usage.json for the usage gate.',
   ],
+  board: [
+    'board.mjs',
+    'Render the cross-initiative kanban board — BOARD.md, board.json and the board.html dashboard — from the journals under .tyran/state/.',
+  ],
   'stop-check': [
     'stop-check.mjs',
     'Check the .tyran/STOP operator brake that halts a running initiative before its next spawn or merge.',

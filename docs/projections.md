@@ -1,6 +1,6 @@
 # Projections reference
 
-`scripts/project.mjs` · 58 unit tests, including byte-exact
+`scripts/project.mjs` · 63 unit tests, including byte-exact
 golden files
 
 The journal stays the only source of truth; everything on this page is a
@@ -13,6 +13,7 @@ Markdown documents that are **generated, never hand-written**:
 |---|---|
 | `STATE.md` | full state: checkpoint, agents, ledger, gates, leases, decisions, errors, resume steps, journal integrity |
 | `PROGRESS.md` | one-line progress banner, ticket checklist, open gates, milestones |
+| `BOARD.md` · `board.json` | the kanban view — lanes, the waiting-on-operator queue, the agent strip; semantics in [the board page](board.md) |
 
 Both start with
 
@@ -182,7 +183,7 @@ Two details worth knowing:
     instead, because that output is machine-readable and this repo parses it
     back; `JSON.parse` of the escaped form is deep-equal to the original.
 - **A gate is open unless it says otherwise.** `data.result` values
-  `pass`, `passed`, `ok`, `green`, `approved` and `closed` (case-insensitive)
+  `pass`, `passed`, `ok`, `green`, `approved`, `closed` and `answered` (case-insensitive; `answered` closes an operator ask)
   close a gate; anything else — including `fail` and `open` — keeps it in
   **Open gates**.
 

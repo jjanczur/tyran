@@ -20,4 +20,5 @@
 {"ts":"2026-07-26T09:41:40.000Z","ev":"progress","init":"demo","actor":"impl-2","data":{"agent":"impl-2","state":"blocked","ticket":"T-2","detail":"waiting on the worktree lease"}}
 {"ts":"2026-07-26T09:41:45.000Z","ev":"finding","init":"demo","actor":"impl-2","data":{"id":"F-1","area":"scripts/**","claim":"the suite needs the quoted glob","proof":"MODULE_NOT_FOUND without it"}}
 {"ts":"2026-07-26T09:41:50.000Z","ev":"ticket.status","init":"demo","actor":"conductor","data":{"ticket":"T-10","column":"parked","reason":"pricing question open"}}
+{"ts":"2026-07-26T09:41:55.000Z","ev":"gate","init":"demo","actor":"conductor","data":{"kind":"pricing-copy","result":"WAITING_ON_OPERATOR","ticket":"T-10","question":"flat fee or per-seat on the team plan?","recommendation":"per-seat","default":"per-seat ships Friday if no answer"}}
 {"ts":"2026-07-26T09:42:00.000Z","ev":"checkpoint","init":"demo","actor":"conductor","data":{"phase":"E2","next_steps":["re-read STATE.md","finish the T-2 review","then start T-10"]}}

@@ -75,6 +75,16 @@
             "timeout": 20
           }
         ]
+      },
+      {
+        "matcher": ".+|^$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/board-refresh.mjs\"",
+            "timeout": 12
+          }
+        ]
       }
     ],
     "PreCompact": [

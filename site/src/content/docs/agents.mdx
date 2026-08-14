@@ -115,6 +115,12 @@ Roles down the side, cost profile across the top:
 | acceptance | deep | top | top |
 | retro | work | work | deep |
 | bookkeeping | cheap | cheap | cheap |
+| conductor (**advisory**) | deep | top | top |
+
+`conductor` is the one row nothing can enforce: the conductor is your own
+session, and no plugin can change a running session's model. The row records
+the choice in the one file where model names may live, and `tiers.mjs` says so
+on stderr when you resolve it.
 
 Read the table as a claim about **where model strength changes the outcome**.
 A scout reports what a file says; a stronger model does not make the file say
@@ -128,8 +134,15 @@ at the ends. **Security review and arbitration have a floor**: they resolve to
 `top` under every profile and every risk level. Without it, `--profile eco
 --risk low` would be a one-flag downgrade of the two judgements the whole
 design leans on. The floor is applied last, after the shift, so it cannot be
-shifted out of.
+shifted out of. `conductor` has a `deep` floor for the same reason, advisory
+or not: one weak coordinator spends a whole team's budget on the wrong plan.
 </Aside>
+
+Implementers and reviewers may raise an **operator ask** rather than stopping
+— `node scripts/journal.mjs ask <journal> <init> --question '...' --default
+'...' [--ticket T-n]` — and must NOT set `ticket.status` on the asked ticket:
+the ask already lanes it `waiting-operator`, and an override on top hides the
+question.
 
 ### The failure this design is actually guarding against
 

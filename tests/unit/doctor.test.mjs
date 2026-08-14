@@ -253,6 +253,96 @@ test('an open spawn is info; the same spawn past the threshold is a warning', ()
   assert.equal(late.ok, false);
 });
 
+test('an open ask is info; past 72 h of journal time it is a warning; answered it is silent', () => {
+  // MUTANT 1: flip the comparison in askFindings. Every open question then
+  // reports as stale on the day it is asked, and a warning that is red during
+  // normal operation is a warning people learn to skip.
+  // MUTANT 2: drop the GATE_PASS filter (state.openGates). An ANSWERED
+  // question then keeps reporting forever, so doctor and the board — two
+  // artefacts doctor itself produces — disagree about what is still open.
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  const asked = ev('2026-08-09T11:02:13.000Z', 'gate', {
+    kind: 'Q-7',
+    result: 'WAITING_ON_OPERATOR',
+    ticket: 'T-10',
+    question: 'Flat fee or per-seat on the team plan?',
+  });
+  writeJournal(journal, [asked, ev('2026-08-09T12:00:00.000Z', 'checkpoint', { phase: 'build', next_steps: [] })]);
+  regenerate(journal);
+
+  const fresh = runStateChecks({ dir });
+  const open = byCode(fresh, 'ask-open');
+  assert.equal(open.length, 1);
+  assert.equal(open[0].severity, 'info');
+  assert.match(open[0].message, /Q-7 is waiting on the operator .*Flat fee or per-seat/);
+  assert.equal(fresh.ok, true, 'a question waiting on a human is not a broken repo');
+
+  const late = runStateChecks({ dir, now: '2026-08-13T11:20:44.000Z' });
+  const stale = byCode(late, 'ask-stale');
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].severity, 'warning');
+  assert.match(stale[0].message, /96\.3 h of journal time/);
+  assert.match(stale[0].message, /threshold 72 h/);
+  assert.match(stale[0].fix, /answer\.mjs render/);
+  assert.equal(late.ok, false);
+  // one hour short of the threshold is still info
+  assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-12T10:02:13.000Z' }), 'ask-stale'), []);
+
+  writeJournal(journal, [
+    asked,
+    ev('2026-08-09T12:00:00.000Z', 'checkpoint', { phase: 'build', next_steps: [] }),
+    ev('2026-08-13T21:04:11.000Z', 'gate', { kind: 'Q-7', result: 'answered', answer: 'per-seat', decision: 'D-1' }),
+  ]);
+  regenerate(journal);
+  const answered = runStateChecks({ dir, now: '2026-09-01T00:00:00.000Z' });
+  assert.deepEqual(byCode(answered, 'ask-open'), []);
+  assert.deepEqual(byCode(answered, 'ask-stale'), []);
+});
+
+test('both ask fixes parse in the shell the operator pastes them into', () => {
+  // MUTANT: end the fix with a bare `   (fill the answer: lines, then apply)`.
+  // The parenthesis opens a subshell and the line fails to PARSE, so nothing
+  // runs at all — measured: /bin/sh and bash exit 2 with "syntax error near
+  // unexpected token `('", zsh exits 1. These are the two findings an
+  // operator meets most often, and doctor's contract is that every finding
+  // carries a command you can paste.
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [
+    ev('2026-08-09T11:02:13.000Z', 'gate', { kind: 'Q-7', result: 'WAITING_ON_OPERATOR', question: 'Flat fee?' }),
+  ]);
+  regenerate(journal);
+  const fixes = [
+    byCode(runStateChecks({ dir }), 'ask-open')[0],
+    byCode(runStateChecks({ dir, now: '2026-08-13T11:20:44.000Z' }), 'ask-stale')[0],
+  ];
+  for (const found of fixes) {
+    assert.ok(found, 'the finding must fire before its fix can be checked');
+    // -n parses without executing: a render here would write a real sheet.
+    execFileSync('/bin/sh', ['-n', '-c', found.fix], { stdio: 'pipe' });
+  }
+});
+
+test('the sheet and the session record are not stray files under state/', () => {
+  // MUTANT: drop the ASK_QUEUE_FILES exemption. Doctor then reports the two
+  // files its own fix command tells the operator to create, and `--state`
+  // exits 1 on a repo whose only sin is having a question open.
+  const root = repo();
+  const dir = scaffold(root);
+  mkdirSync(join(dir, 'state'), { recursive: true });
+  writeFileSync(join(dir, 'state', 'ANSWERS.md'), '# 0 questions waiting on you\n');
+  writeFileSync(
+    join(dir, 'state', 'conductor.json'),
+    '{"session_id":"aaaaaaaaaa","started_at":"2026-08-09T11:02:13.000Z","cwd":"/repo"}\n',
+  );
+  const result = runStateChecks({ dir });
+  assert.deepEqual(byCode(result, 'state-stray-file'), []);
+  assert.equal(result.ok, true);
+});
+
 test('staleness is measured in journal time, so a quiet journal never false-alarms', () => {
   const root = repo();
   const dir = scaffold(root);
@@ -1432,6 +1522,8 @@ const EXPECTED_SEVERITY = {
   'spawn-duplicate': 'warning',
   'spawn-orphan-report': 'warning',
   'agent-name-unusable': 'warning',
+  'ask-open': 'info',
+  'ask-stale': 'warning',
   'lease-open': 'info',
   'lease-orphan': 'warning',
   'lease-expired': 'warning',

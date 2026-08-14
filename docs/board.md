@@ -44,9 +44,58 @@ A ticket is in exactly one lane:
 | `ready` | declared, every `deps[]` entry merged — an UNKNOWN dep counts unmet, because a typo must refuse to schedule |
 | `backlog` | everything else declared |
 
-Closing an operator question: append the same gate `kind` with
-`result: answered` (a member of the pass set), plus a `decision` recording
-the answer in the operator's words.
+An ask is raised by one command, which mints its id under the journal's write
+lock: `node scripts/journal.mjs ask <journal> <init> --question '...'
+--recommendation '...' --default '...' [--ticket T-n]`. The id IS the gate
+`kind`, `Q-<n>`. **Do not park an asked ticket** — the override is checked
+before the ask, so it overrules the lane and hides the question's own ticket.
+
+## Answering
+
+```bash
+npx @jjanczur/tyran answer render --dir .tyran   # writes .tyran/state/ANSWERS.md
+$EDITOR .tyran/state/ANSWERS.md                  # fill the `answer:` lines
+npx @jjanczur/tyran answer apply --dir .tyran    # closes what you answered, re-renders everything
+```
+
+Spelled with `npx` because that is what an operator can actually paste:
+installing the Claude Code plugin puts no `tyran` on your PATH, and a repo
+that adopted the plugin has no `scripts/` of its own for `node` to point at.
+
+Three words do all the work. **Blank** takes the recorded default, verbatim,
+and still records it as a decision — a default accepted is a decision, and the
+ledger says which it was. **`-`** leaves the question open for next time.
+**Anything else** is your answer, in your words, down to the next `## `.
+
+Questions with no recorded default come first, because those are the only ones
+where saying nothing has no safe outcome.
+
+`apply` reads every value it writes — the question, the default, the ticket,
+the id — back out of the journal, so nothing you type can change what was
+asked. One line in each block is structure rather than content: the
+`## Q-<n> · <initiative>` heading PICKS which question your answer closes.
+Leave it alone — retype it to name a different ask and your answer is filed
+against that ask instead. It is all-or-nothing: one unparseable block and
+nothing at all is appended, with the line number.
+
+Two refusals you may meet, both exit 2 and both deliberate. `render` will not
+overwrite a sheet that already holds answers you have not applied — apply them
+first, or pass `--force` to discard them and start the sitting again. And an
+ask raised before this feature existed has a gate `kind` that is not
+`Q-<n>`, so no heading can select it: those are listed read-only above the
+blocks, with the `journal.mjs append … gate` command that closes each one, so
+one un-answerable question can never block the rest of the sitting.
+
+Each answer becomes two events, decision first: a `decision` in your words,
+then the closing `gate` with `result: answered`. Decision first is deliberate
+— a crash between them leaves a visible orphan decision, never a closed
+question whose answer was never written down.
+
+`ANSWERS.md` is generated and then hand-edited, so it is deliberately NOT in
+the byte-exact `--check` set: byte-equality is not a property a file you type
+into can have. Re-render it at the start of each sitting rather than reusing
+the last one — every block in an applied sheet names an ask that is now
+closed, and `apply` refuses the whole file rather than appending a duplicate.
 
 ## board.html
 

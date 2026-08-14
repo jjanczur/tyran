@@ -283,12 +283,33 @@ open one.
    (XL); product, visual and irreversible decisions, put in plain language
    with your recommendation; anything hard to undo or visible outside the
    repo. **"Shall I continue?" is forbidden.**
-   **Every question to the operator lands in the journal before (or as) you
-   ask it**: a `gate` event, `result: WAITING_ON_OPERATOR`, `data` carrying
-   `question`, `recommendation`, `default` and `ticket` when it has one — a
-   question that lives only in chat has to be re-litigated after every
-   compaction. When answered, append the same `kind` with `result: answered`
-   plus a `decision` recording the answer in the operator's words.
+   **Every question to the operator is raised with one command, and the
+   command mints its id:**
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs ask <abs-journal> <init>
+   --question '...' --recommendation '...' --default '...' [--ticket T-n]`.
+   It appends the `gate` — `kind: Q-<n>`, `result: WAITING_ON_OPERATOR` —
+   under the journal's write lock, so two agents asking in the same moment get
+   two ids rather than one. A question that lives only in chat has to be
+   re-litigated after every compaction; a question written as a bare `kind` of
+   your own invention collides with the next one that shares it, and the older
+   question is lost with nothing objecting anywhere.
+   - **Always record a `default`** — what ships if nobody ever answers. It is
+     what the operator accepts by leaving an answer blank, and it is the only
+     reason a queue of fifteen questions takes ten minutes instead of an hour.
+     An ask with no default is a question the operator must stop and think
+     about; spend that budget deliberately.
+   - **Do not park an asked ticket.** An ask that names a ticket already puts
+     it in the board's `waiting-operator` lane. A `ticket.status` override on
+     top of it **overrules** that lane and hides the question's own ticket —
+     measured in our own demo fixture, which showed `waiting-operator (0)`
+     while a question was open.
+   - **Never spin on an open ask.** Raise it, take the next schedulable
+     ticket, and let the operator answer in their own time. You do not close
+     it: `node ${CLAUDE_PLUGIN_ROOT}/scripts/answer.mjs apply` writes the
+     `decision` and the closing `gate` in the operator's own words. When the
+     operator answers you in chat instead, append that pair yourself — same
+     `kind`, `result: answered`, plus a `decision` whose text begins
+     `Q-<n>: ` — and say in your next report that you did.
    **Check the brake before every spawn and every merge:**
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/stop-check.mjs` — exit 1 means the
    operator created `.tyran/STOP`. Halt, report where you got to, and do not

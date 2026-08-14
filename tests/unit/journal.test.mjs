@@ -29,6 +29,9 @@ import {
   DATA_ENUMS,
   CAPPED_DATA_KEYS,
   cappedKeyProblem,
+  ASK_KIND_RE,
+  nextAskKind,
+  raiseAsk,
 } from '../../scripts/journal.mjs';
 
 const SCRIPT = new URL('../../scripts/journal.mjs', import.meta.url).pathname;
@@ -67,17 +70,24 @@ test('progress and ticket.status enums reject out-of-set values, naming the whol
  * Each key is carried by an event that legitimately holds it, so the rejection
  * is the cap and not some other missing requirement.
  */
+const ask = (over) => ({ ev: 'gate', data: { kind: 'Q-1', result: 'WAITING_ON_OPERATOR', ...over } });
 const OVERSIZED_EVENT_BY_KEY = [
   ['detail', (big) => ({ ev: 'progress', data: { agent: 'impl-1', state: 'blocked', detail: big } })],
   ['claim', (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: big } })],
   ['proof', (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: 'c', proof: big } })],
+  // The ask fields. They reach BOARD.md, board.html and ANSWERS.md, so an
+  // uncapped one is a document-sized cell in three artefacts at once.
+  ['question', (big) => ask({ question: big })],
+  ['recommendation', (big) => ask({ question: 'q', recommendation: big })],
+  ['default', (big) => ask({ question: 'q', default: big })],
+  ['answer', (big) => ask({ result: 'answered', answer: big })],
 ];
 
 test('EVERY capped key is REJECTED at append and only WARNED about in history', () => {
   assert.deepEqual(
     Object.keys(CAPPED_DATA_KEYS).sort(),
     OVERSIZED_EVENT_BY_KEY.map(([key]) => key).sort(),
-    'the capped key set changed — docs/journal.md and its site mirror name these three',
+    'the capped key set changed — docs/journal.md and its site mirror name these seven',
   );
   for (const [key, build] of OVERSIZED_EVENT_BY_KEY) {
     const cap = CAPPED_DATA_KEYS[key];
@@ -100,6 +110,18 @@ test('EVERY capped key is REJECTED at append and only WARNED about in history', 
   assert.ok(result.warnings.some((w) => w.includes('data.claim')), result.warnings.join('; '));
   // codepoints, not UTF-16 units
   assert.equal(cappedKeyProblem({ claim: '\u{1D400}'.repeat(CAPPED_DATA_KEYS.claim) }), null);
+
+  // Kills the mutant that pushes a historical oversize into `errors`: a
+  // journal written before the ask keys were capped carries a 3 000-codepoint
+  // question, and `validate` must still say ok.
+  const legacy = tmp();
+  writeFileSync(
+    legacy,
+    JSON.stringify(ev(ask({ question: 'x'.repeat(3000) }))) + '\n',
+  );
+  const legacyResult = validateJournal(legacy);
+  assert.equal(legacyResult.ok, true, 'a pre-cap journal must not turn red retroactively');
+  assert.ok(legacyResult.warnings.some((w) => w.includes('data.question')), legacyResult.warnings.join('; '));
 });
 
 test('progress events never disturb spawn-report pairing (ADR-18)', () => {
@@ -421,6 +443,102 @@ test('8 truly concurrent appends issue 8 DISTINCT decision ids', { timeout: 60_0
   const { badLines, truncatedTail } = readJournal(f);
   assert.deepEqual(badLines, []);
   assert.equal(truncatedTail, false);
+  assert.equal(validateJournal(f).ok, true);
+});
+
+// --- operator asks -----------------------------------------------------
+
+// An ask id is a gate KIND, and the fold keys gates by kind with
+// last-write-wins — so two writers handed one id do not collide loudly, they
+// collide SILENTLY: the second question replaces the first on that Map and the
+// first is gone from every artefact with nothing objecting anywhere.
+//
+// Kills the mutant that computes `nextAskKind` BEFORE `withLock` (read the
+// journal, mint, then call append): every concurrent writer reads the same
+// snapshot and mints the same `Q-1`.
+test('8 truly concurrent asks mint 8 DISTINCT ask ids', { timeout: 60_000 }, async () => {
+  const f = tmp();
+  const launched = [];
+  const finished = [];
+  const t0 = Date.now();
+  const procs = Array.from({ length: 8 }, (_, i) => {
+    const p = spawn(process.execPath, [SCRIPT, 'ask', f, 'demo', '--actor', `p${i}`, '--question', `q${i}`]);
+    launched.push(Date.now() - t0);
+    let err = '';
+    p.stderr.on('data', (d) => (err += d));
+    return new Promise((res, rej) => {
+      p.on('close', (code) => {
+        finished.push(Date.now() - t0);
+        code === 0 ? res() : rej(new Error(`p${i} exit ${code}: ${err}`));
+      });
+    });
+  });
+  await Promise.all(procs);
+
+  // the overlap proof: 8 appends that happened to serialize would pass while
+  // proving nothing about the lock
+  assert.ok(
+    Math.max(...launched) < Math.min(...finished),
+    `not concurrent: last launch ${Math.max(...launched)}ms >= first exit ${Math.min(...finished)}ms`,
+  );
+  const kinds = query(f, { ev: 'gate' }).map((e) => e.data.kind);
+  assert.equal(kinds.length, 8, 'every writer must have appended exactly one gate');
+  assert.deepEqual([...kinds].sort(), ['Q-1', 'Q-2', 'Q-3', 'Q-4', 'Q-5', 'Q-6', 'Q-7', 'Q-8']);
+  assert.equal(validateJournal(f).ok, true);
+});
+
+// Kills the mutant that drops the guard and lets a questionless ask through to
+// `validateEvent`, whose complaint would be about `data.kind` — and the mutant
+// that answers a missing --question with the usage dump, which does not say
+// which flag was missing.
+test('ask demands a question, and says so specifically rather than dumping usage', () => {
+  const f = tmp();
+  assert.throws(() => raiseAsk(f, { init: 'demo', question: '   ' }), /non-empty --question/);
+  assert.deepEqual(readJournal(f).events, [], 'a refused ask writes nothing');
+  const cli = spawnSync(process.execPath, [SCRIPT, 'ask', f, 'demo'], { encoding: 'utf8' });
+  assert.equal(cli.status, 1);
+  assert.match(cli.stderr, /non-empty --question/);
+  assert.doesNotMatch(cli.stderr, /^usage:/m, 'a missing flag gets its own message (the close-spawn precedent)');
+});
+
+// Kills the mutant that unanchors the regex to /Q-(\d+)/: a gate kind of
+// `usage-limit-Q-99` would then raise the next ask to Q-100 and leave every id
+// between free for a later collision.
+test('nextAskKind reads only anchored Q- gate kinds', () => {
+  assert.equal(nextAskKind([]), 'Q-1');
+  assert.equal(
+    nextAskKind([
+      { ev: 'gate', data: { kind: 'usage-limit-Q-99' } },
+      { ev: 'decision', data: { id: 'Q-50' } },
+      { ev: 'gate', data: { kind: 'Q-2' } },
+      { ev: 'gate', data: { kind: 'tests' } },
+      { ev: 'gate', data: {} },
+    ]),
+    'Q-3',
+  );
+  assert.equal(ASK_KIND_RE.test('Q-7'), true);
+  assert.equal(ASK_KIND_RE.test('xQ-7'), false);
+  assert.equal(ASK_KIND_RE.test('Q-7x'), false);
+});
+
+test('ask writes the queue shape the board renders, and answering it is the same kind', () => {
+  const f = tmp();
+  const written = raiseAsk(f, {
+    init: 'demo',
+    actor: 'impl-t10',
+    ticket: 'T-10',
+    question: 'Flat fee or per-seat on the team plan?',
+    recommendation: 'per-seat',
+    default: 'per-seat ships Friday if no answer',
+  });
+  assert.equal(written.ev, 'gate');
+  assert.equal(written.data.kind, 'Q-1');
+  assert.equal(written.data.result, 'WAITING_ON_OPERATOR');
+  assert.equal(written.data.ticket, 'T-10');
+  // an ask with nothing optional carries no null keys the board would print
+  const bare = raiseAsk(f, { init: 'demo', question: 'en dash or em dash?' });
+  assert.deepEqual(Object.keys(bare.data), ['kind', 'result', 'question']);
+  assert.equal(bare.data.kind, 'Q-2');
   assert.equal(validateJournal(f).ok, true);
 });
 

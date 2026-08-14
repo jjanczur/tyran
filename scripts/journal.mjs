@@ -17,6 +17,7 @@
  *   node journal.mjs tail        <file>            # last checkpoint + open items
  *   node journal.mjs open-spawns <file>            # agents with no report or review yet
  *   node journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V]
+ *   node journal.mjs ask         <file> <init> --question Q [--default D] [--ticket T]
  * Exit: 0 ok · 1 validation/finding error · 2 usage/IO error
  */
 import {
@@ -104,7 +105,17 @@ export const DATA_ENUMS = Object.freeze({
  * material belongs in NOTES.md with a reference here. `validateJournal`
  * reports historical oversizes as warnings only (no retroactive errors).
  */
-export const CAPPED_DATA_KEYS = Object.freeze({ detail: 2000, claim: 2000, proof: 2000 });
+export const CAPPED_DATA_KEYS = Object.freeze({
+  detail: 2000,
+  claim: 2000,
+  proof: 2000,
+  // The ask fields. They reach BOARD.md, board.html and the answer sheet, so
+  // an uncapped one is a document-sized cell in three artefacts at once.
+  question: 2000,
+  recommendation: 2000,
+  default: 2000,
+  answer: 2000,
+});
 
 /**
  * A journal-derived value on its way into a HUMAN-READABLE MESSAGE.
@@ -580,6 +591,55 @@ export function closeSpawn(file, { init, agent, actor = 'conductor', verdict = '
   });
 }
 
+// ------------------------------------------------------- operator asks
+
+/**
+ * An ask is a `gate` whose `kind` IS its id. One kind, one question, forever.
+ *
+ * Anchored on purpose: `fold()` keys gates by kind with last-write-wins, so a
+ * kind that merely CONTAINS `Q-<n>` (`usage-limit-Q-99`) must not raise the
+ * next id — it would leave the true maximum free and the next ask would
+ * overwrite an older question on that Map with nothing objecting.
+ */
+export const ASK_KIND_RE = /^Q-(\d+)$/;
+
+/** Pure: the next free ask id over a journal's own gate kinds. */
+export function nextAskKind(events) {
+  let max = 0;
+  for (const e of events) {
+    if (e?.ev !== 'gate') continue;
+    const m = ASK_KIND_RE.exec(String(e?.data?.kind ?? ''));
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `Q-${max + 1}`;
+}
+
+/**
+ * Raise an operator ask: mint the id and append the gate under ONE lock.
+ *
+ * The id is NOT `data.id` and is not issued by `ID_ISSUED_FOR`: it is the gate
+ * `kind`, so no new event type exists and the closed set stays as it is. Two
+ * agents asking in the same millisecond get two ids because the read, the
+ * mint and the write share this lock; minting outside it gives them one, and
+ * the second question then replaces the first on the fold's kind-keyed Map —
+ * silent loss, in an append-only file that can never be corrected.
+ */
+export function raiseAsk(file, { init, actor = 'conductor', question, recommendation = null, default: dflt = null, ticket = null }) {
+  if (typeof question !== 'string' || question.trim().length === 0) {
+    throw new Error('ask requires a non-empty --question (what is the operator being asked?)');
+  }
+  mkdirSync(dirname(resolve(file)), { recursive: true });
+  return withLock(file, () => {
+    const snapshot = readJournal(file);
+    const data = { kind: nextAskKind(snapshot.events), result: 'WAITING_ON_OPERATOR' };
+    if (ticket != null) data.ticket = ticket;
+    data.question = question;
+    if (recommendation != null) data.recommendation = recommendation;
+    if (dflt != null) data.default = dflt;
+    return appendUnderLock(file, { ev: 'gate', init, actor, data }, snapshot);
+  });
+}
+
 /**
  * Read all events. A truncated (crash-interrupted) FINAL line is discarded
  * and reported via `truncatedTail`; a malformed line anywhere else is a
@@ -753,6 +813,7 @@ const CMD_FLAGS = {
   tail: [],
   'open-spawns': [],
   'close-spawn': ['actor', 'verdict', 'reason'],
+  ask: ['actor', 'ticket', 'question', 'recommendation', 'default'],
 };
 
 /**
@@ -835,6 +896,22 @@ function main() {
         console.log(emit(openSpawns(file), 2));
         return;
       }
+      case 'ask': {
+        const [file, init] = rest;
+        if (!file || !init) throw new UsageError();
+        // a missing --question gets raiseAsk's specific message, not a usage
+        // dump: the flag is the whole content of the command.
+        const written = raiseAsk(file, {
+          init,
+          actor: flags.actor ?? 'conductor',
+          question: flags.question ?? '',
+          recommendation: flags.recommendation ?? null,
+          default: flags.default ?? null,
+          ticket: flags.ticket ?? null,
+        });
+        console.log(emit(written));
+        return;
+      }
       case 'close-spawn': {
         const [file, init, agent] = rest;
         if (!file || !init || !agent) throw new UsageError();
@@ -858,6 +935,7 @@ function main() {
           '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>\n' +
           '       journal.mjs open-spawns <file>\n' +
           '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]\n' +
+          '       journal.mjs ask <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A]\n' +
           '\n' +
           // The `--data` contract varies per event and lived only in a table no
           // command printed. A field run discovered it by rejection, one failed

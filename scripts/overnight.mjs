@@ -58,6 +58,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkStop } from './stop-check.mjs';
 import { readJournal } from './journal.mjs';
+import { GATE_PASS } from './project.mjs';
 import { withKeepAwake } from './keepawake.mjs';
 import { limitsOf } from './schema.mjs';
 import { parse } from './yaml-lite.mjs';
@@ -110,8 +111,9 @@ export function skipReason({ stopped, markerExists, journalEvents, pausedAtIso }
     // Only this pause's gate events count: a gate closed before pausedAt
     // belongs to an earlier cycle and says nothing about the current one.
     if (e?.ev === 'gate' && e?.data?.kind === 'usage-limit' && ts > pausedAt) {
-      const result = String(e?.data?.result ?? '').toLowerCase();
-      gateOpen = !['pass', 'passed', 'ok', 'green', 'approved', 'closed', 'answered'].includes(result);
+      // The pass set is project.mjs's, imported: a copy here would let the
+      // watcher and the projection disagree about whether a gate is closed.
+      gateOpen = !GATE_PASS.has(String(e?.data?.result ?? '').toLowerCase());
     }
     if (e?.ev === 'checkpoint' && ts > pausedAt && e?.data?.phase !== 'usage-limit-pause') laterCheckpoint = true;
   }

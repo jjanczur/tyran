@@ -68,6 +68,11 @@ becomes a one-line change in `tiers:`, not a rewrite. A test asserts that no
 agent or skill file contains a model alias, so the rule is enforced rather
 than merely intended.
 
+The conductor has a row of its own (`deep` under `eco`, `top` otherwise) and it
+is **advisory**: no plugin can change a running session's model, so the row
+records what your config says the coordinator should be running and `tiers.mjs`
+prints that caveat on stderr. Everything else in the table is applied.
+
 The full routing table, the role floors, and how the conductor overrides
 either dial for a single subtask are in [the roster](agents.md#choosing-models).
 

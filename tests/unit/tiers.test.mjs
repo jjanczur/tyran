@@ -10,7 +10,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -60,17 +60,49 @@ test('the default profile puts ordinary work on `work`, not on the expensive tie
   assert.equal(resolveTier('scout', 'balanced'), 'cheap');
 });
 
-test('security review and arbitration cannot be demoted by profile or by risk', () => {
+test('no floored role can be demoted by profile or by risk', () => {
+  // MUTANT: delete an entry from ROLE_FLOOR. `--profile eco --risk low` is
+  // then a one-flag downgrade of the judgements everything downstream trusts —
+  // and, for the conductor, of the session that plans the whole initiative.
   for (const role of Object.keys(ROLE_FLOOR)) {
     for (const profile of PROFILES) {
       for (const risk of ['low', 'normal', 'high']) {
-        assert.equal(resolveTier(role, profile, risk), ROLE_FLOOR[role], `${role}/${profile}/${risk}`);
+        assert.ok(
+          TIER_ORDER.indexOf(resolveTier(role, profile, risk)) >= TIER_ORDER.indexOf(ROLE_FLOOR[role]),
+          `${role}/${profile}/${risk} fell below its ${ROLE_FLOOR[role]} floor`,
+        );
+      }
+    }
+  }
+  // the two that are pinned exactly, in every combination
+  for (const role of ['security-review', 'arbitration']) {
+    for (const profile of PROFILES) {
+      for (const risk of ['low', 'normal', 'high']) {
+        assert.equal(resolveTier(role, profile, risk), 'top', `${role}/${profile}/${risk}`);
       }
     }
   }
   // And the floor is not merely the table agreeing with itself: a role whose
   // table entry sits BELOW its floor still resolves to the floor.
   assert.equal(TIER_ORDER.indexOf(ROLE_FLOOR['security-review']), TIER_ORDER.length - 1);
+  assert.equal(resolveTier('conductor', 'eco', 'low'), 'deep', 'the conductor floor holds under the cheapest setting');
+});
+
+test('the conductor is a routing row that says out loud it cannot be enforced', () => {
+  // MUTANT: print the advisory notice on stdout. The skill parses stdout for
+  // the resolved value, so a sentence there becomes a model alias — and the
+  // one place model names may live starts handing out prose.
+  assert.deepEqual(ROLE_TIERS.conductor, { eco: 'deep', balanced: 'top', full: 'top' });
+  const dir = repoWithConfig();
+  const run = spawnSync(process.execPath, [SCRIPT, '--role', 'conductor'], { encoding: 'utf8', cwd: dir });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), 'fable', 'stdout stays the resolved value and nothing else');
+  assert.match(run.stderr, /`conductor` is ADVISORY/);
+  assert.match(run.stderr, /no plugin can change its model mid-flight/);
+  assert.doesNotMatch(run.stdout, /ADVISORY/);
+  // no other role pays for the notice
+  const reviewer = spawnSync(process.execPath, [SCRIPT, '--role', 'reviewer'], { encoding: 'utf8', cwd: dir });
+  assert.doesNotMatch(reviewer.stderr, /ADVISORY/);
 });
 
 test('risk shifts by exactly one tier and clamps at both ends', () => {

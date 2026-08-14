@@ -8,7 +8,8 @@
 
 | Question | Recommendation | Default | Ticket | Gate | Since |
 |---|---|---|---|---|---|
-| flat fee or per-seat on the team plan? | per-seat | per-seat ships Friday if no answer | T-10 | pricing-copy | 2026-07-26T09:41:55.000Z |
+| flat fee or per-seat on the team plan? | per-seat | per-seat ships Friday if no answer | T-10 | Q-1 | 2026-07-26T09:41:55.000Z |
+| en dash or em dash in headings? | &mdash; | &mdash; | &mdash; | Q-2 | 2026-07-26T09:41:57.000Z |
 
 ## Agents
 
@@ -16,17 +17,17 @@
 |---|---|---|---|---|---|
 | impl-2 | implementer | T-2 | blocked | waiting on the worktree lease | 2026-07-26T09:41:40.000Z |
 
-## waiting-operator (0)
+## waiting-operator (1)
 
-_none_
+- `T-10` — projections
 
 ## paused-limit (0)
 
 _none_
 
-## blocked (1)
+## blocked (0)
 
-- `T-2` — schemas &#124; with a pipe and &#96;backticks&#96; — impl-2 _(waiting on the worktree lease)_
+_none_
 
 ## changes-requested (0)
 
@@ -50,7 +51,7 @@ _none_
 
 ## parked (1)
 
-- `T-10` — projections _(pricing question open)_
+- `T-2` — schemas &#124; with a pipe and &#96;backticks&#96; — impl-2 _(worktree lease held by another window)_
 
 ## done (1)
 

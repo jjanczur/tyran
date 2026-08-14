@@ -16,9 +16,11 @@ import { fileURLToPath } from 'node:url';
 
 import { OUTPUT_LIMIT } from '../../hooks/scripts/hook-io.mjs';
 import {
+  CONDUCTOR_RELPATH,
   CONTEXT_BUDGET,
   DEADLINE_MS,
   buildContext,
+  recordConductor,
   fitBudget,
   hardwareLine,
   hookHealth,
@@ -147,10 +149,65 @@ test('the summary carries checkpoint, resume steps, open gates, leases and agent
   assert.match(context, /1\. re-read STATE\.md/);
   assert.match(context, /3\. then start T-10/);
   assert.doesNotMatch(context, /4\. /, 'only the first three steps belong in a resume summary');
-  assert.match(context, /Open gates \(2\):[\s\S]*plan-approval/);
+  assert.match(context, /Open gates \(3\):[\s\S]*plan-approval/);
   assert.match(context, /Open leases \(1\)[\s\S]*worktree:tyran-s2 held by impl-2/);
   assert.match(context, /still believes are working \(1\):[\s\S]*impl-2 \(implementer\)/);
   assert.match(context, /cores · \d+ GiB RAM/);
+});
+
+test('an open gate carries its QUESTION into the resumed session', () => {
+  // MUTANT: drop the `— question` clause. The conductor then reads that it is
+  // waiting on `Q-1` and not what `Q-1` asked, so the question is re-litigated
+  // after every compaction — which is the whole reason it is in the journal.
+  const dir = tempRepo();
+  const context = renderContext({
+    repoRoot: dir,
+    initiatives: readInitiatives(join(dir, '.tyran')),
+    doctor: { available: true, counts: { error: 0, warning: 0, info: 0 }, findings: [] },
+    hardware: hardwareLine(),
+    nowIso: '2026-07-26T10:00:00.000Z',
+  });
+  assert.match(context, /Q-1: WAITING_ON_OPERATOR — flat fee or per-seat on the team plan\?/);
+  assert.match(context, /plan-approval: open \(2026-07-26T09:35:00\.000Z\)/, 'a gate with no question keeps its old shape');
+});
+
+test('recording the session id can never fail the session, and never records garbage', () => {
+  // MUTANT 1: remove the try/catch. SessionStart has no refusal channel
+  // (ADR-22), so a probe that throws over a courtesy file costs the user the
+  // session it was meant to help.
+  // MUTANT 2: drop SESSION_ID_RE. The value becomes an argument of a
+  // `claude --resume` command that `answer.mjs` prints and can spawn.
+  // MUTANT 3: add `pid: process.pid` back to the record. It is the pid of
+  // THIS hook process, which exits within a second — dead before any reader
+  // sees it, and a stranger's once the OS recycles the number. A consumer
+  // reading it as "the conductor is live" is then wrong in both directions.
+  // The key set is asserted whole, in both directions, because the defect is
+  // recording a field whose meaning this process cannot defend.
+  const dir = tempRepo();
+  const stateDir = join(dir, '.tyran');
+  assert.equal(recordConductor(stateDir, { session_id: 'a'.repeat(20), cwd: dir }), true);
+  const doc = JSON.parse(readFileSync(join(stateDir, CONDUCTOR_RELPATH), 'utf8'));
+  assert.deepEqual(Object.keys(doc).sort(), ['cwd', 'session_id', 'started_at']);
+  assert.equal(doc.session_id, 'a'.repeat(20));
+  assert.equal(doc.cwd, dir);
+  assert.ok(Number.isFinite(Date.parse(doc.started_at)));
+
+  for (const bad of ['; rm -rf /', '', 'short', null, undefined, 42, 'x'.repeat(129)]) {
+    const before = readFileSync(join(stateDir, CONDUCTOR_RELPATH), 'utf8');
+    assert.equal(recordConductor(stateDir, { session_id: bad }), false, JSON.stringify(bad));
+    assert.equal(readFileSync(join(stateDir, CONDUCTOR_RELPATH), 'utf8'), before, 'a bad id must not overwrite a good one');
+  }
+
+  // an unwritable target: the write fails, the probe does not
+  const blocked = tempRepo();
+  mkdirSync(join(blocked, '.tyran', CONDUCTOR_RELPATH, 'in-the-way'), { recursive: true });
+  assert.equal(recordConductor(join(blocked, '.tyran'), { session_id: 'b'.repeat(20) }), false);
+  const out = runScript(
+    JSON.stringify({ hook_event_name: 'SessionStart', source: 'resume', session_id: 'b'.repeat(20), cwd: blocked }),
+    blocked,
+  );
+  assert.ok(out.length > 0, 'the probe still emits its summary');
+  assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /Tyran state/);
 });
 
 test('no initiatives means no injection at all, not an empty heading', () => {

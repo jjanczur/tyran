@@ -595,6 +595,12 @@ export const STATE_GITIGNORE_LINES = Object.freeze([
   'state/resume.json',
   'state/resume.log',
   'state/usage.json',
+  // The ask queue's two runtime files: a session id and a pid that mean
+  // nothing in another clone, and a sheet whose answers already live in the
+  // journal — committing either makes every parallel merge conflict on state
+  // that was stale the moment it was written.
+  'state/conductor.json',
+  'state/ANSWERS.md',
 ]);
 const STATE_GITIGNORE_BODY =
   '# Runtime files, never history. Leases record who holds a worktree or a\n' +

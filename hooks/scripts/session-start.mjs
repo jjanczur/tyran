@@ -17,13 +17,14 @@
  * worse bug than the missing summary.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { checkHooks } from '../../scripts/hooks-check.mjs';
 import { readJournal } from '../../scripts/journal.mjs';
+import { SESSION_ID_RE } from '../../scripts/overnight.mjs';
 import { fold, inlinePlain, progressLine } from '../../scripts/project.mjs';
 import { field, main, runProbe } from './hook-io.mjs';
 
@@ -206,7 +207,19 @@ export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso,
     const openGates = state.openGates ?? [];
     if (openGates.length > 0) {
       lines.push(`- Open gates (${openGates.length}):`);
-      lines.push(...rows(openGates, (g) => `  - ${inlinePlain(g.kind)}: ${inlinePlain(g.result ?? 'open')} (${inlinePlain(g.ts)})`));
+      // The QUESTION, not only the gate's name: an ask is a gate whose kind is
+      // its id, and `Q-7: WAITING_ON_OPERATOR` tells a resumed conductor that
+      // it is waiting without telling it what it asked — which is a
+      // re-litigation after every compaction.
+      lines.push(
+        ...rows(
+          openGates,
+          (g) =>
+            `  - ${inlinePlain(g.kind)}: ${inlinePlain(g.result ?? 'open')}` +
+            (g.question ? ` — ${inlinePlain(g.question)}` : '') +
+            ` (${inlinePlain(g.ts)})`,
+        ),
+      );
     }
 
     const leases = [...(state.leases?.values() ?? [])];
@@ -335,6 +348,59 @@ export function renderPauseNotice(marker, nowIso) {
   );
 }
 
+/** Where the resumable session id is recorded, relative to `.tyran`. */
+export const CONDUCTOR_RELPATH = join('state', 'conductor.json');
+
+/**
+ * Record this session so `answer.mjs apply --resume` can put the swarm back on
+ * it. Until this existed a resumable session id was written ONLY by a
+ * usage-limit pause or by the operator-installed statusline, so a repo with
+ * neither had no way to be resumed at all.
+ *
+ * THE CONTRACT, because a reader will otherwise infer more than this process
+ * can vouch for. The file carries exactly three fields:
+ *
+ * - `session_id` — shape-checked against SESSION_ID_RE before it is written,
+ *   because it becomes an argument of a `claude --resume` command and this
+ *   file is the only thing vouching for it;
+ * - `started_at` — the moment of THIS `SessionStart`, which fires on
+ *   `startup`, `resume` and `compact` (hooks.json's matcher), so it is the
+ *   last time the session announced itself, not the time it began;
+ * - `cwd` — the repo root this probe resolved.
+ *
+ * There is deliberately NO liveness signal, and no pid. The only pid a hook
+ * can observe is its OWN: this process is spawned per event and exits within
+ * a second, so a recorded pid is dead before anyone reads it and, once the OS
+ * recycles the number, names a stranger. A consumer treating it as "the
+ * conductor is alive" is wrong in both directions — never true while the
+ * session runs, sometimes true after it is gone. Nothing else in a
+ * `SessionStart` payload has been MEASURED to track the session's lifetime
+ * (see hooks/HOOK-CONTRACT-MEASURED.md), so this file says only that the
+ * session id existed at `started_at`, and a consumer may conclude only that.
+ *
+ * Best-effort, and inside its own try/catch: `SessionStart` has no way to
+ * refuse anything (ADR-22), so a probe that threw here would cost the user
+ * their session to report that a convenience file could not be written.
+ * `.tyran/state/**` is the AUTO policy class already, so no policy moves.
+ */
+export function recordConductor(stateDir, input, { now = new Date(), cwd = null } = {}) {
+  try {
+    const sessionId = field(input, 'session_id');
+    if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return false;
+    const target = join(stateDir, CONDUCTOR_RELPATH);
+    mkdirSync(dirname(target), { recursive: true });
+    const doc = { session_id: sessionId, started_at: now.toISOString(), cwd: cwd ?? dirname(stateDir) };
+    // The pid names the TEMP file only — two hook processes writing at once
+    // must not collide on one name. It is never part of the record.
+    const temp = join(dirname(target), `.conductor-${process.pid}.tmp`);
+    writeFileSync(temp, JSON.stringify(doc, null, 2) + '\n');
+    renameSync(temp, target);
+    return true;
+  } catch {
+    return false; // a probe never fails a session over a courtesy file
+  }
+}
+
 /** The pause marker, if one is active. Garbage reads as absent. */
 export function readPauseMarker(stateDir) {
   try {
@@ -357,6 +423,7 @@ export async function buildContext({ input, now = new Date(), env = process.env,
   if (repoRoot === null) return fitBudget(warning);
   const stateDir = join(repoRoot, '.tyran');
   if (!existsSync(stateDir)) return fitBudget(warning); // not a Tyran repo — but a dead gate still counts
+  recordConductor(stateDir, input, { now, cwd: repoRoot });
   const nowIso = now.toISOString();
   return fitBudget(
     warning +

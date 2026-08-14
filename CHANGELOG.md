@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.1.15 — 2026-08-14
+
+### Fifteen questions, ten minutes, and the swarm moves
+
+An agent that hits a product decision no longer stops and waits for you. It
+raises the question — `journal.mjs ask`, one command, which mints the id under
+the journal's write lock so two agents asking at the same moment get two
+questions rather than one — states what it recommends and what should ship if
+nobody ever answers, and takes the next ticket. The question is a `gate` whose
+`kind` IS its id, `Q-<n>`: the closed event set stays at 17, the board's
+waiting-on-you queue already rendered it, and `answered` was already a pass
+result. What was missing was an identity and a way in.
+
+The way in is a text file. `tyran answer render` writes `.tyran/state/ANSWERS.md`
+— every open question across every initiative, the ones with no recorded default
+first, because those are the only ones where saying nothing has no safe outcome.
+You type under `answer:`. **Blank accepts the recorded default**, verbatim, and
+still records it as a decision; `-` leaves it for next time; anything else is your
+answer in your own words. `tyran answer apply` folds them back as `decision` +
+`gate result: answered` pairs — decision first, so a crash leaves a visible orphan
+decision rather than a closed question whose answer was never written down — then
+re-renders every projection and the board. It reads the question, the default and
+the ticket back out of the journal, never out of the sheet, and it is
+all-or-nothing: one unparseable block and nothing at all is appended, with the
+line number.
+
+Answering a question no longer needs the conductor to be awake. `SessionStart`
+records the session id in `.tyran/state/conductor.json`, so `apply --resume` can
+put the swarm back on it — and refuses while that session is still alive, because
+two conductors on one journal is a hazard this repo has already paid for once.
+
+One correction found while building it. Parking an asked ticket **hid** it: the
+board checks a `ticket.status` override before the ask, so our own demo fixture
+showed `waiting-operator (0)` with a question open — the fixture is corrected and
+the skill now forbids the override.
+
+Also: `question`, `recommendation`, `default` and `answer` are capped at 2000
+codepoints (rejected, never truncated — historical oversizes stay warnings);
+`STATE.md`'s open-gates table and the SessionStart probe now carry the question
+text, so a resumed conductor sees *what* it asked and not merely that it is
+waiting; doctor gains `ask-open` (info) and `ask-stale` (warning, 72 h); the gate
+pass set has one spelling again, exported from `project.mjs` and imported by
+`overnight.mjs` instead of hand-copied; `tiers` gains an advisory `conductor`
+role with a `deep` floor, so the coordinator's model is named in the one file
+where model names may live — and says on stderr that no plugin can change your
+own session's model.
+
 ## 0.1.14 — 2026-08-14
 
 ### The repository remembers what went wrong — and eventually writes it into law

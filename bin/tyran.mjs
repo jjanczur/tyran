@@ -88,6 +88,10 @@ export const COMMANDS = {
     'board.mjs',
     'Render the cross-initiative kanban board — BOARD.md, board.json and the board.html dashboard — from the journals under .tyran/state/.',
   ],
+  answer: [
+    'answer.mjs',
+    'Write the sheet of questions waiting on you, then fold your answers back into the journal.',
+  ],
   'stop-check': [
     'stop-check.mjs',
     'Check the .tyran/STOP operator brake that halts a running initiative before its next spawn or merge.',

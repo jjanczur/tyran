@@ -10,12 +10,20 @@
   "paused": null,
   "asks": [
     {
-      "kind": "pricing-copy",
+      "kind": "Q-1",
       "ticket": "T-10",
       "question": "flat fee or per-seat on the team plan?",
       "recommendation": "per-seat",
       "default": "per-seat ships Friday if no answer",
       "since": "2026-07-26T09:41:55.000Z"
+    },
+    {
+      "kind": "Q-2",
+      "ticket": null,
+      "question": "en dash or em dash in headings?",
+      "recommendation": null,
+      "default": null,
+      "since": "2026-07-26T09:41:57.000Z"
     }
   ],
   "agents": [
@@ -30,19 +38,17 @@
     }
   ],
   "lanes": {
-    "waiting-operator": [],
-    "paused-limit": [],
-    "blocked": [
+    "waiting-operator": [
       {
-        "id": "T-2",
-        "title": "schemas | with a pipe and `backticks`",
-        "agents": [
-          "impl-2"
-        ],
-        "since": "2026-07-26T09:36:01.000Z",
-        "annotation": "waiting on the worktree lease"
+        "id": "T-10",
+        "title": "projections",
+        "agents": [],
+        "since": "2026-07-26T09:02:02.000Z",
+        "annotation": null
       }
     ],
+    "paused-limit": [],
+    "blocked": [],
     "changes-requested": [],
     "in-review": [],
     "in-progress": [],
@@ -50,11 +56,13 @@
     "backlog": [],
     "parked": [
       {
-        "id": "T-10",
-        "title": "projections",
-        "agents": [],
+        "id": "T-2",
+        "title": "schemas | with a pipe and `backticks`",
+        "agents": [
+          "impl-2"
+        ],
         "since": "2026-07-26T09:41:50.000Z",
-        "annotation": "pricing question open"
+        "annotation": "worktree lease held by another window"
       }
     ],
     "done": [

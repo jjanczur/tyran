@@ -6,7 +6,7 @@ import { FileTree } from '@astrojs/starlight/components';
 import Provenance from '../../components/Provenance.astro';
 
 <Provenance>
-`scripts/journal.mjs` · 62 unit tests
+`scripts/journal.mjs` · 66 unit tests
 </Provenance>
 
 This page is the schema contract; extending the event set is a reviewed core
@@ -77,9 +77,15 @@ contents are moved, one initiative directory at a time, under `state/`.
 Two value rules ride the schema, enforced at append time: the `progress.state`
 and `ticket.status.column` sets are CLOSED (an unknown value is rejected
 naming the whole set, exactly like an unknown `ev`), and the free-text keys
-`detail`, `claim` and `proof` are capped at 2 000 codepoints — rejected, never
-truncated; long material belongs in `NOTES.md` with a reference here.
-`validateJournal` reports historical oversizes as warnings only.
+`detail`, `claim`, `proof`, `question`, `recommendation`, `default` and
+`answer` are capped at 2 000 codepoints — rejected, never truncated; long
+material belongs in `NOTES.md` with a reference here. `validateJournal`
+reports historical oversizes as warnings only, so a journal written before the
+cap existed never turns red retroactively.
+
+A `gate` whose `kind` matches `Q-<n>` is an **operator ask** — see below. That
+is a convention, not a validated shape: a legacy ask under a bare kind still
+renders and still closes.
 
 
 The order those types arrive in over one initiative, as the table above
@@ -258,4 +264,29 @@ node scripts/journal.mjs next-id     <file> <prefix>
 node scripts/journal.mjs tail        <file>
 node scripts/journal.mjs open-spawns <file>        # agents with no report or review yet
 node scripts/journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]
+node scripts/journal.mjs ask         <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A]
 ```
+
+## Operator asks: a gate whose kind is its id
+
+An ask is not a new event type — the closed set above stays at 17. It is a
+`gate` with `result: WAITING_ON_OPERATOR` whose `kind` **is** its id, `Q-<n>`,
+plus `question`, `recommendation`, `default` and `ticket` in `data`:
+
+```bash
+node scripts/journal.mjs ask .tyran/state/payments/journal.jsonl payments \
+  --actor impl-t10 --ticket T-10 \
+  --question 'Flat fee or per-seat on the team plan?' \
+  --recommendation 'per-seat' \
+  --default 'per-seat ships Friday if no answer'
+```
+
+The kind is the id because the fold already keys gates by kind, last write
+wins: one kind is one question, and the closing `gate` with `result: answered`
+is the same kind again. `ask` mints the next free `Q-<n>` **inside** the write
+lock, so two agents asking in the same millisecond get two ids — a number
+computed outside the lock would give them one, and the second question would
+replace the first with nothing objecting anywhere.
+
+The operator answers through [the sheet](../board/#answering), which appends
+the `decision` and the closing `gate` for each one.

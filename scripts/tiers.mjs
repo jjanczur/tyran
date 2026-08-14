@@ -91,6 +91,12 @@ export const ROLE_TIERS = Object.freeze({
   acceptance: { eco: 'deep', balanced: 'top', full: 'top' },
   retro: { eco: 'work', balanced: 'work', full: 'deep' },
   bookkeeping: { eco: 'cheap', balanced: 'cheap', full: 'cheap' },
+  // ADVISORY. The conductor is the operator's own session, and no plugin can
+  // change a running session's model — so this row records the choice in the
+  // one file where model names may live and the CLI says out loud, on stderr,
+  // that it cannot enforce it. A row that silently did nothing would be worse
+  // than no row: it would read as configuration.
+  conductor: { eco: 'deep', balanced: 'top', full: 'top' },
 });
 
 /**
@@ -104,6 +110,9 @@ export const ROLE_TIERS = Object.freeze({
 export const ROLE_FLOOR = Object.freeze({
   'security-review': 'top',
   arbitration: 'top',
+  // One weak coordinator spends a whole team's budget on the wrong plan, and
+  // the floor is what `--profile eco --risk low` cannot shift out of.
+  conductor: 'deep',
 });
 
 export const ROLES = Object.freeze(Object.keys(ROLE_TIERS));
@@ -284,6 +293,14 @@ function main() {
       console.error(
         `tiers: override "${escapeInvisible(String(asked))}" RAISED to ${resolved.tier}/${resolved.effort} — ` +
           `"${escapeInvisible(role)}" has a floor that cannot be lowered`,
+      );
+    }
+    // STDERR, like every other note here: stdout is the resolved value and the
+    // skill parses it.
+    if (role === 'conductor') {
+      console.error(
+        'tiers: `conductor` is ADVISORY. The conductor is your own session and no plugin can ' +
+          'change its model mid-flight — this is the tier your config says it should be running.',
       );
     }
     console.error(`tiers: ${role} @ ${profile}/${risk} -> ${resolved.tier} · effort ${resolved.effort}`);

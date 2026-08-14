@@ -42,12 +42,36 @@ shell in every mode, which is a deliberate narrowing rather than a consequence �
 and it is the one file from which every gate is switched off at once. One line
 naming a readable path *and* a secret is still refused for the secret.
 
+That last sentence needed a second check to stay true, and review found it out.
+The exemption was decided on the **finding list**, which is computed from a
+*stripped* copy of the command: `stripMessageArguments` removes a message-bearing
+flag together with its argument, and non-literal tokens are dropped after that.
+`-t` is `git commit --template` *and* a legal flag of `diff` and `cat`, so
+`diff -t .env hooks/scripts/policy-gate.mjs` left a finding list naming only the
+readable path, read as "read-only command on a readable path", and was exempted —
+really publishing the file. Four shapes were measured deny-on-0.1.15 →
+pass-before-the-fix: `diff -t SECRET FILE`, `grep --file=SECRET FILE`,
+`grep -m SECRET FILE`, and `diff ~/SECRET FILE`, the last because a leading `~`
+makes the token non-literal and it is dropped entirely. The exemption is now
+refused when any word of the **raw** command is credential-shaped, tested with
+the same `SECRET_READ_RULES` the findings use, and the refusal names that word
+rather than offering a rewrite that cannot help. This is the invariant being
+repaired, not a new capability: `diff -t .env src/app.js` publishes the same
+bytes and always did, because it names no protected path at all. One false
+refusal comes with it, in the safe direction — `git log --grep=.env -- FILE`
+loses the exemption over a word in a search pattern.
+
 The residual floor is stated in the refusal text and in `docs/policy-gate.md`
 rather than implied: matching flags bounds what a command *says*, not what the
 program *does*. An allowed reader can still be pointed at another program by
 configuration this gate never reads — a `diff.external` driver or a pager in git
 config, a `NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`.
-It is now the fifth entry in `SHELL_DECLARED_MISSES`.
+That is the fifth entry in `SHELL_DECLARED_MISSES`. The sixth is one step
+earlier: the program table is keyed on the **basename**, which is what makes
+`/bin/cat` and `cat` one entry and also makes a repo-writable `src/cat` an
+allowed reader. It is declared rather than closed, because closing it would
+close nothing — a script with the path already inside it needs no allowed name
+at all, which is the third entry.
 
 ## 0.1.15 — 2026-08-14
 

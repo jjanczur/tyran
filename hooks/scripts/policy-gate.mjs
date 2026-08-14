@@ -1566,7 +1566,10 @@ export function readOnlySegment(tokens) {
   if (tokens.length === 0) return false;
   // `basename` for the same reason the lexer uses it: `/usr/bin/cat` and `cat`
   // are one program. Case-folded because a case-insensitive filesystem will
-  // launch `CAT` from the same inode.
+  // launch `CAT` from the same inode. What that costs is the last entry of
+  // SHELL_DECLARED_MISSES: a repo-writable `src/cat` is an allowed reader by
+  // name. Stated there rather than narrowed here — see the entry for why a
+  // narrowing would close nothing.
   const spec = READ_ONLY_PROGRAMS[basename(tokens[0]).toLowerCase()];
   if (spec === undefined) return false;
   let rest = tokens.slice(1);
@@ -1603,16 +1606,76 @@ export function isReadOnlyCommand(command) {
 }
 
 /**
+ * Credential-shaped words of the RAW command text, as `{token, detail}`.
+ *
+ * ## Why the finding list is not enough to decide the exemption
+ *
+ * `shellPathFindings` reads `commandTokens`, and `commandTokens` runs
+ * `stripMessageArguments` FIRST — which removes a message-bearing flag together
+ * with its argument. `-t` is in `MESSAGE_FLAGS` (git's `--template`) and is also
+ * a legal flag of `diff` and `cat`, so `diff -t SECRET READABLE` produced a
+ * finding list naming only the readable path, `isReadOnlyCommand` agreed on the
+ * raw text, and the line was EXEMPTED. Measured deny-on-0.1.15 -> pass, in four
+ * shapes: `diff -t S R`, `grep --file=S R`, `grep -m S R`, and `diff ~/S R` —
+ * the last for a second reason, that `~` makes the token fail `isLiteralPath`
+ * and `commandTokens` drops it entirely.
+ *
+ * That is a broken INVARIANT rather than a new capability: `diff -t S src/app.js`
+ * publishes the same bytes and always did, because it names no protected path
+ * at all. But the exemption's stated claim is that it widens what may be done
+ * to paths `Read` already hands over and NOTHING else, and a line that dumps a
+ * credential is not that.
+ *
+ * ## What this reads
+ *
+ * The raw text, with none of the three filters that lost the word: no message
+ * stripping, no `isLiteralPath`, and the right-hand side of an attached `=`
+ * tested as well as the whole word, so `--file=.env` cannot hide behind its own
+ * flag. The RULES are `secretReadRules` — the same matcher the credential
+ * findings use, asked a second question rather than spelled a second time
+ * (ADR-21).
+ *
+ * One false refusal is declared with it, and it is the direction this gate errs
+ * in: a credential-SHAPED word that is not a path loses the exemption, so
+ * `git log --grep=.env -- hooks/x.mjs` is refused for a word in a search
+ * pattern and costs one `Read` call. A commit message cannot reach here at all
+ * — `git commit -m "fix .env loading"` names no protected path, so there is no
+ * finding to exempt and this function is never called.
+ */
+export function rawCredentialWords(command) {
+  const out = [];
+  for (const segment of splitSegments(String(command))) {
+    for (const token of tokensOf(segment)) {
+      const at = token.indexOf('=');
+      for (const word of at === -1 ? [token] : [token, token.slice(at + 1)]) {
+        if (word === '') continue;
+        const ids = secretReadRules(word);
+        if (ids.length > 0) {
+          out.push({ token, detail: ids.join(', ') });
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * True when the path refusal may be lifted for this command.
  *
  * Every finding must be in the readable class — one credential-shaped path, or
  * one `.claude/settings.json`, and the whole line is refused however read-only
  * the rest of it is. That ordering is the point: the exemption widens what may
  * be done to paths the `Read` tool already hands over, and nothing else.
+ *
+ * The last clause is checked on the RAW text and not only on the findings,
+ * because the findings are computed from a STRIPPED copy of the command and a
+ * credential can be invisible in it. See `rawCredentialWords`.
  */
 export function shellReadExempt(findings, command) {
   if (findings.length === 0) return false;
   if (!findings.every((f) => f.kind === 'kernel' && SHELL_READABLE_GLOBS.includes(f.detail))) return false;
+  if (rawCredentialWords(command).length > 0) return false;
   return isReadOnlyCommand(command);
 }
 
@@ -1631,6 +1694,14 @@ export const SHELL_DECLARED_MISSES = Object.freeze([
   'a program an allowed reader is CONFIGURED to launch — a `diff.external` driver or a pager ' +
     'in git config, a `NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`. ' +
     'READ_ONLY_PROGRAMS matches the command TEXT, and the environment is not in it',
+  // The same miss one step earlier: not what the reader launches, but which
+  // reader the name picks out. Split from the entry above because that one ends
+  // "the environment is not in it" and this program IS in the command text —
+  // the gate reads the word and still gets the wrong program.
+  'a DIFFERENT program with an allowed one\'s name. The table is keyed on the BASENAME, so ' +
+    '`/bin/cat` and `cat` are one entry — and so is a repo-writable `src/cat`, or a bare `cat` ' +
+    'resolved from a PATH entry the repository owns. Closing it would close nothing: a script ' +
+    'with the path already inside it needs no allowed name at all, which is miss 3',
 ]);
 
 /** Every literal token of a command, with message-flag arguments skipped. */
@@ -1664,25 +1735,34 @@ export function shellPathFindings(command, startDir, root) {
 }
 
 /** The refusal for a protected path named in a shell command. */
-function refuseShellPaths(findings) {
+function refuseShellPaths(findings, command = '') {
   const credentials = findings.filter((f) => f.kind === 'credential');
   const kernel = findings.filter((f) => f.kind === 'kernel');
+  // The credential the finding list never saw, because it sat where a message
+  // flag's argument would be or behind a `~`. Computed only when no credential
+  // finding already names one, so the same path is not billed twice — and named
+  // out loud, because otherwise this refusal would offer the "rewrite it as a
+  // read-only command" way forward for a line whose problem is the secret in it.
+  // A refusal that states the wrong reason is worse than one that states none.
+  const hidden = credentials.length === 0 ? rawCredentialWords(command) : [];
   // True when the PATHS were all in the readable class, so the command itself
   // is the only reason this is a refusal. Worth saying: the reader is one
   // rewrite away from an allowed call, and a refusal with no reachable way
   // forward produces an agent that looks for a way around (ADR-19).
   const commandWasTheProblem =
-    credentials.length === 0 && kernel.every((f) => SHELL_READABLE_GLOBS.includes(f.detail));
+    credentials.length === 0 &&
+    hidden.length === 0 &&
+    kernel.every((f) => SHELL_READABLE_GLOBS.includes(f.detail));
   const lines = [
     'tyran policy-gate: refused. This command names a path this gate protects.',
-    ...credentials.map(
+    ...[...credentials, ...hidden].map(
       (f) => `  - ${JSON.stringify(shortPath(f.token))} is credential-shaped (${safePolicyText(f.detail)})`,
     ),
     ...kernel.map(
       (f) => `  - ${JSON.stringify(shortPath(f.token))} is under the protected path \`${safePolicyText(f.detail)}\``,
     ),
   ];
-  if (credentials.length > 0) {
+  if (credentials.length + hidden.length > 0) {
     lines.push(
       '',
       'A shell command that names a credential file publishes its bytes whatever the program is: ' +
@@ -1754,7 +1834,7 @@ async function decideBash({ input, toolInput, root, runner, budget }) {
   // The exemption SKIPS this refusal; it does not return PASS. A `git log` that
   // names a protected path still travels the deployment class and every other
   // check below, exactly as `git log` on any other path does.
-  if (findings.length > 0 && !shellReadExempt(findings, command)) return refuseShellPaths(findings);
+  if (findings.length > 0 && !shellReadExempt(findings, command)) return refuseShellPaths(findings, command);
 
   const plan = planCommand(command, startDir);
   const pushes = plan.targets.filter((t) => t.scanPush === true && Array.isArray(t.pushArgv));

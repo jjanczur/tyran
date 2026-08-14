@@ -62,6 +62,7 @@ import {
   pathTargets,
   protectedGlobFor,
   quoteRule,
+  rawCredentialWords,
   readOnlyFlag,
   readOnlySegment,
   readPush,
@@ -1006,10 +1007,23 @@ for (const row of READ_ONLY_SHELL_MATRIX) {
     });
 
     test(`shell-read: ${row.name} · the SAME command on a secret -> deny`, async () => {
-      // Mutation killed: dropping `f.kind === 'kernel'` from shellReadExempt,
-      // i.e. applying the relaxation to the secrets class. Every row here
-      // turns green under that mutant and the gate loses the one rule it was
-      // built for.
+      // Mutation killed: extending the relaxation to the CREDENTIAL class, i.e.
+      //
+      //   findings.every((f) => f.kind === 'credential'
+      //                         || SHELL_READABLE_GLOBS.includes(f.detail))
+      //
+      // with the `rawCredentialWords` clause dropped alongside it. Measured:
+      // 20 of 234 tests fail, 12 of them this row, and the gate loses the one
+      // rule it was built for.
+      //
+      // Explicitly NOT killed, because this comment claimed it until review
+      // measured otherwise: dropping `f.kind === 'kernel'` on its own leaves
+      // the suite fully green (231/231 when that was written, 234/234 now). A
+      // credential finding's `detail` is a rule-id list — `dotenv`,
+      // `ssh-directory` — never a glob, so `SHELL_READABLE_GLOBS.includes(
+      // f.detail)` already excludes it without any help. The `kind` clause is
+      // belt-and-braces: kept because it states that the two classes never
+      // merge, not because it is the check that holds the line.
       const root = adopted();
       assert.equal(await shellVerdict(row.reads.replaceAll('P', SECRET_PATH), root), 'deny');
     });
@@ -1176,6 +1190,74 @@ test('shell-read: one credential-shaped token refuses the whole line', async () 
   }
 });
 
+test('shell-read: a credential the finding list never SAW refuses the line too', async () => {
+  // Mutation killed: dropping the `rawCredentialWords(command)` clause from
+  // shellReadExempt, i.e. deciding the exemption on the finding list alone.
+  //
+  // The finding list comes from `commandTokens`, which runs
+  // `stripMessageArguments` FIRST and then keeps only `isLiteralPath` tokens.
+  // Both filters can delete the credential, and what is left reads as "one
+  // readable kernel path, under a read-only command" — so the line is
+  // EXEMPTED. Every row below denied under the 0.1.15 rule and PASSED on this
+  // branch before the clause existed, really publishing the file.
+  const root = adopted();
+  for (const command of [
+    // `-t` is in MESSAGE_FLAGS (git's `--template`) and is ALSO a legal flag of
+    // `diff` and `cat`, so the strip removes `-t` together with the path after
+    // it while `isReadOnlyCommand`, reading the raw text, sees an allowed flag.
+    `diff -t ${SECRET_PATH} ${READABLE_PATH}`,
+    `cat -t .aws/credentials ${READABLE_PATH}`,
+    // `--file` is grep's pattern-file flag and a MESSAGE_FLAG (`git commit
+    // --file`); the strip takes the whole `--file=PATH` word with it.
+    `grep --file=/tmp/gate/${SECRET_PATH} ${READABLE_PATH}`,
+    `grep --file=secrets/id_rsa ${READABLE_PATH}`,
+    // `-m` is grep's `--max-count` and MESSAGE_FLAGS has it for `git commit -m`.
+    `grep -m ${SECRET_PATH} ${READABLE_PATH}`,
+    // No message flag at all: a leading `~` fails `isLiteralPath`, so
+    // `commandTokens` drops the token and no finding is ever produced for it.
+    `diff ~/${SECRET_PATH} ${READABLE_PATH}`,
+    `diff ~/.ssh/id_rsa ${READABLE_PATH}`,
+  ]) {
+    assert.equal(await shellVerdict(command, root), 'deny', command);
+  }
+});
+
+test('shell-read: the hidden credential is what the refusal NAMES', async () => {
+  // Mutation killed: closing the hole in `shellReadExempt` alone and leaving
+  // `refuseShellPaths(findings)` to word it. The line would then be refused for
+  // the right reason and told the wrong one — "these paths are READABLE from a
+  // shell, so what was refused is this COMMAND" — which offers a rewrite that
+  // cannot help, and a refusal that states the wrong reason is worse than one
+  // that states none.
+  const root = adopted();
+  const got = await ask(bashInput(`diff -t ${SECRET_PATH} ${READABLE_PATH}`, root), root);
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /is credential-shaped \(dotenv\)/);
+  assert.doesNotMatch(got.reason, /These paths are READABLE from a shell/);
+});
+
+test('rawCredentialWords reads the RAW word, and both sides of an attached `=`', () => {
+  // Mutation killed: reusing `commandTokens` here instead of the raw lexer
+  // output — every row below returns [] under it, which is the whole defect.
+  // Mutation killed: testing only the whole word, never the right-hand side of
+  // `=`; `--file=.env` has a basename of `--file=.env` and matches nothing.
+  assert.deepEqual(rawCredentialWords('diff -t .env hooks/scripts/policy-gate.mjs').map((w) => w.detail), ['dotenv']);
+  assert.deepEqual(rawCredentialWords('grep --file=.env hooks/x.mjs').map((w) => w.token), ['--file=.env']);
+  assert.deepEqual(rawCredentialWords('diff ~/.ssh/id_rsa hooks/x.mjs').map((w) => w.detail), ['ssh-private-key, ssh-directory']);
+  // The direction of error is a false REFUSAL, and it is declared: a
+  // credential-shaped word that is not a path costs the exemption.
+  assert.equal(rawCredentialWords('git log --grep=.env -- hooks/x.mjs').length, 1);
+  // An ordinary read-only line has none, which is why no matrix row moved.
+  for (const command of [
+    'cat hooks/scripts/policy-gate.mjs',
+    'grep -n needle hooks/scripts/policy-gate.mjs',
+    'git log --oneline -- hooks/scripts/policy-gate.mjs',
+    'node --check .tyran/policies/autonomy.yaml',
+  ]) {
+    assert.deepEqual(rawCredentialWords(command), [], command);
+  }
+});
+
 test('shell-read: the refusal names the way forward and its residual floor', async () => {
   // A refusal with no reachable way forward produces an agent that looks for a
   // way around (ADR-19), so a read-shaped path refused for a write-shaped
@@ -1202,8 +1284,15 @@ test('shell-read: the exemption is stated in the declared floor, not only in cod
   // ADR-21: the source list and the prose list are one answer. A new entry
   // here without the matching numbered item in docs/policy-gate.md is caught
   // by tests/unit/docs-claims.test.mjs; this pins the count the refusal quotes.
-  assert.equal(SHELL_DECLARED_MISSES.length, 5);
+  assert.equal(SHELL_DECLARED_MISSES.length, 6);
   assert.equal(SHELL_DECLARED_MISSES.some((m) => m.includes('NODE_OPTIONS')), true);
+  // The basename match: `READ_ONLY_PROGRAMS[basename(tokens[0])]` makes a
+  // repo-writable `src/cat` an allowed reader, and `src/**` is AUTO in the
+  // shipped template. Declared rather than narrowed — a narrowing would close
+  // nothing, because miss 3 already lets the same script do the same work with
+  // the path baked in and no allowed name at all.
+  assert.equal(SHELL_DECLARED_MISSES.some((m) => m.includes('src/cat')), true);
+  assert.equal(readOnlySegment(['src/cat', 'x']), true);
   // The exemption covers the validator's two globs and nothing else.
   assert.deepEqual([...SHELL_READABLE_GLOBS], [...MANDATORY_KERNEL_PATHS]);
   assert.equal(SHELL_READABLE_GLOBS.includes('.claude/settings.json'), false);

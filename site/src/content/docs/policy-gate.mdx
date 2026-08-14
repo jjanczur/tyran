@@ -360,7 +360,19 @@ A command is exempted only when **all** of the following hold:
   spelling, command substitution, parameter expansion, subshell, group, and
   `&`/`&&` at once. Tested on the raw text because the shared lexer *consumes*
   these as separators: by the time a token exists, the `>` that made the line a
-  write is gone.
+  write is gone;
+- **no word of the raw command is credential-shaped**, tested a second time
+  against the same `SECRET_READ_RULES` and with none of the filters the path
+  findings go through. The findings are computed from a *stripped* copy of the
+  command — `stripMessageArguments` removes a message-bearing flag together with
+  its argument, and non-literal tokens are dropped — so a credential can be
+  invisible in them. `-t` is `git commit --template` *and* a legal `diff` flag,
+  which made `diff -t .env FILE` read as "one readable path, one read-only
+  command" and exempted it. Four shapes were measured deny-on-0.1.15 →
+  pass-before-this-check: `diff -t SECRET FILE`, `grep --file=SECRET FILE`,
+  `grep -m SECRET FILE`, `diff ~/SECRET FILE`. One false refusal is declared
+  with it, in the direction this gate errs in: `git log --grep=.env -- FILE`
+  loses the exemption over a word in a search pattern.
 
 `|` and `;` are allowed, because every composed segment still has to be an
 allowed reader — a pipe into a writer is a writer.
@@ -377,6 +389,7 @@ Refused, and each one is a mode of an otherwise allowed program:
 | `tail -f FILE` | never returns |
 | `cat FILE > /tmp/cat` · `cat $(cat FILE)` · `cat FILE \| tee /tmp/x` | redirection, substitution, a pipe into a writer |
 | the same commands on `.env`, `id_rsa`, `.aws/credentials` | the credential family, unchanged |
+| `diff -t .env FILE` · `grep --file=.env FILE` · `grep -m .env FILE` · `diff ~/.env FILE` | the credential family again, found on the **raw** text: the finding list is computed from a stripped copy of the command and never saw these words |
 | the same commands on `.claude/settings.json` | below |
 
 **`.claude/settings.json` is deliberately outside the exemption**, and that is a
@@ -389,8 +402,9 @@ scoped to the friction that was measured. Direction of error stays refuse.
 Matching flags bounds what a command *says*, not what the program *does*. An
 allowed reader can still be pointed at another program by configuration this
 gate never reads: a `diff.external` driver or a pager in git config, a
-`NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`. The claim
-is exact and narrow — **these two globs are no harder to read from a shell than
+`NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`. The name
+in the command may not even be the program it looks like — the table is keyed on
+the basename, item 6 below. The claim is exact and narrow — **these two globs are no harder to read from a shell than
 with the `Read` tool, which already passes on them** — and it is not a claim
 that an allowed program can only ever read. One false refusal is declared with
 it: quoting is not honoured, so `grep ">" FILE` is refused for a character
@@ -413,7 +427,15 @@ Not a ceiling. `SHELL_DECLARED_MISSES` in the source is the same list:
 5. a program an allowed reader is **configured** to launch — a `diff.external`
    driver or pager in git config, a `NODE_OPTIONS` carrying `--require`, a
    shell function shadowing `cat`. The flag table matches the command *text*,
-   and the environment is not in it.
+   and the environment is not in it;
+6. **a different program wearing an allowed one's name.** `READ_ONLY_PROGRAMS`
+   is keyed on the *basename*, which is what makes `/bin/cat` and `cat` one
+   entry — and also makes a repo-writable `src/cat` an allowed reader, with
+   `src/**` classed AUTO in the shipped template. Declared rather than closed:
+   requiring a bare program name would break `/bin/cat` and still admit an
+   absolute in-repo path, and it would buy nothing anyway, because miss 3
+   already lets the same script do the same work with the path baked in and no
+   allowed name at all.
 
 ## The cost, measured
 

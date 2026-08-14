@@ -14,6 +14,7 @@ import {
   costOfTable,
   costReport,
   emptyCounters,
+  forEachLine,
   listSources,
   rollup,
   scanAll,
@@ -351,4 +352,122 @@ test('CLI refuses an unknown flag and a missing directory with exit 2', () => {
       (err) => err.status === 2
     );
   }
+});
+
+test('records the reader could not use reach the report, not just the scanner', () => {
+  const tree = makeTree();
+  const out = report(tree);
+  // MUTANT: drop `malformed` from scanAll's carried fields or from coverage.
+  // The fixture's truncated record then vanishes between the scanner and the
+  // report, and a transcript being appended to WHILE it is read — which is
+  // the running conductor's own file, every time — looks complete while
+  // being short by its whole tail.
+  assert.equal(out.coverage.malformed, 1);
+  assert.equal(typeof out.coverage.skipped_lines, 'number');
+  const human = execFileSync(
+    process.execPath,
+    [COST_CLI, '--dir', tree.tyranDir, '--projects', tree.projects],
+    { encoding: 'utf8' }
+  );
+  assert.match(human, /Records this reader could not use: 1 unparseable/);
+});
+
+test('a gap survives the cache: a reused source keeps its malformed count', () => {
+  const tree = makeTree();
+  const sources = listSources(tree.project, null);
+  const first = scanAll(sources, null);
+  const cache = {
+    schema: COST_SCHEMA,
+    sources: first.scanned.map((s) => ({
+      path: s.path,
+      mtime_ms: s.mtime_ms,
+      size: s.size,
+      by_model: s.by_model,
+      last_ts: s.last_ts,
+      malformed: s.malformed,
+      skipped_lines: s.skipped_lines,
+    })),
+  };
+  const again = scanAll(sources, cache);
+  assert.equal(again.reused, 3);
+  // MUTANT: rebuild the cached entry without its gap fields. A damaged
+  // transcript then reports its damage once and looks healthy on every
+  // render after that.
+  assert.equal(
+    again.scanned.reduce((n, s) => n + (s.malformed ?? 0), 0),
+    first.scanned.reduce((n, s) => n + (s.malformed ?? 0), 0)
+  );
+});
+
+test('the cache is written by costReport itself, so the served page benefits', () => {
+  const tree = makeTree();
+  const first = report(tree);
+  assert.equal(first.coverage.reused_from_cache, 0);
+  // MUTANT: write the sidecar only in the CLI's --json branch. The board
+  // server calls costReport per request and refreshes every 30 s, so the
+  // cache the docs promise would never be populated for the one consumer it
+  // was built for — measured at 1.15 s per request, reuse stuck at zero.
+  const second = report(tree);
+  assert.ok(second.coverage.reused_from_cache > 0, 'a second read reuses the first');
+  assert.deepEqual(second.totals, first.totals);
+});
+
+test('a session filter never persists, and --session with --json is refused', () => {
+  const tree = makeTree();
+  report(tree); // populate the full sidecar
+  const full = JSON.parse(readFileSync(join(tree.tyranDir, 'state', 'cost.json'), 'utf8'));
+  assert.ok(full.totals.tokens > 0);
+
+  costReport({ tyranDir: tree.tyranDir, projectsRoot: tree.projects, session: 'no-such-session' });
+  const after = JSON.parse(readFileSync(join(tree.tyranDir, 'state', 'cost.json'), 'utf8'));
+  // MUTANT: persist a filtered run. A repo with real spend then holds a
+  // sidecar reading "this cost nothing" while `transcripts_found` asserts the
+  // measurement succeeded — the exact "all is well" reading this feature
+  // exists to prevent.
+  assert.equal(after.totals.tokens, full.totals.tokens);
+
+  assert.throws(
+    () =>
+      execFileSync(
+        process.execPath,
+        [COST_CLI, '--dir', tree.tyranDir, '--projects', tree.projects, '--session', 'x', '--json'],
+        { encoding: 'utf8', stdio: 'pipe' }
+      ),
+    (err) => err.status === 2
+  );
+});
+
+test('the directory probe stops at the match instead of reading to EOF', () => {
+  const tree = makeTree({ slugged: false });
+  const padded = join(tree.project, 'huge.jsonl');
+  const cwd = resolve(tree.repo);
+  const filler = JSON.stringify({ type: 'user', cwd, pad: 'x'.repeat(4000) });
+  // The match is on line one; everything after it is dead weight.
+  writeFileSync(padded, [JSON.stringify({ type: 'user', cwd }), ...Array(4000).fill(filler)].join('\n') + '\n');
+  const started = process.hrtime.bigint();
+  assert.equal(transcriptDirFor(tree.repo, tree.projects), tree.project);
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  // MUTANT: drop the `return false` stop signal, or the maxBytes cap. The
+  // probe then reads every candidate to EOF after it has already matched —
+  // measured at 83 ms for a 200 MB file, paid per file, per request.
+  assert.ok(ms < 250, `probe took ${ms} ms; it should stop at the first match`);
+});
+
+test('a character split across a read boundary is decoded, not mangled', () => {
+  const tree = makeTree();
+  const wide = join(tree.project, 'wide.jsonl');
+  // Push a non-ASCII character across the 1 MiB read boundary.
+  const pad = 'a'.repeat((1 << 20) - 1);
+  writeFileSync(wide, JSON.stringify({ type: 'user', pad, note: 'zażółć' }) + '\n');
+  const seen = [];
+  forEachLine(wide, (line) => {
+    seen.push(line);
+    return true;
+  });
+  // MUTANT: decode each chunk with buffer.toString('utf8') instead of a
+  // StringDecoder. The character splits into replacement characters, and the
+  // reachable consequence is the `cwd` equality check in the directory probe:
+  // a repo path with a non-ASCII character reports "no transcripts" forever.
+  assert.equal(JSON.parse(seen[0]).note, 'zażółć');
+  assert.ok(!seen[0].includes('�'));
 });

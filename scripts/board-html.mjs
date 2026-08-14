@@ -243,9 +243,22 @@ if (data.schema !== 1) {
   // the fact. A row whose models have no rate shows no bar at all rather than
   // a zero-length one, because "not priced" and "cost nothing" must not look
   // the same.
-  var chart = function (rows, key, metric, dimKeys) {
+  var chart = function (allRows, key, metric, dimKeys) {
     var box = el('div', 'chart');
-    var values = rows.map(function (r) { return metric === 'usd' ? r.usd : r.tokens; });
+    // Ranked by the metric on screen, not by the one the server happened to
+    // sort by. In cost view a cheap-and-chatty row was being listed above an
+    // expensive-and-terse one — the precise inversion of the routing signal
+    // this view exists to give. Rows with no price sort last.
+    var valueOf = function (r) { return metric === 'usd' ? r.usd : r.tokens; };
+    var rows = allRows.slice().sort(function (a, b) {
+      var av = valueOf(a);
+      var bv = valueOf(b);
+      if (typeof av !== 'number' && typeof bv !== 'number') return 0;
+      if (typeof av !== 'number') return 1;
+      if (typeof bv !== 'number') return -1;
+      return bv - av || String(a[key]).localeCompare(String(b[key]));
+    });
+    var values = rows.map(valueOf);
     var max = 0;
     values.forEach(function (v) { if (typeof v === 'number' && v > max) max = v; });
     rows.forEach(function (r, i) {
@@ -297,7 +310,9 @@ if (data.schema !== 1) {
 
     // The composition is the point of the whole section: cache reads dominate
     // the bill, so the lever is context size and turn count, not model price.
-    var comp = (cost.composition || []).slice().sort(function (a, b) { return b.tokens - a.tokens; });
+    var comp = (cost.composition || []).slice().sort(function (a, b) {
+      return metric === 'usd' ? (b.usd || 0) - (a.usd || 0) : b.tokens - a.tokens;
+    });
     var compTotal = 0;
     comp.forEach(function (c) { compTotal += metric === 'usd' ? (c.usd || 0) : c.tokens; });
     if (compTotal > 0) {
@@ -339,6 +354,13 @@ if (data.schema !== 1) {
     }
     if ((cost.unpriced || []).length > 0) {
       notes.push('Counted in tokens but absent from every amount, having no rate: ' + cost.unpriced.join(', ') + '.');
+    }
+    // A gap the page must never keep to itself: a transcript appended to while
+    // it is read ends in a partial record, so the number above is low by an
+    // amount only this line reports.
+    if ((cov.malformed || 0) > 0 || (cov.skipped_lines || 0) > 0) {
+      notes.push((cov.malformed || 0) + ' unparseable and ' + (cov.skipped_lines || 0) +
+        ' oversized record(s) were skipped; their tokens are missing from every figure here.');
     }
     into.appendChild(el('div', 'caveat', notes.join(' ')));
   };

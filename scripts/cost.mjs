@@ -40,6 +40,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { parse } from './yaml-lite.mjs';
 import { pricingOf, PRICING_RATE_KEYS } from './schema.mjs';
@@ -142,30 +143,49 @@ export function costOfTable(byModel, models) {
  * memory. Sync to match the rest of this codebase; chunked because a
  * transcript is routinely tens of megabytes and occasionally hundreds.
  */
-export function forEachLine(path, onLine) {
+export function forEachLine(path, onLine, { maxBytes = Infinity } = {}) {
   const size = statSync(path).size;
   if (size > MAX_TRANSCRIPT_BYTES) {
     throw new UsageError(`cost: transcript larger than ${MAX_TRANSCRIPT_BYTES} bytes: ${path}`);
   }
   const fd = openSync(path, 'r');
   const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
+  // A StringDecoder rather than buffer.toString(): a multi-byte character
+  // straddling a chunk boundary decodes to replacement characters otherwise,
+  // and one of the things read out of these files is a repo path compared for
+  // equality — a mangled non-ASCII path silently reports "no transcripts".
+  const decoder = new StringDecoder('utf8');
   let rest = '';
   let skipped = 0;
+  let readBytes = 0;
   try {
     for (;;) {
       const read = readSync(fd, buffer, 0, CHUNK_BYTES, null);
       if (read === 0) break;
-      rest += buffer.toString('utf8', 0, read);
+      readBytes += read;
+      rest += decoder.write(buffer.subarray(0, read));
       let at;
+      let stop = false;
       while ((at = rest.indexOf('\n')) !== -1) {
-        onLine(rest.slice(0, at));
+        const line = rest.slice(0, at);
         rest = rest.slice(at + 1);
+        // A callback that says it is done ends the read. Without this the
+        // directory probe reads every candidate file to EOF after it has
+        // already matched on line one — 83 ms on a 200 MB transcript, paid
+        // per file, per request.
+        if (onLine(line) === false) {
+          stop = true;
+          break;
+        }
       }
+      if (stop) return skipped;
       if (rest.length > MAX_LINE_BYTES) {
         skipped += 1;
         rest = '';
       }
+      if (readBytes >= maxBytes) return skipped;
     }
+    rest += decoder.end();
     if (rest !== '') onLine(rest);
   } finally {
     closeSync(fd);
@@ -232,11 +252,33 @@ export function scanTranscript(path) {
  * carry. A guess about the platform that cannot be confirmed is exactly the
  * kind of assumption this project refuses to build a control on.
  */
+const dirCache = new Map();
+
+/**
+ * How far into a candidate transcript the fallback reads before giving up on
+ * it. Every record carries `cwd`, so the answer is on line one; this bound
+ * exists so a miss costs kilobytes per file instead of gigabytes across a
+ * project directory nobody has ever pruned.
+ */
+const PROBE_BYTES = 64 * 1024;
+
 export function transcriptDirFor(repoRoot, projectsRoot) {
-  const direct = join(projectsRoot, resolve(repoRoot).split(sep).join('-'));
+  const want = resolve(repoRoot);
+  // Memoised for the life of the process, negative results included. The
+  // board server re-renders per request and refreshes every 30 s; without
+  // this, a repo whose slug does not match pays the full scan every time,
+  // forever.
+  const key = want + '::' + projectsRoot;
+  if (dirCache.has(key)) return dirCache.get(key);
+  const found = findTranscriptDir(want, projectsRoot);
+  dirCache.set(key, found);
+  return found;
+}
+
+function findTranscriptDir(want, projectsRoot) {
+  const direct = join(projectsRoot, want.split(sep).join('-'));
   if (existsSync(direct)) return direct;
   if (!existsSync(projectsRoot)) return null;
-  const want = resolve(repoRoot);
   for (const entry of readdirSync(projectsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const dir = join(projectsRoot, entry.name);
@@ -249,14 +291,22 @@ export function transcriptDirFor(repoRoot, projectsRoot) {
     for (const session of sessions) {
       let matched = false;
       try {
-        forEachLine(join(dir, session), (line) => {
-          if (matched || line === '' || line.charCodeAt(0) !== 123) return;
-          try {
-            if (field(JSON.parse(line), 'cwd') === want) matched = true;
-          } catch {
-            /* a malformed first line is not a reason to reject the directory */
-          }
-        });
+        forEachLine(
+          join(dir, session),
+          (line) => {
+            if (line === '' || line.charCodeAt(0) !== 123) return true;
+            try {
+              if (field(JSON.parse(line), 'cwd') === want) {
+                matched = true;
+                return false; // stop reading this file
+              }
+            } catch {
+              /* a malformed line is not a reason to reject the directory */
+            }
+            return true;
+          },
+          { maxBytes: PROBE_BYTES }
+        );
       } catch {
         continue;
       }
@@ -335,7 +385,18 @@ export function scanAll(sources, cache) {
     const before = previous.get(source.path);
     if (before && before.mtime_ms === stat.mtimeMs && before.size === stat.size && before.by_model) {
       reused += 1;
-      scanned.push({ ...source, mtime_ms: stat.mtimeMs, size: stat.size, by_model: before.by_model, last_ts: before.last_ts ?? null });
+      scanned.push({
+        ...source,
+        mtime_ms: stat.mtimeMs,
+        size: stat.size,
+        by_model: before.by_model,
+        last_ts: before.last_ts ?? null,
+        // Carried through the cache too: a damaged transcript stays damaged,
+        // and a gap that disappears on the second render is worse than one
+        // that was never reported.
+        malformed: before.malformed ?? 0,
+        skipped_lines: before.skipped_lines ?? 0,
+      });
       continue;
     }
     let result;
@@ -351,6 +412,8 @@ export function scanAll(sources, cache) {
       size: stat.size,
       by_model: result.byModel,
       last_ts: result.lastTs,
+      malformed: result.malformed,
+      skipped_lines: result.skippedLines,
     });
   }
   return { scanned, unreadable, reused };
@@ -395,8 +458,12 @@ export function rollup(scanned, pricing, extra = {}) {
   let agentTranscripts = 0;
   let attributed = 0;
   let newestTs = null;
+  let malformed = 0;
+  let skippedLines = 0;
 
   for (const source of scanned) {
+    malformed += source.malformed ?? 0;
+    skippedLines += source.skipped_lines ?? 0;
     if (source.kind === 'agent') agentTranscripts += 1;
     if (source.kind === 'agent' && source.ticket !== null) attributed += 1;
     if (typeof source.last_ts === 'string' && (newestTs === null || source.last_ts > newestTs)) {
@@ -470,6 +537,15 @@ export function rollup(scanned, pricing, extra = {}) {
       attributed,
       unattributed: agentTranscripts - attributed,
       unreadable: extra.unreadable ?? 0,
+      // Records the reader saw and could not use. These were counted from the
+      // first version and then dropped on the floor between the scanner and
+      // the report — which made every failure mode of a half-written
+      // transcript invisible, in the one feature whose stated property is
+      // that gaps are reported rather than zeroed. A live conductor's own
+      // file is appended to WHILE it is read, so a truncated tail is the
+      // normal case, not an exotic one.
+      malformed,
+      skipped_lines: skippedLines,
       reused_from_cache: extra.reused ?? 0,
     },
   };
@@ -527,6 +603,12 @@ export function renderReport(report) {
     `Coverage: ${c.attributed} of ${c.agent_transcripts} agent transcripts carry a ticket; ` +
       `${c.unattributed} unattributed, ${c.unreadable} unreadable.`
   );
+  if ((c.malformed ?? 0) > 0 || (c.skipped_lines ?? 0) > 0) {
+    out.push(
+      `Records this reader could not use: ${c.malformed ?? 0} unparseable, ${c.skipped_lines ?? 0} over the line cap. ` +
+        'Their tokens are missing from every number above — a transcript being appended to while it is read ends in a partial record.'
+    );
+  }
   out.push(
     `Conductor overhead: ${report.totals.conductor_token_share}% of tokens — not attributable to any ticket.`
   );
@@ -564,7 +646,10 @@ function readCache(path) {
 
 function writeAtomic(path, text) {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
+  // The temp name carries the pid: two writers sharing one fixed `.tmp` can
+  // rename a half-written file over the real one, and the board server and a
+  // hand-run CLI are exactly two writers.
+  const tmp = path + '.' + String(process.pid) + '.tmp';
   writeFileSync(tmp, text);
   renameSync(tmp, path);
 }
@@ -583,6 +668,7 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
   const { scanned, unreadable, reused } = scanAll(listSources(dir, session), readCache(cachePath));
   const report = rollup(scanned, pricing, { unreadable, reused });
   report.transcripts_found = true;
+  report.session = session;
   report.sources = scanned.map((s) => ({
     path: s.path,
     kind: s.kind,
@@ -591,8 +677,23 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
     agent_type: s.agent_type ?? null,
     ticket: s.ticket ?? null,
     last_ts: s.last_ts ?? null,
+    malformed: s.malformed ?? 0,
+    skipped_lines: s.skipped_lines ?? 0,
     by_model: s.by_model,
   }));
+  // Persisting is the whole point of the cache, and it has to happen HERE
+  // rather than only in the `--json` branch: the board server calls this per
+  // request and refreshes every 30 s, so a cache only the CLI ever wrote left
+  // the served page re-reading every transcript forever — measured at 1.15 s
+  // per request, with `reused_from_cache` stuck at zero. A filtered run is
+  // never persisted: it would poison the full report with a partial one.
+  if (session === null) {
+    try {
+      writeAtomic(cachePath, costJson(report));
+    } catch {
+      // A cache that cannot be written is a slow report, not a wrong one.
+    }
+  }
   return report;
 }
 
@@ -634,9 +735,14 @@ function main(argv) {
     return 2;
   }
   if (flags.json) {
-    const path = join(tyranDir, 'state', COST_FILE);
-    writeAtomic(path, costJson(report));
-    console.log(path);
+    // Refused rather than written: the sidecar is what the board reads, and a
+    // one-session file carrying `totals: 0` would overwrite the full report
+    // with a measurement that looks complete and is not.
+    if (flags.session !== null) {
+      console.error('cost: --session cannot be combined with --json — the sidecar must cover every session.');
+      return 2;
+    }
+    console.log(join(tyranDir, 'state', COST_FILE));
   } else {
     process.stdout.write(renderReport(report));
   }

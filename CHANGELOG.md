@@ -67,6 +67,13 @@ billion tokens scans in 1.7 s.
 Also reachable as `npx @jjanczur/tyran cost`. Exit 0 ok · 2 usage, I/O, or no
 transcripts found — spend is read, and nothing here estimates it.
 
+**Upgrading: regenerate your board.** `board.html` gained the Spend section, so
+its BYTES changed even though its contract did not. A repo that committed a
+board rendered by an earlier version will see `board.mjs --check` report drift —
+and `doctor --state` report `projection-drift` — until you run
+`node scripts/board.mjs --dir .tyran` and commit the result. `board.json` and
+`BOARD.md` are byte-identical to 0.1.17.
+
 ## 0.1.17 — 2026-08-14
 
 ### A race test that picked a winner

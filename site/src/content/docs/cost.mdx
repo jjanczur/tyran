@@ -83,7 +83,9 @@ worse than no number at all. So every hole is named:
 |---|---|
 | `unpriced` | models the rate card does not cover — counted in tokens, absent from every amount |
 | `unattributed` | agent transcripts whose task description carried no ticket id |
-| `unreadable` | transcripts that could not be opened or parsed |
+| `unreadable` | transcripts that could not be opened at all |
+| `malformed` | records whose JSON would not parse — a transcript appended to while it is read ends in a partial one |
+| `skipped_lines` | single records over the 8 MB line cap, abandoned rather than accumulated |
 
 Two refinements that stop the warnings becoming noise or becoming lies:
 

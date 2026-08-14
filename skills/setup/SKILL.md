@@ -164,7 +164,7 @@ copies of the config. Stage explicit paths until this commit exists.
 
 ## 7. Offer overnight mode — and say plainly what the operator must do
 
-Overnight mode (`docs/overnight.md`) pauses autonomous work near the
+Overnight mode (https://jjanczur.github.io/tyran/overnight/) pauses autonomous work near the
 subscription usage limit and resumes after the window resets. It is OFF by
 default because its telemetry is a statusline the plugin cannot install:
 `.claude/settings.json` in user scope is the operator's file, and the policy

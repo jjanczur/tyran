@@ -22,12 +22,24 @@
 
 ## What Tyran is
 
-Tyran is a Claude Code plugin that runs a task as a **team of agents instead of
-one long chat**. You describe the work; it interviews you briefly, plans, and
-drives fresh-context subagents through it. Execution state lives in an
-append-only journal committed to your repo rather than in the session window, so
-a restart, a compaction and a colleague on another branch read the same thing.
-Zero runtime dependencies, no build step, Node ≥ 22.
+Every long Claude Code session ends the same way. The context fills up, the
+plan is somewhere in the scrollback, and *"the tests pass"* is a sentence
+rather than something you can check. Start a new session and you start
+explaining from the beginning.
+
+Tyran is a plugin that moves the work off the chat window. You describe a task;
+it interviews you until the goal is unambiguous, sizes it, and drives
+**fresh-context subagents** through it — a scout that only reads, an
+implementer per story on its own branch, a reviewer holding no editing tools so
+it cannot patch what it is grading. Every decision, spawn, report, merge and
+open question is appended to a journal **committed to your repo**, and every
+file you read afterwards is generated from that journal. A restart, a
+compaction and a colleague on another branch all read the same thing.
+
+Two rules are what make that worth the trouble. A report containing no raw
+command output is **rejected by a hook**, not by good intentions. And every
+write is classified against a policy file you own **before it happens**, so
+*autonomous* is a setting with a blast radius rather than a promise.
 
 ![The Tyran dashboard, recorded live, moving through its four tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost](assets/board-demo.gif)
 
@@ -42,7 +54,7 @@ Zero runtime dependencies, no build step, Node ≥ 22.
 - **Reports that carry evidence, or are refused.** A `SubagentStop` hook
   rejects a report with no raw command output — measured on 55 real reports
   from this project's own agents: 53 pass, and both misses were not reports. It
-  blocks silence, not forgery; [the evidence gate](docs/evidence-gate.md) is
+  blocks silence, not forgery; [the evidence gate](https://jjanczur.github.io/tyran/evidence-gate/) is
   precise about the difference.
 - **State you can read without a session.** The journal is the single source of
   truth; `STATE.md`, `PROGRESS.md`, `BOARD.md`, `board.json` and `board.html`
@@ -61,12 +73,12 @@ Zero runtime dependencies, no build step, Node ≥ 22.
   resume and stops — then a watcher wakes at the window reset and continues the
   same session. Leave it working and read the board in the morning. Both
   windows were hit live while the feature was being built; the protocol that
-  survived them is what shipped. See [overnight mode](docs/overnight.md).
+  survived them is what shipped. See [overnight mode](https://jjanczur.github.io/tyran/overnight/).
 
-## Tyran compared
+## Tyran vs. an ordinary session
 
-The axis, not the winner. These rows compare against an ordinary agent session
-— a comparison that can be made without guessing at another tool's internals.
+The axis, not the winner — a comparison that can be made without guessing at
+anyone's internals.
 
 | | An ordinary agent session | Tyran |
 |---|---|---|
@@ -75,15 +87,33 @@ The axis, not the winner. These rows compare against an ordinary agent session
 | Which model does which job | one model for the whole session | four tiers resolved from `.tyran/config.yaml`, per role, with a floor under the judgements everything downstream trusts |
 | What happens after the work | nothing | a retrospective writes what this repo taught it back into this repo |
 | What it adds to your install | — | zero runtime dependencies, no build step |
-| Skills · agents it ships | — | 14 · 4 |
+
+## Tyran vs. other Claude Code orchestrators
+
+Five rows of eleven, verified against those projects' **code and public issue
+trackers** (July 2026) rather than their READMEs. ✅ shipped and enforced ·
+⚠️ partial or prompt-only · ❌ absent or broken · 🎯 committed in the design,
+ships test-gated.
+
+| Capability | **Tyran** | oh-my-claudecode | metaswarm | pilotfish | pro-workflow |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Evidence contract that **blocks**: no raw command output → report rejected | ✅ | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
+| Execution state survives restart & compaction (journal + re-inject) | ✅ | ⚠️ | ❌² | ❌ | ⚠️ |
+| Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
+| Secret gate on commit/push with verified scan coverage, no `--no-verify` escape | ✅ | ❌ | ❌ | ❌ | ⚠️ |
+| Clean install: 2 commands, **never writes into your `~/.claude`** | ✅ | ❌³ | ⚠️ | ❌ | ⚠️ |
+
+¹ Their deliverable check is explicitly non-blocking. ² Their issues
+#32/#33/#36: a crash loses loop state. ³ Open issues #3535/#3536: an update
+deletes user files from `~/.claude`. The other six rows — repo-specific
+learning, cost tiers, independent review, context budget, safe parallelism, OSS
+hygiene — and every footnote in full are in
+[the FAQ](https://jjanczur.github.io/tyran/faq/#how-tyran-compares-to-other-claude-code-orchestrators).
 
 Worth knowing before tuning anything: cache reads were measured at roughly
 three quarters of a real session's cost, and the conductor's own context at
 between 44% and 86% of a tree's tokens — so the lever is context size and turn
-count, not the price of a model. A cell-by-cell comparison against four other
-Claude Code orchestrators, verified against their code and public issue
-trackers, is in
-[the FAQ](docs/faq.md#how-tyran-compares-to-other-claude-code-orchestrators).
+count, not the price of a model.
 
 ## Install
 
@@ -97,11 +127,13 @@ Inside Claude Code:
 
 Restart Claude Code afterwards — hooks and agents are read when a session
 starts, so an install you have not restarted into is an install you are not
-running. `/tyran:hello` is the smoke test. Requirements: Claude Code ≥ 2.1;
-Tyran's scripts are plain Node ≥ 22 and ship with the plugin, so you never run
-npm. `/plugin` is a slash command a human has to type — the prompt that has
-Claude Code install itself, the npm package for a shell or a CI job, updating
-and uninstalling are all in [getting started](docs/getting-started.md).
+running. `/tyran:hello` is the smoke test. The only requirement is **Claude
+Code ≥ 2.1**: the scripts ship with the plugin and Claude Code runs them, so
+there is nothing to install and no version of anything else to match.
+`/plugin` is a slash command a human has to type — the prompt that has Claude
+Code install itself, the npm package for a shell or a CI job, updating and
+uninstalling are all in
+[getting started](https://jjanczur.github.io/tyran/getting-started/).
 
 ## Use it
 
@@ -130,8 +162,10 @@ echo "wrong branch — hold everything" > .tyran/STOP
 npx @jjanczur/tyran board --dir .tyran --serve
 ```
 
-A read-only board on loopback, re-rendered on every request. Four tabs, because
-the page answers four questions:
+A read-only board on loopback, re-rendered on every request. That command is
+the one place a Node version matters — `npx` runs the scripts outside Claude
+Code, and they need **Node ≥ 22**. Four tabs, because the page answers four
+questions:
 
 - **Overview** — what is waiting on you, agents running, progress, tickets that
   need a human; then the agent strip, each chip carrying the time since that
@@ -147,7 +181,7 @@ the page answers four questions:
 
 The same page is written to `.tyran/state/board.html` and refreshed after every
 agent, so you can also just open the file. Spend is served rather than embedded
-and absent over `file://` — [the board](docs/board.md) says why.
+and absent over `file://` — [the board](https://jjanczur.github.io/tyran/board/) says why.
 
 ## What ships
 
@@ -157,29 +191,31 @@ repo, initiative or not — and the other eight are standalone protocols.
 
 | Skill | What it does |
 |---|---|
-| [`run`](skills/run/SKILL.md) | the conductor — interviews, sizes, plans, delegates, merges |
-| [`setup`](skills/setup/SKILL.md) | reads the repo and writes `.tyran/config.yaml`, provenance per value |
-| [`status`](skills/status/SKILL.md) | where an initiative got to, from the journal rather than from memory |
-| [`doctor`](skills/doctor/SKILL.md) | is any gate installed but unable to fire; is the state self-consistent |
-| [`retro`](skills/retro/SKILL.md) | the anti-bloat curator that changes Tyran, never your product code |
-| [`hello`](skills/hello/SKILL.md) | proves the plugin is installed and its paths resolve |
-| [`code-review`](skills/code-review/SKILL.md) | the dimensions a diff is read against, and the rule that you refute a finding before reporting it |
-| [`root-cause`](skills/root-cause/SKILL.md) | reproduce first, one variable per experiment, exit by naming the mechanism |
-| [`browser-check`](skills/browser-check/SKILL.md) | a UI pass that returns counts — console errors, failed responses, computed styles |
-| [`deslop`](skills/deslop/SKILL.md) | the optimization pass: delete before you add, behaviour pinned by a test that ran first |
-| [`pr-feedback`](skills/pr-feedback/SKILL.md) | all three of GitHub's comment surfaces, a disposition for every comment |
-| [`fidelity-gate`](skills/fidelity-gate/SKILL.md) | build 1:1 against a frozen mockup, measured rather than eyeballed |
-| [`prompt-tuning`](skills/prompt-tuning/SKILL.md) | tune a non-deterministic output without chasing noise — noise baseline first |
-| [`skill-writing`](skills/skill-writing/SKILL.md) | what a skill has to earn before it ships, and the test that proves it fires |
+| `run` | the conductor — interviews, sizes, plans, delegates, merges |
+| `setup` | reads the repo and writes `.tyran/config.yaml`, provenance per value |
+| `status` | where an initiative got to, from the journal rather than from memory |
+| `doctor` | is any gate installed but unable to fire; is the state self-consistent |
+| `retro` | the anti-bloat curator that changes Tyran, never your product code |
+| `hello` | proves the plugin is installed and its paths resolve |
+| `code-review` | the dimensions a diff is read against, and the rule that you refute a finding before reporting it |
+| `root-cause` | reproduce first, one variable per experiment, exit by naming the mechanism |
+| `browser-check` | a UI pass that returns counts — console errors, failed responses, computed styles |
+| `deslop` | the optimization pass: delete before you add, behaviour pinned by a test that ran first |
+| `pr-feedback` | all three of GitHub's comment surfaces, a disposition for every comment |
+| `fidelity-gate` | build 1:1 against a frozen mockup, measured rather than eyeballed |
+| `prompt-tuning` | tune a non-deterministic output without chasing noise — noise baseline first |
+| `skill-writing` | what a skill has to earn before it ships, and the test that proves it fires |
 
 Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story, own
 branch), `tyran:reviewer` (no editing tools — it cannot patch what it is
 grading), `tyran:retro`. A skill is admitted only when something already asks
 for the protocol by name, and every description is loaded into every session
 whether the skill fires or not — so the combined length is capped and CI
-enforces the cap (4352 of 5000 characters). What each one assumes, and who
-invokes it, is in [skills and agents](docs/skills.md). Behind all of it: 1289
-unit tests, run with `node --test "tests/**/*.test.mjs"`.
+enforces the cap (4352 of 5000 characters). What each one assumes, when it
+fires and who invokes it, is in
+[skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
+themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
+it: 1297 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 
@@ -188,16 +224,16 @@ Everything below also reads as a site, with search and rendered diagrams:
 
 | | |
 |---|---|
-| [Getting started](docs/getting-started.md) | install, first run, the command line, updating |
-| [Architecture](docs/architecture.md) | the four failures, the three layers, the hooks, the principles, the roadmap |
-| [Skills and agents](docs/skills.md) · [the roster](docs/agents.md) | what each one assumes and who invokes it; the tier and effort table, the `.tyran/STOP` brake |
-| [Configuration](docs/configuration.md) | `.tyran/config.yaml`, cost profiles, the rate card, autonomy classes |
-| [Self-improvement](docs/self-improvement.md) | how Tyran learns your repo, and its guardrails |
-| [Journal](docs/journal.md) · [projections](docs/projections.md) | the append-only event schema, and what is generated from it |
-| [The board](docs/board.md) · [the spend ledger](docs/cost.md) | lanes, answering a question, and what a run cost |
-| [Overnight mode](docs/overnight.md) · [doctor](docs/doctor.md) | usage-limit pause and scheduled resume; the `--state` and `--hooks` checks |
-| [Hook runtime](docs/hooks.md) · [evidence gate](docs/evidence-gate.md) · [policy gate](docs/policy-gate.md) | gates versus probes and why hooks fail open; the criterion and its limits; path classes and where each stops |
-| [FAQ](docs/faq.md) | short answers, the comparison table, and where this came from |
+| [Getting started](https://jjanczur.github.io/tyran/getting-started/) | install, first run, the command line, updating |
+| [Architecture](https://jjanczur.github.io/tyran/architecture/) | the four failures, the three layers, the hooks, the principles, the roadmap |
+| [Skills and agents](https://jjanczur.github.io/tyran/skills/) · [the roster](https://jjanczur.github.io/tyran/agents/) | what each one assumes and who invokes it; the tier and effort table, the `.tyran/STOP` brake |
+| [Configuration](https://jjanczur.github.io/tyran/configuration/) | `.tyran/config.yaml`, cost profiles, the rate card, autonomy classes |
+| [Self-improvement](https://jjanczur.github.io/tyran/self-improvement/) | how Tyran learns your repo, and its guardrails |
+| [Journal](https://jjanczur.github.io/tyran/journal/) · [projections](https://jjanczur.github.io/tyran/projections/) | the append-only event schema, and what is generated from it |
+| [The board](https://jjanczur.github.io/tyran/board/) · [the spend ledger](https://jjanczur.github.io/tyran/cost/) | lanes, answering a question, and what a run cost |
+| [Overnight mode](https://jjanczur.github.io/tyran/overnight/) · [doctor](https://jjanczur.github.io/tyran/doctor/) | usage-limit pause and scheduled resume; the `--state` and `--hooks` checks |
+| [Hook runtime](https://jjanczur.github.io/tyran/hooks/) · [evidence gate](https://jjanczur.github.io/tyran/evidence-gate/) · [policy gate](https://jjanczur.github.io/tyran/policy-gate/) | gates versus probes and why hooks fail open; the criterion and its limits; path classes and where each stops |
+| [FAQ](https://jjanczur.github.io/tyran/faq/) | short answers, the comparison table, and where this came from |
 | [Contributing](CONTRIBUTING.md) | the dev loop, the test commands, the enforced rules |
 
 ## License

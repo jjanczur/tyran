@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.1.20 — 2026-08-14
+
+### `.tyran/` was tracked, and an entire initiative inside it was not
+
+`untrackedTyranDir` was all-or-nothing: one tracked file anywhere under
+`.tyran/` and the whole directory reported healthy. Measured on a real install
+whose `.tyran/` had been tracked for weeks — one initiative directory of six
+files, its plan and the gate event recording two production database migrations
+among them, had NEVER been committed, and a second was 33 events behind its
+committed copy. Both passed. `journal.mjs append` writes the working tree and
+nothing else, so an initiative nobody committed is one `git clean -fd` from
+having never happened.
+
+`doctor --state` now reads each initiative's ledger separately, in three states
+rather than two:
+
+- `initiative-untracked` (**warning**) — git has never seen it.
+- `initiative-ignored` (**warning**) — a `.gitignore` rule covers it. Split out
+  because `git add` on an ignored path exits 0 and stages nothing, so the
+  untracked fix would have read as success while changing nothing.
+- `initiative-uncommitted` (**info**, never fails the check) — tracked with
+  local changes, which is what an initiative in flight looks like ten seconds
+  after any append. It earns its keep at a merge boundary.
+
+Two git invocations for the whole tree, not two per initiative: both listings
+are read once and classified by path prefix in JS, so a repo with forty
+initiatives costs the same three subprocesses as one with a single initiative
+— and a test counts them, because that regression passes every behavioural
+test there is. Under a wholly untracked `.tyran/` the directory-level finding
+still reports alone rather than repeating itself once per initiative with
+narrower advice each time.
+
+### Four things the conductor skill was letting agents rediscover
+
+- **Interactive shell aliases hang an agent until the tool timeout.** An
+  agent's shell starts from the user's profile, so `alias cp='cp -i'` asks a
+  question nobody answers. The symptom is a timeout, which points at the
+  machine rather than at the alias, so it gets rediscovered every time: three
+  agents in one session, then again in a later one that had already read the
+  file it is now written in. STEP 0 probes for it.
+- **A `Test timed out` measured under concurrency is not evidence.** The
+  hardware ceiling bounds agent count, not concurrent heavy phases. Re-run
+  serially and report the serial result. One overnight test failed exactly
+  that way inside the full suite while this release was being verified, and
+  passed alone.
+- **An agent that dies on a terminal API error is resumed, not respawned** —
+  its context, its corrected premises and its uncommitted diff all survive.
+- **Gitignored env files are absent from a fresh worktree too, and fail
+  quieter than dependencies**: 127 is loud, a skipped gated spec is not, so the
+  worktree reports a *cleaner* baseline than the repo has.
+
+### The README says what Tyran is, and the docs it links are the published ones
+
+- **"What Tyran is" rewritten** to open on the failure a reader recognises — a
+  full context window, a plan somewhere in the scrollback, "the tests pass" as
+  a sentence rather than a result — before naming the mechanism that answers
+  it.
+- **The named comparison is back on the front page.** Five rows of the eleven
+  in the FAQ, copied verbatim, plus a test that fails if a verdict moves in one
+  and not the other. The `Skills · agents it ships` row and the guard pinning
+  it were deleted rather than updated: the table under it and the sentence
+  under that already carry the same count, and three spellings of one answer is
+  the defect this repo calls ADR-21 — a test can hold one in place as easily as
+  prose can.
+- **Every documentation link now points at the published site** rather than at
+  a markdown file: twenty in the README, three inside skills, and four in
+  `doctor`'s own fix lines — which reach repos that have no `docs/` directory
+  at all, where `see docs/journal.md` was a dead reference.
+- **The Node version is stated once, where it applies.** It sat in the lede and
+  in the install section, neither of which runs Node: the scripts ship with the
+  plugin and Claude Code runs them. It now sits beside the one command that
+  needs it, `npx @jjanczur/tyran board`.
+- **The dashboard GIF runs at 4 fps instead of 8.3** — the same recording, at a
+  speed a tab can actually be read at.
+
 ## 0.1.19 — 2026-08-14
 
 ### The board answered four questions on one scroll

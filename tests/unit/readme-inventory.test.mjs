@@ -44,11 +44,13 @@ const agents = readdirSync(AGENTS_DIR)
   .sort();
 
 test('every skill that ships is listed in the README, and nothing else is', () => {
-  // Anchored on the link target rather than the label: a row could spell the
-  // name in prose and link somewhere else entirely, and the link is what a
-  // reader actually follows.
-  const linked = [...README.matchAll(/\]\(skills\/([a-z0-9-]+)\/SKILL\.md\)/g)].map((m) => m[1]);
-  const listed = [...new Set(linked)].sort();
+  // Anchored on the first CELL of a table row, not on a link target. The rows
+  // used to link to `skills/<name>/SKILL.md` and the guard read the href;
+  // those links were removed on purpose — the README now sends a reader to the
+  // published page instead of to a raw prompt file — and a guard anchored on
+  // a link is a guard that goes quiet the moment the link does.
+  const rows = [...README.matchAll(/^\| `([a-z0-9-]+)` \|/gm)].map((m) => m[1]);
+  const listed = [...new Set(rows)].sort();
 
   assert.deepEqual(
     listed,
@@ -56,6 +58,7 @@ test('every skill that ships is listed in the README, and nothing else is', () =
     'the README skill table and skills/ disagree. Whichever moved, the other has to follow — ' +
       'a front page that lists seven of eight skills is worse than one that lists none.',
   );
+  assert.equal(rows.length, skills.length, 'a skill is listed twice in the README table');
 });
 
 test('every agent that ships is named in the README', () => {
@@ -68,21 +71,14 @@ test('every agent that ships is named in the README', () => {
   }
 });
 
-test('the comparison table states the real number of skills and agents', () => {
-  // The cell is `8 · 4` in a row of five such cells, so the match is anchored
-  // on the row label rather than on the digits — searching the file for `8`
-  // would find a footnote, a year, or a viewport width.
-  const row = /Skills\s*(?:&middot;|·)\s*agents it ships[^\n]*\n?/.exec(README);
-  assert.ok(row, 'the inventory row is gone from the comparison table — if that was deliberate, delete this test in the same change');
-
-  const cells = row[0].split('|').map((c) => c.trim());
-  const tyran = cells.find((c) => /^\**\d+\s*(?:&middot;|·)\s*\d+/.test(c));
-  assert.ok(tyran, `no count cell found in: ${row[0].trim()}`);
-
-  const [, s, a] = /(\d+)\s*(?:&middot;|·)\s*(\d+)/.exec(tyran);
-  assert.equal(Number(s), skills.length, `README says ${s} skills, skills/ has ${skills.length}`);
-  assert.equal(Number(a), agents.length, `README says ${a} agents, agents/ has ${agents.length}`);
-});
+// The `Skills · agents it ships | 14 · 4` row was a THIRD spelling of a number
+// the table below it and the sentence under that already carry, and the guard
+// that pinned it was a third guard on the same fact. It was removed with the
+// row, on the instruction the guard itself carried, and deliberately not
+// replaced: the two that remain — the table names above, the prose words below
+// — cover the same claim between them. Three spellings of one answer is the
+// defect this repo calls ADR-21, and a test can hold one in place as easily as
+// prose can.
 
 /**
  * The same count, spelled as a WORD.

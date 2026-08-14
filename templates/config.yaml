@@ -11,7 +11,7 @@
 #
 # Validate after editing:  node scripts/schema.mjs validate config .tyran/config.yaml
 
-# Cost mode: eco | balanced | full  (see docs/configuration.md)
+# Cost mode: eco | balanced | full  (see https://jjanczur.github.io/tyran/configuration/)
 profile: balanced
 
 # Deployment autonomy: P1 branch-only · P2 staging · P3 merge to main.
@@ -44,7 +44,7 @@ validation:
 shared_zones: []
 
 # Overnight mode — pause autonomous work near the subscription usage limits
-# and resume after the window resets (docs/overnight.md). Requires the
+# and resume after the window resets (https://jjanczur.github.io/tyran/overnight/). Requires the
 # operator-installed statusline helper (scripts/statusline.mjs), which is the
 # only place the platform exposes usage telemetry; without it the gate is
 # silent and doctor says so.

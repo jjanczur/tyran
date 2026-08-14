@@ -101,7 +101,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" repeats
 It prints one line per signature that has crossed a graduation threshold,
 ending in what that signature has earned. Act on that recommendation — the
 thresholds themselves, and why they are where they are, live in
-`docs/self-improvement.md`.
+https://jjanczur.github.io/tyran/self-improvement/.
 
 - **`promote to .tyran/knowledge/`** — write the rule into
   `.tyran/knowledge/<topic>.yaml`, scoped with `applies_to` so it reaches only

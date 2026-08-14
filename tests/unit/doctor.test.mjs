@@ -1085,6 +1085,133 @@ test('outside a git work tree the question has NO answer, and none is invented',
   assert.deepEqual(byCode(runStateChecks({ dir, run: fakeGit({}) }), 'tyran-dir-untracked'), []);
 });
 
+// --- the quieter one ------------------------------------------------------
+//
+// `.tyran/` being tracked as a whole says nothing about ONE initiative inside
+// it. Measured on a real install: a `.tyran/` tracked for weeks, and inside it
+// an initiative directory of six files — its plan and the gate event recording
+// two production database migrations — that git had never seen, while the
+// directory-level check above reported healthy.
+
+const TRACKED = { [IN_TREE]: 'true\n', 'ls-files -- .tyran': '.tyran/config.yaml\n' };
+const LEDGER = '.tyran/state/demo/journal.jsonl';
+const STATUS = 'status --porcelain --ignored -- .tyran';
+
+/** A tracked `.tyran/` whose `demo` ledger is in whatever state `over` says. */
+function ledgerGit(over) {
+  return fakeGit({ ...TRACKED, 'ls-files -- .tyran': `.tyran/config.yaml\n${LEDGER}\n`, ...over });
+}
+
+test('an initiative whose ledger git has never seen is a warning that fails the check', () => {
+  // Mutant: drop the per-initiative branch and keep only untrackedTyranDir —
+  // this repo has a tracked .tyran/, so the directory check says healthy and
+  // the initiative that is one `git clean -fd` from gone reports nothing.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const result = runStateChecks({ dir, run: fakeGit(TRACKED) });
+  const found = byCode(result, 'initiative-untracked');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].fix, /git add '\.tyran\/state\/demo'/);
+  assert.doesNotMatch(found[0].fix, /\brm\b|\bmv\b|>\s*\S/);
+  assert.equal(result.ok, false);
+});
+
+test('a ledger hidden by a .gitignore rule is NOT told to run a command that does nothing', () => {
+  // `git add` on an ignored path exits 0 and stages nothing, so the untracked
+  // fix would read as success and change nothing.
+  // Mutant: collapse `ignored` into `untracked` and print the same `git add`.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const run = fakeGit({ ...TRACKED, [STATUS]: '!! .tyran/state/\n' });
+  const found = byCode(runStateChecks({ dir, run }), 'initiative-ignored');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  assert.match(found[0].fix, /git check-ignore -v/);
+  assert.doesNotMatch(found[0].fix.split('#')[0], /git add/); // the command, not the note about it
+  assert.deepEqual(byCode(runStateChecks({ dir, run }), 'initiative-untracked'), []);
+});
+
+test('a tracked, clean ledger produces no finding of any of the three kinds', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const result = runStateChecks({ dir, run: ledgerGit({ [STATUS]: '' }) });
+  for (const code of ['initiative-untracked', 'initiative-ignored', 'initiative-uncommitted']) {
+    assert.deepEqual(byCode(result, code), []);
+  }
+});
+
+test('uncommitted ledger changes are INFO — that is what an initiative in flight looks like', () => {
+  // Mutant: raise it to `warning`. Every `journal.mjs append` produces this
+  // state within seconds, so the check would then be red during normal
+  // operation, which is how a check stops being read.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const result = runStateChecks({ dir, run: ledgerGit({ [STATUS]: ` M ${LEDGER}\n` }) });
+  const found = byCode(result, 'initiative-uncommitted');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'info');
+  assert.equal(result.ok, true);
+});
+
+test('an untracked child of a tracked ledger directory reports as uncommitted, not committed', () => {
+  // git collapses a wholly untracked directory into ONE entry ending in `/`.
+  // Mutant: compare the recorded path for equality with the prefix instead of
+  // by prefix, and a plan nobody committed reads as a clean initiative.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const run = ledgerGit({ [STATUS]: '?? .tyran/state/demo/PLAN.md\n' });
+  assert.equal(byCode(runStateChecks({ dir, run }), 'initiative-uncommitted').length, 1);
+});
+
+test('a wholly untracked .tyran/ says so ONCE, not once per initiative', () => {
+  // Mutant: drop the `untracked === false` guard. The repo then reports the
+  // same defect N+1 times, and each per-initiative line gives narrower advice
+  // than the directory line it repeats.
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir, 'one'), '');
+  writeFileSync(journalPathFor(dir, 'two'), '');
+  const run = fakeGit({ [IN_TREE]: 'true\n', 'ls-files -- .tyran': '' });
+  const result = runStateChecks({ dir, run });
+  assert.equal(byCode(result, 'tyran-dir-untracked').length, 1);
+  assert.deepEqual(byCode(result, 'initiative-untracked'), []);
+});
+
+test('outside a git work tree no ledger question is answered either', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  writeFileSync(journalPathFor(dir), '');
+  const result = runStateChecks({ dir, run: fakeGit({}) });
+  for (const code of ['initiative-untracked', 'initiative-ignored', 'initiative-uncommitted']) {
+    assert.deepEqual(byCode(result, code), []);
+  }
+});
+
+test('the ledger check costs a fixed number of git calls, not two per initiative', () => {
+  // Mutant: ask git per initiative. It passes every behavioural test above and
+  // turns a 40-initiative repo into 80 subprocesses inside the SessionStart
+  // deadline, which is the kind of regression only a counter catches.
+  const root = repo();
+  const dir = scaffold(root);
+  for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) writeFileSync(journalPathFor(dir, name), '');
+  const calls = [];
+  const counting = (args) => {
+    calls.push(args.join(' '));
+    return { [IN_TREE]: 'true\n', 'ls-files -- .tyran': '.tyran/config.yaml\n' }[args.join(' ')] ?? '';
+  };
+  runStateChecks({ dir, run: counting });
+  assert.equal(calls.filter((c) => c === STATUS).length, 1);
+  // untrackedTyranDir, this check, trackedLeaseFiles — three, and three
+  // whether the repo holds one initiative or forty.
+  assert.equal(calls.filter((c) => c === 'ls-files -- .tyran').length, 3);
+});
+
 test('a repo with no autonomy policy is told its writes are all refused', () => {
   // `error`, not `info`. The policy gate fails closed on this exact state, so
   // a `.tyran/` with no policy under it is a repository where every tool call
@@ -1557,6 +1684,9 @@ const EXPECTED_SEVERITY = {
   'state-stray-file': 'warning',
   'state-legacy-initiatives-dir': 'warning',
   'lease-file-tracked': 'warning',
+  'initiative-untracked': 'warning',
+  'initiative-ignored': 'warning',
+  'initiative-uncommitted': 'info',
   'limit-pause-active': 'info',
   'limit-pause-stale': 'warning',
   'limit-resume-watcher-dead': 'warning',

@@ -206,6 +206,12 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'state-stray-file': 'warning',
     'state-legacy-initiatives-dir': 'warning',
     'lease-file-tracked': 'warning',
+    // the ledger in git. `uncommitted` is INFO on purpose: every append
+    // produces that state within seconds, and a warning that is on during
+    // normal operation is a warning people learn to scroll past.
+    'initiative-untracked': 'warning',
+    'initiative-ignored': 'warning',
+    'initiative-uncommitted': 'info',
     // the mistakes ledger. `mistakes-unreadable` is a WARNING, not the `error`
     // that `knowledge-unreadable` and `config-unreadable` carry: nothing
     // mechanical consumes MISTAKES.md at write time, so an unreadable one
@@ -1163,6 +1169,98 @@ export function untrackedTyranDir(repoRoot, run, tyranDirName = '.tyran') {
 }
 
 /**
+ * Which initiative ledgers git has never seen, and which carry local changes.
+ *
+ * `untrackedTyranDir` above is all-or-nothing: one tracked file anywhere under
+ * `.tyran/` and the whole directory reports healthy. That is the wrong
+ * granularity for what iron rule 1 actually asks for. Measured on a real
+ * install whose `.tyran/` had been tracked for weeks: one initiative directory
+ * of six files — its plan, and the gate event recording two production
+ * database migrations — had NEVER been committed, and a second was 33 events
+ * behind its committed copy. The directory-level check passed on both.
+ * `journal.mjs append` writes the working tree and nothing else, so an
+ * initiative nobody committed is one `git clean -fd` from having never
+ * happened.
+ *
+ * Three states, because the same loss needs three different sentences:
+ *
+ *   - `untracked` — git has never seen this ledger. Wrong at any moment.
+ *   - `ignored` — a rule in some `.gitignore` covers it. The same loss, but
+ *     `git add` on a path git is ignoring is a SILENT no-op, so the advice the
+ *     untracked case gives would look like it worked and change nothing.
+ *   - `uncommitted` — tracked, with local changes. What an initiative in
+ *     flight looks like ten seconds after any append, so it is worth saying
+ *     only at a merge boundary, and never worth failing a check over.
+ *
+ * Two git invocations for the whole tree rather than two per initiative: the
+ * listings are read once and classified by path prefix in JS. A repo can hold
+ * dozens of initiatives and this runs behind the SessionStart deadline. The
+ * prefix is built in git's own output convention (repo-relative, forward
+ * slashes) for the same reason `trackedLeaseFiles` filters in JS instead of
+ * trusting pathspec globbing.
+ *
+ * No second `rev-parse`: the caller reaches this only when `untrackedTyranDir`
+ * returned a boolean rather than null, which is already the answer to whether
+ * git can answer.
+ */
+export function initiativeGitStates(run, tyranDirName, names) {
+  const lines = (out) => out.split('\n').filter((line) => line !== '');
+  const tracked = lines(run(['ls-files', '--', tyranDirName]));
+  // `--ignored` costs nothing on a call being made anyway and is the whole
+  // difference between "you forgot" and "a rule you wrote is hiding it".
+  // Porcelain v1 is `XY<space>path`; git collapses a wholly untracked or
+  // ignored DIRECTORY into a single entry, so a recorded path can be shorter
+  // than the prefix as well as longer — hence the check in both directions.
+  const status = lines(run(['status', '--porcelain', '--ignored', '--', tyranDirName]));
+  const paths = (keep) => status.filter((l) => l.startsWith('!! ') === keep).map((l) => l.slice(3));
+  const ignored = paths(true);
+  const dirty = paths(false);
+  const covers = (entries, prefix) =>
+    entries.some((path) => path.startsWith(prefix) || prefix.startsWith(path));
+  const states = new Map();
+  for (const name of names) {
+    const prefix = `${tyranDirName}/state/${name}/`;
+    if (tracked.some((path) => path.startsWith(prefix))) {
+      states.set(name, covers(dirty, prefix) ? 'uncommitted' : 'committed');
+    } else {
+      states.set(name, covers(ignored, prefix) ? 'ignored' : 'untracked');
+    }
+  }
+  return states;
+}
+
+/** The finding for one non-`committed` ledger state, or null for `committed`. */
+function ledgerFinding(state, path, name, gitPath) {
+  if (state === 'untracked') {
+    return finding(
+      'initiative-untracked',
+      show(path),
+      'git has never seen this ledger — `journal.mjs append` writes the working tree and nothing ' +
+        'else, so an initiative nobody committed is one `git clean -fd` from having never happened, ' +
+        'and a worktree carries tracked files only, so the agents working in one never read it',
+      `git add ${sq(gitPath)} && git commit -m ${sq(`chore(tyran): record the ${name} ledger`)}`,
+    );
+  }
+  if (state === 'ignored') {
+    return finding(
+      'initiative-ignored',
+      show(path),
+      'a .gitignore rule covers this ledger, so nothing under it can be committed — the journal is ' +
+        'the copy that is supposed to outlive the session, and this one exists on one machine only',
+      `git check-ignore -v ${sq(`${gitPath}/journal.jsonl`)}   # the rule doing it; ` +
+        '`git add` alone is a silent no-op on an ignored path',
+    );
+  }
+  return finding(
+    'initiative-uncommitted',
+    show(path),
+    'the ledger has uncommitted changes — ordinary mid-initiative, a gap at a merge boundary: ' +
+      'rule 1 asks for the ledger to travel with the work, not to be committed once at the end',
+    `git add ${sq(gitPath)} && git commit -m ${sq(`chore(tyran): ${name} ledger`)}`,
+  );
+}
+
+/**
  * Lease files committed to git. A lease records who holds a worktree or a
  * heavy slot RIGHT NOW; committing one makes every parallel merge conflict on
  * state that was stale the moment it was written, and a checkout resurrects
@@ -1258,7 +1356,7 @@ export function mistakesFindings(repoRoot) {
           show(claudePath),
           `${lawEntries} entr${lawEntries === 1 ? 'y' : 'ies'} in ${MISTAKES_FILE} ` +
             `claim${lawEntries === 1 ? 's' : ''} status \`law\`, and ${why}`,
-          `node scripts/mistakes.mjs repeats --file ${sq(path)}   # see docs/self-improvement.md for the fence`,
+          `node scripts/mistakes.mjs repeats --file ${sq(path)}   # see https://jjanczur.github.io/tyran/self-improvement/ for the fence`,
         ),
       );
     }
@@ -1371,7 +1469,7 @@ export function overnightFindings(dir, { now = null, configDoc = null } = {}) {
           show(sidecarPath),
           `limits.mode is "${show(limits.mode)}" but the usage telemetry sidecar is ${sidecar === null ? 'absent' : 'over a day old'} — ` +
             'the gate fails open without it, so the configured pause protects nothing. The statusline ' +
-            'helper is operator-installed; see docs/overnight.md',
+            'helper is operator-installed; see https://jjanczur.github.io/tyran/overnight/',
           `node scripts/statusline.mjs --sidecar-only   # wired into the user-settings statusLine command`,
         ),
       );
@@ -1506,6 +1604,18 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
         finding('state-unreadable', show(stateDir), `cannot list state/ (${errText(err)})`),
       );
     }
+    // Only when `.tyran/` as a whole IS tracked. Under a wholly untracked
+    // directory every initiative would repeat the finding above, each time
+    // with narrower advice than the one that already covers it, and a check
+    // that says the same thing N+1 times is a check people learn to skip.
+    const gitStates =
+      untracked === false
+        ? initiativeGitStates(
+            gitRun,
+            basename(root),
+            sortedNames(names).filter((name) => isDirectory(join(stateDir, name))),
+          )
+        : null;
     for (const name of sortedNames(names)) {
       const path = join(stateDir, name);
       if (!isDirectory(path)) {
@@ -1526,6 +1636,10 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
       }
       const result = checkInitiative(stateDir, name, { now, staleHours });
       findings.push(...result.findings);
+      const ledger = gitStates?.get(name) ?? 'committed';
+      if (ledger !== 'committed') {
+        findings.push(ledgerFinding(ledger, path, name, `${basename(root)}/state/${name}`));
+      }
       initiatives.push(`${show(name)} (${result.events} event(s))`);
     }
   }
@@ -1542,7 +1656,7 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
         'legacy layout — initiative files (PLAN.md, NOTES.md, RETRO.md, locks/) live under ' +
           'state/<initiative>/ since 0.1.9. Mechanical consumers read only state/, so anything ' +
           'kept here is invisible to the projections, the retrospective and the session summary',
-        `ls -la ${sq(legacyDir)}   # relocate the contents by hand, one initiative directory at a time, into ${sq(join(dir, 'state'))} — see docs/journal.md`,
+        `ls -la ${sq(legacyDir)}   # relocate the contents by hand, one initiative directory at a time, into ${sq(join(dir, 'state'))} — see https://jjanczur.github.io/tyran/journal/`,
       ),
     );
   }
@@ -1564,7 +1678,7 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
         `${trackedLeases.length} lease file(s) committed to git — a lease records who holds a resource ` +
           'RIGHT NOW, so a committed one conflicts on every parallel merge and resurrects as a phantom ' +
           'holder on every checkout',
-        `git ls-files -- ${sq(basename(root))}   # list them; keep 'state/*/locks/' in .tyran/.gitignore and un-track the files by hand — see docs/configuration.md`,
+        `git ls-files -- ${sq(basename(root))}   # list them; keep 'state/*/locks/' in .tyran/.gitignore and un-track the files by hand — see https://jjanczur.github.io/tyran/configuration/`,
       ),
     );
   }

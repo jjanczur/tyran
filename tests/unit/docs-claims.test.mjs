@@ -137,3 +137,51 @@ for (const { surface, file, path, stem } of pagesWithClaims) {
     );
   });
 }
+
+/**
+ * The README's competitor table against the FAQ's, cell by cell.
+ *
+ * The README carries five rows of the eleven-row comparison in
+ * `docs/faq.md`, because a reader deciding whether to install this thing will
+ * not click through for it. That is a summary, not a second answer — but only
+ * for as long as the five rows still say what the eleven say. A verdict
+ * corrected in the FAQ and left alone in the README is the exact shape of
+ * every claim this file exists to catch, and the README is the copy people
+ * read.
+ */
+const README_TEXT = readFileSync(join(ROOT, 'README.md'), 'utf8');
+const FAQ_TEXT = readFileSync(join(ROOT, 'docs', 'faq.md'), 'utf8');
+
+/** Rows of the first markdown table whose header names another orchestrator. */
+function comparisonRows(text) {
+  const lines = text.split('\n');
+  const head = lines.findIndex((l) => l.includes('| oh-my-claudecode |'));
+  if (head === -1) return null;
+  const rows = new Map();
+  for (const line of lines.slice(head + 2)) {
+    if (!line.startsWith('|')) break;
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    // The label carries the emphasis and the wording; the verdicts are what a
+    // reader compares, so those are what get pinned.
+    rows.set(cells[0], cells.slice(1));
+  }
+  return rows;
+}
+
+test('every competitor verdict in the README matches the FAQ it summarises', () => {
+  const readme = comparisonRows(README_TEXT);
+  const faq = comparisonRows(FAQ_TEXT);
+  assert.ok(readme, 'the README no longer carries a named-competitor table');
+  assert.ok(faq, 'docs/faq.md no longer carries a named-competitor table');
+  assert.ok(readme.size >= 1 && readme.size < faq.size, 'the README should carry a SUBSET of the FAQ rows');
+
+  for (const [label, verdicts] of readme) {
+    assert.ok(faq.has(label), `the README row "${label}" has no counterpart in docs/faq.md`);
+    assert.deepEqual(
+      verdicts,
+      faq.get(label),
+      `"${label}" reads differently in the README than in docs/faq.md. The FAQ is the ` +
+        'measured one; whichever moved, the other has to follow.',
+    );
+  }
+});

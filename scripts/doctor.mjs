@@ -1279,6 +1279,10 @@ export const OVERNIGHT_RUNTIME_FILES = Object.freeze([
   'resume.json',
   'resume.log',
   'usage.json',
+  // The spend cache. Machine-local like the rest of this list and for the same
+  // reason: it is derived from transcripts under the operator's home
+  // directory, so another clone reads different bytes from the same journal.
+  'cost.json',
 ]);
 
 /**

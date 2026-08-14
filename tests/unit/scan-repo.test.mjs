@@ -326,6 +326,7 @@ const MANAGED_IGNORE_LINES = [
   'state/resume.json',
   'state/resume.log',
   'state/usage.json',
+  'state/cost.json',
   'state/conductor.json',
   'state/ANSWERS.md',
 ];
@@ -375,7 +376,7 @@ test('--ensure-policy appends the overnight lines to a 0.1.9 gitignore', () => {
   assert.equal(
     after,
     `${v019}state/paused-until.json\nstate/resume.json\nstate/resume.log\nstate/usage.json\n` +
-      'state/conductor.json\nstate/ANSWERS.md\n',
+      'state/cost.json\nstate/conductor.json\nstate/ANSWERS.md\n',
     'exactly the missing managed lines, appended at the end',
   );
 
@@ -395,7 +396,7 @@ test('a managed-line append preserves operator lines, their order, and a missing
     readFileSync(ignorePath, 'utf8'),
     'state/scratch/\nstate/usage.json\nstate/*/locks/\n' +
       'state/paused-until.json\nstate/resume.json\nstate/resume.log\n' +
-      'state/conductor.json\nstate/ANSWERS.md\n',
+      'state/cost.json\nstate/conductor.json\nstate/ANSWERS.md\n',
     'operator lines keep their place; only absent managed lines are appended',
   );
 

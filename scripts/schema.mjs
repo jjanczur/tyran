@@ -68,7 +68,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits', 'pricing'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -184,6 +184,51 @@ export function validateConfig(doc) {
     }
   }
 
+  // What a model costs per million tokens. Operator-written from a vendor's
+  // price list — never scanner-inferred, so no provenance wrapper, exactly
+  // like `limits:`. Absent means the cost report shows tokens and no money,
+  // which is the honest default: Tyran does not know what anyone pays.
+  if ('pricing' in doc) {
+    if (!isPlainObject(doc.pricing)) errors.push('pricing: must be a mapping');
+    else {
+      const pricing = doc.pricing;
+      // The rate card's NAME travels with every amount it produces. Two people
+      // quoting different cards produce different money from one set of
+      // tokens, and a figure that cannot say which card it came from is not a
+      // measurement.
+      if ('rate_card' in pricing && !isNonEmptyString(pricing.rate_card)) {
+        errors.push('pricing.rate_card: must be a non-empty label');
+      }
+      if ('models' in pricing) {
+        if (!isPlainObject(pricing.models)) errors.push('pricing.models: must be a mapping of model id to rates');
+        else {
+          for (const [model, rates] of Object.entries(pricing.models)) {
+            if (!isPlainObject(rates)) {
+              errors.push(`pricing.models.${model}: must be a mapping of rate name to price per million tokens`);
+              continue;
+            }
+            for (const key of Object.keys(rates)) {
+              if (!PRICING_RATE_KEYS.includes(key)) {
+                errors.push(`pricing.models.${model}.${key}: unknown rate, one of ${PRICING_RATE_KEYS.join(' | ')}`);
+              }
+            }
+            for (const key of PRICING_RATE_KEYS) {
+              if (!(key in rates)) {
+                errors.push(`pricing.models.${model}.${key}: required`);
+              } else if (typeof rates[key] !== 'number' || !Number.isFinite(rates[key]) || rates[key] < 0) {
+                errors.push(`pricing.models.${model}.${key}: must be a non-negative number (price per million tokens)`);
+              }
+            }
+          }
+        }
+      }
+      const knownPricing = ['rate_card', 'models'];
+      for (const key of Object.keys(pricing)) {
+        if (!knownPricing.includes(key)) errors.push(`pricing.${key}: unknown key`);
+      }
+    }
+  }
+
   return errors;
 }
 
@@ -215,6 +260,49 @@ export function limitsOf(doc) {
     // Opt-in, strictly: anything that is not the boolean true is off. Nothing
     // on any machine changes until an operator writes `keep_awake: true`.
     keep_awake: limits.keep_awake === true,
+  };
+}
+
+/**
+ * The four things a request is billed for. All four are REQUIRED on any model
+ * an operator prices: a table carrying three of them would price the fourth at
+ * zero, silently, and cache reads alone were measured at three quarters of a
+ * real session's cost. A partial rate card is a wrong number, not a partial
+ * one.
+ */
+export const PRICING_RATE_KEYS = Object.freeze(['input', 'cache_write', 'cache_read', 'output']);
+
+/**
+ * The pricing block, normalized — the ONE place the shape lives. Returns
+ * `{ rate_card, models }` where `models` is a null-prototype table keyed by
+ * the model id the platform reports, and `rate_card` is the label that must
+ * travel with every amount derived from it (null when unlabelled).
+ *
+ * A model missing from the table gets NO entry here rather than a zero: the
+ * caller must be able to tell "priced at nothing" from "not priced", because
+ * the first is a number and the second is a gap that belongs on screen.
+ * Rates that fail validateConfig's shape are dropped for the same reason the
+ * usage gate drops out-of-range limits — enforcing a value the schema rejects
+ * is how a bad config becomes a confident wrong answer.
+ */
+export function pricingOf(doc) {
+  const pricing = isPlainObject(doc) && isPlainObject(doc.pricing) ? doc.pricing : {};
+  const models = Object.create(null);
+  if (isPlainObject(pricing.models)) {
+    for (const [model, rates] of Object.entries(pricing.models)) {
+      if (!isPlainObject(rates)) continue;
+      const usable = PRICING_RATE_KEYS.every(
+        (key) => typeof rates[key] === 'number' && Number.isFinite(rates[key]) && rates[key] >= 0
+      );
+      if (!usable) continue;
+      const row = Object.create(null);
+      for (const key of PRICING_RATE_KEYS) row[key] = rates[key];
+      models[model] = row;
+    }
+  }
+  return {
+    rate_card: isNonEmptyString(pricing.rate_card) ? pricing.rate_card : null,
+    models,
   };
 }
 

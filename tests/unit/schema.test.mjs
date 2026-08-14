@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   validateConfig,
   limitsOf,
+  pricingOf,
   validateKnowledge,
   knowledgeWarnings,
   KNOWLEDGE_ENTRY_MAX_CHARS,
@@ -501,4 +502,69 @@ test('CLI: a poisoned FILE NAME cannot reach the terminal either', () => {
     );
     assert.match(r.stdout, expectMatch, `the name must be SHOWN escaped on the ${label}`);
   }
+});
+
+// --- pricing -----------------------------------------------------------
+//
+// The rate card an operator types from a vendor's price list. Never
+// scanner-inferred, so it follows `limits:` in shape: its own top-level
+// block, no provenance wrapper.
+
+test('pricing accepts a full rate card and rejects every partial shape', () => {
+  const full = {
+    ...minimalConfig(),
+    pricing: {
+      rate_card: 'list-2026-08',
+      models: { 'model-a': { input: 15, cache_write: 18.75, cache_read: 1.5, output: 75 } },
+    },
+  };
+  assert.deepEqual(validateConfig(full), []);
+
+  // MUTANT: make the four rate keys optional. A table carrying three of them
+  // prices the fourth at zero, silently — and cache reads alone were measured
+  // at roughly three quarters of a real session's cost.
+  const missing = JSON.parse(JSON.stringify(full));
+  delete missing.pricing.models['model-a'].cache_read;
+  assert.deepEqual(validateConfig(missing), ['pricing.models.model-a.cache_read: required']);
+
+  for (const [bad, expected] of [
+    [{ input: 15, cache_write: 1, cache_read: 1, output: -1 }, 'pricing.models.model-a.output: must be a non-negative number (price per million tokens)'],
+    [{ input: 'free', cache_write: 1, cache_read: 1, output: 1 }, 'pricing.models.model-a.input: must be a non-negative number (price per million tokens)'],
+  ]) {
+    const doc = JSON.parse(JSON.stringify(full));
+    doc.pricing.models['model-a'] = bad;
+    assert.ok(validateConfig(doc).includes(expected), JSON.stringify(bad));
+  }
+
+  const unknown = JSON.parse(JSON.stringify(full));
+  unknown.pricing.models['model-a'].reasoning = 1;
+  assert.ok(validateConfig(unknown).some((e) => e.startsWith('pricing.models.model-a.reasoning: unknown rate')));
+
+  const stray = JSON.parse(JSON.stringify(full));
+  stray.pricing.currency = 'USD';
+  assert.deepEqual(validateConfig(stray), ['pricing.currency: unknown key']);
+
+  const unlabelled = JSON.parse(JSON.stringify(full));
+  unlabelled.pricing.rate_card = '';
+  assert.deepEqual(validateConfig(unlabelled), ['pricing.rate_card: must be a non-empty label']);
+});
+
+test('pricingOf drops a model the validator would reject rather than half-pricing it', () => {
+  const doc = {
+    pricing: {
+      rate_card: 'card',
+      models: {
+        good: { input: 1, cache_write: 2, cache_read: 3, output: 4 },
+        partial: { input: 1, cache_write: 2 },
+      },
+    },
+  };
+  const resolved = pricingOf(doc);
+  assert.equal(resolved.rate_card, 'card');
+  // MUTANT: keep `partial` and default its missing rates to 0 — the report
+  // then shows a confident amount that is short by two of the four things a
+  // request is billed for.
+  assert.deepEqual(Object.keys(resolved.models), ['good']);
+  assert.equal(pricingOf({}).rate_card, null);
+  assert.deepEqual(Object.keys(pricingOf({}).models), []);
 });

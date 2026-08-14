@@ -595,6 +595,11 @@ export const STATE_GITIGNORE_LINES = Object.freeze([
   'state/resume.json',
   'state/resume.log',
   'state/usage.json',
+  // Spend, read back from the platform's own transcripts under the operator's
+  // home directory. Committing it would put one machine's vendor spend into
+  // shared history — a one-way door in an append-only repo — and make two
+  // clones of the same journal disagree.
+  'state/cost.json',
   // The ask queue's two runtime files: a session id and a pid that mean
   // nothing in another clone, and a sheet whose answers already live in the
   // journal — committing either makes every parallel merge conflict on state

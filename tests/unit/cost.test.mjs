@@ -471,6 +471,36 @@ test('the probe stops at the match and the byte cap bounds it — mechanism, not
   assert.equal(transcriptDirFor(tree.repo, tree.projects), tree.project);
 });
 
+test('the byte cap binds the PROBE, not just the primitive it calls', () => {
+  // Round-three finding: the previous pin called forEachLine directly, so it
+  // proved the primitive honours `maxBytes` while proving nothing about the
+  // only caller — and all three of the reviewer's mutants on findTranscriptDir
+  // stayed green. This asserts the caller, on the IDENTITY of its result
+  // rather than on a stopwatch.
+  const tree = makeTree({ slugged: false });
+  const cwd = resolve(tree.repo);
+  // One candidate directory. Its transcript matches this repo — but only far
+  // past the cap, behind 2 MiB of records belonging to somebody else.
+  const decoy = join(tree.projects, 'a-decoy');
+  mkdirSync(decoy, { recursive: true });
+  const filler = JSON.stringify({ type: 'user', cwd: '/some/other/repo', pad: 'y'.repeat(4000) });
+  const buried = [];
+  let bytes = 0;
+  while (bytes < 2 * 1024 * 1024) {
+    buried.push(filler);
+    bytes += filler.length + 1;
+  }
+  buried.push(JSON.stringify({ type: 'user', cwd }));
+  writeFileSync(join(decoy, 'sess.jsonl'), buried.join('\n') + '\n');
+  rmSync(tree.project, { recursive: true, force: true });
+
+  // MUTANT: drop `{ maxBytes: PROBE_BYTES }` from findTranscriptDir's call —
+  // byte-for-byte the pre-fix caller. The probe then reads the decoy to EOF,
+  // finds the buried match and returns it, restoring the measured 1371 ms
+  // miss. With the cap it never reaches that line.
+  assert.equal(transcriptDirFor(tree.repo, tree.projects), null);
+});
+
 test('a missing transcript directory is never remembered as missing', () => {
   const tree = makeTree({ slugged: false });
   const elsewhere = join(tree.base, 'not-yet');

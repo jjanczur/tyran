@@ -276,9 +276,12 @@ const dirCache = new Map();
 
 /**
  * How far into a candidate transcript the fallback reads before giving up on
- * it. Every record carries `cwd`, so the answer is on line one; this bound
- * exists so a miss costs kilobytes per file instead of gigabytes across a
- * project directory nobody has ever pruned.
+ * it. Every record carries `cwd`, so the answer is on line one.
+ *
+ * The bound is checked after a whole 1 MiB read, so in practice it stops a
+ * miss at one chunk per candidate rather than at this number exactly — which
+ * is the point: a miss costs a megabyte per file instead of a whole
+ * transcript, across a project directory nobody has ever pruned.
  */
 const PROBE_BYTES = 64 * 1024;
 
@@ -720,10 +723,15 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
   // a downstream failure with a healthy-looking upstream.
   report.cache_written = false;
   if (session === null) {
+    // Set BEFORE serialising, so the field is true of the file that ends up
+    // on disk. Setting it afterwards left every persisted copy reading
+    // `false` on a cache that had written perfectly well — a diagnostic that
+    // lies to whoever opens the file.
+    report.cache_written = true;
     try {
       writeAtomic(cachePath, costJson(report));
-      report.cache_written = true;
     } catch (err) {
+      report.cache_written = false;
       report.cache_error = String(err?.message ?? err);
     }
   }

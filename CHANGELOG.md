@@ -75,6 +75,27 @@ narrower advice each time.
 - **The dashboard GIF runs at 4 fps instead of 8.3** — the same recording, at a
   speed a tab can actually be read at.
 
+### The dist-tag is earned, not inherited from the last run
+
+Creating GitHub Releases for sixteen historical tags in one batch fired
+`npm-publish.yml` sixteen times. The workflow's safety argument was that npm
+refuses a version that already exists — true, and too small: **npm refusing a
+DUPLICATE version is not npm refusing an OLD one.** Four of those versions had
+never reached npm, so they published cleanly and each took the `latest`
+dist-tag on the way past. For roughly a minute `npm i @jjanczur/tyran` served
+**0.1.2**. Found within two minutes, by checking the registry rather than the
+sixteen green workflow runs, and self-corrected when 0.1.20's own publish
+landed last.
+
+The workflow now asks the registry which version is highest and publishes
+`--tag latest` only when the version in hand IS that one; anything older
+gets `--tag historical` and moves nothing. The comparison is `sort -V`, not
+string order — `0.1.9` sorts above `0.1.10` alphabetically, which would have
+mis-tagged every 0.1.x release past the ninth.
+
+Side effect, kept: 0.1.1, 0.1.2, 0.1.15 and 0.1.16 are now on npm, so the
+registry finally carries every released version.
+
 ## 0.1.19 — 2026-08-14
 
 ### The board answered four questions on one scroll

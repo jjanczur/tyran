@@ -24,6 +24,16 @@ name: Publish to npm
 # and still publishes. The two triggers are idempotent in the only way that
 # matters: npm refuses a version that already exists, so whichever fires second
 # fails loudly instead of publishing something different under the same number.
+#
+# That last sentence used to be the whole safety argument, and it was too
+# small. npm refusing a DUPLICATE version is not npm refusing an OLD one.
+# Measured: GitHub releases were created for sixteen historical tags in one
+# batch, each fired this workflow, and four of those versions had never
+# reached npm at all — so they published cleanly and every one of them took
+# the `latest` dist-tag on the way past. For about a minute
+# `npm i @jjanczur/tyran` served 0.1.2. The dist-tag step below is the fix:
+# `latest` is earned by being the highest version on the registry, not by
+# being the most recent thing this workflow happened to run.
 on:
   push:
     tags: ['v*']
@@ -83,8 +93,33 @@ jobs:
         # at the first require.
         run: npm pack --dry-run
 
+      - name: Which dist-tag this version has earned
+        # `npm publish` defaults to `--tag latest`. That is right for a release
+        # and wrong for a backfill, and this workflow cannot tell the two apart
+        # from its trigger — a `release: published` event looks identical
+        # whether the tag was cut today or two months ago. So the question is
+        # asked of the registry instead: `latest` goes to the version that is
+        # actually the highest one published. Anything older is reachable by
+        # exact version and by `historical`, and moves nothing.
+        #
+        # `sort -V` is the comparison, not string order: `0.1.9` sorts ABOVE
+        # `0.1.10` alphabetically, which would have handed `latest` to the
+        # older of the two on every 0.1.x release past the ninth.
+        id: disttag
+        run: |
+          PKG=$(jq -r .version package.json)
+          HIGHEST=$(npm view "$(jq -r .name package.json)" versions --json 2>/dev/null \
+            | jq -r 'if type == "array" then .[] else . end' | sort -V | tail -1)
+          if [ -z "$HIGHEST" ] || [ "$(printf '%s\n%s\n' "$HIGHEST" "$PKG" | sort -V | tail -1)" = "$PKG" ]; then
+            TAG=latest
+          else
+            TAG=historical
+          fi
+          echo "publishing $PKG as --tag $TAG (highest on npm: ${HIGHEST:-none})"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Publish
         if: github.event_name == 'release' || inputs.dry_run == false
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --tag "${{ steps.disttag.outputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

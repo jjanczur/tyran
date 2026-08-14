@@ -58,7 +58,15 @@ output is rejected, every write is classified against a policy file you own
 before it happens, and a commit carrying a secret is refused. Mechanisms rather
 than instructions — which is the whole argument.
 
-![The Tyran dashboard, recorded live, moving through its four tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost](assets/board-demo.gif)
+<p align="center">
+  <img src="assets/board-demo.gif" width="100%" alt="The Tyran dashboard, recorded live, moving through its four tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost">
+</p>
+
+<p align="center">
+  <b><a href="https://jjanczur.github.io/tyran/sandbox/">▶ Open the sandbox board</a></b> —
+  the real page with sample data, in your browser. Click the tabs, filter the
+  lanes, select a card.
+</p>
 
 ## What it gives you
 
@@ -244,7 +252,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1306 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1313 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

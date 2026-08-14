@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.1.22 — 2026-08-15
+
+### A sandbox board you can click, published with the docs
+
+A screenshot cannot be clicked and a GIF cannot be paused, so the docs now
+publish the **real page** at
+[jjanczur.github.io/tyran/sandbox/](https://jjanczur.github.io/tyran/sandbox/)
+— rendered by the same `scripts/board.mjs` an operator runs, from two invented
+initiatives committed under `site/sandbox/`. Click the tabs, filter the lanes,
+select a card.
+
+Two things a static copy has to solve, and both are solved in the generator
+rather than by hand. **Ages**: the agent strip is aged in the reader's browser
+against event timestamps, so a frozen page would read as a graveyard within a
+month — every timestamp is shifted at build time so the newest event lands six
+minutes before the build, with the original spacing intact. **Honesty**: the
+30-second refresh is stripped (it would also snap a reader back to the first
+tab mid-click) and a banner says what the page is. Both replacements throw if
+their anchor moves, because a silent no-op there publishes a page that claims
+to be someone's live board.
+
+### The board, for someone who left it running overnight
+
+- **The queue count is in the browser tab title.** The page is meant to be left
+  open while agents work; a background tab was saying nothing at all, because
+  the count existed only on a tab you had to be looking at.
+- **"Changed since you marked seen."** The board is a snapshot and the journal
+  is a timeline: coming back to ten lanes meant re-reading all of them to find
+  the two that moved. Press **Mark seen** and the next visit names how many
+  tickets changed lane, badges each one, and says in the detail panel which
+  lane it came from. The baseline moves only on that press — never on load,
+  because the page reloads itself every 30 seconds and an auto-updating
+  baseline would make "since you last looked" mean "in the last half minute",
+  which is the same as showing nothing.
+- **A filter over the lanes**, matching ticket id, title and initiative. Ten
+  lanes across dozens of initiatives is a pile; the lane headings keep their
+  counts as `n of N`, so a filtered zero still reads as a fact rather than an
+  absence.
+- **A merged ticket names who did it.** The card's agent list empties the
+  moment an agent reports, so every `done` card showed nobody — and "who
+  touched this" is a question asked about finished work, not running work. The
+  fold has kept the list since spawns learned to name a ticket; only the board
+  dropped it. `worked_by` is deduplicated and naturally ordered, because
+  `board.json` is compared byte for byte and spawn order is not an order.
+- **Nothing-started no longer looks like nothing-finished.** A fresh
+  initiative and a fully stalled one both rendered `0% · 0 of 0 merged`.
+- **A 404 on spend is an answer, not a failure.** No such route means the page
+  is not being served by the board server — a copy on a docs site, a file
+  behind some other host — and it now says so calmly, while a 503 stays loud.
+
+### The client script is now proved to parse
+
+Every other assertion about the page matches strings in the rendered HTML,
+which a page that cannot run would satisfy just as well. The whole client is
+one template literal, so a backtick inside a **comment** terminates it and the
+module stops loading — which is exactly how this was found, by a comment that
+quoted an identifier. The suite now compiles the emitted script.
+
+### Documentation
+
+The GIF is larger (1180px), and under it, in the README and on both doc
+surfaces, a link to the sandbox. `docs/board.md`'s **Opening it** section is
+the one place that says how to open the dashboard: the serve command and the
+URL it prints, the `open`/`xdg-open`/`start` line for the file, what differs
+between them, and that `/tyran:status` does it for you inside a session.
+
+`CLAUDE.md` now specifies `npm run build` for the site rather than
+`npx astro build` — the sandbox is generated first, and calling astro directly
+publishes a site whose sandbox link 404s.
+
 ## 0.1.21 — 2026-08-14
 
 ### The board said "all is well" in five different ways it should not have

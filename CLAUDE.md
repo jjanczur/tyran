@@ -93,8 +93,13 @@ hand are the risk.
   stack trace that says nothing about Playwright until you scroll.
 
 ```bash
-cd site && npm ci && GITHUB_PAGES=true npx astro build && node scripts/check-base-prefix.mjs
+cd site && npm ci && GITHUB_PAGES=true npm run build && node scripts/check-base-prefix.mjs
 ```
+
+`npm run build`, not `npx astro build`: the build first generates the clickable
+sandbox board into `public/sandbox/` from the journals in `site/sandbox/`,
+shifting their timestamps so the agent ages stay fresh. Call `astro` directly
+and you publish a site whose sandbox link 404s.
 
 ## Small things that waste a cycle
 

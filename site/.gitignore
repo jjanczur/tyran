@@ -14,3 +14,9 @@ dist/
 # Local build tooling noise
 .DS_Store
 *.log
+
+# The clickable sandbox board, generated from site/sandbox/*.jsonl by
+# `npm run sandbox` (which `npm run build` runs first). It is a build product
+# with a timestamp shift in it — committing it would freeze the agent ages
+# that the generator exists to keep fresh.
+public/sandbox/

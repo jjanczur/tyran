@@ -30,7 +30,7 @@ import {
   renderAll,
   renderCrossMd,
 } from '../../scripts/board.mjs';
-import { renderBoardHtml } from '../../scripts/board-html.mjs';
+import { renderBoardError, renderBoardHtml } from '../../scripts/board-html.mjs';
 import { BOARD_FILE, BOARD_JSON_FILE, LANES } from '../../scripts/project.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/board.mjs', import.meta.url));
@@ -301,4 +301,144 @@ test('spend reaches three places from the one fetch, and explains itself when th
   assert.match(html, /if \(cost\) \{/, 'a selected card must be able to show its own spend');
   assert.match(html, /row\('spend', fmtTokens\(hit\.tokens\) \+ ' tokens [^']*' \+ fmtUsd\(hit\.usd\)\);/);
   assert.match(html, /Over file:\/\/ there is no server, so this tab stays empty\./);
+});
+
+// --- the half that did not render -----------------------------------------
+//
+// The damage guard above fires only when NOTHING was readable. Everything
+// below is the other half of the same argument: an initiative that folded
+// successfully can still have lost lines, agents can go quiet, spend can fail
+// to load, and each of those used to render as a board with nothing wrong.
+
+/** The fixture with one line replaced by garbage — readable, but not whole. */
+function partlyDamaged() {
+  const lines = demo().trimEnd().split('\n');
+  lines.splice(3, 0, '{not json at all');
+  return lines.join('\n') + '\n';
+}
+
+test('a PARTIALLY damaged journal renders, and says what it lost', () => {
+  // MUTANT: drop the warnings() call in readInitiativeBoards. The board folds
+  // the readable events, reports errors: [], and renders an initiative in
+  // perfect health while a line of its ledger is gone. This is the exact
+  // shape the total-loss guard cannot see, and it is the likelier one: a
+  // crash mid-write damages the tail, not the whole file.
+  const dir = tree({ demo: partlyDamaged() });
+  const read = readInitiativeBoards(dir);
+  assert.equal(read.errors.length, 0, 'it is readable — this is not the total-loss case');
+  assert.equal(read.initiatives.length, 1, 'and it must still render');
+  assert.match(read.warned[0].warnings.join(' '), /corrupt line/);
+
+  assert.match(renderCrossMd(crossBoard(read)), /\*\*WARNING\*\* — demo: .*corrupt line/);
+  const html = renderAll(dir).files[BOARD_HTML_FILE];
+  assert.match(html, /Warnings \(/, 'the page too — BOARD.md is not what the operator stares at');
+});
+
+test('an intact journal is never accused of corruption', () => {
+  // The other half of the mutant above. A banner that is always on is a
+  // banner nobody reads, which is the failure mode of the FIX rather than of
+  // the bug — so the claim pinned here is specific: no integrity warning on a
+  // journal whose bytes are all there. (The shipped fixture does carry one
+  // state warning, a lease released by a non-holder, and that one is
+  // deliberately surfaced too.)
+  const read = readInitiativeBoards(tree({ demo: demo() }));
+  const all = read.warned.flatMap((w) => w.warnings).join(' ');
+  assert.doesNotMatch(all, /corrupt|truncated|non-object/);
+  assert.ok(readInitiativeBoards(tree({ demo: partlyDamaged() })).warned[0].warnings.length > read.warned.length);
+});
+
+test('needs-a-human counts blocked AGENTS, not only blocked lanes', () => {
+  // MUTANT: count lanes.blocked + lanes['changes-requested'] alone. A ticket
+  // parked by a ticket.status override leaves no card in the blocked lane —
+  // boardOf resolves the override BEFORE the blockage — so the tile read 0
+  // while an agent chip on the same screen said "blocked". Measured on the
+  // shipped fixture.
+  const payload = crossBoard(readInitiativeBoards(tree({ demo: demo() })));
+  const blockedAgents = payload.agents.filter((a) => a.state === 'blocked').length;
+  assert.ok(blockedAgents > 0, 'the fixture must keep an agent blocked or this test proves nothing');
+  const lanes = payload.lanes.blocked.length + payload.lanes['changes-requested'].length;
+  assert.equal(payload.totals.blocked, lanes + blockedAgents);
+  assert.ok(payload.totals.blocked > lanes, 'the agent is the whole point — lanes alone missed it');
+});
+
+test('the agent strip is ordered stalest first, whatever order the journals spawned them', () => {
+  // MUTANT: keep journal order. The strip carries a last-signal age precisely
+  // because the silent agent is the one worth looking at, and journal order
+  // puts it anywhere — including last, below the fold.
+  const dir = tree({ alpha: demo(), beta: demo().replaceAll('"init":"demo"', '"init":"beta"') });
+  const { agents } = crossBoard(readInitiativeBoards(dir));
+  assert.ok(agents.length >= 2);
+  const signals = agents.map((a) => String(a.last_signal ?? ''));
+  assert.deepEqual(signals, [...signals].sort(), 'ascending ISO time is ascending staleness-first');
+
+  // MUTANT: drop the 'next:' line from the chip. The board then says an agent
+  // went quiet without saying what it went quiet in the MIDDLE of — and the
+  // field has been in board.json since the fold learned to read progress.
+  assert.match(demoHtml(), /'next: ' \+ a\.next/);
+  // MUTANT: keep three age buckets. Thirty minutes and six hours then share a
+  // colour and a sentence, and they are not the same event.
+  assert.match(demoHtml(), /likely dead/);
+});
+
+test('the drill-down lists the initiative files that exist, and invents none', () => {
+  // MUTANT: return a fixed list of PLAN.md/NOTES.md/RETRO.md without the
+  // existsSync. The panel then names files that are not there, which is the
+  // same lie as omitting the ones that are — and the operator asked
+  // explicitly that nothing be created to satisfy the link.
+  const dir = tree({ demo: demo() });
+  writeFileSync(join(dir, 'state', 'demo', 'PLAN.md'), '# plan\n');
+  const payload = crossBoard(readInitiativeBoards(dir));
+  assert.deepEqual(payload.files.demo.map((f) => f.name), ['PLAN.md']);
+  assert.match(payload.files.demo[0].path, /state\/demo\/PLAN\.md$/);
+
+  const bare = crossBoard(readInitiativeBoards(tree({ demo: demo() })));
+  assert.deepEqual(bare.files, {}, 'no files on disk, no files claimed');
+});
+
+test('over the ceiling the SERVED page is readable prose, not a 500 it re-fetches every 30 s', () => {
+  // MUTANT: leave the handler's catch writing a plain-text 500. The page sets
+  // its own meta refresh, so the browser then re-requests an error nobody can
+  // read twice a minute. The CLI keeps throwing — that pin is one test above,
+  // and refusing loudly is right when a human is reading exit codes.
+  const html = renderBoardError('65 initiative directories — the ceiling is 64.');
+  assert.match(html, /The board cannot be rendered/);
+  assert.match(html, /the ceiling is 64/);
+  assert.doesNotMatch(html, /http-equiv="refresh"/, 'an error page that reloads itself is a loop');
+  assert.doesNotMatch(html, /innerHTML/);
+});
+
+test('a hostile message on the error page stays text', () => {
+  // MUTANT: interpolate the message into the markup. It comes from an
+  // exception, an exception carries a path, and a path is input.
+  const html = renderBoardError('<img src=x onerror=alert(1)> /tmp/</script><script>');
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.ok(html.includes('\\u003C'), 'the message travels through the same JSON channel the board uses');
+});
+
+test('a spend failure says which failure it was', () => {
+  // MUTANT: map every non-OK response to null and return silently. A crashed
+  // reader, an unparseable rate card and an unserved page then look identical
+  // — all three are simply a missing section — and the server had already
+  // built the sentence that tells them apart.
+  const html = demoHtml();
+  assert.match(html, /Spend could not be read/);
+  assert.match(html, /showCostFailure/);
+  assert.match(html, /location\.protocol/, 'file:// is not a failure and must not be reported as one');
+});
+
+test('board.json carries no absolute path, so two clones of one journal agree', () => {
+  // MUTANT: record the absolute path of each initiative file — which is the
+  // obvious thing to record, since it is what an operator pastes. board.json
+  // is committed and compared BYTE for byte, so an absolute path makes
+  // `--check` fail on any machine whose home directory is spelled
+  // differently. It is the same reason spend is served instead of embedded,
+  // and it was nearly shipped here before this test existed.
+  const dir = tree({ demo: demo() });
+  writeFileSync(join(dir, 'state', 'demo', 'PLAN.md'), '# plan\n');
+  const json = renderAll(dir).files[BOARD_JSON_FILE];
+  assert.match(json, /PLAN\.md/, 'the file has to be in there or this proves nothing');
+  assert.ok(!json.includes(dir), 'the temp directory leaked into a committed artefact');
+  for (const line of json.split('\n')) {
+    assert.doesNotMatch(line, /"path": "\//, 'a path starting at the filesystem root is machine-specific');
+  }
 });

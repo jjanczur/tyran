@@ -52,7 +52,7 @@ const CSS = `
   --hairline:#332e27;--hairline-soft:#26221d;
   --brass:#a8863c;--brass-bright:#cfae63;--brass-low:#221c11;--brass-edge:#5d4c22;
   --steel:#7d9ea9;--steel-bright:#9dbcc6;--steel-low:#17242a;--steel-edge:#3a545d;
-  --clay:#c07a70;--clay-low:#2a1a18;--sage:#88a06a;
+  --clay:#c07a70;--clay-bright:#d9998f;--clay-low:#2a1a18;--sage:#88a06a;
   --display:ui-serif,'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,'Times New Roman',serif;
   --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
@@ -97,6 +97,19 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .agent .age-fresh{color:var(--sage)}
 .agent .age-warm{color:var(--brass-bright)}
 .agent .age-cold{color:var(--clay)}
+/* A dead agent gets the only bold red on the page: three hours of silence is
+   a different event from thirty minutes, and it used to share a colour. */
+.agent .age-dead{color:var(--clay-bright);font-weight:700}
+
+/* ---- what did not render ---- */
+.damaged{background:var(--bg-raised);border-left:3px solid var(--brass);border-radius:.45rem;padding:.42rem .65rem;margin:.3rem 0;font-family:var(--mono);font-size:.78rem;color:var(--brass-bright)}
+.err{background:var(--bg-raised);border-left:3px solid var(--clay);border-radius:.45rem;padding:.6rem .75rem;color:var(--clay-bright);font-size:.85rem}
+
+/* ---- the files an initiative actually has ---- */
+.files{display:flex;flex-direction:column;gap:.2rem;margin-top:.3rem}
+.file{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;font-size:.76rem}
+.file .fname{color:var(--steel-bright);font-family:var(--mono);font-weight:600;min-width:6rem}
+.file code{color:var(--muted);font-size:.72rem;word-break:break-all}
 
 /* ---- lanes ---- */
 .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.6rem;align-items:start}
@@ -206,6 +219,7 @@ if (data.schema !== 1) {
   var lanes = data.lanes || {};
   var errors = data.errors || [];
   var cost = null;
+  var costError = null;
 
   var app = document.getElementById('app');
   var head = el('div');
@@ -282,10 +296,20 @@ if (data.schema !== 1) {
       chip.appendChild(el('div', 'name', a.agent + (a.role ? ' · ' + a.role : '')));
       chip.appendChild(el('div', null, (a.init ? a.init + ' · ' : '') + (a.ticket || 'no ticket') + ' · ' + a.state));
       if (a.detail) chip.appendChild(el('div', 'note', a.detail));
+      // What the agent said it would do next. It has been in board.json since
+      // the fold learned to read progress events, and the strip has never
+      // shown it — so the chip could say an agent went quiet without saying
+      // what it went quiet in the middle of.
+      if (a.next) chip.appendChild(el('div', 'note', 'next: ' + a.next));
       var ageMs = a.last_signal ? Date.now() - Date.parse(a.last_signal) : null;
       var cls = ageMs === null ? 'age-cold' : ageMs < 600000 ? 'age-fresh' : ageMs < 1800000 ? 'age-warm' : 'age-cold';
-      var ageText = ageMs === null ? 'no signal' : Math.round(ageMs / 60000) + ' min since last signal';
-      chip.appendChild(el('div', cls, ageText));
+      // Four buckets, not three. The old top bucket was "30 minutes or six
+      // hours", which are not the same event: one is a long test run, the
+      // other is an agent that is not coming back.
+      var ageText = ageMs === null ? 'no signal recorded'
+        : ageMs >= 10800000 ? Math.round(ageMs / 3600000) + ' HOURS since last signal — likely dead'
+        : Math.round(ageMs / 60000) + ' min since last signal';
+      chip.appendChild(el('div', ageMs !== null && ageMs >= 10800000 ? 'age-dead' : cls, ageText));
       strip.appendChild(chip);
     });
     return strip;
@@ -302,11 +326,21 @@ if (data.schema !== 1) {
     asks.length === 0 ? 'nothing blocked on a decision' : 'answer them on the next tab', asks.length > 0 ? 'lead' : null));
   ovTiles.appendChild(tile('agents running', String(agents.length), 'across ' + (totals.initiatives || 0) + ' initiative(s)'));
   ovTiles.appendChild(tile('progress', (totals.percent || 0) + '%', (totals.merged || 0) + ' of ' + (totals.tickets || 0) + ' merged'));
-  var stuck = laneCount('blocked') + laneCount('changes-requested');
+  // Counted by the server, from the lanes AND the agents. Counting lanes here
+  // read zero while an agent chip on the same screen said "blocked", because a
+  // ticket parked by an override leaves no card in the blocked lane.
+  var blockedAgents = agents.filter(function (a) { return a.state === 'blocked'; }).length;
+  var stuck = totals.blocked !== undefined ? totals.blocked
+    : laneCount('blocked') + laneCount('changes-requested') + blockedAgents;
   ovTiles.appendChild(tile('needs a human', String(stuck),
-    laneCount('blocked') + ' blocked · ' + laneCount('changes-requested') + ' changes requested', stuck > 0 ? 'warn' : null));
+    laneCount('blocked') + ' blocked · ' + laneCount('changes-requested') + ' changes requested · '
+      + blockedAgents + ' agent(s) blocked', stuck > 0 ? 'warn' : null));
   ov.appendChild(ovTiles);
   ov.appendChild(el('h2', null, 'Agents'));
+  // Named, not implied by the order: the strip is sorted stalest-first by the
+  // server, and a reader who does not know that reads the first chip as the
+  // newest one.
+  if (agents.length > 1) ov.appendChild(el('div', 'hint', 'Stalest first — the agent that has said nothing longest is at the top.'));
   ov.appendChild(agentStrip());
   var ovSpend = el('div');
   ov.appendChild(ovSpend);
@@ -318,6 +352,22 @@ if (data.schema !== 1) {
     ov.appendChild(el('h2', null, 'Unreadable (' + errors.length + ')'));
     errors.forEach(function (e) {
       ov.appendChild(el('div', 'paused', 'UNREADABLE — ' + e.name + ': ' + e.error));
+    });
+  }
+
+  // The same argument one step down. An initiative whose journal is PARTLY
+  // damaged folds to a board with nothing wrong on it — the lost half leaves
+  // no trace — so it used to render as an initiative in perfect health.
+  var warned = data.warned || [];
+  if (warned.length > 0) {
+    var warnCount = 0;
+    warned.forEach(function (d) { warnCount += d.warnings.length; });
+    ov.appendChild(el('h2', null, 'Warnings (' + warnCount + ')'));
+    ov.appendChild(el('div', 'hint', 'These initiatives rendered. What follows is what the fold could not account for — a skipped line is missing from every lane above, and a lease released by a non-holder is still open.'));
+    warned.forEach(function (d) {
+      d.warnings.forEach(function (w) {
+        ov.appendChild(el('div', 'damaged', d.name + ': ' + w));
+      });
     });
   }
 
@@ -347,8 +397,26 @@ if (data.schema !== 1) {
     if (cost) {
       var hit = (cost.by_ticket || []).filter(function (r) { return r.ticket === card.id; })[0];
       if (hit) row('spend', fmtTokens(hit.tokens) + ' tokens · ' + fmtUsd(hit.usd));
+    } else if (costError) {
+      row('spend', costError);
     }
     box.appendChild(dl);
+    // The files this initiative ACTUALLY has, listed by the server after an
+    // existsSync — never a fixed list of what a well-run initiative ought to
+    // contain. Paths, not links: the board serves three URLs and derives a
+    // filesystem path from none of them, which is worth more than a click.
+    var docs = (data.files || {})[card.init] || [];
+    if (docs.length > 0) {
+      box.appendChild(el('div', 'dt', 'Files'));
+      var list = el('div', 'files');
+      docs.forEach(function (f) {
+        var line = el('div', 'file');
+        line.appendChild(el('span', 'fname', f.name));
+        line.appendChild(el('code', null, f.path));
+        list.appendChild(line);
+      });
+      box.appendChild(list);
+    }
     detail.appendChild(box);
   };
   Object.keys(lanes).forEach(function (lane) {
@@ -520,11 +588,33 @@ if (data.schema !== 1) {
   // the operator's home directory — machine-local, different in every clone —
   // so writing it into board.json would break the byte-exact --check contract
   // and make two people with one journal disagree.
+  // Three different things used to look identical here: an unserved page, a
+  // crashed reader, and a rate card that does not parse. All three ended as a
+  // silently absent section, so the operator could not tell "there is nothing
+  // to show" from "the thing that shows it is broken". The server already
+  // builds an error string for the 503 and it was never displayed.
+  var showCostFailure = function (why) {
+    costError = why;
+    clear(spBody);
+    spBody.appendChild(el('div', 'err', why));
+  };
   if (typeof fetch === 'function') {
     fetch('cost.json', { headers: { accept: 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (payload) {
-        if (!payload || payload.schema !== 1 || !payload.transcripts_found) return;
+      .then(function (r) {
+        return r.json().then(function (body) { return { ok: r.ok, body: body }; });
+      })
+      .then(function (res) {
+        var payload = res.body;
+        if (!res.ok) {
+          showCostFailure('Spend could not be read: ' + ((payload && payload.error) || 'the server refused the request') + '.');
+          return;
+        }
+        if (!payload || payload.schema !== 1) {
+          showCostFailure('Spend was served in a format this page does not know (schema ' +
+            ((payload && payload.schema) || 'absent') + ') — regenerate the board with the Tyran that served it.');
+          return;
+        }
+        if (!payload.transcripts_found) return; // genuinely nothing to show
         cost = payload;
         renderSpend(spBody, 'tokens');
         var t = cost.totals || {};
@@ -534,7 +624,12 @@ if (data.schema !== 1) {
         ovSpend.appendChild(el('h2', null, 'Spend'));
         ovSpend.appendChild(strip);
       })
-      .catch(function () { /* no server: the board is complete without it */ });
+      .catch(function () {
+        // Over file:// there is no server to ask, which is not a failure —
+        // it is the documented shape of this page without one.
+        if (String(location.protocol) === 'file:') return;
+        showCostFailure('Spend could not be read: the board server did not answer. It is served, never embedded — start it with: npx @jjanczur/tyran board --dir .tyran --serve');
+      });
   }
 
   select('overview');
@@ -550,6 +645,39 @@ if (data.schema !== 1) {
  * bytes of board.json, so the two artefacts can never disagree). The extra
  * `<` escape is the script-element breakout layer.
  */
+/**
+ * The page for a board that could not be rendered at all.
+ *
+ * Built through the same JSON channel as the real page rather than by
+ * interpolating the message into markup: the text comes from an exception, an
+ * exception carries a path, and a path is attacker-adjacent input on a page
+ * the operator opens in a browser. `<` on the JSON, `textContent` on the
+ * other side, no innerHTML anywhere — the same three rules the board itself
+ * follows.
+ */
+export function renderBoardError(message) {
+  const data = JSON.stringify({ message }).replace(/</g, '\\u003C');
+  return (
+    '<!doctype html>\n' +
+    '<html lang="en"><head><meta charset="utf-8">\n' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    '<title>Tyran board — cannot render</title>\n' +
+    `<style>${CSS}</style>\n` +
+    '</head><body><main id="app"></main>\n' +
+    `<script type="application/json" id="board-error">${data}</script>\n` +
+    '<script>\n' +
+    'var d = JSON.parse(document.getElementById("board-error").textContent);\n' +
+    'var app = document.getElementById("app");\n' +
+    'var h = document.createElement("h1"); h.textContent = "The board cannot be rendered";\n' +
+    'var p = document.createElement("p"); p.className = "err"; p.textContent = d.message;\n' +
+    'var n = document.createElement("p");\n' +
+    'n.textContent = "This page does not refresh itself \\u2014 fix the cause above, then reload.";\n' +
+    'app.appendChild(h); app.appendChild(p); app.appendChild(n);\n' +
+    '</script>\n' +
+    '</body></html>\n'
+  );
+}
+
 export function renderBoardHtml(payloadJsonText) {
   const embedded = payloadJsonText.replace(/</g, '\\u003C');
   return (

@@ -25,7 +25,7 @@
  */
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { readJournal } from './journal.mjs';
@@ -37,10 +37,11 @@ import {
   checkFile,
   fold,
   inline,
+  warnings,
   writeAllAtomic,
 } from './project.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
-import { renderBoardHtml } from './board-html.mjs';
+import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
@@ -80,11 +81,21 @@ export function readInitiativeBoards(tyranDir) {
   }
   const initiatives = [];
   const errors = [];
+  const warned = [];
   for (const name of dirs) {
     const journal = join(stateDir, name, 'journal.jsonl');
     if (!existsSync(journal)) continue;
     try {
       const state = fold(readJournal(journal));
+      // PARTIAL damage, which the guard below cannot see. That guard fires only
+      // when NOTHING was readable; three good tickets plus one unparseable line
+      // folds to a board with no errors on it and renders as an initiative in
+      // perfect health. `warnings()` has produced exactly the right sentences
+      // for this since the projection layer existed — the board simply never
+      // asked for them. A page whose stated reason to exist is not saying "all
+      // is well" when it is not cannot be silent about the damaged half.
+      const flaws = warnings(state);
+      if (flaws.length > 0) warned.push({ name, warnings: flaws });
       // `readJournal` does NOT throw on unparseable content — it returns zero
       // events and counts the damage — so the catch below never sees a corrupt
       // journal. Without this guard a damaged file renders as an initiative
@@ -102,36 +113,74 @@ export function readInitiativeBoards(tyranDir) {
       // `journal` is returned, not re-derived by consumers: answer.mjs writes
       // to the file this function already located, so there is one rule for
       // where an initiative's journal lives (ADR-21).
-      initiatives.push({ name, journal, state, board: boardOf(state) });
+      initiatives.push({ name, journal, state, board: boardOf(state), files: initiativeFiles(tyranDir, name) });
     } catch (err) {
       errors.push({ name, error: String(err?.message ?? err) });
     }
   }
-  return { initiatives, errors };
+  return { initiatives, errors, warned };
+}
+
+/**
+ * The files an initiative ACTUALLY has beside its journal.
+ *
+ * Named set, `existsSync`, no creation and no guessing: the operator asked to
+ * reach an agent's plan from the board and asked in the same breath that
+ * nothing be created to satisfy the link. A listed file that is not there is
+ * the same lie as a missing one, in the other direction.
+ *
+ * The recorded path is REPO-RELATIVE, and that is not cosmetic: `board.json`
+ * is a committed, byte-compared artefact, so an absolute path would make two
+ * clones of one journal disagree and fail `--check` on a machine whose home
+ * directory is spelled differently. It is the same reason spend is served
+ * rather than embedded. Relative is also the more useful form — it is what
+ * the reader pastes, from the repo root, into an editor.
+ *
+ * Nothing is served: `--serve` routes three URLs and derives a filesystem
+ * path from none of them, which is worth more than a clickable link.
+ */
+export const INITIATIVE_FILES = Object.freeze(['PLAN.md', 'NOTES.md', 'RETRO.md', 'STATE.md', 'PROGRESS.md']);
+
+export function initiativeFiles(tyranDir, name) {
+  const dir = join(tyranDir, 'state', name);
+  const shown = join(basename(resolve(tyranDir)), 'state', name);
+  return INITIATIVE_FILES.filter((file) => existsSync(join(dir, file))).map((file) => ({
+    name: file,
+    path: join(shown, file),
+  }));
 }
 
 /** Pure merge of per-initiative boards into the one payload. */
-export function crossBoard({ initiatives, errors }) {
+export function crossBoard({ initiatives, errors, warned = [] }) {
   const asks = [];
   const agents = [];
   const paused = [];
+  const files = {};
   const lanes = Object.fromEntries(LANES.map((lane) => [lane, []]));
   let merged = 0;
   let tickets = 0;
   let asOf = null;
 
-  for (const { name, state, board } of initiatives) {
+  for (const { name, state, board, files: docs } of initiatives) {
     merged += state.merged;
     tickets += state.ticketList.length;
     if (state.lastTs !== null && (asOf === null || state.lastTs > asOf)) asOf = state.lastTs;
     for (const a of board.asks) asks.push({ ...a, init: name });
     for (const a of board.agents) agents.push({ ...a, init: name });
     if (board.paused !== null) paused.push({ ...board.paused, init: name });
+    if (docs !== undefined && docs.length > 0) files[name] = docs;
     for (const lane of LANES) {
       for (const card of board.lanes.get(lane)) lanes[lane].push({ ...card, init: name });
     }
   }
   asks.sort((a, b) => String(a.since ?? '').localeCompare(String(b.since ?? '')));
+  // Stalest FIRST. Rendering agents in the order the journals happened to spawn
+  // them puts the one that has said nothing for six hours anywhere at all,
+  // including last — and the whole reason the strip carries a last-signal time
+  // is that the silent agent is the one worth looking at. `last_signal` is an
+  // ISO string from the journal, so ascending string order IS ascending time;
+  // an agent with no signal at all sorts to the front, where it belongs.
+  agents.sort((a, b) => String(a.last_signal ?? '').localeCompare(String(b.last_signal ?? '')));
 
   return {
     schema: 1,
@@ -142,12 +191,21 @@ export function crossBoard({ initiatives, errors }) {
       merged,
       tickets,
       percent: tickets === 0 ? 0 : Math.round((merged / tickets) * 100),
+      // Counted here rather than on the page, from BOTH sources of "a human is
+      // needed": the lanes, and the agents. A ticket parked by a `ticket.status`
+      // override leaves no card in `blocked` — the override is resolved before
+      // the blockage in `boardOf` — so an agent could sit blocked on it while a
+      // tile counting lanes alone read zero. It did.
+      blocked: lanes.blocked.length + lanes['changes-requested'].length
+        + agents.filter((a) => a.state === 'blocked').length,
     },
     paused,
     asks,
     agents,
+    files,
     lanes,
     errors,
+    warned,
   };
 }
 
@@ -168,6 +226,9 @@ export function renderCrossMd(payload) {
   for (const e of payload.errors) {
     parts.push(`\n**UNREADABLE** — ${inline(e.name)}: ${inline(e.error)}\n`);
   }
+  for (const d of payload.warned ?? []) {
+    for (const w of d.warnings) parts.push(`\n**WARNING** — ${inline(d.name)}: ${inline(w)}\n`);
+  }
 
   parts.push('\n## Waiting on you\n\n');
   if (payload.asks.length === 0) parts.push('_none — the agents have what they need_\n');
@@ -184,8 +245,17 @@ export function renderCrossMd(payload) {
     parts.push(
       `- \`${inline(a.agent)}\` (${inline(a.role)}) — ${inline(a.init)}` +
         `${a.ticket != null ? ` · \`${inline(a.ticket)}\`` : ''} · ${inline(a.state)}` +
-        `${a.detail != null ? ` — ${inline(a.detail)}` : ''} · last signal ${inline(a.last_signal)}\n`,
+        `${a.detail != null ? ` — ${inline(a.detail)}` : ''} · last signal ${inline(a.last_signal)}` +
+        `${a.next != null ? ` · next: ${inline(a.next)}` : ''}\n`,
     );
+  }
+
+  const withFiles = Object.keys(payload.files ?? {}).sort();
+  if (withFiles.length > 0) {
+    parts.push('\n## Files\n\n');
+    for (const name of withFiles) {
+      parts.push(`- ${inline(name)}: ${payload.files[name].map((f) => `\`${inline(f.name)}\``).join(', ')}\n`);
+    }
   }
 
   for (const lane of LANES) {
@@ -318,8 +388,14 @@ function main() {
           res.end('not found\n');
         }
       } catch (err) {
-        res.writeHead(500, { 'content-type': 'text/plain' });
-        res.end(`board render failed: ${String(err?.message ?? err)}\n`);
+        // Readable, and 200 on purpose. The page refreshes itself every 30
+        // seconds, so a plain-text 500 becomes a browser tab re-fetching an
+        // error nobody can act on twice a minute. The state that reaches here
+        // is real and fixable — over the initiative ceiling, an unreadable
+        // state directory — and the operator needs the sentence, not a status
+        // code they will never see.
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(renderBoardError(String(err?.message ?? err)));
       }
     });
     // A busy port is an ordinary operator mistake, not a crash worth a stack

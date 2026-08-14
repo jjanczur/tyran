@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.1.21 — 2026-08-14
+
+### The board said "all is well" in five different ways it should not have
+
+An audit read the page against its own promise — that it never shows a healthy
+board over an unhealthy repo — and it failed that promise five times.
+
+**A partially damaged journal rendered as a healthy initiative.** The existing
+guard fires only when NOTHING was readable. Three good tickets plus one
+unparseable line folded to a board with `errors: []` on it, and the lost line
+left no mark anywhere. `project.mjs` has produced exactly the right sentences
+for this since the projection layer existed — `board.mjs` had simply never
+asked for them. It asks now, and the page carries a **Warnings** section
+naming the initiative and what could not be accounted for: a skipped line, a
+lease released by a non-holder, an override for a ticket that does not exist.
+The likelier damage is the partial kind, because a crash mid-write takes the
+tail, not the file.
+
+**"Needs a human" counted lanes, not humans.** A ticket parked by a
+`ticket.status` override leaves no card in the `blocked` lane — `boardOf`
+resolves the override before the blockage — so an agent could sit blocked on
+that ticket while the tile read **0**. Measured on the shipped fixture: the
+tile now reads 2 where it read 0, and both are agents rather than lanes. It
+counts from both sources, on the server, and the sub-label breaks out which is
+which.
+
+**Staleness was shown and never escalated.** Agents rendered in the order the
+journals spawned them, so the one that had said nothing longest could be last.
+They are now sorted stalest-first, said so above the strip, and three hours of
+silence gets its own bucket and its own red — "468 HOURS since last signal —
+likely dead" is not the same event as thirty minutes, and the two used to
+share a colour. Each chip also carries **what the agent said it would do
+next**, which has been in `board.json` since the fold learned to read
+`progress` events and had never been rendered.
+
+**A spend failure was indistinguishable from having no server.** A crashed
+reader, an unparseable rate card and a page opened over `file://` all ended as
+the same silently missing section — and the server had already built the
+sentence that tells them apart, for a 503 nothing displayed. Each now says
+which it was; `file://` still says nothing, because there it is not a failure.
+
+**Over the initiative ceiling, the served page was a plain-text 500 that the
+page's own 30-second refresh re-fetched twice a minute.** It is now a readable
+page that names the cause and does not reload itself. The CLI still refuses
+loudly with exit 2 — that is right when a human is reading exit codes.
+
+### The drill-down reaches the files an initiative actually has
+
+Selecting a card now lists that initiative's `PLAN.md`, `NOTES.md`, `RETRO.md`,
+`STATE.md` and `PROGRESS.md` — **the ones that exist**, checked with
+`existsSync`, never a list of what a well-run initiative ought to contain and
+never created to satisfy a link.
+
+The recorded path is repo-relative, and that is not cosmetic. `board.json` is
+committed and compared byte for byte, so an absolute path would make two
+clones of one journal disagree and fail `--check` on any machine whose home
+directory is spelled differently — the same reason spend is served rather than
+embedded. It was nearly shipped absolute; there is now a test that fails on
+any `"path"` starting at the filesystem root.
+
+Nothing is served: `--serve` still answers exactly three URLs and derives a
+filesystem path from none of them, which is worth more than a clickable link.
+
+### How to open the dashboard, said once, plainly
+
+`docs/board.md` gains an **Opening it** section, mirrored on the site: the
+serve command and the URL it prints, the `open`/`xdg-open`/`start` line for
+the file, what the difference between them is (spend, and only spend), and the
+fact that inside a session you type neither, because `/tyran:status`
+regenerates the board and tells you where it is. The README says the same in
+three lines instead of implying it.
+
+Verified in a browser against a two-initiative tree, one of whose journals was
+deliberately corrupted: 0 console errors, 0 failed requests, the tile at 2,
+three warnings listed, the file rows repo-relative.
+
 ## 0.1.20 — 2026-08-14
 
 ### `.tyran/` was tracked, and an entire initiative inside it was not

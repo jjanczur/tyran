@@ -161,7 +161,13 @@ Like the overnight runtime files, `cost.json` is exempt **by name** from
 doctor's stray-file check and is seeded into `.tyran/.gitignore` at adoption.
 An install that adopted Tyran before this feature should re-run the scanner
 once (`node scripts/scan-repo.mjs --ensure-policy`) so the newer entry exists —
-otherwise the first `--json` run offers you a machine-local file to commit.
+otherwise the first run offers you a machine-local file to commit.
+
+**Any** run writes that cache, not only `--json`: a plain `cost.mjs` invocation
+does, and so does every `GET /cost.json` the served board makes, which is what
+makes a page refreshing every thirty seconds affordable. It is the one thing
+`board.mjs --serve` writes, and it is a gitignored runtime artefact — no
+journal, no projection, nothing committed.
 
 Three ceilings are refusals rather than crashes: a transcript over 512 MB is
 refused by name, a single line over 8 MB is abandoned and counted instead of

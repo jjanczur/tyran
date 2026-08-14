@@ -158,12 +158,30 @@ export function forEachLine(path, onLine, { maxBytes = Infinity } = {}) {
   let rest = '';
   let skipped = 0;
   let readBytes = 0;
+  // Set when an over-long record was abandoned: everything up to that
+  // record's OWN terminating newline still has to be thrown away. Without
+  // this, the tail of the discarded record is handed to the caller as if it
+  // were a record of its own — and a tail that happens to parse is spend the
+  // reader INVENTS. Measured: one 9 MB line ending in a well-formed fragment
+  // billed 777 777 tokens against a model that never existed, with the gap
+  // counters reading clean.
+  let resync = false;
   try {
     for (;;) {
       const read = readSync(fd, buffer, 0, CHUNK_BYTES, null);
       if (read === 0) break;
       readBytes += read;
       rest += decoder.write(buffer.subarray(0, read));
+      if (resync) {
+        const nl = rest.indexOf('\n');
+        if (nl === -1) {
+          rest = '';
+          if (readBytes >= maxBytes) return skipped;
+          continue;
+        }
+        rest = rest.slice(nl + 1);
+        resync = false;
+      }
       let at;
       let stop = false;
       while ((at = rest.indexOf('\n')) !== -1) {
@@ -182,11 +200,13 @@ export function forEachLine(path, onLine, { maxBytes = Infinity } = {}) {
       if (rest.length > MAX_LINE_BYTES) {
         skipped += 1;
         rest = '';
+        resync = true;
       }
       if (readBytes >= maxBytes) return skipped;
     }
     rest += decoder.end();
-    if (rest !== '') onLine(rest);
+    // A file ending mid-discard has no tail worth delivering.
+    if (rest !== '' && !resync) onLine(rest);
   } finally {
     closeSync(fd);
   }
@@ -271,7 +291,13 @@ export function transcriptDirFor(repoRoot, projectsRoot) {
   const key = want + '::' + projectsRoot;
   if (dirCache.has(key)) return dirCache.get(key);
   const found = findTranscriptDir(want, projectsRoot);
-  dirCache.set(key, found);
+  // A HIT is cached forever — a project directory does not move. A MISS is
+  // not cached at all: the board is the page an operator leaves open
+  // overnight, and it is routinely started in a repo whose first session has
+  // not run yet. Remembering "no transcripts" for the life of that process
+  // would keep the Spend section hidden after the transcripts appear, with
+  // nothing on the page saying why.
+  if (found !== null) dirCache.set(key, found);
   return found;
 }
 
@@ -687,11 +713,18 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
   // the served page re-reading every transcript forever — measured at 1.15 s
   // per request, with `reused_from_cache` stuck at zero. A filtered run is
   // never persisted: it would poison the full report with a partial one.
+  // `cache_written` is reported rather than swallowed. For the SERVED page a
+  // failed write is only a slow report, but `--json`'s entire contract is
+  // "the sidecar now exists, here is its path" — printing that path over a
+  // file that was never written, and exiting 0, turns a permission error into
+  // a downstream failure with a healthy-looking upstream.
+  report.cache_written = false;
   if (session === null) {
     try {
       writeAtomic(cachePath, costJson(report));
-    } catch {
-      // A cache that cannot be written is a slow report, not a wrong one.
+      report.cache_written = true;
+    } catch (err) {
+      report.cache_error = String(err?.message ?? err);
     }
   }
   return report;
@@ -740,6 +773,10 @@ function main(argv) {
     // with a measurement that looks complete and is not.
     if (flags.session !== null) {
       console.error('cost: --session cannot be combined with --json — the sidecar must cover every session.');
+      return 2;
+    }
+    if (report.cache_written !== true) {
+      console.error(`cost: could not write the sidecar: ${report.cache_error ?? 'unknown error'}`);
       return 2;
     }
     console.log(join(tyranDir, 'state', COST_FILE));

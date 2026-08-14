@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -437,20 +437,74 @@ test('a session filter never persists, and --session with --json is refused', ()
   );
 });
 
-test('the directory probe stops at the match instead of reading to EOF', () => {
+test('the probe stops at the match and the byte cap bounds it — mechanism, not wall clock', () => {
   const tree = makeTree({ slugged: false });
-  const padded = join(tree.project, 'huge.jsonl');
   const cwd = resolve(tree.repo);
+  const padded = join(tree.project, 'huge.jsonl');
   const filler = JSON.stringify({ type: 'user', cwd, pad: 'x'.repeat(4000) });
-  // The match is on line one; everything after it is dead weight.
   writeFileSync(padded, [JSON.stringify({ type: 'user', cwd }), ...Array(4000).fill(filler)].join('\n') + '\n');
-  const started = process.hrtime.bigint();
+
+  // MUTANT A: drop the `return false` stop signal. The probe reads every
+  // candidate to EOF after it has ALREADY matched — 83 ms on a 200 MB file,
+  // paid per file, per request. A wall-clock budget did not catch this (the
+  // pre-fix code still came in 25x under it), so count the callbacks.
+  let calls = 0;
+  forEachLine(padded, () => {
+    calls += 1;
+    return calls < 1;
+  });
+  assert.equal(calls, 1, 'a callback returning false must end the read at once');
+
+  // MUTANT B: drop the `maxBytes` cap. A file far larger than the cap must
+  // deliver far fewer lines than it holds.
+  let capped = 0;
+  forEachLine(
+    padded,
+    () => {
+      capped += 1;
+      return true;
+    },
+    { maxBytes: 64 * 1024 }
+  );
+  assert.ok(capped > 0 && capped < 4000, `capped read delivered ${capped} of 4001 lines`);
+
   assert.equal(transcriptDirFor(tree.repo, tree.projects), tree.project);
-  const ms = Number(process.hrtime.bigint() - started) / 1e6;
-  // MUTANT: drop the `return false` stop signal, or the maxBytes cap. The
-  // probe then reads every candidate to EOF after it has already matched —
-  // measured at 83 ms for a 200 MB file, paid per file, per request.
-  assert.ok(ms < 250, `probe took ${ms} ms; it should stop at the first match`);
+});
+
+test('a missing transcript directory is never remembered as missing', () => {
+  const tree = makeTree({ slugged: false });
+  const elsewhere = join(tree.base, 'not-yet');
+  assert.equal(transcriptDirFor(tree.repo, elsewhere), null);
+  // The board is left open overnight and is routinely started in a repo whose
+  // first session has not run. MUTANT: memoise the null too — the Spend
+  // section then stays hidden for the life of the server after the
+  // transcripts appear, with nothing on the page saying why.
+  mkdirSync(elsewhere, { recursive: true });
+  const late = join(elsewhere, 'late-project');
+  mkdirSync(late, { recursive: true });
+  writeFileSync(join(late, 'sess.jsonl'), JSON.stringify({ type: 'user', cwd: resolve(tree.repo) }) + '\n');
+  assert.equal(transcriptDirFor(tree.repo, elsewhere), late);
+});
+
+test('an abandoned over-long record cannot be billed as a record of its own', () => {
+  const tree = makeTree();
+  const ghost = join(tree.project, 'oversize.jsonl');
+  const cwd = resolve(tree.repo);
+  // ONE physical line larger than the 8 MB cap, whose TAIL is a well-formed
+  // usage record, then one genuine record.
+  const tail = assistant('phantom', usage(0, 0, 0, 777777), 'GHOST', cwd);
+  const real = assistant('m-cheap', usage(0, 0, 0, 5), 'r-real', cwd);
+  writeFileSync(ghost, 'a'.repeat(9 << 20) + tail + '\n' + real + '\n');
+
+  const scan = scanTranscript(ghost);
+  // MUTANT: clear `rest` without resyncing to the next newline. The tail of
+  // the discarded record is delivered as its own line, parses, and is
+  // BILLED — 777 777 invented tokens against a model that never existed,
+  // while the gap counters read clean. This is the inverse of losing spend:
+  // the reader manufactures it.
+  assert.equal(scan.skippedLines, 1, 'the oversized record is counted as skipped');
+  assert.deepEqual(Object.keys(scan.byModel), ['m-cheap'], 'no phantom model');
+  assert.equal(scan.byModel['m-cheap'].output, 5);
 });
 
 test('a character split across a read boundary is decoded, not mangled', () => {
@@ -470,4 +524,36 @@ test('a character split across a read boundary is decoded, not mangled', () => {
   // a repo path with a non-ASCII character reports "no transcripts" forever.
   assert.equal(JSON.parse(seen[0]).note, 'zażółć');
   assert.ok(!seen[0].includes('�'));
+});
+
+test('--json refuses to print a path to a sidecar it could not write', () => {
+  const tree = makeTree();
+  // `state` as a FILE rather than a directory: deterministic on every uid,
+  // unlike a permission bit, which root ignores. It has to live inside the
+  // real fixture repo, or the run fails for the unrelated reason that no
+  // transcripts belong to it.
+  const broken = tree.tyranDir;
+  rmSync(join(broken, 'state'), { recursive: true, force: true });
+  writeFileSync(join(broken, 'state'), 'not a directory');
+  const result = spawnSync(
+    process.execPath,
+    [COST_CLI, '--dir', broken, '--projects', tree.projects],
+    { encoding: 'utf8' }
+  );
+  // The report itself still works — a cache that cannot be written is a slow
+  // report, not a wrong one.
+  assert.equal(result.status, 0, 'the human report does not depend on the cache');
+
+  const json = spawnSync(
+    process.execPath,
+    [COST_CLI, '--dir', broken, '--projects', tree.projects, '--json'],
+    { encoding: 'utf8' }
+  );
+  // MUTANT: swallow the write failure and print the path anyway. `--json`'s
+  // whole contract is "the sidecar exists, here is its path", so an exit 0
+  // over a file that was never written turns a permission error into a
+  // downstream failure with a healthy-looking upstream.
+  assert.equal(json.status, 2, json.stdout);
+  assert.match(json.stderr, /could not write the sidecar/);
+  assert.equal(json.stdout.trim(), '');
 });

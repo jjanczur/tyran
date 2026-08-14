@@ -262,8 +262,14 @@ function main() {
   const outDir = join(dir, 'state');
 
   if (flags.serve) {
-    // Read-only, loopback-only, re-rendered per request so it is always
-    // fresh. No filesystem path is ever derived from the URL.
+    // Loopback-only, re-rendered per request so it is always fresh. No
+    // filesystem path is ever derived from the URL.
+    //
+    // Not quite read-only, and the exception is worth stating rather than
+    // discovering: `/cost.json` refreshes the machine-local spend cache at
+    // `state/cost.json`. Nothing else is written, and that file is a
+    // gitignored runtime artefact — no journal, no projection, nothing
+    // committed.
     const server = createServer((req, res) => {
       try {
         // Binding to loopback is not enough on its own: any web page the

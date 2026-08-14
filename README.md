@@ -29,7 +29,7 @@ append-only journal committed to your repo rather than in the session window, so
 a restart, a compaction and a colleague on another branch read the same thing.
 Zero runtime dependencies, no build step, Node ≥ 22.
 
-![The Tyran dashboard, recorded live: the waiting-on-you queue scrolling past, the strip of running agents with the time since each one last signalled, the kanban lanes with every ticket in one, and the Spend tab toggling between tokens and cost](assets/board-demo.gif)
+![The Tyran dashboard, recorded live, moving through its four tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost](assets/board-demo.gif)
 
 ## What it gives you
 
@@ -54,6 +54,14 @@ Zero runtime dependencies, no build step, Node ≥ 22.
   the tokens the platform itself reported, per model, per agent type and per
   ticket — read out of the transcripts Claude Code already writes. Money
   appears only under a rate card you write: Tyran does not know what you pay.
+- **It can run overnight, because the usage limit is a wind-down and not a
+  crash.** The platform's own behaviour at the limit is a cliff: calls start
+  failing mid-flight and agents die between a write and its commit. Near the
+  threshold Tyran instead checkpoints, commits the state files, schedules a
+  resume and stops — then a watcher wakes at the window reset and continues the
+  same session. Leave it working and read the board in the morning. Both
+  windows were hit live while the feature was being built; the protocol that
+  survived them is what shipped. See [overnight mode](docs/overnight.md).
 
 ## Tyran compared
 

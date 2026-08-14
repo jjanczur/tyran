@@ -854,6 +854,7 @@ test('THIS repository scans clean end to end', () => {
     'CONTRIBUTING.md',
     'LICENSE',
     'MISTAKES.md',
+    'NOTES-REQUESTS.md',
     'README.md',
     'agents/.gitkeep',
     'agents/implementer.md',
@@ -1038,7 +1039,10 @@ test('THIS repository scans clean end to end', () => {
   // could sit unexamined — and it has to be short enough to read and obvious
   // enough to argue with. It is an image declared `binary` in .gitattributes;
   // anything else appearing here is a finding.
-  assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg']);
+  // Every binary declared in .gitattributes, named here on purpose: a file
+  // that leaves the content scan must do so by a reviewer's decision, not by
+  // someone adding an extension to a glob.
+  assert.deepEqual(exempt.map((e) => e.file), ['assets/banner.jpg', 'assets/board-demo.gif']);
 });
 
 test('a declared gap WINS over a forbidden range that covers it', () => {

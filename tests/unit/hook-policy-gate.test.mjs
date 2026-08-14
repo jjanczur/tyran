@@ -35,7 +35,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { PASS } from '../../hooks/scripts/hook-io.mjs';
-import { planCommand } from '../../hooks/scripts/secrets-gate.mjs';
+import { EXPANSION_CHARS, SEPARATORS, planCommand } from '../../hooks/scripts/secrets-gate.mjs';
 import { MANDATORY_KERNEL_PATHS, classifyPath, normalizePath } from '../../scripts/schema.mjs';
 import {
   CONFIG_PATH,
@@ -44,9 +44,12 @@ import {
   MAX_POLICY_BYTES,
   POLICY_PATH,
   PRODUCTION_BRANCHES,
+  READ_ONLY_PROGRAMS,
   SHARED_BRANCHES,
   SHELL_DECLARED_MISSES,
   SHELL_PROTECTED_GLOBS,
+  SHELL_READABLE_GLOBS,
+  SHELL_READ_DISQUALIFIERS,
   SUPERVISED_MODES,
   actorOf,
   decidingRule,
@@ -59,6 +62,9 @@ import {
   pathTargets,
   protectedGlobFor,
   quoteRule,
+  rawCredentialWords,
+  readOnlyFlag,
+  readOnlySegment,
   readPush,
   refName,
   repoRootOf,
@@ -942,6 +948,366 @@ test('BOUNDARY: what the Bash path rules do and do NOT reach', async () => {
   assert.match(refusal.reason, /credential file or/);
 });
 
+// ============================== 6b. THE READ-ONLY SHELL EXEMPTION (0.1.16)
+
+/**
+ * The exemption is a MATRIX too, and the axis that defines it is the PATH
+ * CLASS, not the program: the same command line passes on a path the `Read`
+ * tool hands over and denies on one it refuses.
+ *
+ * `P` is substituted with each of three paths:
+ *  - READABLE — under `hooks/**`, where `Read` passes, so a shell read buys
+ *    an attacker nothing that is not already one tool call away;
+ *  - SECRET — `.env`, where `Read` DENIES. The symmetry there is the whole
+ *    rule: the measured incident is a refused `Read .env` followed by
+ *    `Bash: grep` in the very next tool call;
+ *  - REGISTRY — `.claude/settings.json`, the hook registry, deliberately left
+ *    outside the exemption even though `Read` passes on it.
+ */
+const READABLE_PATH = 'hooks/scripts/policy-gate.mjs';
+const SECRET_PATH = '.env';
+const REGISTRY_PATH = '.claude/settings.json';
+
+/** Every allowed program, its read-shaped use and its write-shaped mode. */
+const READ_ONLY_SHELL_MATRIX = [
+  { name: 'cat', reads: 'cat P', writes: 'cat P > /tmp/gate-out' },
+  { name: 'cat -n', reads: 'cat -n P', writes: 'cat -n P >> /tmp/gate-out' },
+  { name: 'head', reads: 'head -20 P', writes: 'head -20 P > /tmp/gate-out' },
+  { name: 'tail', reads: 'tail -n 5 P', writes: 'tail -f P' },
+  { name: 'wc', reads: 'wc -l P', writes: 'wc --files0-from=/tmp/list P' },
+  { name: 'grep', reads: 'grep -n needle P', writes: 'grep -n needle P 2> /tmp/gate-err' },
+  { name: 'rg', reads: 'rg -n needle P', writes: 'rg --pre cat -n needle P' },
+  { name: 'diff', reads: 'diff -u P P', writes: 'diff -u P P > /tmp/gate-out' },
+  { name: 'node', reads: 'node --check P', writes: 'node P' },
+  { name: 'git log', reads: 'git log --oneline -- P', writes: 'git log --output=/tmp/x --oneline -- P' },
+  { name: 'git show', reads: 'git show HEAD -- P', writes: 'git show --output=/tmp/x HEAD -- P' },
+  { name: 'git diff', reads: 'git diff -- P', writes: 'git -c core.pager=tee diff -- P' },
+  // No read-shaped spelling is offered for these two: their script argument is
+  // a program with its own write commands (`sed`'s `w`, awk's `print >`), so
+  // allowing the read-shaped flag would mean parsing that script — a second
+  // parser, which ADR-21 is exactly about. Both stay refused in every mode.
+  { name: 'sed', reads: null, writes: 'sed -n 1,20p P' },
+  { name: 'awk', reads: null, writes: 'awk NR<10 P' },
+];
+
+const shellVerdict = async (command, root) => {
+  const got = await ask(bashInput(command, root), root);
+  return got === PASS || got?.decision === 'pass' ? 'pass' : got.decision;
+};
+
+for (const row of READ_ONLY_SHELL_MATRIX) {
+  if (row.reads !== null) {
+    test(`shell-read: ${row.name} · a READABLE protected path -> pass`, async () => {
+      // Mutation killed: reverting `decideBash` to `if (findings.length > 0)
+      // return refuseShellPaths(findings)`. Measured on 0.1.15, every row of
+      // this column denied while `Read` on the same file passed, which
+      // protected nothing and cost a tool call each time.
+      const root = adopted();
+      assert.equal(await shellVerdict(row.reads.replaceAll('P', READABLE_PATH), root), 'pass');
+    });
+
+    test(`shell-read: ${row.name} · the SAME command on a secret -> deny`, async () => {
+      // Mutation killed: extending the relaxation to the CREDENTIAL class, i.e.
+      //
+      //   findings.every((f) => f.kind === 'credential'
+      //                         || SHELL_READABLE_GLOBS.includes(f.detail))
+      //
+      // with the `rawCredentialWords` clause dropped alongside it. Measured:
+      // 20 of 234 tests fail, 12 of them this row, and the gate loses the one
+      // rule it was built for.
+      //
+      // Explicitly NOT killed, because this comment claimed it until review
+      // measured otherwise: dropping `f.kind === 'kernel'` on its own leaves
+      // the suite fully green (231/231 when that was written, 234/234 now). A
+      // credential finding's `detail` is a rule-id list — `dotenv`,
+      // `ssh-directory` — never a glob, so `SHELL_READABLE_GLOBS.includes(
+      // f.detail)` already excludes it without any help. The `kind` clause is
+      // belt-and-braces: kept because it states that the two classes never
+      // merge, not because it is the check that holds the line.
+      const root = adopted();
+      assert.equal(await shellVerdict(row.reads.replaceAll('P', SECRET_PATH), root), 'deny');
+    });
+
+    test(`shell-read: ${row.name} · the SAME command on the hook registry -> deny`, async () => {
+      // Mutation killed: `SHELL_READABLE_GLOBS = SHELL_PROTECTED_GLOBS`. The
+      // registry is the one place inside a repository from which every gate is
+      // switched off at once, and this change is scoped to the friction that
+      // was measured — not to everything the principle would permit.
+      const root = adopted();
+      assert.equal(await shellVerdict(row.reads.replaceAll('P', REGISTRY_PATH), root), 'deny');
+    });
+  }
+
+  test(`shell-read: ${row.name} · its WRITE-shaped mode -> deny`, async () => {
+    // Mutation killed: dropping the per-program flag check, i.e. returning
+    // true from readOnlySegment as soon as the PROGRAM is in the table. Every
+    // row of this column turns green under it — including
+    // `git log --output=FILE`, a real hole found in an earlier review, and
+    // `node FILE`, which is not a syntax check but an execution.
+    const root = adopted();
+    assert.equal(await shellVerdict(row.writes.replaceAll('P', READABLE_PATH), root), 'deny');
+  });
+}
+
+test('shell-read: a redirect, a substitution or a pipe into a writer refuses', async () => {
+  // Mutation killed: dropping the SHELL_READ_DISQUALIFIERS scan. It is not
+  // redundant with the per-segment program check, and the counterexamples are
+  // exact: `splitSegments` CONSUMES `>` and `$(`, so `cat FILE > /tmp/cat`
+  // lexes as two segments whose programs are both `cat`, and `cat $(cat FILE)`
+  // lexes as two segments that are both plain `cat`. Without the raw-text scan
+  // each of these passes while writing a file or running a substitution.
+  const root = adopted();
+  const P = READABLE_PATH;
+  for (const command of [
+    `cat ${P} > /tmp/cat`,
+    `cat ${P} >> /tmp/cat`,
+    `grep -n x ${P} 2> /tmp/cat`,
+    `cat ${P} > ${P}`,
+    `cat < ${P}`,
+    `cat $(cat ${P})`,
+    'cat `cat ' + P + '`',
+    `cat ${P} | tee /tmp/out`,
+    `cat ${P} & cat ${P}`,
+    `cat ${P} && rm -rf hooks`,
+    `cat ${P} ; rm -rf hooks/scripts`,
+    `cat ${P} | sed -i s/a/b/ hooks/scripts/x.mjs`,
+  ]) {
+    assert.equal(await shellVerdict(command, root), 'deny', command);
+  }
+  // A pipe between READERS is not a write, and refusing it would be friction
+  // with no boundary behind it.
+  for (const command of [
+    `cat ${P} | wc -l`,
+    `grep -n x ${P} | head -3`,
+    `cat ${P} | grep -n x | head -3 | wc -l`,
+  ]) {
+    assert.equal(await shellVerdict(command, root), 'pass', command);
+  }
+});
+
+test('shell-read: the program table is matched EXACTLY, never as a substring', () => {
+  // Mutation killed: `Object.keys(READ_ONLY_PROGRAMS).some((p) =>
+  // token.includes(p))` instead of an exact lookup. A substring test admits
+  // `catnip`, `mygit` and `wcx` — arbitrary programs whose names merely
+  // contain an allowed one.
+  for (const program of ['catnip', 'notcat', 'mygit', 'wcx', 'nodemon', 'grepper', 'diffx']) {
+    assert.equal(readOnlySegment([program, 'x']), false, program);
+  }
+  // Mutation killed: a plain object literal for READ_ONLY_PROGRAMS. Every
+  // lookup on one still consults Object.prototype, so `constructor` and
+  // `toString` would resolve to functions and read as allowed programs — the
+  // same defect `pathTargets` carries a guard for.
+  for (const program of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
+    assert.equal(readOnlySegment([program, 'x']), false, program);
+  }
+  // Recognised the way the shared lexer recognises: through a path, through
+  // quoting, and case-folded, because those are one program on the filesystem.
+  assert.equal(readOnlySegment(['/bin/cat', 'x']), true);
+  assert.equal(readOnlySegment(['CAT', 'x']), true);
+  // A transparent prefix is NOT skipped here: `sudo`, `env` and `xargs` all
+  // run a program this table never sees, so they are simply unrecognised.
+  for (const tokens of [['sudo', 'cat', 'x'], ['env', 'cat', 'x'], ['xargs', 'cat', 'x']]) {
+    assert.equal(readOnlySegment(tokens), false, tokens.join(' '));
+  }
+});
+
+test('shell-read: flags are matched per program, cluster by cluster', () => {
+  // Mutation killed: accepting any token that starts with `-`. The flag table
+  // is where the write-shaped modes of read-shaped programs are refused, and a
+  // short CLUSTER has to be read letter by letter or `-nf` smuggles `-f` past
+  // a check that only compared whole tokens.
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.grep, '-rn'), true);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.wc, '-lw'), true);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.tail, '-f'), false);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.tail, '-F'), false);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.tail, '-nf'), false);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.tail, '--follow'), false);
+  // Mutation killed: comparing the whole long token instead of the name before
+  // `=`. `--output=/tmp/x` is not the string `--output`, so an equality test
+  // against the allowlist never matches it and the flag reads as unknown —
+  // which happens to deny — while `--pretty=oneline` reads as unknown too and
+  // denies a legitimate command. Splitting on `=` is what makes both correct.
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.git, '--output=/tmp/x'), false);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.git, '--pretty=oneline'), true);
+  // Mutation killed: allowing a bare numeric token for every program. `-5` is
+  // a count for `head` and `git log` and nothing at all for `cat`.
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.head, '-20'), true);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.head, '-n20'), true);
+  assert.equal(readOnlyFlag(READ_ONLY_PROGRAMS.cat, '-20'), false);
+  // Mutation killed: dropping `require`. `node FILE` executes FILE; only
+  // `--check` makes it a parse, so the flag is mandatory rather than merely
+  // permitted, and that is a different rule from "no unknown flags".
+  assert.equal(readOnlySegment(['node', 'x.mjs']), false);
+  assert.equal(readOnlySegment(['node', '--check', 'x.mjs']), true);
+  assert.equal(readOnlySegment(['node', '-c', 'x.mjs']), true);
+  assert.equal(readOnlySegment(['node', '--check', '--experimental-vm-modules', 'x.mjs']), false);
+  // Mutation killed: reading git's subcommand with `nextWord` (which skips
+  // flags) instead of demanding it in the very next slot. A git GLOBAL `-c`
+  // can name a program for git to run — `-c core.pager=…` — and
+  // `planCommand`'s alias check only covers `alias.`.
+  assert.equal(readOnlySegment(['git', 'log', '--oneline']), true);
+  assert.equal(readOnlySegment(['git', '-c', 'core.pager=tee', 'log']), false);
+  assert.equal(readOnlySegment(['git', 'status']), false);
+  assert.equal(readOnlySegment(['git', 'push', 'origin', 'main']), false);
+});
+
+test('shell-read: the secrets symmetry is intact — Read DENIES and the shell DENIES', async () => {
+  // Deliverable of this change, asserted rather than argued. The distinction
+  // the exemption encodes is that the shell must not become a second route to
+  // something `Read` already refuses; for a credential BOTH still refuse, and
+  // that pairing is what the measured incident called for.
+  const root = adopted();
+  for (const path of ['.env', '.env.local', 'id_rsa', 'deploy.pem', '.aws/credentials']) {
+    assert.equal((await askRead(root, path)).decision, 'deny', `Read ${path}`);
+    assert.equal(await shellVerdict(`cat ${path}`, root), 'deny', `cat ${path}`);
+    assert.equal(await shellVerdict(`grep -n KEY ${path}`, root), 'deny', `grep ${path}`);
+  }
+  // And the other half of the same claim: where `Read` PASSES, the shell now
+  // passes too. Two spellings of one access must not resolve to two answers.
+  for (const path of [READABLE_PATH, '.tyran/policies/autonomy.yaml']) {
+    assert.equal(await askRead(root, path), PASS, `Read ${path}`);
+    assert.equal(await shellVerdict(`cat ${path}`, root), 'pass', `cat ${path}`);
+  }
+  // The registry is the deliberate exception, and it is asymmetric on purpose.
+  assert.equal(await askRead(root, REGISTRY_PATH), PASS, `Read ${REGISTRY_PATH}`);
+  assert.equal(await shellVerdict(`cat ${REGISTRY_PATH}`, root), 'deny', `cat ${REGISTRY_PATH}`);
+});
+
+test('shell-read: one credential-shaped token refuses the whole line', async () => {
+  // Mutation killed: `findings.some(...)` instead of `every(...)`. A line that
+  // names a readable path AND a secret must be refused for the secret, however
+  // read-only it is — the exemption widens what may be done to paths the Read
+  // tool already hands over, and to nothing else.
+  const root = adopted();
+  for (const command of [
+    `cat ${READABLE_PATH} ${SECRET_PATH}`,
+    `cat ${READABLE_PATH} ${REGISTRY_PATH}`,
+    `diff -u ${READABLE_PATH} ${REGISTRY_PATH}`,
+    'cat hooks/scripts/id_rsa',
+    'grep -n X hooks/scripts/deploy.pem',
+  ]) {
+    assert.equal(await shellVerdict(command, root), 'deny', command);
+  }
+});
+
+test('shell-read: a credential the finding list never SAW refuses the line too', async () => {
+  // Mutation killed: dropping the `rawCredentialWords(command)` clause from
+  // shellReadExempt, i.e. deciding the exemption on the finding list alone.
+  //
+  // The finding list comes from `commandTokens`, which runs
+  // `stripMessageArguments` FIRST and then keeps only `isLiteralPath` tokens.
+  // Both filters can delete the credential, and what is left reads as "one
+  // readable kernel path, under a read-only command" — so the line is
+  // EXEMPTED. Every row below denied under the 0.1.15 rule and PASSED on this
+  // branch before the clause existed, really publishing the file.
+  const root = adopted();
+  for (const command of [
+    // `-t` is in MESSAGE_FLAGS (git's `--template`) and is ALSO a legal flag of
+    // `diff` and `cat`, so the strip removes `-t` together with the path after
+    // it while `isReadOnlyCommand`, reading the raw text, sees an allowed flag.
+    `diff -t ${SECRET_PATH} ${READABLE_PATH}`,
+    `cat -t .aws/credentials ${READABLE_PATH}`,
+    // `--file` is grep's pattern-file flag and a MESSAGE_FLAG (`git commit
+    // --file`); the strip takes the whole `--file=PATH` word with it.
+    `grep --file=/tmp/gate/${SECRET_PATH} ${READABLE_PATH}`,
+    `grep --file=secrets/id_rsa ${READABLE_PATH}`,
+    // `-m` is grep's `--max-count` and MESSAGE_FLAGS has it for `git commit -m`.
+    `grep -m ${SECRET_PATH} ${READABLE_PATH}`,
+    // No message flag at all: a leading `~` fails `isLiteralPath`, so
+    // `commandTokens` drops the token and no finding is ever produced for it.
+    `diff ~/${SECRET_PATH} ${READABLE_PATH}`,
+    `diff ~/.ssh/id_rsa ${READABLE_PATH}`,
+  ]) {
+    assert.equal(await shellVerdict(command, root), 'deny', command);
+  }
+});
+
+test('shell-read: the hidden credential is what the refusal NAMES', async () => {
+  // Mutation killed: closing the hole in `shellReadExempt` alone and leaving
+  // `refuseShellPaths(findings)` to word it. The line would then be refused for
+  // the right reason and told the wrong one — "these paths are READABLE from a
+  // shell, so what was refused is this COMMAND" — which offers a rewrite that
+  // cannot help, and a refusal that states the wrong reason is worse than one
+  // that states none.
+  const root = adopted();
+  const got = await ask(bashInput(`diff -t ${SECRET_PATH} ${READABLE_PATH}`, root), root);
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /is credential-shaped \(dotenv\)/);
+  assert.doesNotMatch(got.reason, /These paths are READABLE from a shell/);
+});
+
+test('rawCredentialWords reads the RAW word, and both sides of an attached `=`', () => {
+  // Mutation killed: reusing `commandTokens` here instead of the raw lexer
+  // output — every row below returns [] under it, which is the whole defect.
+  // Mutation killed: testing only the whole word, never the right-hand side of
+  // `=`; `--file=.env` has a basename of `--file=.env` and matches nothing.
+  assert.deepEqual(rawCredentialWords('diff -t .env hooks/scripts/policy-gate.mjs').map((w) => w.detail), ['dotenv']);
+  assert.deepEqual(rawCredentialWords('grep --file=.env hooks/x.mjs').map((w) => w.token), ['--file=.env']);
+  assert.deepEqual(rawCredentialWords('diff ~/.ssh/id_rsa hooks/x.mjs').map((w) => w.detail), ['ssh-private-key, ssh-directory']);
+  // The direction of error is a false REFUSAL, and it is declared: a
+  // credential-shaped word that is not a path costs the exemption.
+  assert.equal(rawCredentialWords('git log --grep=.env -- hooks/x.mjs').length, 1);
+  // An ordinary read-only line has none, which is why no matrix row moved.
+  for (const command of [
+    'cat hooks/scripts/policy-gate.mjs',
+    'grep -n needle hooks/scripts/policy-gate.mjs',
+    'git log --oneline -- hooks/scripts/policy-gate.mjs',
+    'node --check .tyran/policies/autonomy.yaml',
+  ]) {
+    assert.deepEqual(rawCredentialWords(command), [], command);
+  }
+});
+
+test('shell-read: the refusal names the way forward and its residual floor', async () => {
+  // A refusal with no reachable way forward produces an agent that looks for a
+  // way around (ADR-19), so a read-shaped path refused for a write-shaped
+  // COMMAND says which commands are allowed instead. And it states the floor:
+  // an allowed reader can still be pointed at another program by configuration
+  // this gate never reads.
+  const root = adopted();
+  const refused = await ask(bashInput(`node ${READABLE_PATH}`, root), root);
+  assert.match(refused.reason, /These paths are READABLE from a shell/);
+  assert.match(refused.reason, /node --check/);
+  assert.match(refused.reason, /Residual floor/);
+  assert.match(refused.reason, /NODE_OPTIONS/);
+  // A CREDENTIAL refusal must not carry that offer: nothing about it is one
+  // rewrite away from allowed. Neither may the registry's, which is refused
+  // for the path and not for the command — and a refusal that states the wrong
+  // reason is worse than one that states none.
+  for (const path of [SECRET_PATH, REGISTRY_PATH]) {
+    const got = await ask(bashInput(`cat ${path}`, root), root);
+    assert.doesNotMatch(got.reason, /These paths are READABLE from a shell/, path);
+  }
+});
+
+test('shell-read: the exemption is stated in the declared floor, not only in code', () => {
+  // ADR-21: the source list and the prose list are one answer. A new entry
+  // here without the matching numbered item in docs/policy-gate.md is caught
+  // by tests/unit/docs-claims.test.mjs; this pins the count the refusal quotes.
+  assert.equal(SHELL_DECLARED_MISSES.length, 6);
+  assert.equal(SHELL_DECLARED_MISSES.some((m) => m.includes('NODE_OPTIONS')), true);
+  // The basename match: `READ_ONLY_PROGRAMS[basename(tokens[0])]` makes a
+  // repo-writable `src/cat` an allowed reader, and `src/**` is AUTO in the
+  // shipped template. Declared rather than narrowed — a narrowing would close
+  // nothing, because miss 3 already lets the same script do the same work with
+  // the path baked in and no allowed name at all.
+  assert.equal(SHELL_DECLARED_MISSES.some((m) => m.includes('src/cat')), true);
+  assert.equal(readOnlySegment(['src/cat', 'x']), true);
+  // The exemption covers the validator's two globs and nothing else.
+  assert.deepEqual([...SHELL_READABLE_GLOBS], [...MANDATORY_KERNEL_PATHS]);
+  assert.equal(SHELL_READABLE_GLOBS.includes('.claude/settings.json'), false);
+  assert.equal(SHELL_PROTECTED_GLOBS.length > SHELL_READABLE_GLOBS.length, true);
+  // Every disqualifier is a character the shared lexer ALREADY treats as
+  // structural — a segment separator or an expansion trigger — which is why
+  // the scan has to run on the RAW text: by the time a token exists, the
+  // character that made the line a write has been consumed or the token has
+  // been dropped as non-literal. A disqualifier the lexer knows nothing about
+  // would mean this gate had invented its own shell grammar (ADR-21).
+  for (const ch of SHELL_READ_DISQUALIFIERS) {
+    assert.equal(SEPARATORS.includes(ch) || EXPANSION_CHARS.includes(ch), true, ch);
+  }
+});
+
 test('pathTargets is prototype-safe and reads every path field', () => {
   assert.deepEqual(pathTargets({ file_path: 'a' }), ['a']);
   assert.deepEqual(pathTargets({ notebook_path: 'b' }), ['b']);
@@ -1464,9 +1830,16 @@ test('B4: the built-in globs are used, NOT the policy\'s own KERNEL rules', asyn
   // this consulted the policy, a BROKEN policy would refuse the very command
   // an operator runs to repair it. The two mandatory globs need no file.
   const dir = adopted({ policy: 'this: [is not: valid' });
-  const got = await ask(bashInput('cat .tyran/policies/autonomy.yaml', dir), dir);
+  const got = await ask(bashInput('echo x >> .tyran/policies/autonomy.yaml', dir), dir);
   assert.equal(got.decision, 'deny');
   assert.match(got.reason, /protected path/);
+  // The same file, READ from a shell while the policy is unparseable, passes —
+  // and that is the point rather than a weakening of it: the command an
+  // operator runs to see what is wrong with the policy must not be the command
+  // the broken policy refuses. Since 0.1.16 the shell rule on these two globs
+  // is a WRITE rule, matching what `Read` already allowed. The probe used to
+  // be `cat` and had to move, because `cat` is now the passing case.
+  assert.equal(await ask(bashInput('cat .tyran/policies/autonomy.yaml', dir), dir), PASS);
   // A policy-declared KERNEL path is NOT covered here; declared, not implied.
   const dir2 = adopted({
     policy: TEMPLATE.replace('rules:', 'rules:\n  - path: sacred/**\n    class: KERNEL\n    reason: mine\n'),

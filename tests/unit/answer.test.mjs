@@ -537,6 +537,20 @@ test('two apply runs at once cannot both close one ask', async () => {
   const runs = await Promise.all(both);
   for (const r of runs) assert.ok(r.status === 0 || r.status === 2, `exit ${r.status}: ${r.stderr}`);
 
+  // The guarantee is NO DOUBLE CLOSE, which holds however the race lands —
+  // asserted here, while both runs are still the only writers. Completeness is
+  // asserted below instead of here: a loser that gives up on the sitting lock
+  // exits 2 having written nothing, which is correct behaviour and was read as
+  // a failure by an earlier version of this test on a slower two-core runner.
+  const raced = decisions(journals.payments);
+  assert.equal(new Set(raced.map((e) => e.data.ask)).size, raced.length, `an ask was closed twice: ${raced.map((e) => e.data.ask).join(', ')}`);
+  const racedGates = gates(journals.payments).filter((g) => g.data.result === 'answered');
+  assert.equal(new Set(racedGates.map((g) => g.data.kind)).size, racedGates.length, 'a question was closed by two gates');
+
+  // Settle deterministically: one more apply closes whatever a lock loser left.
+  const settle = spawnSync(process.execPath, [SCRIPT, 'apply', '--dir', tyran], { encoding: 'utf8' });
+  assert.ok(settle.status === 0 || settle.status === 1, `settling run exit ${settle.status}: ${settle.stderr}`);
+
   const written = decisions(journals.payments);
   assert.equal(written.length, 8, written.map((e) => e.data.text).join(' | '));
   assert.equal(new Set(written.map((e) => e.data.ask)).size, 8, 'one decision per question, no more');

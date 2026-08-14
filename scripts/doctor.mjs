@@ -784,9 +784,12 @@ export const DEFAULT_ASK_STALE_HOURS = 72;
 function askFindings(journalPath, at, read, reference) {
   const findings = [];
   const { asks } = boardOf(fold(read));
+  // The trailer is a `#` comment, not a parenthetical: a fix string is pasted
+  // into a shell verbatim, and `(…)` is a subshell whose parse fails before
+  // anything runs — the operator gets a syntax error instead of the sheet.
   const answerHint =
     `node scripts/answer.mjs render --dir ${sq(dirname(dirname(dirname(resolve(journalPath)))))}` +
-    '   (fill the answer: lines, then apply)';
+    '   # fill the answer: lines, then apply';
   for (const ask of [...asks].sort((a, b) => naturalCompare(String(a.kind), String(b.kind)))) {
     const question = ask.question == null ? '' : ` — "${show(ask.question)}"`;
     const waited = reference === null || ask.since == null ? null : hoursBetween(String(ask.since), reference);

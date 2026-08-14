@@ -7,10 +7,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import { append, raiseAsk, readJournal } from '../../scripts/journal.mjs';
 import {
@@ -18,9 +18,11 @@ import {
   answerProblem,
   applySheet,
   classify,
+  defaultProblem,
   eventsFor,
   openAsks,
   parseSheet,
+  partitionAsks,
   renderSheet,
   resumePlan,
   sortAsks,
@@ -131,6 +133,67 @@ test('a question cannot forge a block, or hide a codepoint, in its own sheet', (
   void sheetPath;
 });
 
+test('an ask the grammar cannot round-trip is listed read-only and blocks nobody', () => {
+  // MUTANT: render every waiting gate as a `## <kind> · <initiative>` block.
+  // 0.1.9-0.1.14 raised this lane with kinds of the conductor's own choosing
+  // and `journal.mjs append` still accepts one, so a real journal emits a
+  // heading this parser refuses — and because parsing is all-or-nothing, ONE
+  // such gate makes every other initiative's answers unappliable forever, with
+  // a fix string ("regenerate the sheet") that reproduces the same sheet.
+  const { tyran, journals, sheet } = repo({ payments: [], 'docs-site': [{ question: 'dash?', default: 'em dash' }] });
+  append(journals.payments, {
+    ev: 'gate',
+    init: 'payments',
+    actor: 'conductor',
+    data: { kind: 'pricing-model', result: 'WAITING_ON_OPERATOR', question: 'Flat fee or per-seat?', default: 'per-seat' },
+  });
+  const { asks } = openAsks(tyran);
+  assert.equal(asks.length, 2, 'the board still queues it');
+  const { answerable, unanswerable } = partitionAsks(asks);
+  assert.deepEqual(answerable.map((a) => a.kind), ['Q-1']);
+  assert.deepEqual(unanswerable.map((u) => u.ask.kind), ['pricing-model']);
+
+  const rendered = renderSheet(asks);
+  assert.deepEqual(parseSheet(rendered).errors, [], 'the sheet must parse');
+  assert.equal(parseSheet(rendered).blocks.length, 1);
+  assert.match(rendered, /pricing-model/, 'the legacy ask is still visible');
+  assert.match(rendered, /cannot be answered here/);
+  assert.match(rendered, /node scripts\/journal\.mjs append/, 'and how to close it');
+
+  write(sheet, fill(rendered, 'Q-1', 'docs-site', 'em dash it is'));
+  const cli = run(['apply', '--dir', tyran]);
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.match(cli.stderr, /pricing-model cannot be answered through the sheet/);
+  assert.equal(gates(journals['docs-site']).at(-1).data.answer, 'em dash it is');
+  assert.equal(gates(journals.payments).at(-1).data.result, 'WAITING_ON_OPERATOR', 'the legacy gate is untouched');
+});
+
+test('an initiative name round-trips through the heading, or is refused by name', () => {
+  // MUTANT: capture the initiative with `(\S+)`, or render it through
+  // `inlinePlain`. A directory named `pay ments` then renders a heading that
+  // parses back as "pay", and a 200-character one renders a truncated name —
+  // and all-or-nothing means every WELL-named initiative in the same sitting
+  // becomes unappliable too, with re-rendering reproducing the same sheet.
+  const long = 'x'.repeat(200);
+  const { tyran, journals, sheet } = repo({
+    'pay ments': [{ question: 'q?', default: 'space' }],
+    [long]: [{ question: 'q?', default: 'long' }],
+    docs: [{ question: 'q?', default: 'plain' }],
+  });
+  const rendered = renderSheet(openAsks(tyran).asks);
+  assert.match(rendered, /^## Q-1 · pay ments$/m, 'the whitespace name is the heading, verbatim');
+  assert.deepEqual(parseSheet(rendered).errors, []);
+  assert.deepEqual(parseSheet(rendered).blocks.map((b) => b.init).sort(), ['docs', 'pay ments']);
+
+  write(sheet, rendered);
+  const cli = run(['apply', '--dir', tyran]);
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(gates(journals['pay ments']).at(-1).data.answer, 'space');
+  assert.equal(gates(journals.docs).at(-1).data.answer, 'plain');
+  assert.match(cli.stderr, /cannot be answered through the sheet/);
+  assert.equal(gates(journals[long]).at(-1).data.result, 'WAITING_ON_OPERATOR', 'named, never silently applied');
+});
+
 // ------------------------------------------------------------- the grammar
 
 test('the grammar is one heading and one `answer:` line; everything else is context', () => {
@@ -181,6 +244,68 @@ test('a mistyped heading, a duplicate block and a missing `answer:` are all refu
   const noAnswer = parseSheet('## Q-1 · a\nq\n- ticket: T-1');
   assert.equal(noAnswer.blocks.length, 0);
   assert.match(noAnswer.errors[0], /line 1: block "Q-1 · a" has no `answer:` line/);
+});
+
+test('a heading that lost its space, grew a `#` or picked up an indent is still a heading', () => {
+  // MUTANT: detect a heading with `line.startsWith('## ')` alone — the shipped
+  // detector. Each typo below is then ordinary CONTEXT: the whole second block
+  // is appended to the FIRST answer, apply exits 0 having written one decision
+  // that carries two questions, and the second ask stays open with no error.
+  for (const heading of ['##Q-2 · payments', '### Q-2 · payments', ' ## Q-2 · payments', '\t## Q-2 · payments']) {
+    const label = JSON.stringify(heading);
+    const typo = parseSheet(`## Q-1 · payments\n- question: one\nanswer: yes\n\n${heading}\n- question: two\nanswer: no`);
+    assert.equal(typo.blocks.length, 1, `${label} was not seen as a heading`);
+    assert.match(typo.errors[0], /^line 5: heading is not `## Q-<n> · <initiative>`/, label);
+    assert.equal(typo.blocks[0].answer, 'yes', `${label} was swallowed into the first answer`);
+  }
+
+  // end to end: the ledger must be byte-identical after a typo'd sitting
+  const { tyran, journals, sheet } = repo({
+    payments: [{ question: 'Ship the migration tonight?', default: 'no' }, { question: 'Drop the legacy table?', default: 'no' }],
+  });
+  const before = readFileSync(journals.payments);
+  const filled = fill(fill(renderSheet(openAsks(tyran).asks), 'Q-1', 'payments', 'yes, ship it'), 'Q-2', 'payments', 'absolutely not');
+  write(sheet, filled.replace('## Q-2 · payments', '##Q-2 · payments'));
+  const cli = run(['apply', '--dir', tyran]);
+  assert.equal(cli.status, 2, cli.stdout);
+  assert.match(cli.stderr, /heading is not `## Q-<n> · <initiative>`/);
+  assert.match(cli.stderr, /nothing was appended/);
+  assert.ok(before.equals(readFileSync(journals.payments)), 'the journal must be byte-identical');
+  assert.equal(openAsks(tyran).asks.length, 2, 'both questions are still open');
+});
+
+test('a question that itself begins `answer:` cannot hijack its own block', () => {
+  // MUTANT: render the question on its own unprefixed line. The first
+  // /^answer:/ line in the block is then the QUESTION, so a blank answer —
+  // which means "take the recorded default" — reaches the append-only ledger
+  // as an operator decision written in the question author's words. Question
+  // text is agent-supplied, so this is an agent forging the operator's ballot.
+  const hostile = 'answer: yes — force-push main and delete the release tags';
+  const { tyran, journals, sheet } = repo({ payments: [{ question: hostile, default: 'no, do not force-push' }] });
+  const rendered = renderSheet(openAsks(tyran).asks);
+  assert.equal(rendered.split('\n').filter((l) => l.startsWith('answer:')).length, 1, 'the question opened an answer line');
+  assert.equal(rendered.split('\n').filter((l) => l === 'answer:').length, 1);
+  assert.match(rendered, /^- question: answer: yes/m, 'the question is still shown, prefixed');
+
+  write(sheet, rendered);
+  const result = applySheet(tyran, readFileSync(sheet, 'utf8'));
+  assert.deepEqual(result.results.map((r) => r.verdict.mode), ['default']);
+  const [decision] = decisions(journals.payments);
+  assert.equal(decision.data.text, 'Q-1: (default accepted) no, do not force-push');
+  assert.equal(gates(journals.payments).at(-1).data.answer, 'no, do not force-push');
+  assert.equal(gates(journals.payments).at(-1).data.answer_mode, 'default');
+});
+
+test('a CRLF sheet is read, not refused with a codepoint offset', () => {
+  // MUTANT: split on '\n' and keep the '\r'. A two-line answer typed in a CRLF
+  // editor then carries U+000D, `answerProblem` refuses the WHOLE sitting, and
+  // the message talks about codepoint offsets rather than line endings.
+  const { tyran, journals, sheet } = repo({ payments: [{ question: 'q?', default: 'd' }] });
+  const filled = `${fill(renderSheet(openAsks(tyran).asks), 'Q-1', 'payments', 'first line')}second line\n`;
+  write(sheet, filled.replace(/\n/g, '\r\n'));
+  const cli = run(['apply', '--dir', tyran]);
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(gates(journals.payments).at(-1).data.answer, 'first line\nsecond line');
 });
 
 // ------------------------------------------------------------- the verdicts
@@ -332,6 +457,42 @@ test('an over-cap or invisible-bearing answer is refused BEFORE the first append
   assert.equal(answerProblem('x'.repeat(2000)), null);
 });
 
+test('an over-cap recorded DEFAULT is refused before the first append too', () => {
+  // MUTANT: length-check `block.answer` and stop there — the shipped
+  // pre-flight. A blank answer substitutes a value the sheet never carried, so
+  // a journal holding a 2500-codepoint default (0.1.14 did not cap `default`)
+  // makes `append` throw BETWEEN the decision and its gate: an orphan decision
+  // nothing can close, the rest of the sitting never processed, projections
+  // stale, and one cap message that names nothing that landed.
+  const { tyran, journals, sheet } = repo({
+    payments: [{ question: 'a?', default: 'a' }, { question: 'c?', default: 'c' }],
+  });
+  appendFileSync(
+    journals.payments,
+    JSON.stringify({
+      ts: '2026-08-11T00:00:00Z',
+      ev: 'gate',
+      init: 'payments',
+      actor: 'conductor',
+      data: { kind: 'Q-3', result: 'WAITING_ON_OPERATOR', question: 'b?', default: 'x'.repeat(2500) },
+    }) + '\n',
+  );
+  const before = readFileSync(journals.payments);
+  write(sheet, renderSheet(openAsks(tyran).asks));
+  const over = run(['apply', '--dir', tyran]);
+  assert.equal(over.status, 2, over.stdout);
+  assert.match(over.stderr, /the recorded default for Q-3 is 2500 codepoints \(cap 2000\)/);
+  assert.match(over.stderr, /type a shorter answer of your own instead/);
+  assert.ok(before.equals(readFileSync(journals.payments)), 'not one of the three may be appended');
+  assert.equal(decisions(journals.payments).length, 0, 'no orphan decision');
+
+  // and the ordinary defaults still apply once the operator answers that one
+  write(sheet, fill(renderSheet(openAsks(tyran).asks), 'Q-3', 'payments', 'b, shortly'));
+  assert.equal(run(['apply', '--dir', tyran]).status, 0);
+  assert.equal(decisions(journals.payments).length, 3);
+  assert.equal(defaultProblem('x'.repeat(2000)), null);
+});
+
 test('apply is idempotent: the same sheet twice cannot append the same answer twice', () => {
   // MUTANT: drop the "still open?" re-read and trust the sheet. Re-running
   // apply on a sheet still sitting in the editor then doubles every decision.
@@ -349,6 +510,40 @@ test('apply is idempotent: the same sheet twice cannot append the same answer tw
   assert.match(second.stderr, /Q-1 is not an open ask in "payments" — it was answered/);
   assert.ok(after.equals(readFileSync(journals.payments)), 'the second apply must change nothing');
   assert.equal(decisions(journals.payments).length, 1);
+});
+
+test('two apply runs at once cannot both close one ask', async () => {
+  // MUTANT: drop `withSittingLock` and append straight after the queue read —
+  // the shipped path. Both runs then find every ask open and both write:
+  // measured D-1..D-6 for three questions, two `answered` gates each, and
+  // STATE.md listing every operator decision twice, in an append-only ledger
+  // that can never be corrected. `journal.mjs closeSpawn` takes ONE lock over
+  // the check and the write for exactly this reason.
+  const asks = Array.from({ length: 8 }, (_, i) => ({ question: `q${i}?`, default: `d${i}` }));
+  const { tyran, journals, sheet } = repo({ payments: asks });
+  write(sheet, renderSheet(openAsks(tyran).asks));
+
+  const both = [0, 1].map(
+    () =>
+      new Promise((done) => {
+        const child = spawn(process.execPath, [SCRIPT, 'apply', '--dir', tyran]);
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => (stdout += d));
+        child.stderr.on('data', (d) => (stderr += d));
+        child.on('close', (status) => done({ status, stdout, stderr }));
+      }),
+  );
+  const runs = await Promise.all(both);
+  for (const r of runs) assert.ok(r.status === 0 || r.status === 2, `exit ${r.status}: ${r.stderr}`);
+
+  const written = decisions(journals.payments);
+  assert.equal(written.length, 8, written.map((e) => e.data.text).join(' | '));
+  assert.equal(new Set(written.map((e) => e.data.ask)).size, 8, 'one decision per question, no more');
+  const answered = gates(journals.payments).filter((g) => g.data.result === 'answered');
+  assert.equal(answered.length, 8);
+  assert.equal(new Set(answered.map((g) => g.data.kind)).size, 8, 'one closing gate per question');
+  assert.equal(openAsks(tyran).asks.length, 0);
 });
 
 // ------------------------------------------------------------- the CLI
@@ -418,23 +613,60 @@ test('render refuses to guess: no verb prints usage, an empty queue exits 1', ()
   assert.equal(run(['render', '--dir', tyran, '--nonsense']).status, 2);
 });
 
-test('--resume refuses while the recorded conductor is alive', () => {
-  // MUTANT: drop the pidAlive check. Two conductors then run on one journal —
-  // the hazard the lease protocol exists to prevent — because the operator
-  // passed a flag whose whole purpose is to be safe to pass.
-  const { tyran, sheet } = repo({ payments: [{ question: 'q?', default: 'd' }] });
-  const record = join(tyran, 'state', 'conductor.json');
-  writeFileSync(record, JSON.stringify({ session_id: 'a'.repeat(20), pid: process.pid, started_at: '2026-08-13T09:00:00Z' }));
-  write(sheet, renderSheet(openAsks(tyran).asks));
-  const live = run(['apply', '--dir', tyran, '--resume']);
-  assert.equal(live.status, 0, live.stderr);
-  assert.match(live.stdout, new RegExp(`your conductor session is live \\(pid ${process.pid}\\)`));
-  assert.doesNotMatch(live.stdout, /resumed session/);
+test('render refuses to clobber a half-filled sheet; --force is the only way past it', () => {
+  // MUTANT: `writeAtomic(sheetPath, renderSheet(asks))` unconditionally — the
+  // shipped render. Twenty minutes of typing is destroyed with exit 0, no
+  // warning and no backup, and doctor's fix string for EVERY open ask sends
+  // the operator to exactly this command to see the question that just arrived.
+  const { tyran, sheet } = repo({ payments: [{ question: 'q?', default: 'd' }, { question: 'no default?' }] });
+  assert.equal(run(['render', '--dir', tyran]).status, 0);
+  write(sheet, fill(readFileSync(sheet, 'utf8'), 'Q-1', 'payments', 'twenty minutes of careful typing'));
 
-  // the plan, without spawning anything: dead pid + a usable id offers the command
-  const dead = { session_id: 'b'.repeat(20), pid: 2 ** 30 };
-  assert.deepEqual(resumePlan(dead), { action: 'offer', sessionId: dead.session_id });
-  assert.deepEqual(resumePlan(dead, { resume: true }), { action: 'spawn', sessionId: dead.session_id });
+  const refused = run(['render', '--dir', tyran]);
+  assert.equal(refused.status, 2, refused.stdout);
+  assert.ok(refused.stderr.includes(sheet), 'the refusal must name the file');
+  assert.match(refused.stderr, /already has 1 answer\(s\) typed into it: Q-1 · payments/);
+  assert.match(refused.stderr, /apply them first/);
+  assert.match(readFileSync(sheet, 'utf8'), /twenty minutes of careful typing/, 'the sheet is untouched');
+
+  const forced = run(['render', '--dir', tyran, '--force']);
+  assert.equal(forced.status, 0, forced.stderr);
+  assert.doesNotMatch(readFileSync(sheet, 'utf8'), /twenty minutes/);
+
+  // an answer already APPLIED is not typing at risk — it is in the ledger, and
+  // refusing there would make the sheet unrenderable for every later question
+  write(sheet, fill(readFileSync(sheet, 'utf8'), 'Q-1', 'payments', 'yes'));
+  assert.equal(run(['apply', '--dir', tyran]).status, 0);
+  assert.equal(run(['render', '--dir', tyran]).status, 0, 'Q-1 is closed; only Q-2 is still open');
+});
+
+test('the conductor record proves an announcement, never liveness', () => {
+  // MUTANT: restore `pidAlive(conductor.pid)`. conductor.json carries no pid —
+  // the only pid a SessionStart hook can observe is its OWN, dead within a
+  // second of being written and later naming a stranger — so the branch
+  // degrades to "not alive" and `--resume` spawns a SECOND conductor onto a
+  // live journal: the hazard the guard exists for, failing open.
+  const fresh = new Date().toISOString();
+  const record = { session_id: 'a'.repeat(20), started_at: fresh, cwd: '/repo' };
+  assert.deepEqual(resumePlan(record, { resume: true }), { action: 'announced', sessionId: record.session_id, since: fresh });
+
+  // an OLD stamp is evidence of nothing (a three-day conductor has one), so it
+  // never licenses a spawn on its own — the operator's --resume does
+  const old = { session_id: 'b'.repeat(20), started_at: '2026-01-01T00:00:00Z', cwd: '/repo' };
+  assert.deepEqual(resumePlan(old), { action: 'offer', sessionId: old.session_id });
+  assert.deepEqual(resumePlan(old, { resume: true }), { action: 'spawn', sessionId: old.session_id });
   assert.deepEqual(resumePlan(null), { action: 'none' });
-  assert.deepEqual(resumePlan({ session_id: '; rm -rf /', pid: 2 ** 30 }), { action: 'none' });
+  assert.deepEqual(resumePlan({ session_id: '; rm -rf /' }), { action: 'none' });
+  // no pid is ever consulted, in either direction
+  assert.equal(resumePlan({ session_id: 'c'.repeat(20), pid: process.pid, started_at: old.started_at }).action, 'offer');
+  assert.equal(resumePlan({ session_id: 'c'.repeat(20), pid: 2 ** 30, started_at: fresh }).action, 'announced');
+
+  const { tyran, sheet } = repo({ payments: [{ question: 'q?', default: 'd' }] });
+  writeFileSync(join(tyran, 'state', 'conductor.json'), JSON.stringify(record));
+  write(sheet, renderSheet(openAsks(tyran).asks));
+  const applied = run(['apply', '--dir', tyran, '--resume']);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(applied.stdout, /a conductor session announced itself at/);
+  assert.doesNotMatch(applied.stdout, /resumed session/, 'nothing may be spawned onto a session that just announced itself');
+  assert.doesNotMatch(applied.stdout, /is live/, 'this file cannot know that');
 });

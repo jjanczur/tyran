@@ -177,12 +177,18 @@ test('recording the session id can never fail the session, and never records gar
   // session it was meant to help.
   // MUTANT 2: drop SESSION_ID_RE. The value becomes an argument of a
   // `claude --resume` command that `answer.mjs` prints and can spawn.
+  // MUTANT 3: add `pid: process.pid` back to the record. It is the pid of
+  // THIS hook process, which exits within a second — dead before any reader
+  // sees it, and a stranger's once the OS recycles the number. A consumer
+  // reading it as "the conductor is live" is then wrong in both directions.
+  // The key set is asserted whole, in both directions, because the defect is
+  // recording a field whose meaning this process cannot defend.
   const dir = tempRepo();
   const stateDir = join(dir, '.tyran');
   assert.equal(recordConductor(stateDir, { session_id: 'a'.repeat(20), cwd: dir }), true);
   const doc = JSON.parse(readFileSync(join(stateDir, CONDUCTOR_RELPATH), 'utf8'));
+  assert.deepEqual(Object.keys(doc).sort(), ['cwd', 'session_id', 'started_at']);
   assert.equal(doc.session_id, 'a'.repeat(20));
-  assert.equal(doc.pid, process.pid);
   assert.equal(doc.cwd, dir);
   assert.ok(Number.isFinite(Date.parse(doc.started_at)));
 

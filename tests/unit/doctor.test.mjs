@@ -301,6 +301,31 @@ test('an open ask is info; past 72 h of journal time it is a warning; answered i
   assert.deepEqual(byCode(answered, 'ask-stale'), []);
 });
 
+test('both ask fixes parse in the shell the operator pastes them into', () => {
+  // MUTANT: end the fix with a bare `   (fill the answer: lines, then apply)`.
+  // The parenthesis opens a subshell and the line fails to PARSE, so nothing
+  // runs at all — measured: /bin/sh and bash exit 2 with "syntax error near
+  // unexpected token `('", zsh exits 1. These are the two findings an
+  // operator meets most often, and doctor's contract is that every finding
+  // carries a command you can paste.
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [
+    ev('2026-08-09T11:02:13.000Z', 'gate', { kind: 'Q-7', result: 'WAITING_ON_OPERATOR', question: 'Flat fee?' }),
+  ]);
+  regenerate(journal);
+  const fixes = [
+    byCode(runStateChecks({ dir }), 'ask-open')[0],
+    byCode(runStateChecks({ dir, now: '2026-08-13T11:20:44.000Z' }), 'ask-stale')[0],
+  ];
+  for (const found of fixes) {
+    assert.ok(found, 'the finding must fire before its fix can be checked');
+    // -n parses without executing: a render here would write a real sheet.
+    execFileSync('/bin/sh', ['-n', '-c', found.fix], { stdio: 'pipe' });
+  }
+});
+
 test('the sheet and the session record are not stray files under state/', () => {
   // MUTANT: drop the ASK_QUEUE_FILES exemption. Doctor then reports the two
   // files its own fix command tells the operator to create, and `--state`
@@ -309,7 +334,10 @@ test('the sheet and the session record are not stray files under state/', () => 
   const dir = scaffold(root);
   mkdirSync(join(dir, 'state'), { recursive: true });
   writeFileSync(join(dir, 'state', 'ANSWERS.md'), '# 0 questions waiting on you\n');
-  writeFileSync(join(dir, 'state', 'conductor.json'), '{"session_id":"aaaaaaaaaa","pid":1}\n');
+  writeFileSync(
+    join(dir, 'state', 'conductor.json'),
+    '{"session_id":"aaaaaaaaaa","started_at":"2026-08-09T11:02:13.000Z","cwd":"/repo"}\n',
+  );
   const result = runStateChecks({ dir });
   assert.deepEqual(byCode(result, 'state-stray-file'), []);
   assert.equal(result.ok, true);

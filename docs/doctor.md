@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 94 unit tests
+`scripts/doctor.mjs --state` · 95 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.

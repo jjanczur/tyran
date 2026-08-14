@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 95 unit tests
+`scripts/doctor.mjs --state` · 103 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -90,6 +90,9 @@ possible to change one and keep the suite green.
 | `state-stray-file` | warning | something under `state/` is not an initiative directory |
 | `state-legacy-initiatives-dir` | warning | a `.tyran/initiatives/` directory from before 0.1.9 — initiative files live under `state/`, and nothing mechanical reads the old location |
 | `lease-file-tracked` | warning | lease files are committed to git — a lease records who holds a resource right now, so a committed one conflicts on every parallel merge |
+| `initiative-untracked` | warning | git has never seen this initiative’s ledger — `journal.mjs append` writes the working tree and nothing else, so an initiative nobody committed is one `git clean -fd` from having never happened |
+| `initiative-ignored` | warning | a .gitignore rule covers the ledger, so nothing under it can be committed at all — and `git add` on an ignored path is a silent no-op |
+| `initiative-uncommitted` | info | the ledger has uncommitted changes — ordinary mid-initiative, a gap at a merge boundary |
 | `limit-pause-active` | info | a usage-limit pause marker is present and its resume time has not passed — autonomous work is deliberately wound down |
 | `limit-pause-stale` | warning | the pause marker's resume time has passed and the marker remains — the watcher died (reboot) or was never scheduled |
 | `limit-resume-watcher-dead` | warning | `resume.json` says a watcher is waiting but no such process is alive, or the last scheduled resume failed |

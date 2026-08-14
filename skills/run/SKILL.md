@@ -70,6 +70,13 @@ English regardless.
      server start vanish on restart, so restarts stop being deterministic;
    - probe the toolchain with `command -v` for every tool the plan names, and
      confirm your own file-writing path works before you rely on it;
+   - **probe for interactive aliases** — `alias cp mv rm 2>/dev/null` — because
+     an agent's shell is started from the user's profile, so `alias cp='cp -i'`
+     turns a copy into a question with nobody to answer it and the call burns
+     its whole timeout. Put `command cp` in the handoff when one is set. The
+     symptom is a timeout, which points at the machine rather than the alias,
+     so it is rediscovered every time: measured three times in one session, in
+     three different agents, and again in a later one that had read this file;
    - **dry-run every automaton** for one no-op iteration before you trust it
      with unattended work. Trust dialogs and missing dependencies surface
      then, not at 3am.
@@ -227,6 +234,15 @@ open one.
    carries an explicit **"NO INDEPENDENT REVIEW"** stamp; staying quiet about
    it is forbidden. Tests for every non-trivial change. Repo validation per
    the project configuration. You merge, sequentially.
+   - **A `Test timed out` measured while another heavy phase was running is
+     not evidence of a defect.** Re-run it serially, report the serial result,
+     and say the first run was concurrent. The hardware ceiling bounds AGENT
+     count, not concurrent heavy phases, so an agent can respect it and still
+     produce a red only the machine caused — five such failures in one session,
+     all green on a serial re-run.
+   - **An agent that dies on a terminal API error is RESUMED, not respawned.**
+     Its context, its corrected premises and its uncommitted diff all survive
+     the death; a fresh agent on the same handoff redoes work already on disk.
    - **How a diff is read is the `code-review` skill**; what the verdict looks
      like stays in `tyran:reviewer`. The part you enforce as conductor is that
      a finding arrives as an input and an expected result — anything vaguer
@@ -345,6 +361,11 @@ open one.
      manifest and lockfile are already a SHARED ZONE nobody may edit, so the
      dependencies are guaranteed identical, and a per-worktree install is how
      a lockfile drifts. Say in the handoff which directory you linked.
+     **Gitignored environment files are missing for the same reason, and they
+     fail QUIETER**: a missing dependency exits 127, a missing `.env` makes the
+     gated specs SKIP — so the worktree reports a *cleaner* baseline than the
+     repo has and the difference reads as good news. Link those too, and name
+     them in the handoff.
    - **`.tyran/state/**` lives in the main checkout only.** An agent told to
      append to `NOTES.md` from inside a worktree must use the absolute
      main-repo path, or it writes into a copy nobody reads.
@@ -437,6 +458,6 @@ open one.
   stop. Never route around the allowlist: the point of pausing at 97% is
   that the last 3% pays for a clean checkpoint instead of a corpse. The
   scheduler resumes the session after the reset (or notifies and holds on a
-  long, weekly-shaped wait — `docs/overnight.md`); a resumed session starts
+  long, weekly-shaped wait — https://jjanczur.github.io/tyran/overnight/); a resumed session starts
   from the `usage-limit-pause` checkpoint and first closes the open
   usage-limit gate with `result: passed`.

@@ -6,12 +6,13 @@
   "description": "Documentation site for the Tyran plugin. Isolated from the plugin itself: the plugin has zero runtime dependencies and no build step, and this package.json must never change that.",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/build-sandbox.mjs && astro build",
     "preview": "astro preview",
     "check": "astro check",
     "check:base": "node scripts/check-base-prefix.mjs",
     "check:browser": "node scripts/check-browser.mjs",
-    "check:contrast": "node scripts/check-mermaid-contrast.mjs"
+    "check:contrast": "node scripts/check-mermaid-contrast.mjs",
+    "sandbox": "node scripts/build-sandbox.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.41.4",

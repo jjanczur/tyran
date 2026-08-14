@@ -1,0 +1,27 @@
+{"ts":"2026-08-15T08:00:00.000Z","ev":"init.created","init":"payments","actor":"conductor","data":{"title":"Stripe checkout rewrite"}}
+{"ts":"2026-08-15T08:04:00.000Z","ev":"decision","init":"payments","actor":"conductor","data":{"text":"Hardware ceiling: 32 GB / 10 cores -> at most 4 agents, 2 heavy phases"}}
+{"ts":"2026-08-15T08:06:00.000Z","ev":"plan.accepted","init":"payments","actor":"conductor","data":{"stories":6}}
+{"ts":"2026-08-15T08:07:00.000Z","ev":"ticket.created","init":"payments","actor":"conductor","data":{"id":"T-1","title":"payment intent client","deps":[]}}
+{"ts":"2026-08-15T08:07:10.000Z","ev":"ticket.created","init":"payments","actor":"conductor","data":{"id":"T-2","title":"webhook signature verification","deps":["T-1"]}}
+{"ts":"2026-08-15T08:07:20.000Z","ev":"ticket.created","init":"payments","actor":"conductor","data":{"id":"T-3","title":"idempotency keys on retry","deps":["T-1"]}}
+{"ts":"2026-08-15T08:07:30.000Z","ev":"ticket.created","init":"payments","actor":"conductor","data":{"id":"T-4","title":"refund path","deps":["T-2"]}}
+{"ts":"2026-08-15T08:07:40.000Z","ev":"ticket.created","init":"payments","actor":"conductor","data":{"id":"T-5","title":"3DS challenge flow","deps":["T-1"]}}
+{"ts":"2026-08-15T08:07:50.000Z","ev":"ticket.created","init":"payments","actor":"conductor","data":{"id":"T-6","title":"drop the legacy charges API","deps":["T-4"]}}
+{"ts":"2026-08-15T08:10:00.000Z","ev":"spawn","init":"payments","actor":"conductor","data":{"agent":"impl-intent","role":"implementer","ticket":"T-1"}}
+{"ts":"2026-08-15T08:41:00.000Z","ev":"report","init":"payments","actor":"impl-intent","data":{"agent":"impl-intent","ticket":"T-1","summary":"18 tests, all green; exit 0"}}
+{"ts":"2026-08-15T08:44:00.000Z","ev":"spawn","init":"payments","actor":"conductor","data":{"agent":"rev-intent","role":"reviewer","ticket":"T-1"}}
+{"ts":"2026-08-15T08:58:00.000Z","ev":"review","init":"payments","actor":"rev-intent","data":{"agent":"rev-intent","ticket":"T-1","verdict":"APPROVE"}}
+{"ts":"2026-08-15T09:01:00.000Z","ev":"merge","init":"payments","actor":"conductor","data":{"ticket":"T-1","sha":"9f21c04"}}
+{"ts":"2026-08-15T09:05:00.000Z","ev":"spawn","init":"payments","actor":"conductor","data":{"agent":"impl-webhook","role":"implementer","ticket":"T-2"}}
+{"ts":"2026-08-15T09:06:00.000Z","ev":"progress","init":"payments","actor":"impl-webhook","data":{"agent":"impl-webhook","state":"started","ticket":"T-2","next":"reproduce the signature mismatch against a captured payload"}}
+{"ts":"2026-08-15T09:22:00.000Z","ev":"finding","init":"payments","actor":"impl-webhook","data":{"area":"security","ticket":"T-2","claim":"the old verifier compared signatures with ==, which is timing-variable","proof":"src/webhooks/verify.ts:41"}}
+{"ts":"2026-08-15T09:35:00.000Z","ev":"progress","init":"payments","actor":"impl-webhook","data":{"agent":"impl-webhook","state":"working","ticket":"T-2","detail":"constant-time compare in, writing the regression test","next":"prove the test fails without the fix"}}
+{"ts":"2026-08-15T09:12:00.000Z","ev":"spawn","init":"payments","actor":"conductor","data":{"agent":"impl-idem","role":"implementer","ticket":"T-3"}}
+{"ts":"2026-08-15T09:13:00.000Z","ev":"progress","init":"payments","actor":"impl-idem","data":{"agent":"impl-idem","state":"started","ticket":"T-3","next":"read how retries are currently keyed"}}
+{"ts":"2026-08-15T09:40:00.000Z","ev":"progress","init":"payments","actor":"impl-idem","data":{"agent":"impl-idem","state":"blocked","ticket":"T-3","detail":"the staging database has no unique index on idempotency_key, so the retry test cannot fail the way it must","next":"waiting on a decision about the migration"}}
+{"ts":"2026-08-15T09:41:00.000Z","ev":"gate","init":"payments","actor":"conductor","data":{"kind":"Q-1","result":"WAITING_ON_OPERATOR","ticket":"T-3","question":"Add a unique index on idempotency_key in staging? It is a production-shaped migration and I will not run it unasked.","recommendation":"yes, on staging only, in a reversible migration","default":"hold and leave T-3 blocked"}}
+{"ts":"2026-08-15T09:44:00.000Z","ev":"gate","init":"payments","actor":"conductor","data":{"kind":"Q-2","result":"WAITING_ON_OPERATOR","question":"Drop the legacy charges API in this initiative, or leave it behind a flag for one release?","recommendation":"leave it behind a flag — two integrations still call it","default":"leave it behind a flag"}}
+{"ts":"2026-08-15T09:47:00.000Z","ev":"spawn","init":"payments","actor":"conductor","data":{"agent":"scout-3ds","role":"scout","ticket":"T-5"}}
+{"ts":"2026-08-15T09:48:00.000Z","ev":"progress","init":"payments","actor":"scout-3ds","data":{"agent":"scout-3ds","state":"working","ticket":"T-5","detail":"reading the provider's challenge callbacks","next":"report which of the three callback shapes we actually receive"}}
+{"ts":"2026-08-15T09:50:00.000Z","ev":"ticket.status","init":"payments","actor":"conductor","data":{"ticket":"T-6","column":"parked","reason":"parked until Q-2 is answered"}}
+{"ts":"2026-08-15T09:52:00.000Z","ev":"checkpoint","init":"payments","actor":"conductor","data":{"phase":"mid-initiative","next_steps":["answer Q-1","merge T-2 once reviewed"]}}

@@ -171,6 +171,13 @@ export function naturalCompare(a, b) {
 }
 
 /** Stable sort by a natural key; ties keep their original (journal) order. */
+/** Deduplicated and naturally ordered — a board.json array is compared byte
+ * for byte, so "the order the journal happened to spawn them in" is not a
+ * property this can rest on. */
+function sortedUnique(values) {
+  return [...new Set(values)].sort(naturalCompare);
+}
+
 function sortByKey(items, keyOf) {
   return items
     .map((item, i) => [item, i])
@@ -695,6 +702,13 @@ export function boardOf(state) {
       id: t.id,
       title: t.title,
       agents: runningByTicket.get(t.id) ?? [],
+      // Everyone who ever held it, not only whoever holds it now. `agents`
+      // empties the moment an agent reports, so a merged ticket carried no
+      // trace of who did the work — and "who touched this" is a question
+      // people ask about FINISHED tickets, never about running ones. The fold
+      // has kept the list since spawns learned to name a ticket; only the
+      // board dropped it.
+      worked_by: sortedUnique(t.agents),
       since: t.lastTs,
       annotation: annotations.length > 0 ? annotations.join(' · ') : null,
     });

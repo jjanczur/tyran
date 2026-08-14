@@ -16,7 +16,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,7 @@ import {
 } from '../../scripts/board.mjs';
 import { renderBoardError, renderBoardHtml } from '../../scripts/board-html.mjs';
 import { BOARD_FILE, BOARD_JSON_FILE, LANES } from '../../scripts/project.mjs';
+import { readJournal, validateJournal } from '../../scripts/journal.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/board.mjs', import.meta.url));
 const FIXTURE = fileURLToPath(new URL('../fixtures/journal-demo.jsonl', import.meta.url));
@@ -440,5 +441,88 @@ test('board.json carries no absolute path, so two clones of one journal agree', 
   assert.ok(!json.includes(dir), 'the temp directory leaked into a committed artefact');
   for (const line of json.split('\n')) {
     assert.doesNotMatch(line, /"path": "\//, 'a path starting at the filesystem root is machine-specific');
+  }
+});
+
+test('the client script actually parses, which nothing else in this suite proves', () => {
+  // MUTANT: any stray backtick in CLIENT_JS. The whole client is one template
+  // literal in board-html.mjs, so a backtick inside a COMMENT terminates it
+  // and the module stops loading — which is how this was found, by a comment
+  // that quoted an identifier. Every other test here matches strings in the
+  // rendered page and would happily match a page that cannot run.
+  const html = demoHtml();
+  const js = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
+  assert.ok(js.length > 1000, 'the client script is missing entirely');
+  assert.doesNotThrow(() => new Function(js), 'the page ships JavaScript that does not parse');
+});
+
+test('the queue count reaches the browser tab, not only the tab strip', () => {
+  // MUTANT: drop the document.title line. The page is meant to be left open
+  // overnight, and a background tab said nothing at all — the count existed
+  // only on a tab you had to be looking at.
+  assert.match(demoHtml(), /document\.title = \(asks\.length > 0/);
+});
+
+test('the seen baseline is written on a press, never on a load', () => {
+  // MUTANT: call writeSeen() during startup. The page refreshes itself every
+  // 30 seconds, so the baseline would be replaced twice a minute and "changed
+  // since you marked seen" would permanently mean "changed in the last 30
+  // seconds" — which is the same as showing nothing at all.
+  const html = demoHtml();
+  assert.match(html, /addEventListener\('click', function \(\) \{\s*if \(writeSeen\(\)\)/);
+  const startup = html.slice(html.indexOf('var seen = readSeen'), html.indexOf('var app = document'));
+  assert.doesNotMatch(startup, /writeSeen\(\)/, 'the baseline moved without the operator saying so');
+});
+
+test('localStorage refusing outright degrades to no baseline, not to a broken page', () => {
+  // MUTANT: drop the try/catch. Safari over file:// and a locked-down private
+  // window both THROW on localStorage access rather than returning null, and
+  // the whole board would fail to render on a page that is documented to work
+  // over file://.
+  const html = demoHtml();
+  const reader = html.slice(html.indexOf('var readSeen'), html.indexOf('var writeSeen'));
+  assert.match(reader, /try \{/);
+  assert.match(reader, /catch \(e\) \{ return null; \}/);
+});
+
+test('a merged ticket still names who did the work', () => {
+  // MUTANT: leave the card carrying only the RUNNING agents. That list empties
+  // the moment an agent reports, so every done card showed nobody — and "who
+  // touched this" is a question asked about finished tickets, never about
+  // running ones.
+  const payload = crossBoard(readInitiativeBoards(tree({ demo: demo() })));
+  const withHistory = [...Object.values(payload.lanes)].flat().filter((c) => (c.worked_by || []).length > 0);
+  assert.ok(withHistory.length > 0, 'the fixture must have a ticket somebody worked on');
+  for (const card of withHistory) {
+    assert.deepEqual(card.worked_by, [...card.worked_by].sort(), 'board.json is byte-compared: spawn order is not an order');
+    assert.equal(card.worked_by.length, new Set(card.worked_by).size, 'an agent listed twice is a rendering bug');
+  }
+  assert.match(demoHtml(), /'worked by'/);
+});
+
+test('nothing-started and nothing-finished do not render as the same board', () => {
+  // MUTANT: keep one progress tile. "0% · 0 of 0 merged" is what a brand new
+  // initiative shows AND what a fully stalled one shows, and those call for
+  // opposite reactions.
+  const html = renderAll(tree({})).files[BOARD_HTML_FILE];
+  assert.match(html, /no initiatives yet/);
+  assert.match(html, /no tickets declared yet/);
+});
+
+test('the sandbox journals the docs publish are real journals', () => {
+  // MUTANT: hand-edit site/sandbox/*.jsonl into something the fold silently
+  // drops — a misspelled `ev`, a `progress` with no agent. The sandbox would
+  // still build, still publish, and quietly show a smaller board than the
+  // journals describe, on the page whose whole job is to show what the board
+  // looks like.
+  const dir = fileURLToPath(new URL('../../site/sandbox/', import.meta.url));
+  const names = readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+  assert.ok(names.length >= 2, 'the sandbox should show more than one initiative');
+  for (const name of names) {
+    const read = readJournal(join(dir, name));
+    assert.equal(read.badLines.length, 0, `${name} has unparseable lines`);
+    const { errors } = validateJournal(read.events);
+    assert.deepEqual(errors, [], `${name} is not a journal Tyran would accept`);
+    assert.ok(read.events.length > 5, `${name} is too thin to show anything`);
   }
 });

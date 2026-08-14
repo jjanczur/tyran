@@ -105,6 +105,17 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .damaged{background:var(--bg-raised);border-left:3px solid var(--brass);border-radius:.45rem;padding:.42rem .65rem;margin:.3rem 0;font-family:var(--mono);font-size:.78rem;color:var(--brass-bright)}
 .err{background:var(--bg-raised);border-left:3px solid var(--clay);border-radius:.45rem;padding:.6rem .75rem;color:var(--clay-bright);font-size:.85rem}
 
+/* ---- what moved while you were away ---- */
+.moved{background:var(--brass-low);border:1px solid var(--brass-edge);border-radius:var(--radius);padding:.5rem .75rem;margin:.6rem 0;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;color:var(--brass-bright);font-size:.85rem}
+.markseen{background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.4rem;padding:.25rem .6rem;font:inherit;font-size:.78rem;cursor:pointer}
+.markseen:hover{border-color:var(--brass-edge);color:var(--brass-bright)}
+.card .movedtag{display:inline-block;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);border-radius:.3rem;padding:0 .3rem;font-size:.65rem;margin-left:.3rem;letter-spacing:.04em}
+
+/* ---- filter ---- */
+.filter{display:flex;gap:.6rem;align-items:center;margin:.5rem 0 .7rem}
+.filter input{background:var(--bg-sunken);color:var(--text);border:1px solid var(--hairline);border-radius:.4rem;padding:.35rem .6rem;font:inherit;font-size:.82rem;min-width:20rem;max-width:100%}
+.filter input:focus{outline:none;border-color:var(--steel-edge)}
+
 /* ---- the files an initiative actually has ---- */
 .files{display:flex;flex-direction:column;gap:.2rem;margin-top:.3rem}
 .file{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;font-size:.76rem}
@@ -221,6 +232,54 @@ if (data.schema !== 1) {
   var cost = null;
   var costError = null;
 
+  // The queue count, in the browser tab. The whole point of this page is that
+  // you can leave it open while agents work overnight, and a background tab
+  // was saying nothing at all — the count existed only on a tab you had to be
+  // looking at to see.
+  try {
+    document.title = (asks.length > 0 ? '(' + asks.length + ') ' : '') + 'Tyran board';
+  } catch (e) { /* a title is a nicety; never let it take the page down */ }
+
+  // ---- what moved since you last acknowledged it ------------------------
+  //
+  // The page is a snapshot; the journal is a timeline. Someone who leaves
+  // agents running overnight comes back to ten lanes and has to re-read all
+  // of them to find the two that moved.
+  //
+  // The baseline is only replaced when the operator presses "Mark seen" —
+  // deliberately NOT on load, because the page reloads itself every 30
+  // seconds and an auto-updating baseline would mean "since you last looked"
+  // was always "since half a minute ago", which is the same as nothing.
+  // localStorage can throw outright (Safari over file://, a private window),
+  // so every access degrades to "no baseline" rather than to a broken page.
+  var SEEN_KEY = 'tyran-board-seen-v1';
+  var laneOfCard = {};
+  Object.keys(lanes).forEach(function (lane) {
+    (lanes[lane] || []).forEach(function (c) { laneOfCard[(c.init || '') + '/' + c.id] = lane; });
+  });
+  var readSeen = function () {
+    try {
+      var raw = localStorage.getItem(SEEN_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  };
+  var writeSeen = function () {
+    try {
+      localStorage.setItem(SEEN_KEY, JSON.stringify({ at: new Date().toISOString(), cards: laneOfCard }));
+      return true;
+    } catch (e) { return false; }
+  };
+  var seen = readSeen();
+  var moved = {};
+  var movedCount = 0;
+  if (seen && seen.cards) {
+    Object.keys(laneOfCard).forEach(function (key) {
+      var was = seen.cards[key];
+      if (was === undefined) { moved[key] = 'new'; movedCount += 1; }
+      else if (was !== laneOfCard[key]) { moved[key] = was; movedCount += 1; }
+    });
+  }
+
   var app = document.getElementById('app');
   var head = el('div');
   head.appendChild(el('h1', null, 'Tyran board'));
@@ -325,7 +384,14 @@ if (data.schema !== 1) {
   ovTiles.appendChild(tile('waiting on you', String(asks.length),
     asks.length === 0 ? 'nothing blocked on a decision' : 'answer them on the next tab', asks.length > 0 ? 'lead' : null));
   ovTiles.appendChild(tile('agents running', String(agents.length), 'across ' + (totals.initiatives || 0) + ' initiative(s)'));
-  ovTiles.appendChild(tile('progress', (totals.percent || 0) + '%', (totals.merged || 0) + ' of ' + (totals.tickets || 0) + ' merged'));
+  // An initiative with no tickets used to read "0% · 0 of 0 merged", which is
+  // exactly what a fully stalled one reads. Nothing-started and
+  // nothing-finished are different situations and deserve different words.
+  ovTiles.appendChild((totals.tickets || 0) === 0
+    ? tile('progress', '—', (totals.initiatives || 0) === 0
+        ? 'no initiatives yet — run /tyran to start one'
+        : 'no tickets declared yet')
+    : tile('progress', (totals.percent || 0) + '%', (totals.merged || 0) + ' of ' + totals.tickets + ' merged'));
   // Counted by the server, from the lanes AND the agents. Counting lanes here
   // read zero while an agent chip on the same screen said "blocked", because a
   // ticket parked by an override leaves no card in the blocked lane.
@@ -336,6 +402,31 @@ if (data.schema !== 1) {
     laneCount('blocked') + ' blocked · ' + laneCount('changes-requested') + ' changes requested · '
       + blockedAgents + ' agent(s) blocked', stuck > 0 ? 'warn' : null));
   ov.appendChild(ovTiles);
+
+  // The bar only appears once there IS a baseline: on a first visit nothing
+  // has "changed", and saying so would be noise on the one screen that is
+  // supposed to be only signal.
+  if (seen) {
+    var since = el('div', movedCount > 0 ? 'moved' : 'hint');
+    since.appendChild(el('span', null, movedCount > 0
+      ? movedCount + ' ticket(s) changed lane since you marked seen (' + seen.at + ')'
+      : 'Nothing has moved since you marked seen (' + seen.at + ').'));
+    var mark = el('button', 'markseen', 'Mark seen');
+    mark.addEventListener('click', function () {
+      if (writeSeen()) location.reload();
+      else since.appendChild(el('span', 'note', ' — this browser refused to store it'));
+    });
+    since.appendChild(mark);
+    ov.appendChild(since);
+  } else {
+    var first = el('div', 'hint');
+    first.appendChild(el('span', null, 'Mark this board seen and the next visit will tell you what moved while you were away.'));
+    var firstBtn = el('button', 'markseen', 'Mark seen');
+    firstBtn.addEventListener('click', function () { if (writeSeen()) location.reload(); });
+    first.appendChild(firstBtn);
+    ov.appendChild(first);
+  }
+
   ov.appendChild(el('h2', null, 'Agents'));
   // Named, not implied by the order: the strip is sorted stalest-first by the
   // server, and a reader who does not know that reads the first chip as the
@@ -391,8 +482,13 @@ if (data.schema !== 1) {
       dl.appendChild(el('dd', null, v));
     };
     row('lane', lane);
+    var was = moved[(card.init || '') + '/' + card.id];
+    if (was) row('since you marked seen', was === 'new' ? 'new ticket' : 'moved out of ' + was);
     row('initiative', card.init);
     row('agents', card.agents && card.agents.length ? card.agents.join(', ') : null);
+    // Who ever held it, which is the question people ask about a ticket that
+    // is already done — precisely when the running-agents list is empty.
+    row('worked by', card.worked_by && card.worked_by.length ? card.worked_by.join(', ') : null);
     row('note', card.annotation);
     if (cost) {
       var hit = (cost.by_ticket || []).filter(function (r) { return r.ticket === card.id; })[0];
@@ -419,14 +515,33 @@ if (data.schema !== 1) {
     }
     detail.appendChild(box);
   };
+  // A filter, because ten lanes across dozens of initiatives is a pile.
+  // Substring over the id, the title and the initiative — no query language,
+  // nothing to learn, and it never hides a lane HEADING, so "0" after
+  // filtering still reads as a fact about the lane rather than as an
+  // absence.
+  var filterRow = el('div', 'filter');
+  var filterInput = el('input');
+  filterInput.setAttribute('type', 'search');
+  filterInput.setAttribute('placeholder', 'filter by ticket, title or initiative');
+  filterInput.setAttribute('aria-label', 'filter tickets');
+  var filterCount = el('span', 'note');
+  filterRow.appendChild(filterInput);
+  filterRow.appendChild(filterCount);
+  bd.appendChild(filterRow);
+
+  var allCards = [];
   Object.keys(lanes).forEach(function (lane) {
     var cards = lanes[lane];
     var box = el('div', 'lane ' + lane);
     var h = el('h4');
     h.appendChild(el('span', null, lane));
-    h.appendChild(el('span', 'count', ' (' + cards.length + ')'));
+    var count = el('span', 'count', ' (' + cards.length + ')');
+    h.appendChild(count);
     box.appendChild(h);
-    if (cards.length === 0) box.appendChild(el('div', 'empty', '—'));
+    var emptyMark = el('div', 'empty', '—');
+    if (cards.length === 0) box.appendChild(emptyMark);
+    var buttons = [];
     cards.forEach(function (c) {
       var button = el('button', 'card');
       button.setAttribute('type', 'button');
@@ -434,13 +549,36 @@ if (data.schema !== 1) {
       button.appendChild(el('span', 'id', c.id));
       if (c.title) button.appendChild(el('span', null, ' — ' + c.title));
       if (c.init) button.appendChild(el('span', 'init', '  ' + c.init));
+      // The badge is the whole point of the baseline: it puts what moved in
+      // front of you instead of asking you to compare ten lanes by eye.
+      if (moved[(c.init || '') + '/' + c.id]) button.appendChild(el('span', 'movedtag', 'moved'));
       if (c.agents && c.agents.length) button.appendChild(el('span', 'note', 'agents: ' + c.agents.join(', ')));
       if (c.annotation) button.appendChild(el('span', 'note', c.annotation));
       button.addEventListener('click', function () { showDetail(c, lane, button); });
       box.appendChild(button);
+      buttons.push(button);
+      allCards.push({ card: c, button: button, hay: ((c.id || '') + ' ' + (c.title || '') + ' ' + (c.init || '')).toLowerCase() });
     });
     lanesWrap.appendChild(box);
+    box.tyranApply = function (q) {
+      var shown = 0;
+      buttons.forEach(function (b, i) {
+        var hit = q === '' || ((cards[i].id || '') + ' ' + (cards[i].title || '') + ' ' + (cards[i].init || '')).toLowerCase().indexOf(q) !== -1;
+        b.style.display = hit ? '' : 'none';
+        if (hit) shown += 1;
+      });
+      count.textContent = q === '' ? ' (' + cards.length + ')' : ' (' + shown + ' of ' + cards.length + ')';
+      emptyMark.style.display = shown === 0 && cards.length > 0 ? '' : (cards.length === 0 ? '' : 'none');
+      return shown;
+    };
   });
+  var applyFilter = function () {
+    var q = filterInput.value.trim().toLowerCase();
+    var shown = 0;
+    [].forEach.call(lanesWrap.children, function (box) { shown += box.tyranApply(q); });
+    filterCount.textContent = q === '' ? '' : shown + ' of ' + allCards.length + ' ticket(s)';
+  };
+  filterInput.addEventListener('input', applyFilter);
   bd.appendChild(lanesWrap);
   bd.appendChild(detail);
 
@@ -601,9 +739,18 @@ if (data.schema !== 1) {
   if (typeof fetch === 'function') {
     fetch('cost.json', { headers: { accept: 'application/json' } })
       .then(function (r) {
+        // 404 is not a failure, it is an ANSWER: no such route, so this page
+        // is not being served by the board server — a copy on a docs site, a
+        // file behind some other static host. Distinct from a 503, which
+        // means the reader ran and could not finish.
+        if (r.status === 404) return { absent: true };
         return r.json().then(function (body) { return { ok: r.ok, body: body }; });
       })
       .then(function (res) {
+        if (res.absent) {
+          showCostFailure('Spend is not served on this page. Run the board against your own repo to see it: npx @jjanczur/tyran board --dir .tyran --serve');
+          return;
+        }
         var payload = res.body;
         if (!res.ok) {
           showCostFailure('Spend could not be read: ' + ((payload && payload.error) || 'the server refused the request') + '.');

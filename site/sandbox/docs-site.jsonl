@@ -1,0 +1,13 @@
+{"ts":"2026-08-15T07:30:00.000Z","ev":"init.created","init":"docs-site","actor":"conductor","data":{"title":"Docs site accessibility pass"}}
+{"ts":"2026-08-15T07:33:00.000Z","ev":"plan.accepted","init":"docs-site","actor":"conductor","data":{"stories":3}}
+{"ts":"2026-08-15T07:34:00.000Z","ev":"ticket.created","init":"docs-site","actor":"conductor","data":{"id":"T-1","title":"contrast audit across both themes","deps":[]}}
+{"ts":"2026-08-15T07:34:10.000Z","ev":"ticket.created","init":"docs-site","actor":"conductor","data":{"id":"T-2","title":"keyboard focus rings on every control","deps":[]}}
+{"ts":"2026-08-15T07:34:20.000Z","ev":"ticket.created","init":"docs-site","actor":"conductor","data":{"id":"T-3","title":"alt text on the architecture diagrams","deps":["T-1"]}}
+{"ts":"2026-08-15T07:36:00.000Z","ev":"spawn","init":"docs-site","actor":"conductor","data":{"agent":"impl-contrast","role":"implementer","ticket":"T-1"}}
+{"ts":"2026-08-15T08:12:00.000Z","ev":"report","init":"docs-site","actor":"impl-contrast","data":{"agent":"impl-contrast","ticket":"T-1","summary":"18 pairs measured, 4 below 4.5:1, all four raised; checker exits 0"}}
+{"ts":"2026-08-15T08:15:00.000Z","ev":"spawn","init":"docs-site","actor":"conductor","data":{"agent":"rev-contrast","role":"reviewer","ticket":"T-1"}}
+{"ts":"2026-08-15T08:39:00.000Z","ev":"review","init":"docs-site","actor":"rev-contrast","data":{"agent":"rev-contrast","ticket":"T-1","verdict":"CHANGES-REQUESTED","summary":"the dark palette was measured, the light one was not — two of the four regress under prefers-color-scheme: light"}}
+{"ts":"2026-08-15T08:42:00.000Z","ev":"spawn","init":"docs-site","actor":"conductor","data":{"agent":"impl-focus","role":"implementer","ticket":"T-2"}}
+{"ts":"2026-08-15T08:43:00.000Z","ev":"progress","init":"docs-site","actor":"impl-focus","data":{"agent":"impl-focus","state":"started","ticket":"T-2","next":"tab through every page and record what never receives focus"}}
+{"ts":"2026-08-15T09:30:00.000Z","ev":"progress","init":"docs-site","actor":"impl-focus","data":{"agent":"impl-focus","state":"working","ticket":"T-2","detail":"11 of 14 controls done","next":"the search dialog, which traps focus"}}
+{"ts":"2026-08-15T09:33:00.000Z","ev":"finding","init":"docs-site","actor":"impl-focus","data":{"area":"accessibility","claim":"the search dialog traps focus and Escape does not close it","proof":"site/src/components/Search.astro:88"}}

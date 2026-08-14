@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.19 — 2026-08-14
+
+### The board answered four questions on one scroll
+
+`board.html` is now four tabs. **Overview** — what is waiting on you, agents
+running, progress, tickets that need a human, then the agent strip. **Board** —
+the kanban lanes, where every card is a button that opens a detail panel
+carrying its lane, initiative, agents, note and, once spend has loaded, that
+ticket's tokens and cost. **Waiting on you** — the queue, with the three
+commands that answer it printed above the questions, and its open count in the
+tab label so a pending decision survives being on another tab. **Spend** —
+unchanged in substance, still FETCHED rather than embedded, so `board.json` and
+`board.html` keep their byte-exact `--check` contract.
+
+The palette is pulled back. The first version filled whole bars and whole cards
+at full saturation, which reads as an alarm rather than as information. The
+roles are unchanged — one warm accent for the operator's call to action, a cool
+one for the agent strip, red for refusal, green for the ledger's `+` — but
+saturation is now spent on text, edges and 3px rails, and every large fill is a
+muted tone of the same hue. The tokens are `--brass`, `--steel`, `--clay`,
+`--sage`.
+
+### The README explained the problem before it explained the product
+
+Rebuilt, 491 lines to 204: what Tyran is, a recorded demo of the board, what it
+gives you, a comparison, install, use, the dashboard. Everything cut was first
+given a home on BOTH doc surfaces — nine sections that lived nowhere else were
+moved rather than deleted, and four inbound links that pointed at README
+anchors now resolve inside `docs/`.
+
+The version badge read GitHub Releases, where the newest was 0.1.3 while
+sixteen versions had shipped by tag and by npm. It now reads npm, which the
+release itself maintains and which cannot go stale.
+
+**Upgrading: regenerate your board.** `board.html` changed again, so
+`board.mjs --check` reports drift until you run
+`node scripts/board.mjs --dir .tyran` and commit. `board.json` and `BOARD.md`
+are unchanged.
+
 ## 0.1.18 — 2026-08-14
 
 ### The spend ledger: nobody could say what a run cost

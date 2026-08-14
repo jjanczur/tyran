@@ -9,16 +9,22 @@ import { FORBIDDEN } from './invisible.mjs';
  * is blocked over file:// in Chromium, so meta-refresh is the one reliable
  * primitive; under `board.mjs --serve` the same refresh hits the server.
  *
- * ## Style: the landing page's system, not a new one
+ * ## Four tabs, because the page answers four questions
  *
- * Tokens are copied from `site/src/styles/landing.css` (operator-decided
- * 2026-08-14): the stone/gold/glow palette read off the banner, system font
- * stacks (no web fonts), dark only. The semantic mapping keeps the landing's
- * own rules — gold is the ONE accent, so it marks the operator's waiting
- * queue (the page's only call to action); the glow is a light source, so it
- * lights the agent strip (literally the cold light off the agents' screens);
- * red stays refusal (the PAUSED banner, the blocked lane); green stays the
- * ledger `+` (the done lane).
+ * Overview (what is the state), Board (where is every ticket), Waiting on you
+ * (what is blocked on a decision, and how to answer it), Spend (what it
+ * cost). They were competing for one scroll. The queue keeps its count in the
+ * tab label, so "something is waiting on me" survives being on another tab.
+ *
+ * ## Style: the landing page's system, muted
+ *
+ * Roles are the landing page's — one warm accent for the operator's call to
+ * action, a cool one for the agent strip, red for refusal, green for the
+ * ledger's `+`. The TONES are deliberately pulled back from the first
+ * version (operator-decided 2026-08-14: "a bit too flashy"), which filled
+ * whole bars and whole cards at full saturation. Saturation is now spent on
+ * text, edges and 3px rails; every large fill is a muted tone of the same
+ * hue. System font stacks, no web fonts, dark only.
  *
  * ## Safety
  *
@@ -36,77 +42,120 @@ import { FORBIDDEN } from './invisible.mjs';
 
 const CSS = `
 :root{
-  --bg:#12100e;--bg-raised:#1c1917;--bg-sunken:#0d0c0a;
-  --text:#d9d2c6;--heading:#f5efe3;--muted:#a29788;
-  --hairline:#3b342c;--hairline-soft:#29241f;
-  --gold:#d4a017;--gold-bright:#e8bc4d;--gold-low:#2a2110;
-  --glow:#8fd8ea;--glow-dim:#1e3a44;
-  --red:#f2665e;--red-low:#35191a;--green:#8fce6a;
+  /* Warm near-black ground, unchanged in role. The accents below are the
+     change: the first version filled whole bars and whole cards at full
+     saturation, which reads as an alarm rather than as information. Colour is
+     now spent on small things — text, edges, a 3px rail — and every large
+     fill drops to a muted tone of the same hue. */
+  --bg:#141210;--bg-raised:#1c1a16;--bg-sunken:#100e0c;
+  --text:#cec7ba;--heading:#ece5d7;--muted:#8f8779;
+  --hairline:#332e27;--hairline-soft:#26221d;
+  --brass:#a8863c;--brass-bright:#cfae63;--brass-low:#221c11;--brass-edge:#5d4c22;
+  --steel:#7d9ea9;--steel-bright:#9dbcc6;--steel-low:#17242a;--steel-edge:#3a545d;
+  --clay:#c07a70;--clay-low:#2a1a18;--sage:#88a06a;
   --display:ui-serif,'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,'Times New Roman',serif;
   --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
-  --radius:0.75rem;color-scheme:dark;
+  --radius:0.6rem;color-scheme:dark;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:1rem;line-height:1.55;-webkit-font-smoothing:antialiased;padding:1.25rem}
-main{max-width:68rem;margin:0 auto}
-h1{font-family:var(--display);color:var(--heading);font-size:1.6rem;margin:0 0 .25rem}
-h2{font-family:var(--display);color:var(--heading);font-size:1.05rem;margin:1.5rem 0 .5rem;border-bottom:1px solid var(--hairline-soft);padding-bottom:.3rem}
-.meta{color:var(--muted);font-family:var(--mono);font-size:.8rem}
-.paused{background:var(--red-low);border:1px solid var(--red);color:var(--red);border-radius:var(--radius);padding:.6rem .9rem;margin:.9rem 0;font-weight:600}
-.ask{background:var(--gold-low);border:1px solid var(--gold);border-radius:var(--radius);padding:.7rem .9rem;margin:.5rem 0}
-.ask .q{color:var(--gold-bright);font-size:1.05rem;font-weight:600}
-.ask .row{margin-top:.25rem;font-size:.9rem}
-.ask .label{color:var(--muted);text-transform:uppercase;font-size:.7rem;letter-spacing:.06em;margin-right:.4rem}
-.agents{display:flex;flex-wrap:wrap;gap:.5rem}
-.agent{background:var(--bg-raised);border:1px solid var(--glow-dim);border-left:3px solid var(--glow);border-radius:var(--radius);padding:.45rem .7rem;font-family:var(--mono);font-size:.8rem;min-width:14rem}
-.agent .name{color:var(--glow);font-weight:600}
-.agent .age-fresh{color:var(--green)}
-.agent .age-warm{color:var(--gold-bright)}
-.agent .age-cold{color:var(--red)}
-.lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.7rem;align-items:start}
-.lane{background:var(--bg-sunken);border:1px solid var(--hairline-soft);border-radius:var(--radius);padding:.6rem}
-.lane h3{margin:0 0 .4rem;font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.lane h3 .count{color:var(--text)}
-.lane.blocked{border-color:var(--red)}
-.lane.blocked h3 .count{color:var(--red)}
-.lane.done h3 .count{color:var(--green)}
-.lane.waiting-operator{border-color:var(--gold-dim, #6d5410)}
-.card{background:var(--bg-raised);border:1px solid var(--hairline);border-radius:.5rem;padding:.4rem .55rem;margin:.3rem 0;font-size:.85rem}
+main{max-width:70rem;margin:0 auto}
+h1{font-family:var(--display);color:var(--heading);font-size:1.5rem;margin:0 0 .2rem;font-weight:600}
+h2{font-family:var(--display);color:var(--heading);font-size:1.02rem;margin:1.4rem 0 .5rem;border-bottom:1px solid var(--hairline-soft);padding-bottom:.3rem;font-weight:600}
+h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0 .2rem;font-weight:650}
+.meta{color:var(--muted);font-family:var(--mono);font-size:.78rem}
+
+/* ---- tabs ---- */
+.tabs{display:flex;flex-wrap:wrap;gap:.3rem;margin:.9rem 0 1.1rem;border-bottom:1px solid var(--hairline);padding-bottom:.5rem;position:sticky;top:0;background:var(--bg);z-index:5}
+.tabs button{font-family:var(--font);font-size:.82rem;font-weight:600;letter-spacing:.01em;background:transparent;color:var(--muted);border:1px solid transparent;border-radius:.4rem;padding:.34rem .8rem;cursor:pointer}
+.tabs button:hover{color:var(--text);background:var(--bg-raised)}
+.tabs button[aria-selected="true"]{color:var(--brass-bright);background:var(--brass-low);border-color:var(--brass-edge)}
+.tabs button:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.tabs .count{font-family:var(--mono);font-size:.72rem;opacity:.85;margin-left:.3rem}
+.panel[hidden]{display:none}
+.hint{color:var(--muted);font-size:.82rem;margin:.2rem 0 .9rem;max-width:52rem}
+
+/* ---- banners ---- */
+.paused{background:var(--clay-low);border:1px solid var(--clay);border-left:3px solid var(--clay);color:var(--clay);border-radius:var(--radius);padding:.55rem .85rem;margin:.7rem 0;font-weight:600;font-size:.9rem}
+
+/* ---- tiles ---- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));gap:.55rem;margin:.5rem 0 .2rem}
+.stile{background:var(--bg-raised);border:1px solid var(--hairline);border-radius:.5rem;padding:.6rem .8rem}
+.stile .lbl{display:block;font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.stile .big{display:block;font-family:var(--mono);font-size:1.3rem;color:var(--heading);font-variant-numeric:tabular-nums;line-height:1.3}
+.stile .sub{display:block;font-family:var(--mono);font-size:.68rem;color:var(--muted)}
+.stile.lead{border-color:var(--brass-edge)}
+.stile.lead .big{color:var(--brass-bright)}
+.stile.warn{border-color:var(--clay)}
+.stile.warn .big{color:var(--clay)}
+
+/* ---- agents ---- */
+.agents{display:flex;flex-wrap:wrap;gap:.45rem}
+.agent{background:var(--bg-raised);border:1px solid var(--hairline);border-left:3px solid var(--steel-edge);border-radius:.45rem;padding:.42rem .65rem;font-family:var(--mono);font-size:.76rem;min-width:15rem}
+.agent .name{color:var(--steel-bright);font-weight:600}
+.agent .age-fresh{color:var(--sage)}
+.agent .age-warm{color:var(--brass-bright)}
+.agent .age-cold{color:var(--clay)}
+
+/* ---- lanes ---- */
+.lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.6rem;align-items:start}
+.lane{background:var(--bg-sunken);border:1px solid var(--hairline-soft);border-radius:var(--radius);padding:.55rem}
+.lane h4{margin:0 0 .35rem;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-family:var(--font);font-weight:650}
+.lane h4 .count{color:var(--text);font-family:var(--mono)}
+.lane.blocked{border-color:var(--clay)}
+.lane.blocked h4 .count{color:var(--clay)}
+.lane.done h4 .count{color:var(--sage)}
+.lane.waiting-operator{border-color:var(--brass-edge)}
+.lane.waiting-operator h4 .count{color:var(--brass-bright)}
+.card{background:var(--bg-raised);border:1px solid var(--hairline);border-radius:.4rem;padding:.38rem .5rem;margin:.28rem 0;font-size:.82rem;cursor:pointer;text-align:left;width:100%;font-family:var(--font);color:var(--text);display:block}
+.card:hover{border-color:var(--steel-edge)}
+.card[aria-pressed="true"]{border-color:var(--brass);background:var(--brass-low)}
+.card:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
 .card .id{font-family:var(--mono);color:var(--heading)}
-.card .init{font-family:var(--mono);color:var(--muted);font-size:.7rem}
-.card .note{color:var(--muted);font-size:.78rem;display:block}
-.empty{color:var(--hairline);font-size:.8rem}
-footer{margin-top:2rem;color:var(--muted);font-size:.75rem;border-top:1px solid var(--hairline-soft);padding-top:.6rem}
-.spend-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.8rem}
+.card .init{font-family:var(--mono);color:var(--muted);font-size:.68rem}
+.card .note{color:var(--muted);font-size:.74rem;display:block}
+.empty{color:var(--hairline);font-size:.78rem}
+
+/* ---- detail ---- */
+.detail{background:var(--bg-raised);border:1px solid var(--hairline);border-left:3px solid var(--brass-edge);border-radius:var(--radius);padding:.8rem 1rem;margin:.9rem 0 0}
+.detail .dt{font-family:var(--mono);color:var(--heading);font-size:.95rem}
+.detail dl{display:grid;grid-template-columns:auto 1fr;gap:.2rem .8rem;margin:.5rem 0 0;font-size:.84rem}
+.detail dt{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding-top:.16rem}
+.detail dd{margin:0;color:var(--text)}
+
+/* ---- questions ---- */
+.ask{background:var(--brass-low);border:1px solid var(--brass-edge);border-left:3px solid var(--brass);border-radius:var(--radius);padding:.7rem .9rem;margin:.5rem 0}
+.ask .q{color:var(--brass-bright);font-size:1rem;font-weight:600}
+.ask .row{margin-top:.22rem;font-size:.86rem}
+.ask .label{color:var(--muted);text-transform:uppercase;font-size:.66rem;letter-spacing:.07em;margin-right:.4rem;font-family:var(--mono)}
+pre.how{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;padding:.7rem .85rem;font-family:var(--mono);font-size:.76rem;color:var(--text);overflow-x:auto;margin:.4rem 0 .7rem}
+pre.how .c{color:var(--muted)}
+
+/* ---- spend ---- */
+.spend-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.7rem}
 .toggle{display:flex;gap:.25rem;margin-left:auto}
-.toggle button{font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;background:var(--bg-raised);color:var(--muted);border:1px solid var(--hairline);border-radius:.35rem;padding:.2rem .6rem;cursor:pointer}
-.toggle button[aria-pressed="true"]{background:var(--gold-low);border-color:var(--gold);color:var(--gold-bright)}
-.toggle button:focus-visible{outline:2px solid var(--glow);outline-offset:2px}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem;margin:.6rem 0}
-.stile{background:var(--bg-raised);border:1px solid var(--hairline);border-radius:.55rem;padding:.6rem .8rem}
-.stile .lbl{display:block;font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-.stile .big{display:block;font-family:var(--mono);font-size:1.35rem;color:var(--heading);font-variant-numeric:tabular-nums;line-height:1.25}
-.stile .sub{display:block;font-family:var(--mono);font-size:.7rem;color:var(--muted)}
-.stile.gold{background:var(--gold-low);border-color:var(--gold)}
-.stile.gold .big{color:var(--gold-bright)}
-.comp{display:flex;height:1.5rem;border:1px solid var(--hairline);border-radius:.35rem;overflow:hidden}
-.comp span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.65rem;color:var(--bg);font-weight:700;white-space:nowrap;overflow:hidden}
-.comp .s-cache_read{background:var(--gold)}
-.comp .s-cache_write{background:var(--glow)}
-.comp .s-output{background:var(--green)}
+.toggle button{font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;background:var(--bg-raised);color:var(--muted);border:1px solid var(--hairline);border-radius:.3rem;padding:.18rem .55rem;cursor:pointer}
+.toggle button[aria-pressed="true"]{background:var(--brass-low);border-color:var(--brass-edge);color:var(--brass-bright)}
+.toggle button:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.comp{display:flex;height:1.35rem;border:1px solid var(--hairline);border-radius:.3rem;overflow:hidden;margin-top:.5rem}
+.comp span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.63rem;color:var(--bg);font-weight:700;white-space:nowrap;overflow:hidden}
+.comp .s-cache_read{background:var(--brass)}
+.comp .s-cache_write{background:var(--steel)}
+.comp .s-output{background:var(--sage)}
 .comp .s-input{background:var(--muted)}
-.compkey{display:flex;flex-wrap:wrap;gap:.9rem;font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:.35rem}
-.compkey i{display:inline-block;width:.6rem;height:.6rem;border-radius:.15rem;margin-right:.3rem}
-.chart{display:flex;flex-direction:column;gap:.28rem;margin-top:.4rem}
-.chartrow{display:grid;grid-template-columns:minmax(7rem,14rem) 1fr auto;gap:.6rem;align-items:center;font-size:.8rem}
+.compkey{display:flex;flex-wrap:wrap;gap:.85rem;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.3rem}
+.compkey i{display:inline-block;width:.55rem;height:.55rem;border-radius:.12rem;margin-right:.3rem}
+.chart{display:flex;flex-direction:column;gap:.24rem;margin-top:.35rem}
+.chartrow{display:grid;grid-template-columns:minmax(7rem,13rem) 1fr auto;gap:.55rem;align-items:center;font-size:.78rem}
 .chartrow .rl{font-family:var(--mono);color:var(--heading);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chartrow .rb{background:var(--bg-sunken);border-radius:.25rem;height:.85rem;overflow:hidden}
-.chartrow .rb i{display:block;height:100%;background:var(--gold);border-radius:.25rem}
+.chartrow .rb{background:var(--bg-sunken);border-radius:.2rem;height:.75rem;overflow:hidden}
+.chartrow .rb i{display:block;height:100%;background:var(--brass);border-radius:.2rem;opacity:.85}
 .chartrow.dim .rl{color:var(--muted);font-style:italic}
 .chartrow.dim .rb i{background:var(--hairline)}
 .chartrow .rv{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--text);min-width:5.5rem;text-align:right}
-.caveat{color:var(--muted);font-size:.78rem;margin-top:.5rem}
+.caveat{color:var(--muted);font-size:.76rem;margin-top:.5rem;max-width:52rem}
+footer{margin-top:2rem;color:var(--muted);font-size:.72rem;border-top:1px solid var(--hairline-soft);padding-top:.6rem}
 `;
 
 /**
@@ -146,90 +195,62 @@ if (data.schema !== 1) {
     if (text !== undefined && text !== null) node.textContent = show(text);
     return node;
   };
+  var clear = function (node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+    return node;
+  };
+
+  var totals = data.totals || {};
+  var asks = data.asks || [];
+  var agents = data.agents || [];
+  var lanes = data.lanes || {};
+  var errors = data.errors || [];
+  var cost = null;
+
   var app = document.getElementById('app');
   var head = el('div');
   head.appendChild(el('h1', null, 'Tyran board'));
-  var totals = data.totals || {};
   head.appendChild(el('div', 'meta',
-    (totals.agents || 0) + ' agent(s) running across ' + (totals.initiatives || 0) + ' initiative(s) · ' +
-    (totals.merged || 0) + '/' + (totals.tickets || 0) + ' tickets merged (' + (totals.percent || 0) + '%) · as of ' + (data.as_of || 'unknown')));
+    (totals.initiatives || 0) + ' initiative(s) · ' + (totals.merged || 0) + '/' + (totals.tickets || 0) +
+    ' tickets merged (' + (totals.percent || 0) + '%) · as of ' + (data.as_of || 'unknown')));
   app.appendChild(head);
 
-  (data.paused || []).forEach(function (p) {
-    app.appendChild(el('div', 'paused', 'PAUSED — ' + p.init + ': gate ' + p.kind + ' (' + p.result + ') since ' + p.since));
-  });
-
-  var asks = data.asks || [];
-  app.appendChild(el('h2', null, 'Waiting on you (' + asks.length + ')'));
-  if (asks.length === 0) app.appendChild(el('div', 'empty', 'nothing — the agents have what they need'));
-  asks.forEach(function (a) {
-    var card = el('div', 'ask');
-    card.appendChild(el('div', 'q', a.question || '(no question recorded — gate ' + a.kind + ')'));
-    [['recommendation', a.recommendation], ['default', a.default],
-     ['ticket', a.ticket], ['initiative', a.init], ['since', a.since]].forEach(function (pair) {
-      if (pair[1] === null || pair[1] === undefined) return;
-      var row = el('div', 'row');
-      row.appendChild(el('span', 'label', pair[0]));
-      row.appendChild(el('span', null, pair[1]));
-      card.appendChild(row);
-    });
-    app.appendChild(card);
-  });
-
-  var agents = data.agents || [];
-  app.appendChild(el('h2', null, 'Agents (' + agents.length + ')'));
-  var strip = el('div', 'agents');
-  if (agents.length === 0) strip.appendChild(el('div', 'empty', 'none running'));
-  agents.forEach(function (a) {
-    var chip = el('div', 'agent');
-    chip.appendChild(el('div', 'name', a.agent + (a.role ? ' · ' + a.role : '')));
-    chip.appendChild(el('div', null, (a.init ? a.init + ' · ' : '') + (a.ticket || 'no ticket') + ' · ' + a.state));
-    if (a.detail) chip.appendChild(el('div', 'note', a.detail));
-    var ageMs = a.last_signal ? Date.now() - Date.parse(a.last_signal) : null;
-    var cls = ageMs === null ? 'age-cold' : ageMs < 600000 ? 'age-fresh' : ageMs < 1800000 ? 'age-warm' : 'age-cold';
-    var ageText = ageMs === null ? 'no signal' : Math.round(ageMs / 60000) + ' min since last signal';
-    chip.appendChild(el('div', cls, ageText));
-    strip.appendChild(chip);
-  });
-  app.appendChild(strip);
-
-  app.appendChild(el('h2', null, 'Lanes'));
-  var lanesWrap = el('div', 'lanes');
-  Object.keys(data.lanes || {}).forEach(function (lane) {
-    var cards = data.lanes[lane];
-    var box = el('div', 'lane ' + lane);
-    var h = el('h3');
-    h.appendChild(el('span', null, lane + ' '));
-    h.appendChild(el('span', 'count', '(' + cards.length + ')'));
-    box.appendChild(h);
-    if (cards.length === 0) box.appendChild(el('div', 'empty', '—'));
-    cards.forEach(function (c) {
-      var card = el('div', 'card');
-      card.appendChild(el('span', 'id', c.id));
-      if (c.title) card.appendChild(el('span', null, ' — ' + c.title));
-      if (c.init) card.appendChild(el('span', 'init', '  ' + c.init));
-      if (c.agents && c.agents.length) card.appendChild(el('span', 'note', 'agents: ' + c.agents.join(', ')));
-      if (c.annotation) card.appendChild(el('span', 'note', c.annotation));
-      box.appendChild(card);
-    });
-    lanesWrap.appendChild(box);
-  });
-  app.appendChild(lanesWrap);
-
-  var fmtTokens = function (n) {
-    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + ' M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + ' k';
-    return String(n);
+  // ---- tabs -------------------------------------------------------------
+  // The board answers four different questions and they were competing for
+  // one scroll. Each gets a panel; the queue keeps its count in the tab, so
+  // "something is waiting on me" survives being on another tab.
+  var tabbar = el('div', 'tabs');
+  tabbar.setAttribute('role', 'tablist');
+  var panels = {};
+  var buttons = {};
+  var TABS = [
+    ['overview', 'Overview', null],
+    ['board', 'Board', null],
+    ['questions', 'Waiting on you', asks.length],
+    ['spend', 'Spend', null],
+  ];
+  var select = function (key) {
+    for (var i = 0; i < TABS.length; i += 1) {
+      var k = TABS[i][0];
+      var on = k === key;
+      buttons[k].setAttribute('aria-selected', on ? 'true' : 'false');
+      panels[k].hidden = !on;
+    }
   };
-  // An amount that rounds to nothing still cost something. Printing $0.00
-  // there reads as free, which is the one reading that would change a
-  // routing decision for the wrong reason.
-  var fmtUsd = function (v) {
-    if (v === null || v === undefined) return '—';
-    if (v > 0 && v < 0.01) return '<$0.01';
-    return '$' + v.toFixed(2);
-  };
+  TABS.forEach(function (spec) {
+    var b = el('button', null, spec[1]);
+    b.setAttribute('type', 'button');
+    b.setAttribute('role', 'tab');
+    if (spec[2] !== null && spec[2] !== undefined) b.appendChild(el('span', 'count', '(' + spec[2] + ')'));
+    b.addEventListener('click', function () { select(spec[0]); });
+    buttons[spec[0]] = b;
+    tabbar.appendChild(b);
+    var p = el('div', 'panel');
+    p.setAttribute('role', 'tabpanel');
+    panels[spec[0]] = p;
+  });
+  app.appendChild(tabbar);
+  TABS.forEach(function (spec) { app.appendChild(panels[spec[0]]); });
 
   var tile = function (label, big, sub, cls) {
     var box = el('div', cls ? 'stile ' + cls : 'stile');
@@ -239,16 +260,157 @@ if (data.schema !== 1) {
     return box;
   };
 
-  // One ranked bar chart. The bar is the comparison; the number beside it is
-  // the fact. A row whose models have no rate shows no bar at all rather than
-  // a zero-length one, because "not priced" and "cost nothing" must not look
-  // the same.
+  var fmtTokens = function (n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + ' M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + ' k';
+    return String(n);
+  };
+  // An amount that rounds to nothing still cost something; printing $0.00
+  // there reads as free.
+  var fmtUsd = function (v) {
+    if (v === null || v === undefined) return '—';
+    if (v > 0 && v < 0.01) return '<$0.01';
+    return '$' + v.toFixed(2);
+  };
+
+  var agentStrip = function () {
+    var strip = el('div', 'agents');
+    if (agents.length === 0) strip.appendChild(el('div', 'empty', 'none running'));
+    agents.forEach(function (a) {
+      var chip = el('div', 'agent');
+      chip.appendChild(el('div', 'name', a.agent + (a.role ? ' · ' + a.role : '')));
+      chip.appendChild(el('div', null, (a.init ? a.init + ' · ' : '') + (a.ticket || 'no ticket') + ' · ' + a.state));
+      if (a.detail) chip.appendChild(el('div', 'note', a.detail));
+      var ageMs = a.last_signal ? Date.now() - Date.parse(a.last_signal) : null;
+      var cls = ageMs === null ? 'age-cold' : ageMs < 600000 ? 'age-fresh' : ageMs < 1800000 ? 'age-warm' : 'age-cold';
+      var ageText = ageMs === null ? 'no signal' : Math.round(ageMs / 60000) + ' min since last signal';
+      chip.appendChild(el('div', cls, ageText));
+      strip.appendChild(chip);
+    });
+    return strip;
+  };
+
+  // ---- overview ---------------------------------------------------------
+  var ov = panels.overview;
+  (data.paused || []).forEach(function (p) {
+    ov.appendChild(el('div', 'paused', 'PAUSED — ' + p.init + ': gate ' + p.kind + ' (' + p.result + ') since ' + p.since));
+  });
+  var laneCount = function (name) { return (lanes[name] || []).length; };
+  var ovTiles = el('div', 'tiles');
+  ovTiles.appendChild(tile('waiting on you', String(asks.length),
+    asks.length === 0 ? 'nothing blocked on a decision' : 'answer them on the next tab', asks.length > 0 ? 'lead' : null));
+  ovTiles.appendChild(tile('agents running', String(agents.length), 'across ' + (totals.initiatives || 0) + ' initiative(s)'));
+  ovTiles.appendChild(tile('progress', (totals.percent || 0) + '%', (totals.merged || 0) + ' of ' + (totals.tickets || 0) + ' merged'));
+  var stuck = laneCount('blocked') + laneCount('changes-requested');
+  ovTiles.appendChild(tile('needs a human', String(stuck),
+    laneCount('blocked') + ' blocked · ' + laneCount('changes-requested') + ' changes requested', stuck > 0 ? 'warn' : null));
+  ov.appendChild(ovTiles);
+  ov.appendChild(el('h2', null, 'Agents'));
+  ov.appendChild(agentStrip());
+  var ovSpend = el('div');
+  ov.appendChild(ovSpend);
+
+  // An initiative the board could not read is the one thing this page must
+  // never omit: a missing card is indistinguishable from an initiative with
+  // no work, which is the "all is well" reading the board exists to prevent.
+  if (errors.length > 0) {
+    ov.appendChild(el('h2', null, 'Unreadable (' + errors.length + ')'));
+    errors.forEach(function (e) {
+      ov.appendChild(el('div', 'paused', 'UNREADABLE — ' + e.name + ': ' + e.error));
+    });
+  }
+
+  // ---- board ------------------------------------------------------------
+  var bd = panels.board;
+  bd.appendChild(el('div', 'hint', 'Every lane is derived from the journal — moving a ticket means appending an event, never editing this page. Select a card to see what the board knows about it.'));
+  var detail = el('div');
+  var selected = null;
+  var lanesWrap = el('div', 'lanes');
+  var showDetail = function (card, lane, button) {
+    if (selected) selected.setAttribute('aria-pressed', 'false');
+    selected = button;
+    button.setAttribute('aria-pressed', 'true');
+    clear(detail);
+    var box = el('div', 'detail');
+    box.appendChild(el('div', 'dt', card.id + (card.title ? ' — ' + card.title : '')));
+    var dl = el('dl');
+    var row = function (k, v) {
+      if (v === null || v === undefined || v === '') return;
+      dl.appendChild(el('dt', null, k));
+      dl.appendChild(el('dd', null, v));
+    };
+    row('lane', lane);
+    row('initiative', card.init);
+    row('agents', card.agents && card.agents.length ? card.agents.join(', ') : null);
+    row('note', card.annotation);
+    if (cost) {
+      var hit = (cost.by_ticket || []).filter(function (r) { return r.ticket === card.id; })[0];
+      if (hit) row('spend', fmtTokens(hit.tokens) + ' tokens · ' + fmtUsd(hit.usd));
+    }
+    box.appendChild(dl);
+    detail.appendChild(box);
+  };
+  Object.keys(lanes).forEach(function (lane) {
+    var cards = lanes[lane];
+    var box = el('div', 'lane ' + lane);
+    var h = el('h4');
+    h.appendChild(el('span', null, lane));
+    h.appendChild(el('span', 'count', ' (' + cards.length + ')'));
+    box.appendChild(h);
+    if (cards.length === 0) box.appendChild(el('div', 'empty', '—'));
+    cards.forEach(function (c) {
+      var button = el('button', 'card');
+      button.setAttribute('type', 'button');
+      button.setAttribute('aria-pressed', 'false');
+      button.appendChild(el('span', 'id', c.id));
+      if (c.title) button.appendChild(el('span', null, ' — ' + c.title));
+      if (c.init) button.appendChild(el('span', 'init', '  ' + c.init));
+      if (c.agents && c.agents.length) button.appendChild(el('span', 'note', 'agents: ' + c.agents.join(', ')));
+      if (c.annotation) button.appendChild(el('span', 'note', c.annotation));
+      button.addEventListener('click', function () { showDetail(c, lane, button); });
+      box.appendChild(button);
+    });
+    lanesWrap.appendChild(box);
+  });
+  bd.appendChild(lanesWrap);
+  bd.appendChild(detail);
+
+  // ---- questions --------------------------------------------------------
+  var qs = panels.questions;
+  qs.appendChild(el('div', 'hint', 'Every question here is a gate in the journal, and it stays open until you close it. Blank takes the recorded default and is still written down as your decision; a single dash leaves it for next time.'));
+  var how = el('pre', 'how');
+  how.textContent =
+    'npx @jjanczur/tyran answer render --dir .tyran   # writes .tyran/state/ANSWERS.md\\n' +
+    '$EDITOR .tyran/state/ANSWERS.md                  # fill the answer: lines\\n' +
+    'npx @jjanczur/tyran answer apply --dir .tyran    # closes what you answered';
+  qs.appendChild(how);
+  if (asks.length === 0) qs.appendChild(el('div', 'empty', 'nothing — the agents have what they need'));
+  asks.forEach(function (a) {
+    var card = el('div', 'ask');
+    card.appendChild(el('div', 'q', a.question || '(no question recorded — gate ' + a.kind + ')'));
+    [['answer with', a.kind], ['recommendation', a.recommendation], ['default', a.default],
+     ['ticket', a.ticket], ['initiative', a.init], ['since', a.since]].forEach(function (pair) {
+      if (pair[1] === null || pair[1] === undefined) return;
+      var row = el('div', 'row');
+      row.appendChild(el('span', 'label', pair[0]));
+      row.appendChild(el('span', null, pair[1]));
+      card.appendChild(row);
+    });
+    qs.appendChild(card);
+  });
+
+  // ---- spend ------------------------------------------------------------
+  var sp = panels.spend;
+  var spBody = el('div');
+  sp.appendChild(spBody);
+  spBody.appendChild(el('div', 'hint', 'Spend is read from the transcripts Claude Code already writes, and it is served rather than embedded — open this board with "board.mjs --serve" to see it. Over file:// there is no server, so this tab stays empty.'));
+
   var chart = function (allRows, key, metric, dimKeys) {
     var box = el('div', 'chart');
-    // Ranked by the metric on screen, not by the one the server happened to
-    // sort by. In cost view a cheap-and-chatty row was being listed above an
-    // expensive-and-terse one — the precise inversion of the routing signal
-    // this view exists to give. Rows with no price sort last.
+    // Ranked by the metric on screen, not by the one the server sorted by:
+    // in cost view a cheap-and-chatty row above an expensive-and-terse one
+    // is the exact inversion of the signal this view exists to give.
     var valueOf = function (r) { return metric === 'usd' ? r.usd : r.tokens; };
     var rows = allRows.slice().sort(function (a, b) {
       var av = valueOf(a);
@@ -278,11 +440,10 @@ if (data.schema !== 1) {
     return box;
   };
 
-  var renderSpend = function (into, cost, metric) {
-    while (into.firstChild) into.removeChild(into.firstChild);
+  var renderSpend = function (into, metric) {
+    clear(into);
     var t = cost.totals || {};
     var cov = cost.coverage || {};
-
     var header = el('div', 'spend-head');
     header.appendChild(el('h2', null, 'Spend'));
     var toggle = el('div', 'toggle');
@@ -290,7 +451,7 @@ if (data.schema !== 1) {
       var button = el('button', null, pair[1]);
       button.setAttribute('type', 'button');
       button.setAttribute('aria-pressed', metric === pair[0] ? 'true' : 'false');
-      button.addEventListener('click', function () { renderSpend(into, cost, pair[0]); });
+      button.addEventListener('click', function () { renderSpend(into, pair[0]); });
       toggle.appendChild(button);
     });
     header.appendChild(toggle);
@@ -298,18 +459,15 @@ if (data.schema !== 1) {
 
     var tiles = el('div', 'tiles');
     tiles.appendChild(tile('tokens', fmtTokens(t.tokens || 0), (t.requests || 0) + ' requests'));
-    tiles.appendChild(tile(
-      'cost through the API', fmtUsd(t.usd),
-      cost.rate_card ? 'rate card ' + cost.rate_card : 'no rate card set', 'gold'));
-    tiles.appendChild(tile(
-      'conductor overhead', (t.conductor_token_share || 0) + '%', 'of tokens, no ticket'));
-    tiles.appendChild(tile(
-      'attributed', (cov.attributed || 0) + ' / ' + (cov.agent_transcripts || 0),
+    tiles.appendChild(tile('cost through the API', fmtUsd(t.usd),
+      cost.rate_card ? 'rate card ' + cost.rate_card : 'no rate card set', 'lead'));
+    tiles.appendChild(tile('conductor overhead', (t.conductor_token_share || 0) + '%', 'of tokens, no ticket'));
+    tiles.appendChild(tile('attributed', (cov.attributed || 0) + ' / ' + (cov.agent_transcripts || 0),
       (cov.unattributed || 0) + ' agent(s) without a ticket'));
     into.appendChild(tiles);
 
-    // The composition is the point of the whole section: cache reads dominate
-    // the bill, so the lever is context size and turn count, not model price.
+    // The composition is the point of the whole tab: cache reads dominate the
+    // bill, so the lever is context size and turn count, not model price.
     var comp = (cost.composition || []).slice().sort(function (a, b) {
       return metric === 'usd' ? (b.usd || 0) - (a.usd || 0) : b.tokens - a.tokens;
     });
@@ -323,15 +481,12 @@ if (data.schema !== 1) {
         if (value <= 0) return;
         var pct = Math.round((value / compTotal) * 100);
         var seg = el('span', 's-' + c.kind, pct >= 8 ? pct + '%' : '');
-        // Normalised to a share, not set to the raw value: flex-grow below 1
-        // does not fill its container, and dollar amounts are routinely
-        // fractions. Measured — the cost view drew a bar 13% of the width
-        // while the token view, whose values are thousands, filled it.
+        // Normalised to a share: flex-grow below 1 does not fill its
+        // container, and dollar amounts are routinely fractions.
         seg.style.flex = String((value / compTotal) * 100);
         bar.appendChild(seg);
         var legend = el('span', null);
-        var swatch = el('i', 's-' + c.kind);
-        legend.appendChild(swatch);
+        legend.appendChild(el('i', 's-' + c.kind));
         legend.appendChild(el('span', null,
           c.kind.replace('_', ' ') + ' ' + (metric === 'usd' ? fmtUsd(c.usd) : fmtTokens(c.tokens))));
         key.appendChild(legend);
@@ -347,17 +502,13 @@ if (data.schema !== 1) {
       into.appendChild(chart(spec[1], spec[2], metric, spec[3]));
     });
 
-    var notes = [];
-    notes.push('Conductor context is not attributable to any ticket; it is shown as its own row so the rows sum to the total.');
+    var notes = ['Conductor context is not attributable to any ticket; it is its own row so the rows sum to the total.'];
     if ((cov.unattributed || 0) > 0) {
       notes.push(cov.unattributed + ' agent(s) carry no ticket id in their task description and are grouped as unattributed.');
     }
     if ((cost.unpriced || []).length > 0) {
       notes.push('Counted in tokens but absent from every amount, having no rate: ' + cost.unpriced.join(', ') + '.');
     }
-    // A gap the page must never keep to itself: a transcript appended to while
-    // it is read ends in a partial record, so the number above is low by an
-    // amount only this line reports.
     if ((cov.malformed || 0) > 0 || (cov.skipped_lines || 0) > 0) {
       notes.push((cov.malformed || 0) + ' unparseable and ' + (cov.skipped_lines || 0) +
         ' oversized record(s) were skipped; their tokens are missing from every figure here.');
@@ -365,32 +516,28 @@ if (data.schema !== 1) {
     into.appendChild(el('div', 'caveat', notes.join(' ')));
   };
 
-  // Spend is FETCHED, never embedded. It is derived from transcripts under the
-  // operator's home directory — machine-local, different in every clone — so
-  // writing it into board.json would break the byte-exact --check contract and
-  // make two people with one journal disagree. Opened over file:// there is no
-  // server, the request fails, and the section simply never appears.
-  var spendAt = el('div');
-  app.appendChild(spendAt);
+  // Spend is FETCHED, never embedded: it is derived from transcripts under
+  // the operator's home directory — machine-local, different in every clone —
+  // so writing it into board.json would break the byte-exact --check contract
+  // and make two people with one journal disagree.
   if (typeof fetch === 'function') {
     fetch('cost.json', { headers: { accept: 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (cost) {
-        if (cost && cost.schema === 1 && cost.transcripts_found) renderSpend(spendAt, cost, 'tokens');
+      .then(function (payload) {
+        if (!payload || payload.schema !== 1 || !payload.transcripts_found) return;
+        cost = payload;
+        renderSpend(spBody, 'tokens');
+        var t = cost.totals || {};
+        var strip = el('div', 'tiles');
+        strip.appendChild(tile('spend so far', fmtUsd(t.usd),
+          fmtTokens(t.tokens || 0) + ' tokens · see the Spend tab'));
+        ovSpend.appendChild(el('h2', null, 'Spend'));
+        ovSpend.appendChild(strip);
       })
       .catch(function () { /* no server: the board is complete without it */ });
   }
 
-  // An initiative the board could not read is the one thing this page must
-  // never omit: a missing card is indistinguishable from an initiative with
-  // no work, which is the "all is well" reading the board exists to prevent.
-  var errors = data.errors || [];
-  if (errors.length > 0) {
-    app.appendChild(el('h2', null, 'Unreadable (' + errors.length + ')'));
-    errors.forEach(function (e) {
-      app.appendChild(el('div', 'paused', 'UNREADABLE — ' + e.name + ': ' + e.error));
-    });
-  }
+  select('overview');
 
   var foot = el('footer');
   foot.appendChild(el('div', null, 'GENERATED by tyran scripts/board.mjs — do not edit. Refreshes every 30 s; ages are computed in this browser.'));

@@ -88,6 +88,12 @@ renders and still closes.
   whose agent already has a `spawn` with no `report` — see below.
 - **Lease protocol honesty:** a `lease.released` by a non-holder does not
   free the lease — it is surfaced in `tail().mismatchedReleases`.
+- **Parallelism is detected, not prevented.** A worktree per agent, a lease
+  per shared resource and a *sequential* merge are specified in the conductor
+  skill, and every lease event is recorded here — so `STATE.md` surfaces a
+  lease released by a non-holder and `doctor --state` reports one nobody
+  released at all. But nothing physically stops a second agent from entering
+  a held worktree: the journal makes a collision **visible**, not impossible.
 - **IDs never from memory:** omit `id` (or leave it empty) and `append`
   scans the file and issues `D-<max+1>` itself — duplicate or blank ledger
   numbers after a compaction become impossible. `append` issues the id under

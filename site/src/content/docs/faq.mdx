@@ -1,13 +1,13 @@
 ---
 title: 'FAQ'
-description: 'Short answers on trusting an agent with commits, choosing models, stopping a run, what a plugin update does to local learning, and the name.'
+description: 'Short answers on trusting an agent with commits, choosing models, stopping a run, what a plugin update does to local learning, where Tyran came from, the name, and how it compares to other Claude Code orchestrators.'
 ---
 **Is this usable today?**
 Yes, for real work. `/tyran:run` conducts an initiative end to end with the
-four-agent roster; the state layer and the enforcement hooks are shipped and
-tested. What is still missing is the automatic learning loop and
-`/tyran:setup` — see the [roadmap](https://github.com/jjanczur/tyran#roadmap), which is honest and
-test-gated.
+four-agent roster; the state layer, the enforcement hooks, `/tyran:setup` and
+the self-improvement loop are shipped and tested. Two things are not built:
+the update delta-review and the cost-profile benchmark receipts — see the
+[roadmap](../architecture/#roadmap), which is honest and test-gated.
 
 **Why should I trust an autonomous agent with commits?**
 You configure how much it may do (`P1` branch-only is the default, detected
@@ -46,10 +46,34 @@ files, commits) are in English.
 
 **How is this different from oh-my-claudecode / metaswarm / pilotfish /
 pro-workflow?**
-See the [comparison table](https://github.com/jjanczur/tyran#how-it-compares) — every cell is
-verified against their code and public issues, with footnoted receipts. The
-one-line answer: their verification is advisory and their state dies with
-the session; Tyran's whole design is making those failures impossible.
+See the [comparison table](#how-tyran-compares-to-other-claude-code-orchestrators)
+below — every cell is verified against their code and public issues, with
+footnoted receipts. The one-line answer: their verification is advisory and
+their state dies with the session; Tyran's whole design is making those
+failures impossible.
+
+**Where did this come from?**
+A teaching problem. One of us was mentoring the other through learning to
+program, and the mentee kept hitting the same wall — not with the code, with
+the *tool*. Claude would ask a pile of hard questions at once, lose the thread
+halfway through the answer, and burn a small fortune in tokens re-deriving
+what it had already worked out. From the outside it looked like a skill
+problem. It was a **context** problem.
+
+So we sat down and went through how Claude Code actually works underneath —
+agent teams, subagents, why a fresh context beats a long one, why the state
+has to live somewhere the window cannot take with it. That conversation turned
+into a plugin. The first version was **pure prompt**: a long, careful skill
+that told the model how to behave. It worked exactly as well as a written rule
+ever works — until the run got long, or expensive, or boring.
+
+That failure is the whole reason for v2. Every rule that mattered got demoted
+from a paragraph to a **mechanism**: a hook that refuses a report with no
+command output, a gate that will not let an initiative close unretrospected, a
+file that decides which model a role gets. The motto on the conductor skill —
+*a rule in prose loses to a mechanism that makes the mistake impossible* — is
+not a slogan we adopted. It is the lesson v1 taught us, in the order we
+learned it.
 
 **Why "Tyran"?**
 Polish for "tyrant". It conducts a team of agents with an iron evidence
@@ -57,3 +81,48 @@ contract and zero tolerance for "trust me, it works". The figure on the
 banner conducts; every worker's screen shows what it is actually doing,
 including the ones that are stalled or failing. That is the whole idea:
 the state is on the wall, not in someone's summary.
+
+## How Tyran compares to other Claude Code orchestrators
+
+Verified against those projects' **code and public issue trackers** (July
+2026), not their READMEs. ✅ shipped/enforced · ⚠️ partial or prompt-only ·
+❌ absent or broken · — not applicable · 🎯 committed in the v2 design, ships
+test-gated (flips to ✅ only when the tests exist and pass).
+
+| Capability | **Tyran v2** | oh-my-claudecode | metaswarm | pilotfish | pro-workflow |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Evidence contract that **blocks**: no raw command output → report rejected | ✅ | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
+| Learns **your repo's** rules, with an anti-bloat curator + decision ledger | ✅⁹ | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
+| Execution state survives restart & compaction (journal + re-inject) | ✅ | ⚠️ | ❌² | ❌ | ⚠️ |
+| Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
+| Cost modes resolved from repo config (`eco`/`balanced`/`full`, role-based routing, model names in ONE file) | ✅ | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
+| Secret gate on commit/push with verified scan coverage, no `--no-verify` escape | ✅ | ❌ | ❌ | ❌ | ⚠️ |
+| Independent reviewer that never grades its own homework | ✅⁷ | ⚠️ | ⚠️ prompt | ⚠️ | ❌ |
+| Small curated core — no context tax, enforced in CI | ✅ | ❌⁴ | ⚠️ | ✅ | ❌ |
+| Safe parallelism: worktree per agent, leases, sequential merge | ✅⁸ | ⚠️ | ❌ | — | ❌⁵ |
+| Clean install: 2 commands, **never writes into your `~/.claude`** | ✅ | ❌³ | ⚠️ | ❌ | ⚠️ |
+| OSS hygiene: license, changelog, CI validation, pressure tests | ✅ | ⚠️ | ⚠️ | ✅ | ❌⁶ |
+
+¹ Their deliverable check is explicitly non-blocking ("never prevents the
+agent from stopping"). ² Their issues #32/#33/#36: crash loses loop state.
+³ Open issues #3535/#3536: update deletes user files from `~/.claude`.
+⁴ Their issue #2943, "50+ skills exceeding context description budget" — the
+bill that arrives with a large roster. Two of these projects ship three times
+as many skills as Tyran, which is the point of the row rather than a defeat:
+counting files is not counting value, and the distinction is between a budget
+that was *exceeded* and one CI enforces on every push. ⁵ Their issues #73/#74:
+worktree hook broke isolated spawns. ⁶ "MIT" badge links to a LICENSE file
+that does not exist in the repo; the GitHub API reports no license for it.
+⁷ The reviewer agent is granted no editing tools, so it cannot patch what it
+is grading — but it keeps `Bash` in order to run the tests, and `Bash` can
+write. This raises the price of self-approval; it does not make it impossible.
+⁸ Worktrees, leases and sequential merge are specified in the conductor skill,
+and lease events are recorded in the journal, so `STATE.md` surfaces a lease
+released by a non-holder. Detection, not prevention — see
+[the journal's guarantees](../journal/#guarantees). ⁹ The retrospective is
+triggered by a `Stop` gate and the curator's filter is enforced in the agent's
+own contract, but what it decides to record is a judgement, not a mechanism —
+and the gate deliberately accepts "I am skipping this" as a complete answer.
+
+What each skill is for is in [skills and agents](../skills/), one directory
+each.

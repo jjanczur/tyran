@@ -183,8 +183,11 @@ prints the lines.
 
 The way out is an explicit `class: AUTO` rule for the path in
 `.tyran/policies/autonomy.yaml`. That file is class `KERNEL`, **and a shell
-command that names it is refused too**, so the exemption is not one an agent
-writes for itself in the ordinary way. It is not a proof: a path this gate
+command that writes to it is refused too**, so the exemption is not one an agent
+writes for itself in the ordinary way. (Narrowed in 0.1.16 from "a shell command
+that *names* it": a read-only command on that path passes now, as `Read` always
+did. What closes the route is the write half, which is the half `cat >>` used.)
+It is not a proof: a path this gate
 never sees as a word is in the declared floor above. Round two claimed the
 stronger version — "cannot be talked out of it from inside a session" — and
 review took it apart in three tool calls.
@@ -204,12 +207,15 @@ finds by itself is a boundary it learns to prefer.
 </Limit>
 
 1. **Shell commands are path-checked for two families only, not classified.**
-   A `Bash` command that names a credential-shaped path, or a path under the
-   two built-in protected globs, is refused; the policy's own `AUTO`/`GATED`/
-   `KERNEL` rules are **not** consulted for shell commands. *Worst case:* a
-   `KERNEL` path a user declared in their own policy can be written from a
-   shell. The two built-in globs are deliberate — they need no policy file, so
-   a broken policy cannot be the thing that stops an operator repairing it.
+   A `Bash` command that names a credential-shaped path is refused outright; a
+   command that could write to a path under the two built-in protected globs,
+   `.claude/settings.json` or `.claude/settings.local.json` is refused, while a
+   read-only command on the two built-in globs passes (see below). The policy's
+   own `AUTO`/`GATED`/`KERNEL` rules are **not** consulted for shell commands.
+   *Worst case:* a `KERNEL` path a user declared in their own policy can be
+   written from a shell. The two built-in globs are deliberate — they need no
+   policy file, so a broken policy cannot be the thing that stops an operator
+   repairing it.
 2. **Product code is not classified by default.** Only `.tyran/`, `.claude/`
    and `hooks/` fall under the policy's `default:`; everything else needs an
    explicit rule. *Worst case:* a user who believes the policy covers their
@@ -273,14 +279,15 @@ of the command, never the effect of running it.**
 
 Every literal token of every segment is tested — there is no heuristic about
 which token "looks like a path", because an ordinary word matches nothing.
-Two families are refused:
+Two families are refused, and they are refused for different reasons:
 
 - a **credential-shaped** path, whatever the program does with it. `cat`,
   `grep`, `cp` and `base64` all publish the bytes, and the distinction between
-  reading and copying is not one a gate reading text can make;
+  reading and copying is not one a gate reading text can make. Reads and writes
+  alike, because the `Read` tool refuses this family too;
 - a path under `hooks/**`, `.tyran/policies/**`, `.claude/settings.json` or
-  `.claude/settings.local.json`. To *read* one, use the `Read` tool, which is
-  not refused for them.
+  `.claude/settings.local.json`. This family is a **write** rule: on the two
+  built-in globs a read-only command passes, because `Read` passes on them.
 
 **`.claude/settings.json` is on that list because it registers the hooks** — it
 is the one place inside a repository from which every gate can be switched off
@@ -298,11 +305,97 @@ refused. Raising it into the validator's list would close that and would change
 what every policy file is allowed to say — a separate decision, deliberately
 not taken here.
 
-The argument of `-m` / `--message` / `-F` / `--file` / `-t` / `--template` is
-removed from the text first, so `git commit -m "fix .env loading"` is not a
-refusal. That is the same move `stripHeredocBodies` makes in the shared lexer,
-for the same measured reason: a commit message is data, and lexing data as a
-program was the largest single source of false alarms there.
+The argument of `-m` / `--message` / `-F` / `--file` / `-t` / `--template` /
+`--data` is removed from the text first, so `git commit -m "fix .env loading"`
+is not a refusal — and neither is a `journal.mjs append ... --data '{...}'`
+whose prose merely *mentions* a dotenv-shaped filename. That last one was
+measured twice on one install (a journal entry describing a migration run
+against a test env file was refused as if it published the file), and its
+cost was the worst kind: conductors stopped writing certain filenames into
+their own ledger, which is the journal failing at its one job. This is the
+same move `stripHeredocBodies` makes in the shared lexer, for the same
+measured reason: a commit message is data, and lexing data as a program was
+the largest single source of false alarms there.
+
+### Reading `hooks/**` and `.tyran/policies/**` from a shell
+
+<Measured from="the shipped 0.1.15 gate, driven over one file under hooks/ and the same file on 0.1.16">
+Measured on 0.1.15, for one file under `hooks/**`:
+</Measured>
+
+| call | 0.1.15 | 0.1.16 |
+|---|---|---|
+| `Read FILE` | pass | pass |
+| `cat FILE` | **deny** | pass |
+| `grep -n X FILE` | **deny** | pass |
+| `wc -l FILE` | **deny** | pass |
+| `node --check FILE` | **deny** | pass |
+| `git log --oneline -- hooks/` | pass | pass |
+
+The last row is what made the old rule indefensible: a bare directory token
+names no file to classify, so it always passed, while `wc -l` on a file inside
+it did not. In every other row the bytes were one `Read` call away.
+
+**The rule this encodes: the shell must not become a second route to something
+the `Read` tool already refuses.** For `.env` that symmetry is the whole point —
+`Read` denies *and* `grep` denies, because the measured incident is a refused
+`Read .env` followed by `Bash: grep` in the very next tool call. Where `Read` is
+allowed, refusing the shell buys nothing and costs a tool call every time
+somebody inspects the gate they are working on.
+
+A command is exempted only when **all** of the following hold:
+
+- every segment's program is `cat`, `head`, `tail`, `wc`, `grep`, `rg`, `diff`,
+  `node` or `git`, matched **exactly** on the program name. `/bin/cat` and
+  `CAT` are the same program; `catnip` is not, and neither is `constructor`;
+- for `git`, the word immediately after it is `log`, `show` or `diff`. A global
+  flag before the subcommand refuses, because `git -c core.pager=…` names a
+  program for git to run and `planCommand`'s alias check only covers `alias.`;
+- for `node`, `--check` (or `-c`) is **required** rather than merely permitted:
+  `node FILE` executes FILE;
+- every token beginning with `-` is in that program's flag list, short clusters
+  read letter by letter. An unrecognised flag **refuses** — the enumeration's
+  incompleteness costs a false refusal, never a pass;
+- the raw command contains none of ``< > $ ` ( ) { } &`` — every redirection
+  spelling, command substitution, parameter expansion, subshell, group, and
+  `&`/`&&` at once. Tested on the raw text because the shared lexer *consumes*
+  these as separators: by the time a token exists, the `>` that made the line a
+  write is gone.
+
+`|` and `;` are allowed, because every composed segment still has to be an
+allowed reader — a pipe into a writer is a writer.
+
+Refused, and each one is a mode of an otherwise allowed program:
+
+| refused | why |
+|---|---|
+| `sed -n 1,20p FILE` · `awk NR<10 FILE` | the script argument is a program with its own write commands (`sed`'s `w`, awk's `print >`). Reading it needs a second parser, which ADR-21 is exactly about |
+| `node FILE` | executes it |
+| `git log --output=FILE` · `git show --output=FILE` | writes a file — a real hole found in an earlier review of this gate |
+| `git -c core.pager=tee log` | a global `-c` names a program for git to run |
+| `rg --pre CMD` · `rg --hostname-bin CMD` | runs `CMD` once per file |
+| `tail -f FILE` | never returns |
+| `cat FILE > /tmp/cat` · `cat $(cat FILE)` · `cat FILE \| tee /tmp/x` | redirection, substitution, a pipe into a writer |
+| the same commands on `.env`, `id_rsa`, `.aws/credentials` | the credential family, unchanged |
+| the same commands on `.claude/settings.json` | below |
+
+**`.claude/settings.json` is deliberately outside the exemption**, and that is a
+narrowing rather than a consequence: `Read` passes on it too, so the principle
+alone would admit it. It is the hook registry — the one place inside a
+repository from which every gate is switched off at once — and this change is
+scoped to the friction that was measured. Direction of error stays refuse.
+
+<Limit title="The residual floor of the read-only exemption">
+Matching flags bounds what a command *says*, not what the program *does*. An
+allowed reader can still be pointed at another program by configuration this
+gate never reads: a `diff.external` driver or a pager in git config, a
+`NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`. The claim
+is exact and narrow — **these two globs are no harder to read from a shell than
+with the `Read` tool, which already passes on them** — and it is not a claim
+that an allowed program can only ever read. One false refusal is declared with
+it: quoting is not honoured, so `grep ">" FILE` is refused for a character
+inside a string.
+</Limit>
 
 ### The declared floor for the shell rules
 
@@ -316,7 +409,11 @@ Not a ceiling. `SHELL_DECLARED_MISSES` in the source is the same list:
 3. anything a script writes once it is running;
 4. a `KERNEL` path declared by the **policy** rather than built in — only
    `SHELL_PROTECTED_GLOBS` is checked, so a broken policy can never be the
-   thing that stops an operator repairing it.
+   thing that stops an operator repairing it;
+5. a program an allowed reader is **configured** to launch — a `diff.external`
+   driver or pager in git config, a `NODE_OPTIONS` carrying `--require`, a
+   shell function shadowing `cat`. The flag table matches the command *text*,
+   and the environment is not in it.
 
 ## The cost, measured
 

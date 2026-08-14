@@ -1025,8 +1025,11 @@ const READ_REMEDY =
   // calls: `cat >> .tyran/policies/autonomy.yaml`, then the same read, allowed.
   // The shell route is closed now, so the claim is nearly true — and "nearly"
   // is exactly the word a guarantee may not leave out.
-  'That file is class KERNEL, and a shell command that NAMES it is refused too, so the exemption ' +
-  'is not one an agent can write for itself in the ordinary way. It is not a proof: a path this ' +
+  // Narrowed in 0.1.16 from "a shell command that NAMES it": a read-only shell
+  // command on that path passes now, exactly as `Read` always did. What closes
+  // the route is the WRITE half, which is the half `cat >>` used.
+  'That file is class KERNEL, and a shell command that WRITES to it is refused too, so the ' +
+  'exemption is not one an agent can write for itself in the ordinary way. It is not a proof: a path this ' +
   'gate never sees as a word — assembled from a variable, or from a program it launches — is in ' +
   'the declared floor in docs/policy-gate.md. Writing that exemption yourself is working around ' +
   'the gate, which is the one move that makes a boundary worse than no boundary.';
@@ -1225,8 +1228,8 @@ function escapeRoute(cls, unsupervised) {
       'edit in the main session, where the permission prompt is the approval. Do not look for a ' +
       'path around this gate: writing the same bytes through `Bash` is outside what this gate ' +
       'checks for CLASSES — though it does refuse a shell command that names a credential file or ' +
-      'a built-in protected path — and doing it deliberately is the one thing that turns a ' +
-      'boundary into a decoration.'
+      'writes to a built-in protected path — and doing it deliberately is the one thing that ' +
+      'turns a boundary into a decoration.'
     );
   }
   return (
@@ -1318,6 +1321,13 @@ export function stripMessageArguments(command) {
  *    the thing that stops an operator running the validator. The two built-in
  *    globs need no configuration and cannot be edited away.
  *
+ * The second family is a WRITE rule, and since 0.1.16 it says so: a command
+ * that can only read passes on `SHELL_READABLE_GLOBS`, because the `Read` tool
+ * passes on those paths and a shell refusal on top of an allowed `Read`
+ * protects nothing. See `SHELL_READABLE_GLOBS` for the measurement. The first
+ * family is untouched — for a credential the `Read` tool refuses too, and that
+ * symmetry is the entire rule.
+ *
  * ## The declared floor
  *
  * `SHELL_DECLARED_MISSES` names what still gets through. A path assembled at
@@ -1362,6 +1372,250 @@ export function shellProtectedGlobFor(normalized) {
   return null;
 }
 
+// ------------------------------------------- the read-only shell exemption
+
+/**
+ * The protected globs on which a READ-ONLY shell command is allowed.
+ *
+ * ## The measurement
+ *
+ * On 0.1.15, for any path under `hooks/**` or `.tyran/policies/**`: the `Read`
+ * tool PASSES, and every read-shaped shell command on the SAME file is
+ * refused — `cat FILE`, `grep -n X FILE`, `wc -l FILE`, `node --check FILE`,
+ * all deny. The bytes are one `Read` call away, so the refusal protected
+ * nothing and cost a tool call every time somebody inspected the gate they
+ * were working on. The rule was not even consistent with itself:
+ * `git log --oneline -- hooks/` passes, because a bare directory token names
+ * no file to classify, while `wc -l` on a file inside it does not.
+ *
+ * ## The distinction this encodes
+ *
+ * **The shell must not become a second route to something the `Read` tool
+ * already refuses.** For a secret that symmetry is load-bearing and stays
+ * exactly as it was: `Read .env` denies AND `grep .env` denies, because the
+ * measured incident is a refused `Read` followed by `Bash: grep` in the very
+ * next tool call. Where `Read` is allowed, refusing the shell buys nothing —
+ * it only teaches the reader that the gate is an obstacle rather than a
+ * boundary, which is the failure mode ADR-19 is about.
+ *
+ * ## Why this list is not `SHELL_PROTECTED_GLOBS`
+ *
+ * `.claude/settings.json` and `.claude/settings.local.json` are deliberately
+ * NOT here, and that is a narrowing beyond what the argument above strictly
+ * requires — `Read` passes on them too, so by the principle alone they would
+ * qualify. They are the hook registry, the one place inside a repository from
+ * which every gate is switched off at once, and this change is scoped to the
+ * friction that was actually measured. Direction of error stays REFUSE.
+ */
+export const SHELL_READABLE_GLOBS = Object.freeze([...MANDATORY_KERNEL_PATHS]);
+
+/**
+ * Characters that put a WRITE — or a program this gate cannot see — into a
+ * command line. One of them anywhere in the raw text disqualifies the whole
+ * line from the exemption, whatever the programs are.
+ *
+ * `>` and `<` are every redirection spelling at once (`>`, `>>`, `2>`, `&>`,
+ * `<`, `<<`, `<<<`, `<(…)`); `` ` `` and `$` are command substitution and
+ * parameter expansion, whose result this gate never sees; `(`, `)`, `{`, `}`
+ * are subshells and groups; `&` is both background and `&&`, and telling those
+ * apart needs a parser this repository is not getting a second of (ADR-21).
+ *
+ * Tested on the RAW command rather than on the lexer's tokens, and that is
+ * forced rather than chosen: `splitSegments` CONSUMES these as separators
+ * (`SEPARATORS` in secrets-gate.mjs), so by the time a token exists the `>`
+ * that made the line a write is already gone. Quoting is not honoured, so
+ * `grep ">" FILE` is a false refusal — the direction this gate errs in.
+ *
+ * `|`, `;` and newline are absent on purpose: they compose commands without
+ * writing, and every composed segment still has to be an allowed read-only
+ * program, so a pipe into a writer is refused by the program check.
+ */
+export const SHELL_READ_DISQUALIFIERS = '<>$`(){}&';
+
+/**
+ * Programs that read, and the flags under which they only read.
+ *
+ * ## Program AND flags, because read-shaped programs have write-shaped modes
+ *
+ * This is the honest risk of the whole exemption, so it is matched rather than
+ * asserted: `sed -n` versus `sed -i`, `node --check FILE` versus
+ * `node FILE`, and `git log` versus `git log --output=FILE` — the last a real
+ * hole found in an earlier review of this gate. Every token beginning with `-`
+ * must appear in the entry for its program; an unrecognised flag REFUSES, so
+ * the enumeration's incompleteness costs a false refusal and never a pass.
+ *
+ * Fields, all optional except `short`/`long`:
+ *  - `short` — the single letters a short cluster may contain (`-rn` is `r`
+ *    and `n`, checked one letter at a time);
+ *  - `long`  — the long options, matched on the name before any `=`, so
+ *    `--output=/tmp/x` is tested as `--output` and refused;
+ *  - `numeric` — the program takes a bare count (`head -20`, `git log -5`)
+ *    and an attached one (`head -n20`);
+ *  - `subcommands` — the word that MUST follow the program immediately. `git`
+ *    is the only entry with one, and requiring it in the very next slot is
+ *    what refuses `git -c core.pager=… log`: a global `-c` can name a program
+ *    for git to run, and `planCommand`'s alias check only covers `alias.`;
+ *  - `require` — at least one of these must be present. `node` alone RUNS a
+ *    file, so `--check` is not merely permitted, it is mandatory.
+ *
+ * Null-prototype on purpose: a plain object literal answers `constructor`
+ * with a function, which would make `constructor FILE` an allowed program.
+ */
+export const READ_ONLY_PROGRAMS = Object.freeze(Object.assign(Object.create(null), {
+  cat: {
+    short: 'AbeEnstTuv',
+    long: ['--show-all', '--number-nonblank', '--show-ends', '--number', '--squeeze-blank',
+      '--show-tabs', '--show-nonprinting'],
+  },
+  head: {
+    short: 'cnqvz',
+    numeric: true,
+    long: ['--bytes', '--lines', '--quiet', '--silent', '--verbose', '--zero-terminated'],
+  },
+  // Identical to `head` minus `-f`/`-F`/`--follow`/`--retry`/`--pid`, which do
+  // not write but never return either: a gate that hands the session a command
+  // it can only recover from by killing the tool call has not helped anyone.
+  tail: {
+    short: 'cnqvz',
+    numeric: true,
+    long: ['--bytes', '--lines', '--quiet', '--silent', '--verbose', '--zero-terminated'],
+  },
+  wc: {
+    short: 'clLmw',
+    long: ['--bytes', '--chars', '--lines', '--max-line-length', '--words'],
+  },
+  grep: {
+    short: 'ABCDEFGHILPRTUVZabcdefhilmnoqrsuvwxyz',
+    long: ['--extended-regexp', '--fixed-strings', '--basic-regexp', '--perl-regexp', '--regexp',
+      '--file', '--ignore-case', '--no-ignore-case', '--invert-match', '--word-regexp',
+      '--line-regexp', '--count', '--files-without-match', '--files-with-matches', '--max-count',
+      '--only-matching', '--quiet', '--silent', '--no-messages', '--byte-offset', '--with-filename',
+      '--no-filename', '--label', '--line-number', '--initial-tab', '--null', '--null-data',
+      '--after-context', '--before-context', '--context', '--group-separator',
+      '--no-group-separator', '--color', '--colour', '--binary-files', '--text', '--directories',
+      '--devices', '--recursive', '--dereference-recursive', '--include', '--exclude',
+      '--exclude-from', '--exclude-dir', '--line-buffered', '--binary', '--version', '--help'],
+  },
+  // ripgrep is the entry that most needs its flags read rather than its name:
+  // `--pre` and `--hostname-bin` name a program for rg to execute per file,
+  // which is arbitrary code from a command line that otherwise looks like a
+  // search. Neither is listed, so both refuse.
+  rg: {
+    short: 'ABCFHILMNPSTUVcefghijlmnopqrstuvwxz0',
+    long: ['--after-context', '--before-context', '--context', '--count', '--count-matches',
+      '--regexp', '--fixed-strings', '--file', '--glob', '--iglob', '--with-filename',
+      '--no-filename', '--ignore-case', '--smart-case', '--case-sensitive', '--follow',
+      '--files-with-matches', '--files-without-match', '--files', '--max-columns', '--max-count',
+      '--max-depth', '--max-filesize', '--no-line-number', '--line-number', '--column',
+      '--only-matching', '--pcre2', '--pretty', '--quiet', '--replace', '--type', '--type-not',
+      '--multiline', '--multiline-dotall', '--unrestricted', '--version', '--invert-match',
+      '--word-regexp', '--line-regexp', '--search-zip', '--threads', '--null', '--heading',
+      '--no-heading', '--hidden', '--no-ignore', '--no-config', '--color', '--colors', '--json',
+      '--vimgrep', '--sort', '--sortr', '--stats', '--trim', '--text', '--binary', '--engine',
+      '--help'],
+  },
+  diff: {
+    short: 'BCEHNSTUWZabcdinpqrstuwxy',
+    long: ['--unified', '--context', '--side-by-side', '--brief', '--report-identical-files',
+      '--recursive', '--new-file', '--ignore-space-change', '--ignore-all-space',
+      '--ignore-blank-lines', '--ignore-case', '--ignore-tab-expansion', '--ignore-trailing-space',
+      '--ignore-matching-lines', '--text', '--expand-tabs', '--initial-tab', '--minimal',
+      '--speed-large-files', '--color', '--width', '--suppress-common-lines',
+      '--strip-trailing-cr', '--show-c-function', '--label', '--exclude', '--exclude-from',
+      '--starting-file', '--no-dereference', '--version', '--help'],
+  },
+  // `node FILE` executes FILE. `--check` only parses it, and is REQUIRED here
+  // rather than merely allowed, which is what separates the two.
+  node: {
+    short: 'c',
+    long: ['--check'],
+    require: { short: 'c', long: ['--check'] },
+  },
+  git: {
+    subcommands: ['log', 'show', 'diff'],
+    short: 'MSUbnpsuw',
+    numeric: true,
+    long: ['--oneline', '--graph', '--decorate', '--no-decorate', '--abbrev-commit',
+      '--no-abbrev-commit', '--pretty', '--format', '--date', '--stat', '--numstat',
+      '--shortstat', '--dirstat', '--name-only', '--name-status', '--raw', '--patch',
+      '--no-patch', '--unified', '--word-diff', '--color', '--no-color', '--reverse', '--all',
+      '--branches', '--tags', '--remotes', '--author', '--committer', '--grep', '--since',
+      '--until', '--before', '--after', '--max-count', '--skip', '--follow', '--first-parent',
+      '--merges', '--no-merges', '--cached', '--staged', '--summary', '--find-renames',
+      '--find-copies', '--full-history', '--topo-order', '--date-order', '--author-date-order',
+      '--relative', '--no-prefix', '--src-prefix', '--dst-prefix', '--diff-filter', '--text',
+      '--binary', '--numbered', '--no-renames'],
+  },
+}));
+
+/** True when one `-…` token is a flag its program only reads under. */
+export function readOnlyFlag(spec, token) {
+  if (token.startsWith('--')) return (spec.long ?? []).includes(token.split('=')[0]);
+  const body = token.slice(1);
+  // `head -20`, `git log -5`: the whole body is the count.
+  if (/^[0-9]+$/.test(body)) return spec.numeric === true;
+  // `head -n20`: an attached count on the last letter of the cluster.
+  const letters = spec.numeric === true ? body.replace(/[0-9]+$/, '') : body;
+  if (letters === '') return false;
+  for (const ch of letters) if (!(spec.short ?? '').includes(ch)) return false;
+  return true;
+}
+
+/** True when one segment is a read-only program used in a read-only way. */
+export function readOnlySegment(tokens) {
+  if (tokens.length === 0) return false;
+  // `basename` for the same reason the lexer uses it: `/usr/bin/cat` and `cat`
+  // are one program. Case-folded because a case-insensitive filesystem will
+  // launch `CAT` from the same inode.
+  const spec = READ_ONLY_PROGRAMS[basename(tokens[0]).toLowerCase()];
+  if (spec === undefined) return false;
+  let rest = tokens.slice(1);
+  if (spec.subcommands !== undefined) {
+    if (rest.length === 0 || !spec.subcommands.includes(rest[0])) return false;
+    rest = rest.slice(1);
+  }
+  // `-` is stdin and `--` ends the options; neither is a flag.
+  const flags = rest.filter((t) => t.startsWith('-') && t !== '-' && t !== '--');
+  for (const flag of flags) if (!readOnlyFlag(spec, flag)) return false;
+  if (spec.require === undefined) return true;
+  return flags.some((t) =>
+    t.startsWith('--')
+      ? spec.require.long.includes(t.split('=')[0])
+      : [...t.slice(1)].some((ch) => spec.require.short.includes(ch)));
+}
+
+/**
+ * True when this whole command line can only read.
+ *
+ * Two gates, and both have to hold: no character that can redirect, substitute
+ * or group (checked on the raw text, see `SHELL_READ_DISQUALIFIERS`), and
+ * every segment the shared lexer produces is an allowed program under allowed
+ * flags. Segmentation comes from `splitSegments` — this repository has one
+ * lexer and is not getting a second (ADR-21).
+ */
+export function isReadOnlyCommand(command) {
+  const text = String(command);
+  for (const ch of SHELL_READ_DISQUALIFIERS) if (text.includes(ch)) return false;
+  const segments = splitSegments(text);
+  if (segments.length === 0) return false;
+  for (const segment of segments) if (!readOnlySegment(tokensOf(segment))) return false;
+  return true;
+}
+
+/**
+ * True when the path refusal may be lifted for this command.
+ *
+ * Every finding must be in the readable class — one credential-shaped path, or
+ * one `.claude/settings.json`, and the whole line is refused however read-only
+ * the rest of it is. That ordering is the point: the exemption widens what may
+ * be done to paths the `Read` tool already hands over, and nothing else.
+ */
+export function shellReadExempt(findings, command) {
+  if (findings.length === 0) return false;
+  if (!findings.every((f) => f.kind === 'kernel' && SHELL_READABLE_GLOBS.includes(f.detail))) return false;
+  return isReadOnlyCommand(command);
+}
+
 export const SHELL_DECLARED_MISSES = Object.freeze([
   'a path assembled at runtime — from a variable, a command substitution, a glob, or a file ' +
     'already on disk. The gate never expands anything, so it never sees the result',
@@ -1371,6 +1625,12 @@ export const SHELL_DECLARED_MISSES = Object.freeze([
   'anything a script writes once it is running — this reads the COMMAND, never its effect',
   'a KERNEL path declared by the POLICY rather than built in; only SHELL_PROTECTED_GLOBS is ' +
     'checked here, so that a broken policy cannot stop the operator repairing it',
+  // The floor of the read-only exemption, stated in the same list rather than
+  // in a second one: what an allowed program does is decided partly OUTSIDE
+  // the command text this gate reads, and no flag table can see that half.
+  'a program an allowed reader is CONFIGURED to launch — a `diff.external` driver or a pager ' +
+    'in git config, a `NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`. ' +
+    'READ_ONLY_PROGRAMS matches the command TEXT, and the environment is not in it',
 ]);
 
 /** Every literal token of a command, with message-flag arguments skipped. */
@@ -1407,6 +1667,12 @@ export function shellPathFindings(command, startDir, root) {
 function refuseShellPaths(findings) {
   const credentials = findings.filter((f) => f.kind === 'credential');
   const kernel = findings.filter((f) => f.kind === 'kernel');
+  // True when the PATHS were all in the readable class, so the command itself
+  // is the only reason this is a refusal. Worth saying: the reader is one
+  // rewrite away from an allowed call, and a refusal with no reachable way
+  // forward produces an agent that looks for a way around (ADR-19).
+  const commandWasTheProblem =
+    credentials.length === 0 && kernel.every((f) => SHELL_READABLE_GLOBS.includes(f.detail));
   const lines = [
     'tyran policy-gate: refused. This command names a path this gate protects.',
     ...credentials.map(
@@ -1431,6 +1697,23 @@ function refuseShellPaths(findings) {
       'A protected path is edited by a human, by hand, outside an agent session — these are the ' +
         'files that enforce every other boundary. To READ one, use the Read tool, which is not ' +
         'refused for them.',
+    );
+  }
+  if (commandWasTheProblem) {
+    lines.push(
+      '',
+      `These paths are READABLE from a shell — ${SHELL_READABLE_GLOBS.join(' and ')} both are — ` +
+        'so what was refused is this COMMAND, not the file. A read-only line passes: the allowed ' +
+        'programs are cat, head, tail, wc, grep, rg, diff, `node --check` and `git log`/`show`/' +
+        '`diff`, each only under flags that cannot write, and the line may contain no redirection ' +
+        '(`>`, `>>`, `2>`, `<`), no command substitution (`$(…)`, backticks), no `&`, and no ' +
+        'segment whose program is not on that list — a pipe into a writer is a writer.',
+      'Residual floor, stated because a flag table cannot see past the command text: an allowed ' +
+        'reader can still be made to run something else by configuration this gate never reads — ' +
+        'a `diff.external` driver or pager in git config, a NODE_OPTIONS carrying `--require`, a ' +
+        'shell function shadowing `cat`. The exemption is that these paths are no harder to READ ' +
+        'from a shell than with the Read tool, which already passes on them; it is not a claim ' +
+        'that an allowed program can only ever read.',
     );
   }
   lines.push(
@@ -1468,7 +1751,10 @@ async function decideBash({ input, toolInput, root, runner, budget }) {
   // check that only runs once a policy loads is a check an unconfigured repo
   // does not have.
   const findings = shellPathFindings(command, startDir, root);
-  if (findings.length > 0) return refuseShellPaths(findings);
+  // The exemption SKIPS this refusal; it does not return PASS. A `git log` that
+  // names a protected path still travels the deployment class and every other
+  // check below, exactly as `git log` on any other path does.
+  if (findings.length > 0 && !shellReadExempt(findings, command)) return refuseShellPaths(findings);
 
   const plan = planCommand(command, startDir);
   const pushes = plan.targets.filter((t) => t.scanPush === true && Array.isArray(t.pushArgv));

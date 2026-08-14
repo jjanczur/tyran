@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.1.16 — 2026-08-14
+
+### `cat hooks/…` was refused while `Read` handed you the same bytes
+
+Measured on the shipped 0.1.15 gate, on one file under `hooks/**`: `Read` passes,
+and `cat`, `grep -n`, `wc -l` and `node --check` on that same file all **deny**.
+The bytes were one tool call away in every case, so the refusal protected
+nothing — and it was not consistent with itself either: `git log --oneline --
+hooks/` passed all along, because a bare directory token names no file to
+classify, while `wc -l` on a file inside it did not. The cost was four
+interrupted tool calls in one session for the author, every one of them while
+reading the gate being worked on.
+
+The rule this release encodes instead: **the shell must not become a second
+route to something the `Read` tool already refuses.** For `.env` that symmetry
+is load-bearing and is untouched — `Read` denies *and* `grep` denies, because
+the measured incident behind that rule is a refused `Read .env` followed by
+`Bash: grep` in the very next tool call. Where `Read` is allowed, refusing the
+shell buys nothing.
+
+So on `hooks/**` and `.tyran/policies/**` — and only there — a read-only shell
+command now passes. "Read-only" is matched on the **program and its flags**,
+never on the program alone, because read-shaped programs have write-shaped
+modes: `node --check FILE` passes and `node FILE` denies; `git log` passes and
+`git log --output=FILE` denies, which was a real hole found in an earlier review
+of this gate; `tail -n 5` passes and `tail -f` does not. An unrecognised flag
+refuses, so the enumeration's incompleteness costs a false refusal and never a
+pass. `sed` and `awk` are not on the list at all: their script argument is a
+program with its own write commands, and reading it would need a second parser.
+The raw command may contain none of ``< > $ ` ( ) { } &``, which is every
+redirection spelling, command substitution, subshell and `&&` at once — checked
+on the raw text, because the shared lexer *consumes* those characters as
+separators and by the time a token exists the `>` is gone. `|` and `;` are fine,
+since each composed segment still has to be an allowed reader.
+
+What did not change: every credential shape denies for reads and writes alike;
+`.claude/settings.json` and `.claude/settings.local.json` stay refused from a
+shell in every mode, which is a deliberate narrowing rather than a consequence —
+`Read` passes on the registry too, so the principle alone would have admitted it,
+and it is the one file from which every gate is switched off at once. One line
+naming a readable path *and* a secret is still refused for the secret.
+
+The residual floor is stated in the refusal text and in `docs/policy-gate.md`
+rather than implied: matching flags bounds what a command *says*, not what the
+program *does*. An allowed reader can still be pointed at another program by
+configuration this gate never reads — a `diff.external` driver or a pager in git
+config, a `NODE_OPTIONS` carrying `--require`, a shell function shadowing `cat`.
+It is now the fifth entry in `SHELL_DECLARED_MISSES`.
+
 ## 0.1.15 — 2026-08-14
 
 ### Fifteen questions, ten minutes, and the swarm moves

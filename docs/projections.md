@@ -1,6 +1,6 @@
 # Projections reference
 
-`scripts/project.mjs` · 64 unit tests, including byte-exact
+`scripts/project.mjs` · 68 unit tests, including byte-exact
 golden files
 
 The journal stays the only source of truth; everything on this page is a
@@ -185,7 +185,12 @@ Two details worth knowing:
 - **A gate is open unless it says otherwise.** `data.result` values
   `pass`, `passed`, `ok`, `green`, `approved`, `closed` and `answered` (case-insensitive; `answered` closes an operator ask)
   close a gate; anything else — including `fail` and `open` — keeps it in
-  **Open gates**.
+  **Open gates**. The set has ONE spelling, exported from `project.mjs`;
+  `overnight.mjs` imports it rather than keeping a copy.
+- **Open gates carries the QUESTION.** An operator ask is a gate whose `kind`
+  is its id (`Q-<n>`), so the table's `Gate` column would otherwise tell a
+  resumed conductor that it is waiting without telling it what it asked.
+  Ordinary gates render an em dash there.
 
 Ticket status is the strongest signal seen: `merged` › `review: <verdict>` ›
 `reported: <verdict>` › `in progress` (a spawn exists) › `open`. The

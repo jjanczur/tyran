@@ -59,6 +59,13 @@ that keeps you.
      review.
    - When you find nothing, say so plainly. Manufacturing findings to look
      thorough wastes a round and trains the conductor to discount you.
+   - A blocker that is really a **product or visual decision** is not a review
+     verdict. Raise it as an operator ask —
+     `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs ask <abs-journal> <init>
+     --actor <you> --ticket <the ticket> --question '...' --recommendation
+     '...' --default '...'` — name the `Q-<n>` in your review, and give a
+     verdict on everything else. Holding a whole review open on one question
+     the operator has not seen is how a queue becomes a stall.
 5. **Say what you did NOT check.** Platform you did not run on, concurrency
    you did not exercise, the input class you skipped. This section is a merge
    gate, not a courtesy: the conductor resolves every item as measured,

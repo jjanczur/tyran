@@ -35,22 +35,24 @@
 | Ticket | Title | Status | Deps | Agents | Last event |
 |---|---|---|---|---|---|
 | `T-1` | journal module | merged (88ea8cb) | &mdash; | impl-1 | 2026-07-26T09:32:00.000Z |
-| `T-2` | schemas &#124; with a pipe and &#96;backticks&#96; | in progress | T-1 | impl-2 | 2026-07-26T09:36:01.000Z |
-| `T-10` | projections | parked (set by ticket.status) | T-1 | &mdash; | 2026-07-26T09:41:50.000Z |
+| `T-2` | schemas &#124; with a pipe and &#96;backticks&#96; | parked (set by ticket.status) | T-1 | impl-2 | 2026-07-26T09:41:50.000Z |
+| `T-10` | projections | open | T-1 | &mdash; | 2026-07-26T09:02:02.000Z |
 
 ## Open gates
 
-| Gate | Latest result | At | Evidence |
-|---|---|---|---|
-| plan-approval | open | 2026-07-26T09:35:00.000Z | waiting for the operator |
-| pricing-copy | WAITING_ON_OPERATOR | 2026-07-26T09:41:55.000Z | &mdash; |
+| Gate | Latest result | Question | At | Evidence |
+|---|---|---|---|---|
+| Q-1 | WAITING_ON_OPERATOR | flat fee or per-seat on the team plan? | 2026-07-26T09:41:55.000Z | &mdash; |
+| Q-2 | WAITING_ON_OPERATOR | en dash or em dash in headings? | 2026-07-26T09:41:57.000Z | &mdash; |
+| plan-approval | open | &mdash; | 2026-07-26T09:35:00.000Z | waiting for the operator |
 
 ## All gates
 
 | Gate | Latest result | Events | At |
 |---|---|---|---|
+| Q-1 | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:55.000Z |
+| Q-2 | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:57.000Z |
 | plan-approval | open | 1 | 2026-07-26T09:35:00.000Z |
-| pricing-copy | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:55.000Z |
 | tests | pass | 1 | 2026-07-26T09:34:00.000Z |
 
 ## Open leases
@@ -91,10 +93,10 @@
 
 ## Journal integrity
 
-- **Events folded:** 24
+- **Events folded:** 25
 - **Unknown event types:** 0
 - **Non-object lines skipped:** 0
 - **Corrupt lines skipped:** 0
 - **Truncated final line:** no
 - **Timespan:** 2026-07-26T09:00:00.000Z → 2026-07-26T09:42:00.000Z
-- **Events by type:** `checkpoint` 1 · `decision` 1 · `error` 1 · `finding` 1 · `gate` 3 · `init.created` 1 · `lease.acquired` 2 · `lease.released` 2 · `merge` 1 · `plan.accepted` 1 · `progress` 1 · `report` 1 · `retro.entry` 1 · `review` 1 · `spawn` 2 · `ticket.created` 3 · `ticket.status` 1
+- **Events by type:** `checkpoint` 1 · `decision` 1 · `error` 1 · `finding` 1 · `gate` 4 · `init.created` 1 · `lease.acquired` 2 · `lease.released` 2 · `merge` 1 · `plan.accepted` 1 · `progress` 1 · `report` 1 · `retro.entry` 1 · `review` 1 · `spawn` 2 · `ticket.created` 3 · `ticket.status` 1

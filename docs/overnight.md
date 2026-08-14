@@ -155,8 +155,15 @@ aborts instead of resuming. A supervised operator is never bound by the gate
 | `paused-until.json` | the usage gate | the durable pause: window, percent, resume time, long-wait decision |
 | `resume.json` | the scheduler | watcher state (waiting · holding · resuming · done · failed · skipped · aborted-stop · cancelled), pid |
 | `resume.log` | the scheduler | the watcher's append-only trace |
+| `conductor.json` | the `SessionStart` probe | this session's resumable id, pid, start time and cwd |
 
-All four are machine-local runtime, exempt — by name — from doctor's
+`conductor.json` is where a resumable session id comes from **without** a
+usage-limit pause: before it existed, one was written only by the pause marker
+or by the operator-installed statusline, so a repo with neither could not be
+resumed at all. `answer.mjs apply --resume` reads it, and refuses to spawn
+while the recorded pid is alive.
+
+All five are machine-local runtime, exempt — by name — from doctor's
 stray-file check, and kept out of history by `.tyran/.gitignore`. That
 ignore file is seeded at adoption and brought up to date by re-running the
 scanner (`node scripts/scan-repo.mjs --ensure-policy` or `--write`) — an

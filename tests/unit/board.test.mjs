@@ -50,6 +50,21 @@ function run(args) {
   }
 }
 
+test('readInitiativeBoards returns the journal path it already computed', () => {
+  // MUTANT: drop the `journal` key. answer.mjs would then have to re-derive
+  // `<dir>/state/<name>/journal.jsonl` for itself — a second spelling of where
+  // an initiative's journal lives, in the file that WRITES to it (ADR-21).
+  const dir = tree({ demo: demo(), other: demo() });
+  const { initiatives } = readInitiativeBoards(dir);
+  assert.equal(initiatives.length, 2);
+  for (const it of initiatives) {
+    assert.equal(it.journal, join(dir, 'state', it.name, 'journal.jsonl'));
+    assert.equal(readFileSync(it.journal, 'utf8'), demo(), 'the path must open the journal it folded');
+  }
+  // extra keys never disturb the payload every other consumer reads
+  assert.equal(crossBoard({ initiatives, errors: [] }).totals.initiatives, 2);
+});
+
 test('two initiatives merge into one payload with per-card provenance and honest totals', () => {
   const dir = tree({ alpha: demo(), beta: demo().replaceAll('"init":"demo"', '"init":"beta"') });
   const payload = crossBoard(readInitiativeBoards(dir));
@@ -57,7 +72,8 @@ test('two initiatives merge into one payload with per-card provenance and honest
   assert.equal(payload.totals.initiatives, 2);
   assert.equal(payload.totals.tickets, 6);
   assert.equal(payload.totals.merged, 2);
-  assert.equal(payload.asks.length, 2, 'one waiting-operator ask per copy of the fixture');
+  assert.equal(payload.asks.length, 4, 'two waiting-operator asks per copy of the fixture');
+  assert.deepEqual([...new Set(payload.asks.map((a) => a.kind))].sort(), ['Q-1', 'Q-2']);
   assert.ok(payload.asks.every((a) => a.init === 'alpha' || a.init === 'beta'));
   assert.deepEqual(Object.keys(payload.lanes), [...LANES]);
   const md = renderCrossMd(payload);

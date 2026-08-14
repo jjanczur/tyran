@@ -6,7 +6,7 @@ import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 
 <Provenance>
-`scripts/doctor.mjs --state` · 92 unit tests
+`scripts/doctor.mjs --state` · 94 unit tests
 </Provenance>
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
@@ -67,6 +67,8 @@ possible to change one and keep the suite green.
 | `spawn-duplicate` | warning | two open spawns for one agent name — pairing is ambiguous (ADR-18) |
 | `spawn-orphan-report` | warning | a `report` that closes nothing |
 | `agent-name-unusable` | warning | an agent name that cannot act as a correlator; those events are excluded from pairing |
+| `ask-open` | info | a question is waiting on the operator and has not been answered |
+| `ask-stale` | warning | ...and it has stood past 72 h of journal time — the initiative is waiting on a human who has not been told (see the clock below) |
 | `lease-open` | info | an open lease whose holder is still working |
 | `lease-orphan` | warning | an open lease whose holder already reported — the resource is blocked by nobody |
 | `lease-expired` | warning | the acquiring event carried `expires` / `expires_at` / `until`, and it has passed |
@@ -186,6 +188,11 @@ self-reported `blocked` signal that has stood for **1 hour** of journal time.
 That hour is fixed — `--stale-hours` moves staleness only. A signal counts
 only for the spawn it was emitted during, so a re-spawned agent name does not
 inherit the blockage its previous incarnation's report already cleared.
+
+`ask-stale` reads the same journal clock against **72 hours**, also fixed. The
+fix it prints is the sitting: `node scripts/answer.mjs render`, fill the
+`answer:` lines, then apply. An ask that has been answered is a closed gate
+and produces no finding at all.
 
 ## Dead policy rules
 

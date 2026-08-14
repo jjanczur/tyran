@@ -37,6 +37,7 @@ import {
   boardJson,
   LANES,
   WAITING_RE,
+  GATE_PASS,
 } from '../../scripts/project.mjs';
 
 /** First line of every projection — used to spot a half-written document. */
@@ -508,6 +509,78 @@ test('golden: BOARD.md and board.json are byte-identical to the committed projec
   assert.equal(files[BOARD_JSON_FILE], readFileSync(join(GOLDEN_DIR, BOARD_JSON_FILE), 'utf8'));
 });
 
+
+test('an ask naming a ticket lanes it waiting-operator with NO ticket.status', () => {
+  // MUTANT: delete the `askTickets.has(t.id)` branch in boardOf. The queue
+  // still renders the question while its ticket sits in `ready` — which is
+  // what made an agent pick it up again while the operator was still deciding.
+  const asked = [
+    T('T-10'),
+    ev({ ev: 'gate', ts: '2026-07-26T09:01:00.000Z', data: { kind: 'Q-1', result: 'WAITING_ON_OPERATOR', ticket: 'T-10', question: 'flat fee or per-seat?' } }),
+  ];
+  assert.equal(laneFor(asked, 'T-10'), 'waiting-operator');
+  const board = boardOf(fold({ events: asked }));
+  assert.equal(board.asks[0].kind, 'Q-1');
+  assert.equal(board.asks[0].ticket, 'T-10');
+});
+
+test('a ticket.status override OVERRULES the ask lane — the reason the skill forbids parking', () => {
+  // MUTANT: swap the override and ask branches in boardOf. This test would
+  // then go green with the prose in skills/run/SKILL.md and agents/*.md
+  // ("do not park an asked ticket") describing a hazard that no longer exists.
+  // The precedence is deliberate — an operator's explicit lane wins — so the
+  // rule has to live in prose, and this pins what the prose is about. Our own
+  // demo fixture shipped this bug: `waiting-operator (0)` with a question open.
+  const parked = [
+    T('T-10'),
+    ev({ ev: 'gate', ts: '2026-07-26T09:01:00.000Z', data: { kind: 'Q-1', result: 'WAITING_ON_OPERATOR', ticket: 'T-10', question: 'q?' } }),
+    ev({ ev: 'ticket.status', ts: '2026-07-26T09:02:00.000Z', data: { ticket: 'T-10', column: 'parked', reason: 'pricing question open' } }),
+  ];
+  assert.equal(laneFor(parked, 'T-10'), 'parked', 'the override wins — which is why parking an asked ticket hides it');
+  const board = boardOf(fold({ events: parked }));
+  assert.equal(board.asks.length, 1, 'the question is still open; only its ticket moved out of the lane');
+  assert.equal(board.lanes.get('waiting-operator').length, 0);
+  // and the shipped fixture no longer demonstrates it
+  const fixture = readFileSync(FIXTURE, 'utf8');
+  assert.ok(!/"ticket":"T-10","column"/.test(fixture), 'the demo fixture must not park its own asked ticket');
+});
+
+test('STATE.md Open gates carries the question, and renders byte-identically twice', () => {
+  // MUTANT: drop the Question column. A resumed conductor then reads that it
+  // is waiting on `Q-7` without reading what `Q-7` asked, and re-litigates the
+  // question after every compaction — which is the whole reason the ask exists.
+  const events = [
+    ev({ ev: 'gate', ts: '2026-07-26T09:01:00.000Z', data: { kind: 'Q-1', result: 'WAITING_ON_OPERATOR', question: 'flat fee or per-seat?' } }),
+    ev({ ev: 'gate', ts: '2026-07-26T09:02:00.000Z', data: { kind: 'tests', result: 'fail', evidence_ref: '3 failing' } }),
+  ];
+  const first = renderProjections({ events }).files[STATE_FILE];
+  const second = renderProjections({ events }).files[STATE_FILE];
+  assert.equal(first, second, 'the projection layer is clock-free');
+  const header = first.split('\n').find((l) => l.startsWith('| Gate |'));
+  assert.equal(header, '| Gate | Latest result | Question | At | Evidence |');
+  assert.ok(
+    first.includes('| Q-1 | WAITING_ON_OPERATOR | flat fee or per-seat? |'),
+    'the open-gates row must carry the question text',
+  );
+  assert.ok(first.includes('| tests | fail | &mdash; |'), 'an ordinary gate renders an em dash there');
+});
+
+test('GATE_PASS has exactly ONE spelling — overnight reads this Set, not a copy', async () => {
+  // MUTANT: restore the hand-copied literal inside overnight.skipReason. The
+  // probe below then cannot change its answer, because the copy is what it
+  // reads — and the two spellings drift the moment a pass result is added.
+  const { skipReason } = await import('../../scripts/overnight.mjs');
+  const gate = [{ ev: 'gate', ts: '2026-07-26T09:02:00.000Z', data: { kind: 'usage-limit', result: 'ostrich' } }];
+  const args = { stopped: false, markerExists: true, journalEvents: gate, pausedAtIso: '2026-07-26T09:00:00.000Z' };
+  assert.equal(skipReason(args), null, 'an unknown result keeps the gate open');
+  GATE_PASS.add('ostrich');
+  try {
+    assert.equal(skipReason(args), 'gate-already-closed', 'the watcher must read THIS set');
+  } finally {
+    GATE_PASS.delete('ostrich');
+  }
+  assert.equal(skipReason(args), null);
+});
 
 test('a TICKETLESS blockage clears on movement too, not only a ticketed one', () => {
   // MUTANT: restrict the clear to blockages that carry a ticket. A reviewer or

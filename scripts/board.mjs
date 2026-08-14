@@ -98,7 +98,10 @@ export function readInitiativeBoards(tyranDir) {
         errors.push({ name, error: `0 readable events and ${damage} — the journal is damaged` });
         continue;
       }
-      initiatives.push({ name, state, board: boardOf(state) });
+      // `journal` is returned, not re-derived by consumers: answer.mjs writes
+      // to the file this function already located, so there is one rule for
+      // where an initiative's journal lives (ADR-21).
+      initiatives.push({ name, journal, state, board: boardOf(state) });
     } catch (err) {
       errors.push({ name, error: String(err?.message ?? err) });
     }

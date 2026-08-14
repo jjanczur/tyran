@@ -359,13 +359,14 @@ Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/
 command stays `tyran` either way; only the registry name is scoped, the same
 pattern as `@angular/cli` giving you `ng`. `bin/tyran.mjs` exposes the same
 scripts the plugin's hooks and skills already call — `doctor`, `scan-repo`,
-`tiers`, `journal`, `schema`, `knowledge`, `board`, `overnight`, `statusline`, `stop-check`,
+`tiers`, `journal`, `schema`, `knowledge`, `board`, `answer`, `overnight`, `statusline`, `stop-check`,
 `scan-control-chars`, `desc-budget` — for a shell or a CI job with no Claude
 Code session. Zero dependencies; `--help` lists them.
 
 ```bash
 npx @jjanczur/tyran doctor --hooks     # is any gate installed but unable to fire?
 npx @jjanczur/tyran scan-repo --dir .  # what this repo looks like, with provenance
+npx @jjanczur/tyran answer render      # the sheet of questions waiting on you
 ```
 
 Exit codes propagate to the digit, so a CI step reddens exactly when the

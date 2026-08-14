@@ -48,9 +48,21 @@ commits and anything written to disk are in English.**
      the prediction written down first, and name the mechanism. A fix for a
      failure you never reproduced cannot be shown to have worked.
    - When the PR comes back with comments, follow `pr-feedback`.
-3. **Decide technical questions yourself.** Stop only for product or visual
-   decisions, or when something would cross a boundary the handoff named —
-   then stop and ask the conductor. "Shall I continue?" is forbidden.
+3. **Decide technical questions yourself.** "Shall I continue?" is forbidden.
+   A product or visual decision, or one that would cross a boundary the handoff
+   named, is not yours to make — and it is also not a reason to sit still.
+   Raise it as an operator ask, in one command, against the MAIN checkout's
+   journal (the handoff carries its absolute path):
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs ask <abs-journal> <init>
+   --actor <you> --ticket <your ticket> --question '...' --recommendation '...'
+   --default '...'`. State both: what you would do, and what should ship if
+   nobody ever answers. Then **carry on under your own default** if the story
+   can proceed, or report and end if it cannot. The `Q-<n>` the command prints
+   goes in your report. Do **not** set `ticket.status` — the ask already moves
+   your ticket into the board's waiting-operator lane, and an override on top
+   of it hides the question. Ask the **conductor**, not the operator, for a
+   technical unblock: a lease, a corrected premise, a scope call inside the
+   handoff.
 4. **Shared zones are append-only**, per the manifest. `git add` takes an
    explicit list of paths — never `-A`, never `.`; they sweep in files
    belonging to other windows, and that has already put blobs on a remote

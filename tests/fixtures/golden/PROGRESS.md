@@ -8,13 +8,14 @@ Initiative: **demo** · see `STATE.md` for the full state.
 ## Tickets
 
 - [x] `T-1` — merged (88ea8cb) — journal module
-- [ ] `T-2` — in progress — schemas &#124; with a pipe and &#96;backticks&#96;
-- [ ] `T-10` — parked (set by ticket.status) — projections
+- [ ] `T-2` — parked (set by ticket.status) — schemas &#124; with a pipe and &#96;backticks&#96;
+- [ ] `T-10` — open — projections
 
 ## Open gates
 
+- **Q-1** — WAITING_ON_OPERATOR (2026-07-26T09:41:55.000Z)
+- **Q-2** — WAITING_ON_OPERATOR (2026-07-26T09:41:57.000Z)
 - **plan-approval** — open (2026-07-26T09:35:00.000Z)
-- **pricing-copy** — WAITING_ON_OPERATOR (2026-07-26T09:41:55.000Z)
 
 ## Milestones
 
@@ -25,5 +26,6 @@ Initiative: **demo** · see `STATE.md` for the full state.
 | 2026-07-26T09:32:00.000Z | `merge` | T-1 → 88ea8cb |
 | 2026-07-26T09:34:00.000Z | `gate` | tests → pass |
 | 2026-07-26T09:35:00.000Z | `gate` | plan-approval → open |
-| 2026-07-26T09:41:55.000Z | `gate` | pricing-copy → WAITING_ON_OPERATOR |
+| 2026-07-26T09:41:55.000Z | `gate` | Q-1 → WAITING_ON_OPERATOR |
+| 2026-07-26T09:41:57.000Z | `gate` | Q-2 → WAITING_ON_OPERATOR |
 | 2026-07-26T09:42:00.000Z | `checkpoint` | phase E2 |

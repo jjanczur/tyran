@@ -27,30 +27,41 @@ plan is somewhere in the scrollback, and *"the tests pass"* is a sentence
 rather than something you can check. Start a new session and you start
 explaining from the beginning.
 
-Tyran is a plugin that moves the work off the chat window. You describe a task;
-it interviews you until the goal is unambiguous, sizes it, and drives
-**fresh-context subagents** through it — a scout that only reads, an
-implementer per story on its own branch, a reviewer holding no editing tools so
-it cannot patch what it is grading. Every decision, spawn, report, merge and
-open question is appended to a journal **committed to your repo**, and every
-file you read afterwards is generated from that journal. A restart, a
-compaction and a colleague on another branch all read the same thing.
+Tyran is an orchestrator. You describe a task; it interviews you until the goal
+is unambiguous, sizes it, plans it, and hands each piece to a **dedicated
+subagent with fresh context and a model tier matched to how hard that piece
+actually is** — cheap for a mechanical sweep, expensive for a security
+boundary, never one model for a whole session. They run in parallel, as an
+Agent Team where the platform offers one.
 
-Two rules are what make that worth the trouble. A report containing no raw
-command output is **rejected by a hook**, not by good intentions. And every
-write is classified against a policy file you own **before it happens**, so
-*autonomous* is a setting with a blast radius rather than a promise.
+That is a cost lever and a quality lever at the same time. The conductor holds
+the plan and never accumulates its agents' transcripts, which is where the
+tokens in a long session actually go; and an agent that never saw the last six
+failed attempts cannot inherit them, so the second opinion is a real one.
+
+**It learns your repo while it works.** Setup reads how the repo is really
+worked — stack, validation commands, how things get deployed — rather than
+asking you to describe it. A retrospective after every initiative writes what
+it learnt into `.tyran/knowledge/`, and a failure that repeats graduates out of
+`MISTAKES.md` into a rule. Meanwhile every decision, spawn, report, merge and
+open question is appended to a journal **committed to your repo**, so a
+restart, a compaction and a colleague on another branch all read the same
+thing.
+
+All of it is one plugin, and it comes with a **dashboard**: what every agent is
+doing right now, which questions are waiting on you, and what the work cost —
+in the tokens the platform itself reported, per model, per agent and per
+ticket.
+
+Underneath, **deterministic hooks hold the line**: a report with no raw command
+output is rejected, every write is classified against a policy file you own
+before it happens, and a commit carrying a secret is refused. Mechanisms rather
+than instructions — which is the whole argument.
 
 ![The Tyran dashboard, recorded live, moving through its four tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost](assets/board-demo.gif)
 
 ## What it gives you
 
-- **A model tier per role, resolved from one config file.** Model names appear
-  in exactly one place; skills, agents and policies are written in role names.
-  The expensive tier is kept for security review, arbitration and final
-  acceptance, and the first two sit on a floor no profile or risk flag crosses.
-- **Fresh context for every subagent.** Handoffs are self-contained, so the
-  conductor holds the plan and never accumulates its agents' transcripts.
 - **Reports that carry evidence, or are refused.** A `SubagentStop` hook
   rejects a report with no raw command output — measured on 55 real reports
   from this project's own agents: 53 pass, and both misses were not reports. It
@@ -59,9 +70,11 @@ write is classified against a policy file you own **before it happens**, so
 - **State you can read without a session.** The journal is the single source of
   truth; `STATE.md`, `PROGRESS.md`, `BOARD.md`, `board.json` and `board.html`
   are generated projections of it.
-- **A retrospective after every initiative.** It writes durable facts about
-  your repo into `.tyran/knowledge/`, and repeated failures graduate out of
-  `MISTAKES.md` into rules.
+- **The routing table is one file.** Model names appear in exactly one place;
+  skills, agents and policies are written in role names, so a deprecation is a
+  one-line edit. The expensive tier is reserved for security review,
+  arbitration and final acceptance, and those two sit on a floor no cost
+  profile or risk flag can cross.
 - **A spend ledger.** `npx @jjanczur/tyran cost` reports what the work cost, in
   the tokens the platform itself reported, per model, per agent type and per
   ticket — read out of the transcripts Claude Code already writes. Money

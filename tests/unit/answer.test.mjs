@@ -535,7 +535,14 @@ test('two apply runs at once cannot both close one ask', async () => {
       }),
   );
   const runs = await Promise.all(both);
-  for (const r of runs) assert.ok(r.status === 0 || r.status === 2, `exit ${r.status}: ${r.stderr}`);
+  // All three exits are legitimate outcomes of this race and the test must not
+  // pick a winner: 0 closed some, 2 gave up on the sitting lock, and 1 found
+  // the queue already empty — which is what a runner slow enough to serialise
+  // the two spawns produces, and what failed a publish run that had passed
+  // both locally and in the PR checks. The guarantee is below, not here.
+  for (const r of runs) {
+    assert.ok([0, 1, 2].includes(r.status), `exit ${r.status}: ${r.stderr}`);
+  }
 
   // The guarantee is NO DOUBLE CLOSE, which holds however the race lands —
   // asserted here, while both runs are still the only writers. Completeness is

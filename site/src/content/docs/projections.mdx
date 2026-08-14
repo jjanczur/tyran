@@ -30,6 +30,17 @@ Both start with
 Edits to these files are lost on the next projection — and `--check` will
 report them as drift before that happens.
 
+## Spend is deliberately not a projection
+
+[The spend ledger](../cost/) is the one report on this state layer that is not
+rendered from the journal and never will be. It reads the transcripts Claude
+Code writes under the operator's home directory: machine-local inputs that
+differ per clone, so two people with the same journal legitimately get
+different numbers. A projection promises the opposite — same bytes in, same
+bytes out — so adding `cost.json` to the byte-exact `--check` set would turn a
+correct answer into reported drift. It is therefore never committed, never
+byte-compared, and never merged into `board.json`.
+
 ## CLI
 
 ```bash

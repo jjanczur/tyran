@@ -78,6 +78,35 @@ h2{font-family:var(--display);color:var(--heading);font-size:1.05rem;margin:1.5r
 .card .note{color:var(--muted);font-size:.78rem;display:block}
 .empty{color:var(--hairline);font-size:.8rem}
 footer{margin-top:2rem;color:var(--muted);font-size:.75rem;border-top:1px solid var(--hairline-soft);padding-top:.6rem}
+.spend-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.8rem}
+.toggle{display:flex;gap:.25rem;margin-left:auto}
+.toggle button{font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;background:var(--bg-raised);color:var(--muted);border:1px solid var(--hairline);border-radius:.35rem;padding:.2rem .6rem;cursor:pointer}
+.toggle button[aria-pressed="true"]{background:var(--gold-low);border-color:var(--gold);color:var(--gold-bright)}
+.toggle button:focus-visible{outline:2px solid var(--glow);outline-offset:2px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem;margin:.6rem 0}
+.stile{background:var(--bg-raised);border:1px solid var(--hairline);border-radius:.55rem;padding:.6rem .8rem}
+.stile .lbl{display:block;font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.stile .big{display:block;font-family:var(--mono);font-size:1.35rem;color:var(--heading);font-variant-numeric:tabular-nums;line-height:1.25}
+.stile .sub{display:block;font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.stile.gold{background:var(--gold-low);border-color:var(--gold)}
+.stile.gold .big{color:var(--gold-bright)}
+.comp{display:flex;height:1.5rem;border:1px solid var(--hairline);border-radius:.35rem;overflow:hidden}
+.comp span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.65rem;color:var(--bg);font-weight:700;white-space:nowrap;overflow:hidden}
+.comp .s-cache_read{background:var(--gold)}
+.comp .s-cache_write{background:var(--glow)}
+.comp .s-output{background:var(--green)}
+.comp .s-input{background:var(--muted)}
+.compkey{display:flex;flex-wrap:wrap;gap:.9rem;font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:.35rem}
+.compkey i{display:inline-block;width:.6rem;height:.6rem;border-radius:.15rem;margin-right:.3rem}
+.chart{display:flex;flex-direction:column;gap:.28rem;margin-top:.4rem}
+.chartrow{display:grid;grid-template-columns:minmax(7rem,14rem) 1fr auto;gap:.6rem;align-items:center;font-size:.8rem}
+.chartrow .rl{font-family:var(--mono);color:var(--heading);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chartrow .rb{background:var(--bg-sunken);border-radius:.25rem;height:.85rem;overflow:hidden}
+.chartrow .rb i{display:block;height:100%;background:var(--gold);border-radius:.25rem}
+.chartrow.dim .rl{color:var(--muted);font-style:italic}
+.chartrow.dim .rb i{background:var(--hairline)}
+.chartrow .rv{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--text);min-width:5.5rem;text-align:right}
+.caveat{color:var(--muted);font-size:.78rem;margin-top:.5rem}
 `;
 
 /**
@@ -186,6 +215,149 @@ if (data.schema !== 1) {
     lanesWrap.appendChild(box);
   });
   app.appendChild(lanesWrap);
+
+  var fmtTokens = function (n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + ' M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + ' k';
+    return String(n);
+  };
+  // An amount that rounds to nothing still cost something. Printing $0.00
+  // there reads as free, which is the one reading that would change a
+  // routing decision for the wrong reason.
+  var fmtUsd = function (v) {
+    if (v === null || v === undefined) return '—';
+    if (v > 0 && v < 0.01) return '<$0.01';
+    return '$' + v.toFixed(2);
+  };
+
+  var tile = function (label, big, sub, cls) {
+    var box = el('div', cls ? 'stile ' + cls : 'stile');
+    box.appendChild(el('span', 'lbl', label));
+    box.appendChild(el('span', 'big', big));
+    box.appendChild(el('span', 'sub', sub));
+    return box;
+  };
+
+  // One ranked bar chart. The bar is the comparison; the number beside it is
+  // the fact. A row whose models have no rate shows no bar at all rather than
+  // a zero-length one, because "not priced" and "cost nothing" must not look
+  // the same.
+  var chart = function (rows, key, metric, dimKeys) {
+    var box = el('div', 'chart');
+    var values = rows.map(function (r) { return metric === 'usd' ? r.usd : r.tokens; });
+    var max = 0;
+    values.forEach(function (v) { if (typeof v === 'number' && v > max) max = v; });
+    rows.forEach(function (r, i) {
+      var value = values[i];
+      var unpriced = metric === 'usd' && (value === null || value === undefined);
+      var dim = unpriced || dimKeys.indexOf(r[key]) !== -1;
+      var row = el('div', dim ? 'chartrow dim' : 'chartrow');
+      row.appendChild(el('div', 'rl', r[key]));
+      var track = el('div', 'rb');
+      var fill = el('i');
+      fill.style.width = (max > 0 && typeof value === 'number' ? (value / max) * 100 : 0) + '%';
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el('div', 'rv', metric === 'usd' ? fmtUsd(value) : fmtTokens(value)));
+      box.appendChild(row);
+    });
+    return box;
+  };
+
+  var renderSpend = function (into, cost, metric) {
+    while (into.firstChild) into.removeChild(into.firstChild);
+    var t = cost.totals || {};
+    var cov = cost.coverage || {};
+
+    var header = el('div', 'spend-head');
+    header.appendChild(el('h2', null, 'Spend'));
+    var toggle = el('div', 'toggle');
+    [['tokens', 'tokens'], ['usd', 'cost']].forEach(function (pair) {
+      var button = el('button', null, pair[1]);
+      button.setAttribute('type', 'button');
+      button.setAttribute('aria-pressed', metric === pair[0] ? 'true' : 'false');
+      button.addEventListener('click', function () { renderSpend(into, cost, pair[0]); });
+      toggle.appendChild(button);
+    });
+    header.appendChild(toggle);
+    into.appendChild(header);
+
+    var tiles = el('div', 'tiles');
+    tiles.appendChild(tile('tokens', fmtTokens(t.tokens || 0), (t.requests || 0) + ' requests'));
+    tiles.appendChild(tile(
+      'cost through the API', fmtUsd(t.usd),
+      cost.rate_card ? 'rate card ' + cost.rate_card : 'no rate card set', 'gold'));
+    tiles.appendChild(tile(
+      'conductor overhead', (t.conductor_token_share || 0) + '%', 'of tokens, no ticket'));
+    tiles.appendChild(tile(
+      'attributed', (cov.attributed || 0) + ' / ' + (cov.agent_transcripts || 0),
+      (cov.unattributed || 0) + ' agent(s) without a ticket'));
+    into.appendChild(tiles);
+
+    // The composition is the point of the whole section: cache reads dominate
+    // the bill, so the lever is context size and turn count, not model price.
+    var comp = (cost.composition || []).slice().sort(function (a, b) { return b.tokens - a.tokens; });
+    var compTotal = 0;
+    comp.forEach(function (c) { compTotal += metric === 'usd' ? (c.usd || 0) : c.tokens; });
+    if (compTotal > 0) {
+      var bar = el('div', 'comp');
+      var key = el('div', 'compkey');
+      comp.forEach(function (c) {
+        var value = metric === 'usd' ? (c.usd || 0) : c.tokens;
+        if (value <= 0) return;
+        var pct = Math.round((value / compTotal) * 100);
+        var seg = el('span', 's-' + c.kind, pct >= 8 ? pct + '%' : '');
+        // Normalised to a share, not set to the raw value: flex-grow below 1
+        // does not fill its container, and dollar amounts are routinely
+        // fractions. Measured — the cost view drew a bar 13% of the width
+        // while the token view, whose values are thousands, filled it.
+        seg.style.flex = String((value / compTotal) * 100);
+        bar.appendChild(seg);
+        var legend = el('span', null);
+        var swatch = el('i', 's-' + c.kind);
+        legend.appendChild(swatch);
+        legend.appendChild(el('span', null,
+          c.kind.replace('_', ' ') + ' ' + (metric === 'usd' ? fmtUsd(c.usd) : fmtTokens(c.tokens))));
+        key.appendChild(legend);
+      });
+      into.appendChild(bar);
+      into.appendChild(key);
+    }
+
+    [['By model', cost.by_model || [], 'model', []],
+     ['By agent type', cost.by_agent_type || [], 'agent_type', ['conductor']],
+     ['By ticket', cost.by_ticket || [], 'ticket', ['conductor', 'unattributed']]].forEach(function (spec) {
+      into.appendChild(el('h3', null, spec[0]));
+      into.appendChild(chart(spec[1], spec[2], metric, spec[3]));
+    });
+
+    var notes = [];
+    notes.push('Conductor context is not attributable to any ticket; it is shown as its own row so the rows sum to the total.');
+    if ((cov.unattributed || 0) > 0) {
+      notes.push(cov.unattributed + ' agent(s) carry no ticket id in their task description and are grouped as unattributed.');
+    }
+    if ((cost.unpriced || []).length > 0) {
+      notes.push('Counted in tokens but absent from every amount, having no rate: ' + cost.unpriced.join(', ') + '.');
+    }
+    into.appendChild(el('div', 'caveat', notes.join(' ')));
+  };
+
+  // Spend is FETCHED, never embedded. It is derived from transcripts under the
+  // operator's home directory — machine-local, different in every clone — so
+  // writing it into board.json would break the byte-exact --check contract and
+  // make two people with one journal disagree. Opened over file:// there is no
+  // server, the request fails, and the section simply never appears.
+  var spendAt = el('div');
+  app.appendChild(spendAt);
+  if (typeof fetch === 'function') {
+    fetch('cost.json', { headers: { accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cost) {
+        if (cost && cost.schema === 1 && cost.transcripts_found) renderSpend(spendAt, cost, 'tokens');
+      })
+      .catch(function () { /* no server: the board is complete without it */ });
+  }
 
   // An initiative the board could not read is the one thing this page must
   // never omit: a missing card is indistinguishable from an initiative with

@@ -41,6 +41,7 @@ import {
 } from './project.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
 import { renderBoardHtml } from './board-html.mjs';
+import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
 
@@ -275,6 +276,28 @@ function main() {
         if (host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]') {
           res.writeHead(403, { 'content-type': 'text/plain' });
           res.end('forbidden: this board answers to 127.0.0.1 only\n');
+          return;
+        }
+        // Spend is served, never rendered into the artefacts. It is derived
+        // from transcripts under the operator's home directory — machine-local
+        // by nature — so putting it in board.json would make two clones of one
+        // journal disagree and break the byte-exact `--check` contract. The
+        // page fetches this route and simply omits the section when the fetch
+        // fails, which is what happens over file://.
+        if (req.url === '/cost.json') {
+          let body;
+          try {
+            body = costJson(costReport({ tyranDir: dir }));
+          } catch (err) {
+            // A cost failure must never take the board down with it: the
+            // board answers "what is going on", and that answer does not
+            // depend on knowing what it cost.
+            res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ schema: COST_SCHEMA, error: String(err?.message ?? err) }) + '\n');
+            return;
+          }
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+          res.end(body);
           return;
         }
         const { files } = renderAll(dir);

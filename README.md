@@ -359,7 +359,7 @@ Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/
 command stays `tyran` either way; only the registry name is scoped, the same
 pattern as `@angular/cli` giving you `ng`. `bin/tyran.mjs` exposes the same
 scripts the plugin's hooks and skills already call — `doctor`, `scan-repo`,
-`tiers`, `journal`, `schema`, `knowledge`, `board`, `answer`, `overnight`, `statusline`, `stop-check`,
+`tiers`, `journal`, `schema`, `knowledge`, `board`, `cost`, `answer`, `overnight`, `statusline`, `stop-check`,
 `scan-control-chars`, `desc-budget` — for a shell or a CI job with no Claude
 Code session. Zero dependencies; `--help` lists them.
 
@@ -444,6 +444,11 @@ underlying script does.
 - [x] Read-only dashboard: the kanban board — `BOARD.md`/`board.json` next to
       every journal, one cross-initiative `board.html` in the landing page's
       own palette, refreshed on every subagent stop, plus `board.mjs --serve`
+- [x] The spend ledger: what the work actually cost, read out of the
+      transcripts Claude Code already writes — tokens per model, per agent type
+      and per ticket, money only under a rate card you write, and a Spend
+      section the board fetches rather than embeds — see
+      [docs/cost.md](docs/cost.md)
 - [x] The mistakes ledger: `MISTAKES.md` at your repo root — what went wrong
       here and how often — where three occurrences of one signature graduate a
       lesson into `.tyran/knowledge/` and five write a rule into your

@@ -135,6 +135,7 @@ export default defineConfig({
             { label: 'Projections', slug: 'projections' },
             { label: 'Doctor', slug: 'doctor' },
             { label: 'The board', slug: 'board' },
+            { label: 'The spend ledger', slug: 'cost' },
             { label: 'Overnight mode', slug: 'overnight' },
             { label: 'FAQ', slug: 'faq' },
           ],

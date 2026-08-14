@@ -67,3 +67,24 @@ limits:
   long_wait: hold
   resume_margin_minutes: 5
   keep_awake: false # a real boolean, so the bare-off trap above cannot apply
+
+# What a model costs, per MILLION tokens. Optional; absent means the spend
+# report counts tokens and shows no money, which is the honest default —
+# Tyran does not know what you pay. Operator-written from a vendor's price
+# list, never inferred, so there is no provenance wrapper here.
+#
+# All four rates are required on any model you price: a table carrying three
+# of them would price the fourth at zero, silently, and cache reads alone
+# measure at roughly three quarters of a real session's cost. A model you
+# leave out is reported as unpriced rather than as free.
+#
+# See docs/cost.md. Uncomment and fill in the ids your platform reports —
+# `node scripts/cost.mjs --dir .tyran` lists them under "By model".
+# pricing:
+#   rate_card: 'list-2026-08' # the label that travels with every amount
+#   models:
+#     some-model-id:
+#       input: 15
+#       cache_write: 18.75
+#       cache_read: 1.5
+#       output: 75

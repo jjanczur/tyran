@@ -100,7 +100,9 @@ closed, and `apply` refuses the whole file rather than appending a duplicate.
 ## board.html
 
 The page an operator leaves open overnight: self-contained (inline CSS/JS,
-no network, works over `file://`), refreshes itself every 30 seconds, and
+zero external hosts and zero CDNs, complete over `file://` — with one
+same-origin request to loopback, amended in [Spend](#spend) below),
+refreshes itself every 30 seconds, and
 renders the waiting-on-you queue first, then the agent strip with
 signal-freshness colours computed in the browser (the artefact itself never
 reads a clock — "as of" is the newest event timestamp, which keeps
@@ -124,6 +126,33 @@ filesystem path from a URL. The initiative ceiling is 64, refused loudly —
 archive closed initiatives rather than boarding them. An unreadable journal
 renders as a visible **UNREADABLE** entry: a board that omits a broken
 initiative would read as "all is well" exactly when it is not.
+
+## Spend
+
+Under the lanes, the board shows what the work cost: total tokens and
+requests, the amount under the named rate card, the conductor's share of
+tokens, how many agents carry a ticket id, a composition bar across input /
+cache write / cache read / output, and three ranked charts — by model, by agent
+type, by ticket — with a toggle between tokens and cost. A row whose models
+have no rate draws no bar at all, because "not priced" and "cost nothing" must
+not look the same. What the numbers mean, and what they do not, is in
+[the spend ledger](cost.md).
+
+**This section is fetched, not embedded, and that amends the description
+above.** `board.html` requests `cost.json` from `board.mjs --serve` and builds
+the section in the browser. Spend is derived from transcripts under the
+operator's home directory — machine-local, different in every clone — so
+writing it into `board.json` would break the byte-exact `--check` contract and
+make two people with one journal disagree. Opened over `file://` there is no
+server, the request fails, and the section simply never appears; the board is
+complete without it.
+
+The page is therefore still zero external hosts and zero CDNs. What it makes is
+one same-origin request to loopback, and the same defences cover it: the
+`/cost.json` route sits behind the same `Host` pin as everything else on
+`--serve` (a foreign `Host` gets 403, verified), and a cost read that fails
+returns 503 rather than taking the board down — the board answers "what is
+going on", and that answer does not depend on knowing what it cost.
 
 ## board.json, schema 1
 

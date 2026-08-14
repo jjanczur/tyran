@@ -88,6 +88,10 @@ export const COMMANDS = {
     'board.mjs',
     'Render the cross-initiative kanban board — BOARD.md, board.json and the board.html dashboard — from the journals under .tyran/state/.',
   ],
+  cost: [
+    'cost.mjs',
+    'What the work cost, in tokens the platform reported — per model, per agent type and per ticket, priced by your own rate card.',
+  ],
   answer: [
     'answer.mjs',
     'Write the sheet of questions waiting on you, then fold your answers back into the journal.',

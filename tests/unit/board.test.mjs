@@ -174,3 +174,20 @@ test('an empty state directory renders an honest empty board, exit 0', () => {
   const md = readFileSync(join(dir, 'state', BOARD_FILE), 'utf8');
   assert.match(md, /0 agent\(s\) running across 0 initiative\(s\)/);
 });
+
+test('the page fetches spend rather than embedding it, so the artefacts stay byte-exact', () => {
+  const dir = tree({ demo: demo() });
+  const { files } = renderAll(dir);
+  const html = files[BOARD_HTML_FILE];
+  // MUTANT: inline the cost payload into board.html or board.json. Spend is
+  // derived from transcripts under the operator's HOME directory — machine
+  // local, different in every clone — so embedding it would break the
+  // byte-exact --check contract and make two people with one journal
+  // disagree about what their own board says.
+  assert.ok(html.includes("fetch('cost.json'"), 'the page asks a server for spend');
+  assert.ok(!html.includes('"conductor_token_share":'), 'no spend numbers are baked into the page');
+  assert.ok(!files[BOARD_JSON_FILE].includes('conductor_token_share'), 'board.json carries no spend');
+  // Over file:// there is no server: the request fails and the section never
+  // appears, which is why the failure path is a silent catch.
+  assert.match(html, /\.catch\(function \(\) \{/);
+});

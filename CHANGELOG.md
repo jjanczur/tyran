@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.1.18 — 2026-08-14
+
+### The spend ledger: nobody could say what a run cost
+
+`node scripts/cost.mjs` reports what the work cost, in tokens the platform
+itself reported, per model, per agent type and per ticket. It **reads, it never
+instruments**: every number comes from the `message.usage` records Claude Code
+already writes under `~/.claude/projects/`, so there is no hook, no probe, no
+new event type and nothing to keep in sync.
+
+It is deliberately **not a projection**, and that is the decision the rest
+follows from. Its inputs are machine-local and differ per clone, so two people
+with the same journal legitimately get different numbers — which is exactly
+what a byte-exact `--check` would report as drift. `cost.json` is therefore
+never committed (it joins the runtime files `.tyran/.gitignore` excludes),
+never byte-compared, and never merged into `board.json`.
+
+**Tokens are facts; money is an opinion.** Only tokens are counted. Money comes
+from an operator-written `pricing:` block, and the card's name travels with
+every amount — a figure that cannot say which card produced it is not a
+measurement. Absent pricing gives tokens and no money, which is the honest
+default: Tyran does not know what anyone pays. All four rate keys are required
+per model, because a table carrying three would price the fourth at zero,
+silently, and cache reads alone were measured at roughly three quarters of a
+real session's cost.
+
+Gaps are reported rather than zeroed: `unpriced` models are counted in tokens
+and absent from every amount, `unattributed` agents are the ones whose task
+description carried no ticket id, `unreadable` transcripts are named. A model
+that billed zero tokens is not reported as unpriced — that would be a permanent
+false warning about something that cannot cost anything. And partial pricing is
+a partial sum: an amount is blank only when nothing in the row is priced at
+all, because a real rate card always misses something and nulling the grand
+total over one absent row would leave every figure blank forever.
+
+The conductor is its own row. Its context is not attributable to any ticket and
+was measured between 44% and 86% of a tree's tokens, so a per-ticket table that
+omitted it would present a fraction of the bill as the cost of the work. That
+share is reported in tokens, never dollars: a partial rate card prices only some
+models, so a dollar share is a ratio over whichever subset happened to be
+priced — the same tree read 86% by tokens and 99% by dollars.
+
+Ticket attribution cost nothing to add. The conductor already puts the ticket id
+at the head of a `Task` description; the reader takes it back out of the agent's
+`.meta.json`. No journal change, no event-set change, and an agent whose
+description omits the id lands in a visible `unattributed` bucket rather than
+being guessed at.
+
+`board.html` gains a **Spend** section, and it **fetches `cost.json` rather than
+embedding it** — a deliberate amendment to the page's "self-contained, no
+network" description. It is still zero external hosts and zero CDNs; what it
+makes is one same-origin request to loopback. Over `file://` there is no server,
+the request fails, and the section never appears, so `board.json` and
+`board.html` keep their byte-exact `--check` contract and carry no machine-local
+data. The `/cost.json` route is covered by the existing `Host` pin (a foreign
+`Host` gets 403, verified) and returns 503 rather than taking the board down if
+the cost read fails.
+
+Transcripts reach tens of megabytes and the page refreshes every 30 seconds, so
+the reader streams in chunks and caches per source file keyed on `(path, mtime,
+size)`. A finished agent's transcript never changes, so only the running
+session's file is re-read. Measured cold: a 226-transcript tree totalling 6.86
+billion tokens scans in 1.7 s.
+
+Also reachable as `npx @jjanczur/tyran cost`. Exit 0 ok · 2 usage, I/O, or no
+transcripts found — spend is read, and nothing here estimates it.
+
 ## 0.1.17 — 2026-08-14
 
 ### A race test that picked a winner

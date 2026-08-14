@@ -45,7 +45,15 @@ limits:                    # OPTIONAL. Overnight mode (docs/overnight.md):
   wait_max_hours: 5        # beyond this a pause is LONG: notify + hold
   long_wait: hold          # hold | resume
   resume_margin_minutes: 5
+  keep_awake: false        # true holds the SYSTEM awake while the resume
+                           # watcher waits — never the display, so the screen
+                           # lock is untouched (docs/overnight.md)
 ```
+
+Setup also seeds `MISTAKES.md` at the repository root, create-only. There is no
+knob for it: **deleting the file is the opt-out.** What it is for and how an
+entry graduates is in [self-improvement](self-improvement.md), and stated only
+there.
 
 ## Cost profiles
 

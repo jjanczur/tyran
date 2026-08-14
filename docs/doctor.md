@@ -92,6 +92,15 @@ possible to change one and keep the suite green.
 | `limit-pause-stale` | warning | the pause marker's resume time has passed and the marker remains — the watcher died (reboot) or was never scheduled |
 | `limit-resume-watcher-dead` | warning | `resume.json` says a watcher is waiting but no such process is alive, or the last scheduled resume failed |
 | `limit-telemetry-missing` | warning | `limits.mode` is `warn` or `pause` but the usage telemetry sidecar is absent or over a day old — the gate fails open, so the configured pause protects nothing |
+| `mistakes-unreadable` | warning | `MISTAKES.md` is present but could not be read or parsed, so nothing in it was counted. Warning rather than error: nothing mechanical consumes the ledger at write time, so an unreadable one degrades learning without stopping work |
+| `mistakes-repeat-unpromoted` | info | one signature's `open` entries have reached the knowledge threshold ([self-improvement](self-improvement.md)) — a failure that recurred that often is evidence a rule is missing, and `/tyran:retro` promotes it into `.tyran/knowledge/`. Info, because a healthy repo sits here between a breakage and its next retrospective |
+| `claude-md-fence-missing` | info | entries claim status `law` while `CLAUDE.md` carries no `tyran:rules` fence — the earned rule is not in force in any session — or carries a malformed one, where the next promotion cannot land at all |
+
+An **absent** `MISTAKES.md` produces no finding at all: deleting the file is
+the documented opt-out ([self-improvement](self-improvement.md)), and a tool
+that nags about a file you removed on purpose is a tool you disable. The
+`checked` line still names it, so "nothing was said about it" and "it is not
+there" stay distinguishable.
 
 ## Guarantees
 

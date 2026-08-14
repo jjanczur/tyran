@@ -70,7 +70,86 @@ Write what a competent newcomer would get wrong, not what the code already
 says. "The test suite takes 9 minutes, so do not run it per file" is worth an
 entry. "This is a Next.js app" is not: the next agent can see that.
 
-## 4. Report
+## 4. Fold what BROKE into `MISTAKES.md`, and promote what recurred
+
+`.tyran/knowledge/` holds what an agent should know before touching a path;
+`MISTAKES.md` at the repo root holds what has gone wrong here and **how often**.
+Not two spellings of one store: the first is delivered into every handoff by
+the knowledge brief, the second is the evidence that decides what deserves
+delivering at all.
+
+One entry per breakage this initiative genuinely paid for — a wasted agent
+cycle, a bad merge, a rework wave. Not per discovery, and not per `finding`
+event: most findings are good news.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" add \
+  --signature worktree-missing-deps \
+  --what '...' --cause '...' --consequence '...' --prevention '...' \
+  --initiative "$INIT" --actor impl-t3 --proof F-12
+```
+
+**The signature is the judgement, and the one part a script cannot do.** Reuse
+the signature an earlier entry already used for the same failure; a
+near-synonym resets the count to one and the lesson never graduates. Search the
+file before you invent one. Then let the counting be mechanical:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" repeats
+```
+
+It prints one line per signature that has crossed a graduation threshold,
+ending in what that signature has earned. Act on that recommendation — the
+thresholds themselves, and why they are where they are, live in
+`docs/self-improvement.md`.
+
+- **`promote to .tyran/knowledge/`** — write the rule into
+  `.tyran/knowledge/<topic>.yaml`, scoped with `applies_to` so it reaches only
+  the agents it helps:
+
+  ```yaml
+  entries:
+    - id: K-12
+      kind: gotcha
+      text: 'Link the dependency directory into every new worktree before the handoff.'
+      confidence: 0.8
+      provenance:
+        - source: MISTAKES.md
+          reference: 'worktree-missing-deps — the open entries that earned it'
+      used: 0
+      helpful: 0
+      outdated_reports: 0
+      applies_to:
+        - 'scripts/**'
+  ```
+
+  `provenance` is a block sequence, never a flow mapping: `yaml-lite` refuses
+  `[{...}]`, and a knowledge file it cannot parse reaches no handoff at all.
+  Then `mistakes.mjs promote --signature <sig> --status knowledge:<id>`. Grep
+  `.tyran/knowledge/` for the signature first: an entry already carrying it
+  means this was promoted before and the status trailers were hand-edited away.
+- **`promote to CLAUDE.md law` — it kept happening after the knowledge entry
+  shipped.** That is evidence the delivered rule was not enough, which is the
+  strongest case for law there is. Write it:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" promote --signature <sig> \
+    --law --rule 'One imperative sentence.' --journal "$J" --init "$INIT"
+  ```
+
+  That edits the host `CLAUDE.md` between `<!-- tyran:rules start -->` and
+  `<!-- tyran:rules end -->` and no byte outside it, appends a `decision` event
+  naming the rule, the signature and the count, and refuses below the law
+  threshold or on a fence it cannot parse. `--dry-run` prints the line and
+  writes nothing. You do not wait for an approval: the operator meets the
+  change in the journal, the board and the diff, and says no by deleting the
+  line — a deleted rule does not come back.
+
+Promotion never deletes an entry; it rewrites one status token. The entry is
+the evidence that earned the rule. Nothing to add is a correct outcome here
+too, and a common one: most initiatives break nothing that recurs.
+
+## 5. Report
 
 Five lines: candidates considered, implemented, rejected and why, what was
 deleted or merged, what is left for next time. Rejections are as valuable as

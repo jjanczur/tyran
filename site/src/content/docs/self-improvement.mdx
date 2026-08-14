@@ -84,6 +84,132 @@ received. The retrospective folds those verdicts into the counters at close
 (the procedure lives in the retro skill, its one home). An entry nobody
 reports as helpful is a retirement candidate on evidence, not on taste.
 
+## Where a lesson lands: four stores, four questions
+
+A fourth store is only defensible if it answers a question none of the others
+answers. `MISTAKES.md` — plain prose at your repository root — does, and the
+question is **recurrence**.
+
+| Store | The one question it answers | Lifetime | Writer | How an agent receives it |
+|---|---|---|---|---|
+| journal `finding` | what did I discover during THIS run, and what proves it | one initiative | any agent, mid-run | nothing — it dies with the initiative, correctly |
+| **`MISTAKES.md`** | what has gone WRONG here, how often, and what would have prevented it | the repository's | the retrospective, at close | nothing — there is no read channel, on purpose |
+| `.tyran/knowledge/*.yaml` | what must an agent about to touch THESE paths know | until the counters retire it | the retrospective | `knowledge.mjs brief`, pasted verbatim into every handoff |
+| `CLAUDE.md`, inside the `tyran:rules` fence | the law that binds every session here, whatever it touches | until someone deletes the line | `mistakes.mjs promote --law` | it is in context on every turn |
+
+Read the axis, not the topics. "Bugs here, conventions there" is unfalsifiable
+and produces three spellings of one rule inside a month. The axis is **shape
+and delivery**: knowledge is forward-looking, path-scoped, machine-delivered
+and budgeted; `MISTAKES.md` is backward-looking, narrative, repo-global and
+counted; `CLAUDE.md` is law — no scope, no counters, no budget, paid on every
+turn.
+
+> `MISTAKES.md` is where evidence accumulates, the knowledge store is where it
+> gets delivered, and `CLAUDE.md` is where it gets enforced.
+
+Setup seeds the file create-only, and **deleting it is the whole opt-out** —
+no config knob for a file you can remove. Nothing reads it at session start:
+an unscoped injection would spend context on every session to deliver what the
+knowledge brief already delivers scoped.
+
+## The graduation pipeline — 3 to knowledge, 5 to law
+
+```
+a correction or a breakage, mid-run
+   │  the agent appends a `finding` event (claim + proof)
+   ▼
+a `finding` in the journal                   [one initiative; dies at close]
+   │  the retro at close: did something actually BREAK, or is this a discovery?
+   │  mistakes.mjs add --signature <s> --proof F-12
+   ▼
+a MISTAKES.md entry, status `open`           [repo lifetime, yours to edit]
+   │  mistakes.mjs repeats --threshold 3     (three OPEN entries, one signature)
+   ▼
+.tyran/knowledge/<topic>.yaml                [delivered in every matching handoff]
+   │  mistakes.mjs promote --signature <s> --status knowledge:K-12
+   │  ...and it happened twice more anyway — 5 open-or-promoted
+   ▼
+CLAUDE.md, inside the tyran:rules fence      [law, on every turn of every session]
+   mistakes.mjs promote --signature <s> --law --rule '...'
+```
+
+**The signature is the judgement; the count is mechanical.** The model decides
+whether two failures are the *same* failure — a near-synonym resets the count
+to one and the lesson never graduates — and the script counts what it is given.
+Promotion never deletes an entry; it rewrites one status token, because the
+entry is the evidence that earned the rule.
+
+**Why 3 and 5.** Three is "not a coincidence, and cheap to act on": the
+knowledge store is scoped, budgeted, and retired by its own counters, so a
+wrong promotion costs one brief line. Five is the expensive one, because law is
+paid on every turn — and the gap between them is the diagnostic. A signature
+that reaches five has already been delivered in every matching handoff and
+broke anyway, which is the strongest argument for a rule there is.
+
+**Tyran writes the fence itself.** At five occurrences the retrospective edits
+your `CLAUDE.md` between two markers, and never a byte outside them:
+
+```markdown
+<!-- tyran:rules start -->
+- Link the dependency directory into every new worktree before the handoff. (`worktree-missing-deps`, 5 occurrences — MISTAKES.md entries 2026-05-02, 2026-06-11, 2026-07-03, 2026-07-28, 2026-08-09)
+<!-- tyran:rules end -->
+```
+
+One line: the rule, its signature, and the dated entries that earned it — the
+evidence is not decoration, it is how you disagree well. There is no approval
+gate.
+You meet the change the way you meet every other autonomous act — a `decision`
+event in the journal, a row on the board, a diff — and you say no by **deleting
+the line**, which does not come back (those entries are already at status
+`law`). `--dry-run` prints the line and writes nothing. An absent fence is
+appended once, with its heading, at the end of the file; a malformed one is
+refused by name and left alone.
+
+The shipped policy classes `CLAUDE.md` as GATED, and that bans the *hand*, not
+the mechanism: a subagent's free-hand `Write` is denied, while the script that
+demands five recorded occurrences passes. The boundary is not "agents may not
+change the law" — it is **"the law changes only through the mechanism that
+requires evidence."**
+
+State its floor with it, because a guarantee read as absolute is worse than a
+narrower one read correctly: the class binds the `Write`/`Edit` hand, and only
+`hooks/**` and `.tyran/policies/**` are refused to shell commands as well. A
+repo-root file is not in those globs, so a subagent's `Bash` redirect into
+`CLAUDE.md` is not refused — measured, and stated where the class is set
+([`policy-gate`](../policy-gate/)). What the mechanism guarantees is that the
+law arriving *through it* carries its evidence; what catches the other route is
+the diff, the same way you meet every other autonomous act.
+
+Seeding has always been create-only, so a repo adopted
+before this rule shipped keeps its own policy until it copies the line from
+`templates/policies/autonomy.yaml`.
+
+## Authored, not a projection — and what that costs
+
+`MISTAKES.md` is prose you edit. It is deliberately **not** a generated
+projection of the journal:
+
+- a projection reports a hand edit as drift and destroys it on the next
+  render — and a human correcting a wrong root cause is the most valuable edit
+  this file will ever receive;
+- journals are per-initiative, so archiving an old initiative would silently
+  shrink a projected history, taking the recurrence count with it;
+- most `finding` events are *discoveries*, not mistakes, and projecting them
+  would fill the file with non-mistakes.
+
+**The cost, stated rather than discovered:** nothing checks `MISTAKES.md`
+against the journal byte for byte, so it *can* drift — a fabricated entry, or a
+real breakage nobody wrote down. Every entry cites its initiative and the
+journal event id that proves it, so drift is **auditable by a human and not
+enforced by a gate**. That is a weaker guarantee than the projections carry,
+and no test will catch an entry nobody lived through.
+
+[`doctor --state`](../doctor/) surfaces the ledger without nagging:
+`mistakes-repeat-unpromoted` (info) when a signature has earned promotion,
+`mistakes-unreadable` (warning), and `claude-md-fence-missing` (info) when
+entries claim `law` but no fence exists to hold the rule. An absent file
+produces no finding at all.
+
 ## The one part that is not built: the update delta-review
 
 <Aside type="caution" title="Not built yet">

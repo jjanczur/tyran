@@ -23,7 +23,9 @@
  * ## What the watcher defends against (measured platform facts)
  *
  *  - Machine sleep: chunked sleeps re-read the wall clock; an overslept
- *    laptop fires late, never never. Reboot kills the watcher — the marker
+ *    laptop fires late, never never. Under `limits.keep_awake` it does not
+ *    oversleep at all — the wait is wrapped in a system-sleep inhibitor
+ *    (scripts/keepawake.mjs). Reboot still kills the watcher — the marker
  *    then goes stale, doctor reports it, and the gate self-heals it.
  *  - Blind resumed sessions: statuslines do not run under `claude -p`
  *    (measured 2.1.197), so a resumed session has NO fresh telemetry. The
@@ -49,13 +51,14 @@
  *   node overnight.mjs --wait   [--dir <repo>]        # internal (the watcher)
  * Exit: 0 ok/held · 1 refused (no marker, already scheduled, STOP) · 2 usage/IO
  */
-import { spawn, spawnSync, execFile } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkStop } from './stop-check.mjs';
 import { readJournal } from './journal.mjs';
+import { withKeepAwake } from './keepawake.mjs';
 import { limitsOf } from './schema.mjs';
 import { parse } from './yaml-lite.mjs';
 import { escapeInvisible } from './invisible.mjs';
@@ -281,6 +284,58 @@ function readLimitsFile(repo) {
   }
 }
 
+/**
+ * Run ONE resume attempt to completion without blocking the event loop.
+ *
+ * `spawnSync` is the shorter shape and must not be used: a sync child parks
+ * the loop for the whole attempt — up to RESUME_ATTEMPT_TIMEOUT_MS, four
+ * times over — and no JS signal handler can run while it is parked. Two
+ * things depend on those handlers: `cancel`, the operator's documented
+ * handle, SIGTERMs the watcher and expects it to die; and keepawake's release
+ * runs from the same handler, so a sender that escalates to SIGKILL past its
+ * grace period orphans the inhibitor. Both are measured, in overnight.test.
+ *
+ * Resolves, never rejects: a missing binary arrives asynchronously as an
+ * 'error' event, and an unheard 'error' event is thrown from outside any
+ * try/catch the caller could have. Its `status: null` reads as "did not
+ * take", which is the babysitter's business, not an exception's.
+ */
+export function runResume(argv, { cwd, timeoutMs = RESUME_ATTEMPT_TIMEOUT_MS, spawnFn = spawn } = {}) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawnFn(argv[0], argv.slice(1), {
+        cwd,
+        // Never a pipe: the output was captured and discarded before, and a
+        // buffered pipe would cap a long resume at maxBuffer instead.
+        stdio: 'ignore',
+        // The argv is the whole command. No shell, ever.
+        shell: false,
+      });
+    } catch {
+      resolve({ status: null, signal: null });
+      return;
+    }
+    let settled = false;
+    let timer = null;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve(result);
+    };
+    timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* it finished between the timer firing and this line */
+      }
+    }, timeoutMs);
+    child.on('error', () => finish({ status: null, signal: null }));
+    child.on('exit', (status, signal) => finish({ status, signal }));
+  });
+}
+
 // ------------------------------------------------------------ subcommands
 
 function doSchedule(repo, flags) {
@@ -325,6 +380,19 @@ function doSchedule(repo, flags) {
     process.exit(1);
   }
 
+  // A warning, never a refusal: the operator is about to leave a machine
+  // waiting for hours, and whether it stays awake is their call to make with
+  // the risk named. Only on the watch path — a hold waits for nothing.
+  if (readLimitsFile(repo).keep_awake === true) {
+    console.log('overnight: keep-awake is on — the system stays awake while the watcher waits (the display and the screen lock are untouched).');
+  } else {
+    console.error(
+      'overnight: keep-awake is OFF — if this machine sleeps before the reset, the watcher sleeps with it and the ' +
+        'resume fires late or never. Set limits.keep_awake: true in .tyran/config.yaml to hold the SYSTEM awake ' +
+        'while it waits; the display and the screen lock are untouched.',
+    );
+  }
+
   const logFd = openSync(join(repo, RESUME_LOG_RELPATH), 'a');
   const watcherArgv = [
     SELF,
@@ -366,6 +434,23 @@ async function doWait(repo, flags) {
   const prompt = typeof flags.prompt === 'string' ? flags.prompt : null;
   const cmd = typeof flags.cmd === 'string' ? flags.cmd : 'claude';
 
+  // The whole point of this process is to be asleep for hours, and a laptop
+  // that suspends during that window is the measured way an overnight run
+  // dies. The wrap covers the resume too: the resumed `claude -p` IS the
+  // overnight work, and a machine that suspends mid-session kills it.
+  //
+  // Opt-in, and released on every exit path including SIGTERM — which is what
+  // `cancel` sends. That release runs from a JS signal handler, so NOTHING
+  // inside this region may block the event loop: a sync child would defer the
+  // handler for its whole runtime and make `cancel` a no-op meanwhile. Hence
+  // runResume rather than spawnSync.
+  return withKeepAwake(
+    { enabled: readLimitsFile(repo).keep_awake === true, onNote: (message) => log(repo, message) },
+    () => runWaitLoop(repo, { chunkMs, backoffs, prompt, cmd }),
+  );
+}
+
+async function runWaitLoop(repo, { chunkMs, backoffs, prompt, cmd }) {
   for (;;) {
     const marker = readSmallJson(join(repo, MARKER_RELPATH));
     if (marker === null) {
@@ -455,7 +540,7 @@ async function doWait(repo, flags) {
       log(repo, `resuming attempt=${attempt + 1} argv=${argv[0]} session=${marker.session_id}`);
       writeStateFile(repo, { state: 'resuming', attempt: attempt + 1, at: new Date().toISOString() });
       notifyDesktop('Tyran: resuming', `The usage window has reset; resuming the paused session${init ? ` (${init})` : ''}.`);
-      const child = spawnSync(argv[0], argv.slice(1), { cwd: repo, encoding: 'utf8', timeout: RESUME_ATTEMPT_TIMEOUT_MS });
+      const child = await runResume(argv, { cwd: repo });
       const eventsAfter = journalEventCount(journalPath);
       const took =
         eventsBefore === null || eventsAfter === null

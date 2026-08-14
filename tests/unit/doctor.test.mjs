@@ -1469,6 +1469,9 @@ const EXPECTED_SEVERITY = {
   'limit-pause-stale': 'warning',
   'limit-resume-watcher-dead': 'warning',
   'limit-telemetry-missing': 'warning',
+  'mistakes-unreadable': 'warning',
+  'mistakes-repeat-unpromoted': 'info',
+  'claude-md-fence-missing': 'info',
 };
 
 test('every finding code has exactly one pinned severity', () => {

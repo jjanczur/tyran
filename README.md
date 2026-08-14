@@ -443,6 +443,11 @@ underlying script does.
 - [x] Read-only dashboard: the kanban board — `BOARD.md`/`board.json` next to
       every journal, one cross-initiative `board.html` in the landing page's
       own palette, refreshed on every subagent stop, plus `board.mjs --serve`
+- [x] The mistakes ledger: `MISTAKES.md` at your repo root — what went wrong
+      here and how often — where three occurrences of one signature graduate a
+      lesson into `.tyran/knowledge/` and five write a rule into your
+      `CLAUDE.md`, inside Tyran's own fence — see
+      [docs/self-improvement.md](docs/self-improvement.md)
 
 ## Where this came from
 

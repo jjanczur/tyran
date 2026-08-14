@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.1.14 — 2026-08-14
+
+### The repository remembers what went wrong — and eventually writes it into law
+
+Tyran had three places a lesson could land and not one of them answered *how
+often*. A journal `finding` dies with its initiative, correctly: it is that
+run's discovery. A `.tyran/knowledge/` entry says what an agent must know
+before touching a path. `CLAUDE.md` is law. Recurrence was counted nowhere, so
+"this has burned us three times" was something a human had to remember, and on
+the fourth time it was argued from scratch.
+
+`MISTAKES.md` at your repository root is the store that was missing: what
+happened, the root cause, the consequence, the prevention — newest first, plain
+prose, yours to edit. The retrospective is its only writer, and it writes an
+entry only for a breakage the initiative actually paid for. Every entry carries
+a **signature**, and the signature is the whole point: the model decides
+whether two failures are the *same* failure, and `scripts/mistakes.mjs`
+(`add` · `repeats` · `promote`) does the counting.
+
+**Three open entries under one signature** graduate the lesson into
+`.tyran/knowledge/`, where every handoff touching those paths already delivers
+it. **Five, still recurring after the knowledge entry shipped**, is evidence
+the delivered rule was not enough — the strongest argument for law there is —
+and at five `mistakes.mjs promote --law` **writes the rule into your
+`CLAUDE.md`**. Not a proposal, not a queue: an autonomous write, between
+`<!-- tyran:rules start -->` and `<!-- tyran:rules end -->` and never a byte
+outside those markers. The line names the rule, its signature and the dated
+entries that earned it; a `decision` event records the act; `--dry-run` prints
+the line and writes nothing. You say no by deleting the line — the entries are
+already at status `law`, so nothing puts it back. A fence that is absent is
+appended once at the end, with its heading, and existing prose is never
+reflowed; a fence that is malformed is refused by name, with nothing written.
+
+The safety story is a boundary rather than a sentence. The shipped policy now
+classes `CLAUDE.md` as **GATED**, which bans the hand and not the mechanism: a
+subagent's free-hand `Write` is denied, while the script that demands five
+recorded occurrences passes. Until this rule, the gate was silent on repo-root
+files — its governed namespace is `.tyran/`, `.claude/` and the enforcement
+scripts — so a subagent could rewrite the law it was bound by and nothing had
+an opinion. An explicit rule outranks that namespace test, which is why one
+line is enough. Seeding has always been create-only, so existing installs keep
+their own policy untouched.
+
+Seeding `MISTAKES.md` is create-only too, and **deleting the file is the whole
+opt-out** — no knob for a file you can remove. `doctor --state` grew three
+codes, 54 → **57**: `mistakes-repeat-unpromoted` (info — a lesson has earned
+promotion), `mistakes-unreadable` (warning), and `claude-md-fence-missing`
+(info — entries claim `law` but no fence exists to hold the rule). An absent
+ledger is never a finding.
+
+Stated rather than discovered: `MISTAKES.md` is **authored, not a byte-checked
+projection**. A projection would report a hand edit as drift and destroy it on
+the next render, and a human correcting a wrong root cause is the most valuable
+edit this file will ever get. The cost is that nothing compares it to the
+journal, so it can drift. Every entry cites its initiative and the event id
+that proves it, which makes drift auditable by a human and **not** enforced by
+a gate — a weaker guarantee than the projections carry, and both docs surfaces
+say so instead of leaving you to assume parity.
+
+This repository ships its own `MISTAKES.md`, five entries, one of them earned
+during this release: the control-character write-guard refused an edit twice
+because the editing tool turns `\uXXXX` escape text into the character itself,
+so a regex class typed as escapes reached disk as raw C0 and bidi codepoints.
+The guard was working; the author was the attacker.
+
+### Keep the machine awake while the watcher waits
+
+The overnight resume watcher's whole job is to be asleep for hours, which is
+exactly the interval a laptop chooses to suspend in — and a suspended machine
+takes the watcher and the network with it. `limits.keep_awake` (a real boolean,
+default `false`) wraps the wait in a system-sleep inhibitor: `caffeinate -is`
+on macOS, `systemd-inhibit --what=idle:sleep` on Linux. **Never `caffeinate
+-d`**: that blocks the display sleep and with it the screen lock, and a machine
+left running overnight that never locks is a security regression. The inhibitor
+is released on every exit path including `SIGINT` and `SIGTERM`, an unsupported
+platform degrades to a no-op instead of refusing to wait, and
+`overnight.mjs schedule` tells you which way the knob is set — as a warning,
+never a refusal.
+
+### Measured
+
+`node --test "tests/**/*.test.mjs"`: **1133 unit tests, 0 failures** — 34 of
+them new in `tests/unit/mistakes.test.mjs` (the entry format, the counting
+thresholds, the fence, and every refusal), 11 in `keepawake.test.mjs`.
+`scan-control-chars`: clean over 185 tracked text files. The skill description
+budget is unchanged at **4352 / 5000** — this release adds no skill and no
+agent.
+
 ## 0.1.13 — 2026-08-13
 
 ### Six concurrent decisions, two ids

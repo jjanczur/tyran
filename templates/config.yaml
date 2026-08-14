@@ -55,6 +55,10 @@ shared_zones: []
 #                                days (the weekly window). Within it: schedule
 #                                the resume and say when.
 #   long_wait: hold | resume     what the scheduler does beyond wait_max_hours
+#   keep_awake: false            true holds the SYSTEM awake while the resume
+#                                watcher waits — a laptop that suspends takes
+#                                the watcher with it. Never the display: your
+#                                screen lock is untouched.
 limits:
   mode: 'off' # quoted — bare off is YAML for false
   pause_at_percent: 97
@@ -62,3 +66,4 @@ limits:
   wait_max_hours: 5
   long_wait: hold
   resume_margin_minutes: 5
+  keep_awake: false # a real boolean, so the bare-off trap above cannot apply

@@ -171,7 +171,13 @@ export function validateConfig(doc) {
       if ('resume_margin_minutes' in limits && (typeof limits.resume_margin_minutes !== 'number' || limits.resume_margin_minutes <= 0 || limits.resume_margin_minutes > 240)) {
         errors.push('limits.resume_margin_minutes: must be a number in (0, 240]');
       }
-      const knownLimits = ['mode', 'pause_at_percent', 'weekly_pause_at_percent', 'wait_max_hours', 'long_wait', 'resume_margin_minutes'];
+      // Boolean only, and rejected rather than coerced: this knob spawns a
+      // process that changes the operator's machine, so a value nobody can
+      // read as a switch must be a complaint, not a guess.
+      if ('keep_awake' in limits && typeof limits.keep_awake !== 'boolean') {
+        errors.push('limits.keep_awake: must be true or false');
+      }
+      const knownLimits = ['mode', 'pause_at_percent', 'weekly_pause_at_percent', 'wait_max_hours', 'long_wait', 'resume_margin_minutes', 'keep_awake'];
       for (const key of Object.keys(limits)) {
         if (!knownLimits.includes(key)) errors.push(`limits.${key}: unknown key`);
       }
@@ -206,6 +212,9 @@ export function limitsOf(doc) {
     long_wait: LIMITS_LONG_WAIT.includes(limits.long_wait) ? limits.long_wait : 'hold',
     resume_margin_minutes:
       inRange(limits.resume_margin_minutes, 0, 240, { minExclusive: true }) ? limits.resume_margin_minutes : 5,
+    // Opt-in, strictly: anything that is not the boolean true is off. Nothing
+    // on any machine changes until an operator writes `keep_awake: true`.
+    keep_awake: limits.keep_awake === true,
   };
 }
 

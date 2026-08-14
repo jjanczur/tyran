@@ -72,6 +72,10 @@ export const COMMANDS = {
     'knowledge.mjs',
     'Select the knowledge entries that apply to a set of paths and print a paste-ready brief for a handoff.',
   ],
+  mistakes: [
+    'mistakes.mjs',
+    "Append to the repository's MISTAKES.md, count recurring signatures, and promote a recurring one into CLAUDE.md.",
+  ],
   overnight: [
     'overnight.mjs',
     'Schedule and run the usage-limit resume watcher: wait for the window reset, then resume the paused session.',

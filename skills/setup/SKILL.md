@@ -34,6 +34,13 @@ ever creates, never overwrites, and what it writes is the strictest template
 Tyran ships. Editing that file afterwards is human-only and stays so — the
 gate refuses `Write`, `Edit`, and any shell command that names the path.
 
+It also seeds `MISTAKES.md` at the repository root: the durable record of what
+has gone wrong here, which `/tyran:retro` appends to at close and reads before
+it proposes anything. Create-only like the policy — and deleting it is the
+whole opt-out, so a repository that does not want one simply removes it. Say
+in your report that it appeared; a file landing in someone's working tree
+unannounced is a bad way to meet a tool.
+
 If you find a repository already in the broken state — `.tyran/` present, no
 policy — this repairs it without touching anything else:
 
@@ -69,6 +76,19 @@ Good: "Only 2 of the last 50 commits on `main` arrived as merges, and there
 is a `staging` branch with CI. That looks like P2 — I release to staging on
 my own, production stays yours. Confirm, or say P1 and I only ever touch
 branches."
+
+One flagged question is the `CLAUDE.md` pointer, and it is a question rather
+than an edit on purpose. Tyran writes `CLAUDE.md` only inside its own
+`tyran:rules` fence, and only through `mistakes.mjs promote --law`, which
+demands five recorded occurrences of one signature; this line lives outside
+that fence, so it is theirs to paste:
+
+```
+Log mistakes in MISTAKES.md (what happened, root cause, prevention).
+```
+
+That single line is what makes ordinary sessions — the ones Tyran does not
+conduct at all — contribute evidence. Do not write it yourself.
 
 ## 4. Install the bare `/tyran` shortcut
 
@@ -115,8 +135,14 @@ End by asking for one commit of `.tyran/`. This is not tidiness, and the
 reason is the one failure mode of this whole setup that is **silent**:
 
 ```bash
-git add .tyran && git commit -m "chore: adopt Tyran"
+git add .tyran
+git add MISTAKES.md 2>/dev/null || true   # absent if they took the opt-out
+git commit -m "chore: adopt Tyran"
 ```
+
+Two `git add` calls, not one: `git add` is atomic on an unmatched pathspec, so
+naming a deleted `MISTAKES.md` alongside `.tyran` aborts the whole staging and
+`&&` then eats the commit — the silent failure this step exists to prevent.
 
 The scan also seeded `.tyran/.gitignore` (excluding `state/*/locks/`), so this
 `git add` stays clean: lease files record who holds a resource RIGHT NOW, and a

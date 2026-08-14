@@ -52,6 +52,7 @@ import {
 } from './project.mjs';
 import { classifyPath, normalizePath, validateFile, knowledgeWarnings, MANDATORY_KERNEL_PATHS } from './schema.mjs';
 import { gitRunner } from './scan-repo.mjs';
+import { parseMistakes, countSignatures, fenceState, KNOWLEDGE_THRESHOLD, MISTAKES_FILE, CLAUDE_MD_FILE } from './mistakes.mjs';
 
 /** Severity order is also the report order. `info` never fails the check. */
 export const SEVERITIES = Object.freeze(['error', 'warning', 'info']);
@@ -200,6 +201,17 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'state-stray-file': 'warning',
     'state-legacy-initiatives-dir': 'warning',
     'lease-file-tracked': 'warning',
+    // the mistakes ledger. `mistakes-unreadable` is a WARNING, not the `error`
+    // that `knowledge-unreadable` and `config-unreadable` carry: nothing
+    // mechanical consumes MISTAKES.md at write time, so an unreadable one
+    // degrades learning without stopping work, and exiting 1 on it would be a
+    // false alarm about a repository that is fine. The other two are `info`
+    // for the same reason `spawn-open` is: a warning would go red on every
+    // healthy repo between a breakage and its next retro, and a check that is
+    // red during normal operation is a check people learn to skip.
+    'mistakes-unreadable': 'warning',
+    'mistakes-repeat-unpromoted': 'info',
+    'claude-md-fence-missing': 'info',
     // overnight mode
     'limit-pause-active': 'info',
     'limit-pause-stale': 'warning',
@@ -1113,6 +1125,98 @@ export function trackedLeaseFiles(run, tyranDirName = '.tyran') {
   return listing.split('\n').filter((line) => line !== '' && lease.test(line));
 }
 
+/**
+ * The mistakes ledger at the repository root: is it readable, has a lesson
+ * earned promotion, and can a promoted rule actually land?
+ *
+ * ABSENCE PRODUCES NO FINDING AT ALL. Deleting the file is the documented
+ * opt-out, and a tool that nags about a file you deliberately removed is a
+ * tool you disable. The `checked` line still records what was looked at, so
+ * "nothing was said about it" and "it is not there" stay distinguishable.
+ *
+ * `parseMistakes` is imported rather than re-implemented: the entry shape is
+ * owned by `mistakes.mjs`, the same discipline doctor already follows for
+ * `validateKnowledge` and `pairSpawns` (ADR-18).
+ */
+export function mistakesFindings(repoRoot) {
+  const path = join(repoRoot, MISTAKES_FILE);
+  if (!existsSync(path)) return { findings: [], checked: `${MISTAKES_FILE}: absent` };
+
+  let parsed;
+  try {
+    parsed = parseMistakes(readFileSync(path, 'utf8'));
+  } catch (err) {
+    return {
+      findings: [
+        finding(
+          'mistakes-unreadable',
+          show(path),
+          `the mistakes ledger could not be read or parsed (${errText(err)}) — nothing in it was counted`,
+          `ls -la ${sq(path)}   # this file is prose, not a projection: open it and repair it by hand`,
+        ),
+      ],
+      checked: `${MISTAKES_FILE}: UNREADABLE`,
+    };
+  }
+
+  const findings = [];
+  const rows = countSignatures(parsed.entries);
+  for (const row of rows) {
+    if (row.open < KNOWLEDGE_THRESHOLD) continue;
+    findings.push(
+      finding(
+        'mistakes-repeat-unpromoted',
+        show(path),
+        `\`${show(row.signature)}\` has ${row.open} open entries (${show(row.dates.join(', '))}) — ` +
+          'a failure that recurred this often is evidence a rule is missing, not a coincidence',
+        `node scripts/mistakes.mjs repeats --file ${sq(path)} --threshold ${KNOWLEDGE_THRESHOLD}   # then /tyran:retro promotes them into .tyran/knowledge/`,
+      ),
+    );
+  }
+
+  // A law entry says a rule was earned; the fence is where such a rule lives.
+  // Info in both directions: a repo whose law predates the fence is fine, and
+  // a repo that has never promoted anything must never see this at all.
+  const lawEntries = parsed.entries.filter((entry) => entry.statusKind === 'law').length;
+  if (lawEntries > 0) {
+    const claudePath = join(repoRoot, CLAUDE_MD_FILE);
+    let state = { start: null, problem: null };
+    let claudeExists = existsSync(claudePath);
+    if (claudeExists) {
+      try {
+        state = fenceState(readFileSync(claudePath, 'utf8'));
+      } catch {
+        claudeExists = false;
+      }
+    }
+    if (!claudeExists || state.problem !== null || state.start === null) {
+      // The two branches fail differently, so they say different things: a
+      // missing fence is written by the next promotion (writeRuleToFence
+      // creates it), a malformed one refuses every promotion until it is
+      // repaired by hand.
+      const why = state.problem !== null
+        ? `the tyran:rules fence is malformed (${show(state.problem)}) — ` +
+          'the next promotion cannot land where an earned rule is supposed to live'
+        : `${CLAUDE_MD_FILE} carries no tyran:rules fence — ` +
+          'the earned rule is not in force in any session';
+      findings.push(
+        finding(
+          'claude-md-fence-missing',
+          show(claudePath),
+          `${lawEntries} entr${lawEntries === 1 ? 'y' : 'ies'} in ${MISTAKES_FILE} ` +
+            `claim${lawEntries === 1 ? 's' : ''} status \`law\`, and ${why}`,
+          `node scripts/mistakes.mjs repeats --file ${sq(path)}   # see docs/self-improvement.md for the fence`,
+        ),
+      );
+    }
+  }
+
+  return {
+    findings,
+    checked: `${MISTAKES_FILE}: ${parsed.entries.length} entries, ${rows.length} signatures`,
+  };
+}
+
 /** The repo-global overnight runtime files that legally live at state/ level. */
 /** The cross-initiative board artefacts board.mjs writes at state/ level. */
 export const CROSS_BOARD_FILES = Object.freeze(['BOARD.md', 'board.json', 'board.html']);
@@ -1378,6 +1482,10 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     );
   }
   checked.push(`initiatives/ (legacy): ${isDirectory(legacyDir) ? 'PRESENT' : 'absent'}`);
+
+  const mistakes = mistakesFindings(repoRoot);
+  findings.push(...mistakes.findings);
+  checked.push(mistakes.checked);
 
   findings.push(...overnightFindings(dir, { now, configDoc }));
   checked.push('overnight: checked');

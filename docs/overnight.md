@@ -63,16 +63,45 @@ protocol that survived them, mechanized.
 ## Configuration
 
 Overnight mode is driven by the optional `limits:` block in
-`.tyran/config.yaml`. The annotated reference for all six keys — defaults,
+`.tyran/config.yaml`. The annotated reference for all seven keys — defaults,
 accepted ranges, and the quoted-`'off'` rule — lives in
 [the configuration reference](configuration.md). Enabling the pause is
 minimal:
 
 ```yaml
-limits:               # all six keys, defaults and ranges: see the reference
+limits:               # all seven keys, defaults and ranges: see the reference
   mode: pause
   pause_at_percent: 97
 ```
+
+### Keeping the machine awake (`limits.keep_awake`, default `false`)
+
+A watcher whose whole job is to be asleep for hours is waiting through exactly
+the interval a laptop chooses to suspend in — and a suspended machine takes the
+watcher, and the network, with it. With `keep_awake: true` the wait — and the
+resume it fires, which is the actual work — is wrapped in a system-sleep
+inhibitor: `caffeinate -is` on macOS,
+`systemd-inhibit --what=idle:sleep` on Linux. **Never `caffeinate -d`** — that
+would also block the screen lock, and a machine left running overnight that
+never locks is a security regression; the display and the lock stay exactly as
+you set them. The inhibitor is released on every exit path, including `SIGINT`
+and `SIGTERM`; `SIGKILL` is the one signal nothing can catch, and it would leak
+the inhibitor until the process table clears it. An unsupported platform or a
+missing binary degrades to a no-op rather than refusing to wait —
+keeping the machine awake is an optimization on the real work, never a
+precondition for it. `overnight.mjs schedule` says which way the knob is set,
+as a warning and never a refusal.
+
+**On Linux this also refuses a suspend you asked for.** The two platforms are
+not symmetric behind this one knob. `systemd-inhibit --mode=block` holds the
+lock against *every* suspend, not only the automatic one — which is what makes
+it work at all, since a laptop's own idle suspend goes through the same logind
+call — so while the watcher waits, closing the lid or running `systemctl
+suspend` is refused, with a message naming `systemd-inhibit` and Tyran's
+reason. systemd lets only a privileged user override a `block` lock. macOS does
+not behave this way: `caffeinate -i -s` still lets an explicit sleep request
+through. To put a Linux laptop in a bag mid-wait, cancel the watcher first —
+`node scripts/overnight.mjs cancel` releases the inhibitor with it.
 
 `warn` surfaces through doctor and never denies. The default is `off`
 because the pause depends on operator-installed telemetry; enabling it
@@ -107,6 +136,12 @@ node scripts/overnight.mjs cancel            # stop the scheduled resume
 node scripts/overnight.mjs cancel --clear    # ...and take over: clears the marker
 node scripts/overnight.mjs schedule --force-resume   # resume despite a long-wait hold
 ```
+
+`cancel` reaches the watcher at any moment, including while a resume attempt is
+already running: the watcher never parks its own signal handling, so the
+`SIGTERM` is not deferred behind a `claude -p` that may run for hours. What it
+stops is the babysitting — a resumed session already in flight is a separate
+process and keeps going, so stop that one yourself if you meant it too.
 
 The `.tyran/STOP` brake outranks everything: a watcher that finds it at wake
 aborts instead of resuming. A supervised operator is never bound by the gate

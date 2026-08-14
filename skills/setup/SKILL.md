@@ -135,8 +135,14 @@ End by asking for one commit of `.tyran/`. This is not tidiness, and the
 reason is the one failure mode of this whole setup that is **silent**:
 
 ```bash
-git add .tyran MISTAKES.md && git commit -m "chore: adopt Tyran"
+git add .tyran
+git add MISTAKES.md 2>/dev/null || true   # absent if they took the opt-out
+git commit -m "chore: adopt Tyran"
 ```
+
+Two `git add` calls, not one: `git add` is atomic on an unmatched pathspec, so
+naming a deleted `MISTAKES.md` alongside `.tyran` aborts the whole staging and
+`&&` then eats the commit — the silent failure this step exists to prevent.
 
 The scan also seeded `.tyran/.gitignore` (excluding `state/*/locks/`), so this
 `git add` stays clean: lease files record who holds a resource RIGHT NOW, and a

@@ -67,8 +67,8 @@ governed prefix, so the `default:` never reached it. The rule bans the *hand*,
 not the mechanism: a free-hand `Write` from a subagent is denied, while
 `scripts/mistakes.mjs promote --law` — a `Bash` command, and a repo-root file
 is not in the shell-protected globs — still writes its own fenced region, and
-only after five recorded occurrences of one signature
-([self-improvement](self-improvement.md)). Seeding is create-only, so a repo
+only once one signature has recorded the occurrences that earn a rule
+([self-improvement](self-improvement.md) holds the thresholds). Seeding is create-only, so a repo
 adopted before this release keeps the older, silent behaviour until it copies
 the rule from `templates/policies/autonomy.yaml`; a repo that dislikes the
 trade deletes four lines from its own policy and accepts one permission prompt

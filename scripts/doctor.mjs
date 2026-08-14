@@ -1190,15 +1190,21 @@ export function mistakesFindings(repoRoot) {
       }
     }
     if (!claudeExists || state.problem !== null || state.start === null) {
+      // The two branches fail differently, so they say different things: a
+      // missing fence is written by the next promotion (writeRuleToFence
+      // creates it), a malformed one refuses every promotion until it is
+      // repaired by hand.
       const why = state.problem !== null
-        ? `the tyran:rules fence is malformed (${show(state.problem)})`
-        : `${CLAUDE_MD_FILE} carries no tyran:rules fence`;
+        ? `the tyran:rules fence is malformed (${show(state.problem)}) — ` +
+          'the next promotion cannot land where an earned rule is supposed to live'
+        : `${CLAUDE_MD_FILE} carries no tyran:rules fence — ` +
+          'the earned rule is not in force in any session';
       findings.push(
         finding(
           'claude-md-fence-missing',
           show(claudePath),
-          `${lawEntries} entr${lawEntries === 1 ? 'y' : 'ies'} in ${MISTAKES_FILE} claim status \`law\`, and ${why} — ` +
-            'the next promotion cannot land where the rule it earned is supposed to live',
+          `${lawEntries} entr${lawEntries === 1 ? 'y' : 'ies'} in ${MISTAKES_FILE} ` +
+            `claim${lawEntries === 1 ? 's' : ''} status \`law\`, and ${why}`,
           `node scripts/mistakes.mjs repeats --file ${sq(path)}   # see docs/self-improvement.md for the fence`,
         ),
       );

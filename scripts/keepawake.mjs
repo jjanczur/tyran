@@ -13,7 +13,11 @@
  *    block the screen lock, and a machine left running overnight that never
  *    locks is a security regression. `-i` is idle sleep, `-s` is sleep while
  *    on AC power; the display and the lock stay exactly as the operator set
- *    them.
+ *    them. The platforms are NOT symmetric behind this one knob, and the
+ *    difference is documented rather than papered over: macOS still honours
+ *    an explicit sleep request, while a logind `block` lock refuses the
+ *    operator's own deliberate suspend too (see `inhibitorArgv`, and the
+ *    `limits.keep_awake` section of docs/overnight.md).
  *  - **A leak is worse than a no-op.** An inhibitor that outlives its reason
  *    keeps someone's laptop awake indefinitely. So: the child is `unref`'d
  *    (it can never hold this process open), it is released on every exit path
@@ -60,6 +64,15 @@ export function inhibitorArgv(platform = process.platform) {
   // DISPLAY, and blocking it blocks the screen lock.
   if (platform === 'darwin') return ['caffeinate', '-i', '-s'];
   if (platform === 'linux') {
+    // `sleep` is not droppable: GNOME's automatic suspend goes through
+    // logind's Suspend(), which only a `sleep` lock stops — `idle` alone
+    // would leave the laptop suspending on its own timer. The cost is that
+    // `block` refuses the operator's DELIBERATE suspend as well (lid close,
+    // `systemctl suspend`), which is stated in docs/overnight.md rather than
+    // engineered around: `delay` merely postpones by InhibitDelayMaxSec and
+    // then lets the machine go, and `block-weak` (systemd 255+) exempts
+    // privileged callers — logind itself — so it would not stop the
+    // automatic suspend this exists for. `cancel` releases the lock at once.
     return [
       'systemd-inhibit',
       '--what=idle:sleep',

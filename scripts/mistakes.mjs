@@ -45,10 +45,11 @@
  *                              [--claude-md PATH] [--dry-run]
  *                              [--journal PATH] [--init SLUG] [--actor A]
  * Exit: 0 ok · 1 nothing matched (no signature at the threshold; no entry
- *       changed; the signature has not earned law) · 2 usage / IO / a field
- *       that violates a cap
+ *       changed; the signature has not earned law; the rule could not be put
+ *       in force, so no status moved) · 2 usage / IO / a field that violates
+ *       a cap
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { escapeInvisible } from './invisible.mjs';
@@ -79,7 +80,15 @@ export const MISTAKE_FIELD_MAX = 1000;
 export const SIGNATURE_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export const SIGNATURE_MAX = 60;
 
-/** Titles are one line of a heading; longer than this and a reader skims past. */
+/**
+ * Titles are one line of a heading; longer than this and a reader skims past.
+ *
+ * The two paths differ on purpose and the difference is not a loophole: a
+ * DERIVED title is cut with an ellipsis because nobody chose its length, while
+ * an explicit `--title` is REJECTED over the cap — the same reject-never-
+ * truncate doctrine as `MISTAKE_FIELD_MAX`, applied where an author is the one
+ * who decided.
+ */
 export const TITLE_MAX = 100;
 
 /**
@@ -167,6 +176,43 @@ function joinDoc({ lines, eol, finalNewline }) {
 // ---------------------------------------------------------------- parsing
 
 /**
+ * The lines of a document that are TEXT rather than a fenced code sample, and
+ * the fence that was never closed.
+ *
+ * One answer, one place: `parseMistakes` must not count an example entry
+ * pasted into a fenced block, and `fenceState` must not mistake a
+ * `tyran:rules` marker inside an operator's ```markdown block — the shipped
+ * documentation contains exactly that snippet — for the real fence. Same
+ * blindness, so the same tracking.
+ *
+ * `danglingFence` is the line index of a fence nothing closed, or `null`.
+ * Everything below such a line is invisible to both readers, and a ledger that
+ * silently reads as smaller than it is undercounts the recurrence this file
+ * exists to count — so the state is returned rather than absorbed.
+ */
+function scanOutsideCodeFences(lines) {
+  const outside = [];
+  let openedAt = null;
+  let marker = null;
+  for (const [index, line] of lines.entries()) {
+    const fence = CODE_FENCE_RE.exec(line);
+    if (fence) {
+      if (openedAt === null) {
+        openedAt = index;
+        marker = fence[1][0];
+      } else if (fence[1][0] === marker) {
+        openedAt = null;
+        marker = null;
+      }
+      continue;
+    }
+    if (openedAt !== null) continue;
+    outside.push([index, line]);
+  }
+  return { outside, danglingFence: openedAt };
+}
+
+/**
  * Every entry of a `MISTAKES.md`, newest first, plus the counts of what could
  * not be classified.
  *
@@ -176,31 +222,16 @@ function joinDoc({ lines, eol, finalNewline }) {
  * birth. Headings are also anchored at column 0 for the same reason — the
  * shipped template indents its example four spaces.
  *
- * Nothing is dropped silently. An entry with no signature and an entry whose
- * status is not in the grammar are both COUNTED and reported: a typo that
- * removed an entry from the count with no trace is the failure this file's
- * whole value rests on not having.
+ * Nothing is dropped silently. An entry with no signature, an entry whose
+ * status is not in the grammar, and a code fence nobody closed — which hides
+ * every entry below it — are all COUNTED and reported: a typo that removed an
+ * entry from the count with no trace is the failure this file's whole value
+ * rests on not having.
  */
 export function parseMistakes(text) {
   const { lines } = splitDoc(String(text));
-  const headings = [];
-  let inCodeFence = false;
-  let fenceMarker = null;
-  for (const [index, line] of lines.entries()) {
-    const fence = CODE_FENCE_RE.exec(line);
-    if (fence) {
-      if (!inCodeFence) {
-        inCodeFence = true;
-        fenceMarker = fence[1][0];
-      } else if (fence[1][0] === fenceMarker) {
-        inCodeFence = false;
-        fenceMarker = null;
-      }
-      continue;
-    }
-    if (inCodeFence) continue;
-    if (HEADING_RE.test(line)) headings.push(index);
-  }
+  const { outside, danglingFence } = scanOutsideCodeFences(lines);
+  const headings = outside.filter(([, line]) => HEADING_RE.test(line)).map(([index]) => index);
 
   const entries = [];
   for (const [n, start] of headings.entries()) {
@@ -212,6 +243,7 @@ export function parseMistakes(text) {
     firstEntryLine: headings.length > 0 ? headings[0] : null,
     withoutSignature: entries.filter((e) => e.signature === null).length,
     unknownStatus: entries.filter((e) => e.statusKind === 'unknown').length,
+    danglingFence,
   };
 }
 
@@ -330,6 +362,11 @@ export function insertEntry(text, rendered) {
  * parsed parts: re-rendering would silently normalise — and on an entry a
  * human had annotated, LOSE — the initiative, actor and proof of exactly the
  * entries that mattered enough to be promoted.
+ *
+ * The replacement is a FUNCTION, never a template string: `knowledge:<id>`
+ * admits `$&`, `` $` `` and `$'`, and String.replace would expand them into
+ * the surrounding trailer — corruption outside the status token, which is the
+ * one thing this function promises not to do.
  */
 export function promoteStatus(text, signature, newStatus, fromKinds) {
   const doc = splitDoc(String(text));
@@ -339,7 +376,7 @@ export function promoteStatus(text, signature, newStatus, fromKinds) {
     if (entry.signature !== signature || entry.trailerLine === null) continue;
     if (!fromKinds.includes(entry.statusKind)) continue;
     const line = doc.lines[entry.trailerLine];
-    const rewritten = line.replace(/(status\s+`)([^`]*)(`)/, `$1${newStatus}$3`);
+    const rewritten = line.replace(/(status\s+`)([^`]*)(`)/, (_match, open, _old, close) => open + newStatus + close);
     if (rewritten === line) continue;
     doc.lines[entry.trailerLine] = rewritten;
     changed += 1;
@@ -352,26 +389,38 @@ export function promoteStatus(text, signature, newStatus, fromKinds) {
 /**
  * Where Tyran's region of a `CLAUDE.md` is, or what is wrong with it.
  *
- * Returns `{start, end, problem}` with line indices. A malformed fence is
- * NEVER guessed at: this file belongs to the operator, and a writer that
+ * Returns `{start, end, problem, indent}` with line indices. A malformed fence
+ * is NEVER guessed at: this file belongs to the operator, and a writer that
  * picked the likeliest interpretation of a broken marker pair would edit prose
  * nobody asked it to touch.
+ *
+ * CODE-FENCE-AWARE, for the same reason `parseMistakes` is and with more force:
+ * `docs/self-improvement.md` ships the marker pair inside a ```markdown block,
+ * so an operator documenting the mechanism in their own CLAUDE.md would
+ * otherwise have the rule written into their example — or, with a real fence
+ * as well, be told forever that their fence has "2 start markers".
+ *
+ * `indent` is the start marker's own leading whitespace, so a fence nested
+ * under a list item gets its rule at the list's indentation instead of a line
+ * at column 0 that terminates the list early.
  */
 export function fenceState(text) {
   const { lines } = splitDoc(String(text));
+  const { outside } = scanOutsideCodeFences(lines);
   const starts = [];
   const ends = [];
-  for (const [index, line] of lines.entries()) {
+  for (const [index, line] of outside) {
     if (FENCE_START_RE.test(line)) starts.push(index);
     else if (FENCE_END_RE.test(line)) ends.push(index);
   }
-  if (starts.length > 1) return { start: null, end: null, problem: `${starts.length} start markers` };
-  if (ends.length > 1) return { start: null, end: null, problem: `${ends.length} end markers` };
-  if (starts.length === 1 && ends.length === 0) return { start: null, end: null, problem: 'a start marker with no end marker' };
-  if (ends.length === 1 && starts.length === 0) return { start: null, end: null, problem: 'an end marker with no start marker' };
-  if (starts.length === 0) return { start: null, end: null, problem: null };
-  if (ends[0] < starts[0]) return { start: null, end: null, problem: 'the end marker comes before the start marker' };
-  return { start: starts[0], end: ends[0], problem: null };
+  const broken = (problem) => ({ start: null, end: null, problem, indent: '' });
+  if (starts.length > 1) return broken(`${starts.length} start markers`);
+  if (ends.length > 1) return broken(`${ends.length} end markers`);
+  if (starts.length === 1 && ends.length === 0) return broken('a start marker with no end marker');
+  if (ends.length === 1 && starts.length === 0) return broken('an end marker with no start marker');
+  if (starts.length === 0) return broken(null);
+  if (ends[0] < starts[0]) return broken('the end marker comes before the start marker');
+  return { start: starts[0], end: ends[0], problem: null, indent: /^[ \t]*/.exec(lines[starts[0]])[0] };
 }
 
 /** The fence block, identical wherever it is created — one shape, one answer. */
@@ -416,7 +465,10 @@ export function writeRuleToFence(text, ruleLine) {
     doc.lines.splice(doc.lines.length - 1, 0, ruleLine);
     return joinDoc({ ...doc, finalNewline: doc.finalNewline || text === '' });
   }
-  doc.lines.splice(state.end, 0, ruleLine);
+  // The fence's own indentation, not column 0: an operator who nested the
+  // markers under a list item gets a rule inside that list rather than a line
+  // that ends it.
+  doc.lines.splice(state.end, 0, state.indent + ruleLine);
   return joinDoc(doc);
 }
 
@@ -437,6 +489,31 @@ export function fenceRules(text) {
 export function ruleLineFor({ rule, signature, count, dates }) {
   const pointer = dates.length > 0 ? ` — ${MISTAKES_FILE} entries ${dates.join(', ')}` : '';
   return `- ${clean(rule)} (\`${clean(signature)}\`, ${count} occurrences${pointer})`;
+}
+
+/**
+ * The evidence parenthetical `ruleLineFor` writes, anchored where it writes it.
+ * Whitespace after it is tolerated; a rule's human text is not searched.
+ */
+const RULE_EVIDENCE_RE = /\(`([a-z0-9]+(?:-[a-z0-9]+)*)`, \d+ occurrences(?: — [^`)]*)?\)$/;
+
+/**
+ * The signature a rule line's MACHINE-WRITTEN evidence names, or `null`.
+ *
+ * Read from the tail rather than looked for anywhere in the line, because rule
+ * text naming another signature in backticks is the normal case — signatures
+ * are kebab-case slugs for repo concepts. A substring test let one such rule
+ * block that signature's own rule forever while its entries were still flipped
+ * to `law`: a trailer claiming law with no rule anywhere, which is the one
+ * state nothing downstream detects.
+ */
+export function signatureOfRuleLine(line) {
+  return RULE_EVIDENCE_RE.exec(String(line).trimEnd())?.[1] ?? null;
+}
+
+/** Whether the fence carries a rule whose evidence names this signature. */
+export function fenceCarriesSignature(text, signature) {
+  return fenceRules(text).some((line) => signatureOfRuleLine(line) === signature);
 }
 
 // ------------------------------------------------------------- validation
@@ -488,6 +565,25 @@ function checkDate(value) {
   return value;
 }
 
+/**
+ * An explicit title: the field checks, then the heading's own ceiling.
+ *
+ * Measured against the INPUT for the same reason as `MISTAKE_FIELD_MAX` —
+ * `escapeInvisible` turns one hostile codepoint into eight visible ones, and a
+ * cap counted after escaping would reject a legal title over a character its
+ * author cannot see.
+ */
+function checkTitle(value) {
+  checkField('title', value);
+  if (cpLength(value) > TITLE_MAX) {
+    throw new UsageError(
+      `--title is ${cpLength(value)} codepoints, over the ${TITLE_MAX} cap — ` +
+        'a heading is one line. It is NOT truncated',
+    );
+  }
+  return clean(value);
+}
+
 /** First sentence of `what`, cut at TITLE_MAX with an ellipsis. */
 export function titleFrom(what) {
   const text = clean(what);
@@ -535,10 +631,60 @@ function readMistakes(path) {
         'so nothing here puts it back. `scan-repo.mjs --ensure-policy` seeds it again if you want one',
     );
   }
+  return readText(path);
+}
+
+/**
+ * Every read this CLI makes, with the failure named.
+ *
+ * An EISDIR or EACCES escaping as an uncaught exception is a stack trace and
+ * exit 1 — the code this CLI's contract reserves for "nothing matched", which
+ * an automated caller reads as "the signature has not earned law" and moves on
+ * from. IO belongs on exit 2 with the path in the message.
+ */
+function readText(path) {
   try {
     return readFileSync(path, 'utf8');
   } catch (error) {
     throw new IOError(`could not read ${escapeInvisible(path)}: ${error.message}`);
+  }
+}
+
+/**
+ * Every write this CLI makes, THROUGH a symlink rather than over it.
+ *
+ * `writeAtomic` renames a temp file onto the target, and a rename replaces a
+ * symlink with a regular file: an operator whose `CLAUDE.md` links to a shared
+ * or global instructions file would lose the link while the file they meant
+ * never received the rule — silent on both halves. So the link is resolved and
+ * the file it names is written, which is what every editor does with the same
+ * path; refusing instead would make an ordinary monorepo layout unpromotable.
+ * A link pointing nowhere is the one case that IS refused: there is no file to
+ * write, and replacing the link would destroy the operator's only record of
+ * where it pointed.
+ */
+function writeThroughLinks(path, text) {
+  let target = path;
+  let link = null;
+  try {
+    link = lstatSync(path).isSymbolicLink();
+  } catch {
+    link = false; // no such path yet: the write creates it
+  }
+  if (link) {
+    try {
+      target = realpathSync(path);
+    } catch (error) {
+      throw new IOError(
+        `${escapeInvisible(path)} is a symlink to a path that does not exist (${error.message}) — ` +
+          'repair the link; nothing was written',
+      );
+    }
+  }
+  try {
+    writeAtomic(target, text);
+  } catch (error) {
+    throw new IOError(`could not write ${escapeInvisible(target)}: ${error.message}`);
   }
 }
 
@@ -593,11 +739,11 @@ function cmdAdd(flags) {
     status: 'open',
   };
   for (const [key] of FIELDS) entry[key] = checkField(key, flags[key]);
-  entry.title = flags.title === undefined ? titleFrom(entry.what) : clean(checkField('title', flags.title));
+  entry.title = flags.title === undefined ? titleFrom(entry.what) : checkTitle(flags.title);
 
   const before = readMistakes(path);
   const after = insertEntry(before, renderEntry(entry));
-  writeAtomic(path, after);
+  writeThroughLinks(path, after);
   console.error(`mistakes: added \`${signature}\` to ${escapeInvisible(path)} (${entry.date})`);
   return 0;
 }
@@ -619,6 +765,7 @@ function cmdRepeats(flags) {
         entries: parsed.entries.length,
         without_signature: parsed.withoutSignature,
         unknown_status: parsed.unknownStatus,
+        dangling_code_fence_line: parsed.danglingFence === null ? null : parsed.danglingFence + 1,
         signatures: rows.map((row) => ({ ...row, recommendation: recommendationFor(row, threshold) })),
       },
       null,
@@ -634,14 +781,20 @@ function cmdRepeats(flags) {
       : `${row.open} open (${row.dates.join(', ')})`;
     console.log(`${row.signature.padEnd(width)}  ${counted}  -> ${recommendationFor(row, threshold)}`);
   }
-  // Omission is never silent: an entry nobody gave a signature, and an entry
-  // whose status was typo'd, are both invisible to the counts above and are
-  // the two ways this file quietly reads as smaller than it is.
+  // Omission is never silent: an entry nobody gave a signature, an entry whose
+  // status was typo'd, and a code fence nobody closed are the three ways this
+  // file quietly reads as smaller than it is.
   const notes = [`${rows.length} signature(s) at or above the threshold`, `${parsed.entries.length} entries scanned`];
   if (parsed.withoutSignature > 0) notes.push(`${parsed.withoutSignature} without a signature`);
   if (parsed.unknownStatus > 0) notes.push(`${parsed.unknownStatus} with an unrecognised status`);
+  if (parsed.danglingFence !== null) notes.push(danglingFenceNote(parsed));
   console.log(notes.join('; '));
   return rows.length > 0 ? 0 : 1;
+}
+
+/** An unclosed ``` swallows every entry below it — said, never absorbed. */
+function danglingFenceNote(parsed) {
+  return `a code fence opened at line ${parsed.danglingFence + 1} is never closed, so every entry below it was NOT counted`;
 }
 
 function recommendationFor(row, threshold) {
@@ -670,13 +823,18 @@ function cmdPromote(flags) {
   if (status === 'wontfix') fromKinds = ['open', 'knowledge', 'law', 'unknown', 'missing'];
   else if (/^knowledge:\S+$/.test(status)) fromKinds = ['open'];
   else throw new UsageError(`--status must be knowledge:<id> or wontfix (got ${JSON.stringify(escapeInvisible(status))})`);
+  // The trailer writes the status inside a backtick span, so a backtick in the
+  // id would close it early and hand the rest of the id to the parser as
+  // structure — refused here for the same reason `checkTrailerField` refuses
+  // it, rather than written and read back as something shorter.
+  if (status.includes('`')) throw new UsageError('--status must not contain a backtick');
 
   const { text, changed } = promoteStatus(readMistakes(path), signature, status, fromKinds);
   if (changed === 0) {
     console.error(`mistakes: no entry with signature \`${signature}\` was eligible for status \`${status}\` — nothing written`);
     return 1;
   }
-  writeAtomic(path, text);
+  writeThroughLinks(path, text);
   console.error(`mistakes: ${changed} entr${changed === 1 ? 'y' : 'ies'} moved to status \`${status}\``);
   return 0;
 }
@@ -697,6 +855,7 @@ function promoteLaw(flags, path, signature) {
   const claudePath = resolve(flags['claude-md'] ?? join(dirname(path), CLAUDE_MD_FILE));
 
   const parsed = parseMistakes(readMistakes(path));
+  if (parsed.danglingFence !== null) console.error(`mistakes: ${danglingFenceNote(parsed)}`);
   const row = countSignatures(parsed.entries).find((r) => r.signature === signature);
   const count = row?.lawCount ?? 0;
   if (count === 0) {
@@ -713,7 +872,7 @@ function promoteLaw(flags, path, signature) {
     return 1;
   }
 
-  const claudeText = existsSync(claudePath) ? readFileSync(claudePath, 'utf8') : '';
+  const claudeText = existsSync(claudePath) ? readText(claudePath) : '';
   const state = fenceState(claudeText);
   if (state.problem !== null) {
     throw new UsageError(
@@ -722,7 +881,9 @@ function promoteLaw(flags, path, signature) {
     );
   }
   const line = ruleLineFor({ rule, signature, count, dates: row.dates });
-  const already = fenceRules(claudeText).some((existing) => existing.includes(`\`${signature}\``));
+  // The signature this line's EVIDENCE names, never a substring of the rule's
+  // prose: see `signatureOfRuleLine`.
+  const already = fenceCarriesSignature(claudeText, signature);
 
   if (flags['dry-run']) {
     console.log(line);
@@ -733,9 +894,23 @@ function promoteLaw(flags, path, signature) {
     return 0;
   }
 
-  if (!already) writeAtomic(claudePath, writeRuleToFence(claudeText, line));
+  // The status flip and the rule line are ONE decision, checked before either
+  // is made: entries that say `law` while the rule is in no fence — because an
+  // unclosed code fence in the operator's document swallowed the block we would
+  // append — is the one state nothing downstream detects, so it is refused
+  // rather than produced.
+  const nextClaudeText = already ? claudeText : writeRuleToFence(claudeText, line);
+  if (!fenceCarriesSignature(nextClaudeText, signature)) {
+    console.error(
+      `mistakes: ${escapeInvisible(claudePath)} would carry no rule for \`${signature}\` after the write ` +
+        '(an unclosed ``` code fence swallowing the tyran:rules block?) — nothing written, no status moved',
+    );
+    return 1;
+  }
+
+  if (!already) writeThroughLinks(claudePath, nextClaudeText);
   const { text, changed } = promoteStatus(readMistakes(path), signature, 'law', ['open', 'knowledge']);
-  writeAtomic(path, text);
+  writeThroughLinks(path, text);
   console.error(
     already
       ? `mistakes: ${escapeInvisible(claudePath)} already carried \`${signature}\`; ${changed} entr${changed === 1 ? 'y' : 'ies'} moved to status \`law\``

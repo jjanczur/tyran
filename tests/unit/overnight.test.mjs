@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,12 +27,16 @@ import {
   pidAlive,
   resumeArgv,
   resumeTook,
+  runResume,
   scheduleDecision,
   skipReason,
   watcherAlive,
   HEARTBEAT_FRESH_MS,
   weeklyDeferral,
 } from '../../scripts/overnight.mjs';
+// The platform matrix has one home; this test asks it whether to expect an
+// inhibitor process at all, rather than spelling the platforms out again.
+import { inhibitorArgv } from '../../scripts/keepawake.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/overnight.mjs', import.meta.url));
 const NOW = Date.parse('2026-08-13T12:00:00.000Z');
@@ -55,6 +59,28 @@ const marker = (over = {}) => ({
   init: 'demo',
   ...over,
 });
+
+async function waitForDeath(pid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (pidAlive(pid) && Date.now() < deadline) await new Promise((tick) => setTimeout(tick, 25));
+  return !pidAlive(pid);
+}
+
+async function waitForFile(path, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path) && Date.now() < deadline) await new Promise((tick) => setTimeout(tick, 25));
+  return existsSync(path);
+}
+
+/** Kill a pid recorded by a stub, if it is still around. Cleanup only. */
+function reap(pidFile) {
+  if (!existsSync(pidFile)) return;
+  try {
+    process.kill(Number(readFileSync(pidFile, 'utf8').trim()), 'SIGKILL');
+  } catch {
+    /* already gone */
+  }
+}
 
 // spawnSync, not execFileSync: the latter discards stderr on the SUCCESS path,
 // and the keep-awake warning is stderr on a command that exits 0.
@@ -468,6 +494,92 @@ test('with the knob off the watcher acquires nothing — the default changes no 
   const r = run(['--wait', '--dir', dir, '--chunk-ms', '50']);
   assert.equal(r.code, 0, r.stderr);
   assert.doesNotMatch(readFileSync(join(dir, RESUME_LOG_RELPATH), 'utf8'), /keep-awake/);
+});
+
+test('SIGTERM still kills the watcher DURING a resume attempt, and takes the inhibitor with it', async () => {
+  // M20: run the attempt with `spawnSync`. The keep-awake wrap installs JS
+  // signal handlers, and a sync child parks the event loop for the attempt's
+  // whole life, so none of them can run. Measured on the mutant:
+  // a SIGTERM that kills the watcher in 4ms with the knob off was swallowed for
+  // the stub's full 25s with it on — and in production one attempt is capped at
+  // RESUME_ATTEMPT_TIMEOUT_MS (6h), up to four of them. `cancel` is the
+  // operator's documented handle for exactly this, and it would do nothing.
+  const dir = repo();
+  writeFileSync(join(dir, '.tyran', 'config.yaml'), 'limits:\n  mode: pause\n  keep_awake: true\n');
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const inhibitorPidFile = join(dir, 'inhibitor.pid');
+  const claudePidFile = join(dir, 'claude.pid');
+  // Stubs under the REAL names, first on PATH: keepawake resolves `caffeinate`
+  // / `systemd-inhibit` through PATH, and neither real one may ever run — a
+  // test that changed the operator's sleep policy is a test with a side effect
+  // on their machine. Each execs, so the pid in the file is the signal's target.
+  for (const name of ['caffeinate', 'systemd-inhibit']) {
+    const stub = join(bin, name);
+    writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$$" > ${JSON.stringify(inhibitorPidFile)}\nexec sleep 600\n`);
+    chmodSync(stub, 0o755);
+  }
+  // A resume that far outlives the signal: the SIGTERM must not wait for it.
+  const stub = join(bin, 'claude');
+  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$$" > ${JSON.stringify(claudePidFile)}\nexec sleep 30\n`);
+  chmodSync(stub, 0o755);
+  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ resume_at: new Date(Date.now() - 1000).toISOString() })));
+
+  const watcher = spawn(process.execPath, [SCRIPT, '--wait', '--dir', dir, '--cmd', stub, '--chunk-ms', '50'], {
+    stdio: 'ignore',
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  const exited = new Promise((res) => watcher.on('exit', (code, signal) => res({ code, signal })));
+  try {
+    assert.ok(await waitForFile(claudePidFile), 'the stub resume started');
+    if (inhibitorArgv() !== null) assert.ok(await waitForFile(inhibitorPidFile, 5000), 'the inhibitor is held');
+    watcher.kill('SIGTERM');
+    const result = await Promise.race([
+      exited,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('the watcher outlived a SIGTERM sent during its resume attempt')), 10000),
+      ),
+    ]);
+    assert.equal(result.signal, 'SIGTERM', "the watcher dies from the operator's own signal, mid-attempt");
+    // M21: release without re-raising, or hold the inhibitor past the handler.
+    // A sender that escalates after a grace period — systemd shutdown, macOS
+    // logout, `pkill` then a hard kill — reaches SIGKILL before anything runs,
+    // and the inhibitor is left holding the machine awake with nothing alive to
+    // explain why. That leak is the worst outcome this module has.
+    if (inhibitorArgv() !== null) {
+      const inhibitor = Number(readFileSync(inhibitorPidFile, 'utf8').trim());
+      assert.ok(await waitForDeath(inhibitor), `the inhibitor (pid ${inhibitor}) outlived the watcher that held it`);
+    }
+  } finally {
+    reap(inhibitorPidFile);
+    reap(claudePidFile);
+    if (watcher.exitCode === null && watcher.signalCode === null) watcher.kill('SIGKILL');
+  }
+});
+
+test('runResume reclaims a hung attempt at the timeout, and survives a missing binary', async () => {
+  // M22: drop the timer. The per-attempt ceiling is hand-rolled here rather
+  // than free from spawnSync's `timeout`, and without it a `claude -p` that
+  // hangs pins the babysitter on its first rung forever instead of failing.
+  const dir = repo();
+  const startedAt = Date.now();
+  const hung = await runResume(['/bin/sh', '-c', 'exec sleep 30'], { cwd: dir, timeoutMs: 300 });
+  assert.equal(hung.signal, 'SIGTERM', 'the attempt was reclaimed, not waited out');
+  assert.ok(Date.now() - startedAt < 15000, 'and reclaimed on the timeout, not at the child\'s own pace');
+  // M23: drop the 'error' listener. A missing `claude` arrives as an async
+  // 'error' event, and an unheard one is thrown from outside any try/catch the
+  // watcher could have — measured: it takes the process down where one failed
+  // attempt should only have cost one rung of the ladder. With the mutant this
+  // whole test FILE dies rather than failing an assertion, which is the point.
+  assert.deepEqual(await runResume(['/nonexistent/tyran-claude-that-is-not-there'], { cwd: dir }), {
+    status: null,
+    signal: null,
+  });
+  // M24: report a fixed status. With no journal to compare, `took` IS the exit
+  // code — a hardcoded null would fail every resume on such a repo, and a
+  // hardcoded 0 would call every failed one a success.
+  assert.deepEqual(await runResume(['/bin/sh', '-c', 'exit 0'], { cwd: dir }), { status: 0, signal: null });
+  assert.deepEqual(await runResume(['/bin/sh', '-c', 'exit 3'], { cwd: dir }), { status: 3, signal: null });
 });
 
 test('numeric flags refuse junk that would wake the watcher hours early', () => {

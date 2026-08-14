@@ -14,11 +14,13 @@ Every entry has the same five bullets:
     - **Prevention:** the rule that would have stopped it, imperative.
     - **Signature:** `kebab-case-slug` · initiative `<slug>` · actor `<who>` · proof `<F-n>` · status `open`
 
-The **signature** is what makes this more than a diary. Three entries under
-one signature are evidence that a rule is missing, and the count is what
-earns it:
+The **signature** is what makes this more than a diary. Repeated entries under
+one signature are evidence that a rule is missing, and the count is what earns
+it — `repeats` prints the signatures that have crossed a graduation threshold
+and what each has earned (the thresholds, and why they are where they are, live
+in `docs/self-improvement.md`):
 
-    node scripts/mistakes.mjs repeats --threshold 3
+    node scripts/mistakes.mjs repeats
 
 Reuse an existing signature rather than inventing a near-synonym — a synonym
 resets the count to one and the lesson never graduates.
@@ -68,4 +70,4 @@ deleting it destroys the count that earned the rule.
 - **Root cause:** the enforcement scripts and the policy directory are `MANDATORY_KERNEL_PATHS`, and the gate matches the Bash command's TEXT, not just a write target — a validator, a `grep` and a `cat` are all refused alike. This is the boundary working: a command naming the mechanism is the shape an attempt to disable it takes.
 - **Consequence:** an investigation stalled until the tool was switched; on an earlier occasion, a schema validator handed to an operator to run by hand.
 - **Prevention:** reach for `Read` on those files, and name only the directory in a shell command — `node scripts/doctor.mjs --state --dir .tyran` validates the policy without naming it.
-- **Signature:** `gate-refuses-kernel-path-in-bash` · initiative `phase-5-mistakes` · actor `conductor` · proof `-` · status `law`
+- **Signature:** `gate-refuses-kernel-path-in-bash` · initiative `phase-5-mistakes` · actor `conductor` · proof `-` · status `open`

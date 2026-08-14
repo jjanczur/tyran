@@ -126,6 +126,23 @@ test('Linux inhibits idle and sleep with our own reason and a command to hold th
   assert.match(INHIBIT_SLEEP_SECONDS, /^\d+$/, 'POSIX sleep takes an integer; GNU `infinity` is not portable');
 });
 
+test('Linux keeps `sleep` in --what and `block` as the mode — the two the docs promise', () => {
+  const argv = inhibitorArgv('linux');
+  // M25: soften `--mode=block` to `delay`. A delay lock only postpones, by
+  // InhibitDelayMaxSec, and then lets the machine suspend anyway — the watcher
+  // is lost while the log says it is being held awake. `block` is also the
+  // mode docs/overnight.md describes to the operator: it refuses their own
+  // deliberate suspend, and only a privileged user can override it. Both
+  // surfaces state that, so weakening it here makes the docs wrong too.
+  assert.ok(argv.includes('--mode=block'), 'a delay lock expires and the machine sleeps regardless');
+  // M26: drop `sleep` from --what and inhibit `idle` alone. Automatic suspend
+  // goes through logind's Suspend(), which only a `sleep` lock stops, so an
+  // idle-only lock would let the laptop suspend on its own timer — the exact
+  // failure this module exists for — while looking correct in the log.
+  const what = argv.find((token) => token.startsWith('--what='));
+  assert.ok(what.split('=')[1].split(':').includes('sleep'), 'idle alone does not stop logind Suspend()');
+});
+
 test('a platform with no mechanism is a no-op release, never a crash', () => {
   // M4: throw (or return undefined) on an unsupported platform. Windows would
   // lose the watcher entirely, over a feature that is pure upside.

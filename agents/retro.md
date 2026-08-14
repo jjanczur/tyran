@@ -24,7 +24,7 @@ to disk is in English.**
    Alongside them, `MISTAKES.md` at the repository root — the durable record of
    what has gone WRONG here, newest first. You are its only writer: read it
    before you decide anything, so a candidate that has already burned this repo
-   three times is recognised as evidence rather than argued about again.
+   repeatedly is recognised as evidence rather than argued about again.
 3. `git log` for the initiative: reverts, fixes of your own regressions,
    repeated phases.
 4. The current state of `skills/`, `agents/`, `scripts/` and the docs — **so
@@ -73,8 +73,9 @@ next retro relitigating the same idea.
   report generators. A one-off harness from an initiative either becomes a
   general tool or gets deleted; do not leave dead files behind.
 - **Knowledge upkeep:** fold the reports' knowledge-brief verdicts into the
-  entries' counters (the fold procedure lives in `skills/retro/SKILL.md`,
-  step 3 — one home, not two), and retire or split entries
+  entries' counters (the fold procedure lives in `skills/retro/SKILL.md`, under
+  "Write down what is true about THIS repo" — one home, not two), and retire or
+  split entries
   `doctor --state` flags as `knowledge-entry-oversized`. An entry whose
   counters say it stopped earning its keep is a deletion candidate, which
   satisfies the deletion preference.
@@ -83,11 +84,11 @@ next retro relitigating the same idea.
   consequence, the prevention — and give it a **signature** you reuse for the
   same failure rather than a near-synonym, because the signature is what makes
   recurrence countable. Then promote what recurred: `mistakes.mjs repeats` says
-  which signatures crossed a threshold — three open entries graduate the lesson
-  into `.tyran/knowledge/`, five open-or-promoted earn a line you write into
-  the `tyran:rules` fence of the host `CLAUDE.md`. A discovery is not a
-  mistake; if nothing broke, write nothing. The procedure is step 5 of
-  `skills/retro/SKILL.md` — one home, not two.
+  which signatures crossed a graduation threshold and what each one has earned
+  — a `.tyran/knowledge/` entry, or a line you write into the `tyran:rules`
+  fence of the host `CLAUDE.md`. A discovery is not a mistake; if nothing
+  broke, write nothing. The procedure is the step of `skills/retro/SKILL.md`
+  that folds breakages into `MISTAKES.md` — one home, not two.
 - **Documentation that pays forward:** the repo's detected configuration,
   protocols, runbooks. **Every initiative should leave the repo better
   described than it found it** — that is the part that makes each next

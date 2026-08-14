@@ -95,17 +95,40 @@ near-synonym resets the count to one and the lesson never graduates. Search the
 file before you invent one. Then let the counting be mechanical:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" repeats --threshold 3
+node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" repeats
 ```
 
-- **Three open entries under one signature** — write the rule into
-  `.tyran/knowledge/<topic>.yaml` with
-  `provenance: [{source: MISTAKES.md, reference: '<sig> x3'}]`, scope it with
-  `applies_to` so it reaches only the agents it helps, then
-  `mistakes.mjs promote --signature <sig> --status knowledge:<id>`. Grep
+It prints one line per signature that has crossed a graduation threshold,
+ending in what that signature has earned. Act on that recommendation — the
+thresholds themselves, and why they are where they are, live in
+`docs/self-improvement.md`.
+
+- **`promote to .tyran/knowledge/`** — write the rule into
+  `.tyran/knowledge/<topic>.yaml`, scoped with `applies_to` so it reaches only
+  the agents it helps:
+
+  ```yaml
+  entries:
+    - id: K-12
+      kind: gotcha
+      text: 'Link the dependency directory into every new worktree before the handoff.'
+      confidence: 0.8
+      provenance:
+        - source: MISTAKES.md
+          reference: 'worktree-missing-deps — the open entries that earned it'
+      used: 0
+      helpful: 0
+      outdated_reports: 0
+      applies_to:
+        - 'scripts/**'
+  ```
+
+  `provenance` is a block sequence, never a flow mapping: `yaml-lite` refuses
+  `[{...}]`, and a knowledge file it cannot parse reaches no handoff at all.
+  Then `mistakes.mjs promote --signature <sig> --status knowledge:<id>`. Grep
   `.tyran/knowledge/` for the signature first: an entry already carrying it
   means this was promoted before and the status trailers were hand-edited away.
-- **Five open-or-promoted — it kept happening after the knowledge entry
+- **`promote to CLAUDE.md law` — it kept happening after the knowledge entry
   shipped.** That is evidence the delivered rule was not enough, which is the
   strongest case for law there is. Write it:
 
@@ -116,8 +139,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/mistakes.mjs" repeats --threshold 3
 
   That edits the host `CLAUDE.md` between `<!-- tyran:rules start -->` and
   `<!-- tyran:rules end -->` and no byte outside it, appends a `decision` event
-  naming the rule, the signature and the count, and refuses below five
-  occurrences or on a fence it cannot parse. `--dry-run` prints the line and
+  naming the rule, the signature and the count, and refuses below the law
+  threshold or on a fence it cannot parse. `--dry-run` prints the line and
   writes nothing. You do not wait for an approval: the operator meets the
   change in the journal, the board and the diff, and says no by deleting the
   line — a deleted rule does not come back.

@@ -12,7 +12,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, chmodSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  mkdtempSync, writeFileSync, readFileSync, readdirSync, chmodSync, existsSync, mkdirSync,
+  symlinkSync, lstatSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -27,9 +30,12 @@ import {
   fenceRules,
   writeRuleToFence,
   ruleLineFor,
+  signatureOfRuleLine,
+  fenceCarriesSignature,
   titleFrom,
   statusKindOf,
   MISTAKE_FIELD_MAX,
+  TITLE_MAX,
   LAW_THRESHOLD,
   FENCE_START,
   FENCE_END,
@@ -82,12 +88,29 @@ const read = (dir, file = 'MISTAKES.md') => readFileSync(join(dir, file), 'utf8'
  *
  * Anchored at column 0, which is precisely the line class `parseMistakes`
  * treats as an entry: the fixture and the parser agree on what an entry is.
+ *
+ * A replacer FUNCTION, for the same reason the code under test uses one: a
+ * status containing `$&` expands inside a template replacement, so a fixture
+ * built that way would assert against a document nothing produced.
  */
 function setEntryStatus(text, status) {
   return text
     .split('\n')
-    .map((line) => (/^- \*\*Signature:\*\*/.test(line) ? line.replace(/(status `)[^`]*(`)/, `$1${status}$2`) : line))
+    .map((line) => (/^- \*\*Signature:\*\*/.test(line)
+      ? line.replace(/(status `)[^`]*(`)/, (_m, open, close) => open + status + close)
+      : line))
     .join('\n');
+}
+
+/** The same edit, on ONE entry: the guards about eligibility need a mixture. */
+function setStatusOfEntry(text, index, status) {
+  const lines = text.split('\n');
+  const trailers = lines.flatMap((line, i) => (/^- \*\*Signature:\*\*/.test(line) ? [i] : []));
+  lines[trailers[index]] = lines[trailers[index]].replace(
+    /(status `)[^`]*(`)/,
+    (_m, open, close) => open + status + close,
+  );
+  return lines.join('\n');
 }
 
 // ------------------------------------------------------------ the entry shape
@@ -164,6 +187,85 @@ test('a field over the cap is REJECTED, never truncated', () => {
   assert.equal(read(dir), before, 'a rejected add still wrote to the file');
   // and exactly at the cap is accepted, so the boundary is a cap and not a fear
   assert.equal(add(dir, ['--cause', 'x'.repeat(MISTAKE_FIELD_MAX)]).code, 0);
+});
+
+test('the cap counts CODEPOINTS, so an astral character costs one', () => {
+  // M6b — count `String(value).length` instead of codepoints: an author whose
+  // root cause carries emoji, CJK extension B or mathematical alphanumerics
+  // loses half the documented budget, and the refusal quotes a number that
+  // disproves its own claim ("501 codepoints, over the 1000 cap").
+  const dir = repo();
+  const astral = String.fromCodePoint(0x1f600);
+  assert.equal(add(dir, ['--cause', astral.repeat(MISTAKE_FIELD_MAX)]).code, 0, 'a field exactly at the cap was refused');
+  const over = add(dir, ['--cause', astral.repeat(MISTAKE_FIELD_MAX + 1)]);
+  assert.equal(over.code, 2);
+  assert.match(over.stderr, /is 1001 codepoints, over the 1000 cap/);
+  // the trailer fields carry their own cap, and it is the same measurement
+  assert.equal(add(dir, ['--proof', astral.repeat(MISTAKE_FIELD_MAX)]).code, 0);
+  const trailer = add(dir, ['--proof', astral.repeat(MISTAKE_FIELD_MAX + 1)]);
+  assert.equal(trailer.code, 2);
+  assert.match(trailer.stderr, /--proof is over the 1000-codepoint cap/);
+});
+
+test('a required field that is missing or blank is refused, and nothing is written', () => {
+  // M6c — drop the `typeof value !== 'string' || value.trim() === ''` guard:
+  // `add` exits 0 on three empty bullets, the five-bullet entry shape the
+  // template and the docs both state degrades silently, and the entry still
+  // counts toward a rule earned on evidence with no recorded root cause.
+  const complete = {
+    signature: 'worktree-missing-deps',
+    what: 'the first validation command in the worktree exited 127',
+    cause: 'git worktree add carries tracked files only',
+    consequence: 'forty minutes of agent time',
+    prevention: 'link the dependency directory before the handoff',
+    date: '2026-08-14',
+  };
+  const dir = repo();
+  const before = read(dir);
+  for (const omitted of ['what', 'cause', 'consequence', 'prevention']) {
+    const args = ['add'];
+    for (const [flag, value] of Object.entries(complete)) {
+      if (flag !== omitted) args.push(`--${flag}`, value);
+    }
+    const missing = cli(dir, args);
+    assert.equal(missing.code, 2, `--${omitted} could be omitted`);
+    assert.match(missing.stderr, new RegExp(`--${omitted} is required and must not be empty`));
+    const blank = cli(dir, [...args, `--${omitted}`, '   ']);
+    assert.equal(blank.code, 2, `--${omitted} accepted whitespace`);
+    assert.match(blank.stderr, /is required and must not be empty/);
+  }
+  assert.equal(read(dir), before, 'a refused add still wrote to the file');
+});
+
+test('a date that is not YYYY-MM-DD is refused', () => {
+  // M6d — drop `checkDate`: `## whenever — w` parses to `date: null`, so the
+  // promoted rule loses the dated pointer to its own evidence entirely, and an
+  // operator is handed a rule with no way to read what it cost.
+  const dir = repo();
+  const before = read(dir);
+  const result = add(dir, ['--date', 'whenever']);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /is not YYYY-MM-DD/);
+  assert.equal(read(dir), before);
+  assert.equal(
+    ruleLineFor({ rule: 'Do it.', signature: 'sig', count: 5, dates: [] }),
+    '- Do it. (`sig`, 5 occurrences)',
+    'an undated signature silently drops the pointer that makes a rule arguable',
+  );
+});
+
+test('an explicit --title is held to the same 100 ceiling as a derived one', () => {
+  // M6e — validate an explicit title with the 1000-codepoint FIELD cap only:
+  // the documented heading ceiling is enforced on the path the author did not
+  // choose and ignored on the one they did, and a 413-character `## ` heading
+  // ships. Rejected rather than cut, because here the length was chosen.
+  const dir = repo();
+  assert.equal(add(dir, ['--title', 'T'.repeat(TITLE_MAX)]).code, 0, 'a title exactly at the cap was refused');
+  const over = add(dir, ['--title', 'T'.repeat(TITLE_MAX + 1)]);
+  assert.equal(over.code, 2);
+  assert.match(over.stderr, /--title is 101 codepoints, over the 100 cap/);
+  assert.match(over.stderr, /NOT truncated/);
+  assert.equal(parseMistakes(read(dir)).entries.length, 1);
 });
 
 test('an invisible codepoint is ESCAPED, not stripped', () => {
@@ -272,6 +374,34 @@ test('an unrecognised status is parsed and reported, never dropped', () => {
   assert.match(result.stdout, /1 with an unrecognised status/);
 });
 
+test('a code fence nobody closed is REPORTED, not absorbed', () => {
+  // M12b — track the fence state and say nothing about a fence left open: every
+  // entry below an unbalanced ``` disappears from the ledger while
+  // `withoutSignature` and `unknownStatus` both stay 0, so a signature that
+  // really recurred six times reports one, reaches no threshold, and the file
+  // whose entire contribution is a COUNT undercounts in silence.
+  const dir = repo();
+  for (const date of ['2026-08-14', '2026-08-19', '2026-09-02']) add(dir, ['--date', date]);
+  const lines = read(dir).split('\n');
+  // A one-line inline span at column 0 — an ordinary hand edit, since this file
+  // is prose: CODE_FENCE_RE matches once per line, so it opens and never closes.
+  const newest = lines.findIndex((line) => line.startsWith('## 2026-09-02'));
+  lines.splice(newest + 1, 0, '```mistakes.mjs repeats``` is the command we forgot.');
+  writeFileSync(join(dir, 'MISTAKES.md'), lines.join('\n'), 'utf8');
+
+  const parsed = parseMistakes(read(dir));
+  assert.equal(parsed.entries.length, 1, 'the fixture no longer hides the entries below the fence');
+  assert.equal(parsed.withoutSignature, 0);
+  assert.equal(parsed.unknownStatus, 0);
+  assert.equal(parsed.danglingFence, newest + 1);
+
+  const result = cli(dir, ['repeats', '--threshold', '1']);
+  assert.match(result.stdout, /a code fence opened at line \d+ is never closed/);
+  assert.match(result.stdout, /NOT counted/);
+  const json = JSON.parse(cli(dir, ['repeats', '--threshold', '1', '--json']).stdout);
+  assert.equal(json.dangling_code_fence_line, newest + 2, 'the JSON line number is 1-based for a human');
+});
+
 // ----------------------------------------------------------------- promotion
 
 test('`promote` rewrites ONLY the status token', () => {
@@ -288,6 +418,68 @@ test('`promote` rewrites ONLY the status token', () => {
   assert.equal(entry.initiative, 'add-billing-export');
   assert.equal(entry.actor, 'impl-t3');
   assert.equal(entry.proof, 'F-12');
+});
+
+test('a `$&` in a knowledge id is written literally, not expanded', () => {
+  // M13b — build the replacement as a template string: String.replace reads
+  // `$&`, `` $` ``, `$'` and `$n` as replacement patterns, and the
+  // `knowledge:<id>` grammar (`\S+`) admits all of them. `` $` `` splices the
+  // whole preceding trailer INTO the status token, so the entry re-parses as
+  // an unrecognised status, stops counting toward both thresholds, and the
+  // corruption reaches text outside the token this function may touch.
+  for (const id of ['knowledge:$&-K1', "knowledge:$'y", 'knowledge:$1z', 'knowledge:$$K']) {
+    const dir = repo();
+    add(dir, ['--initiative', 'add-billing-export', '--actor', 'impl-t3', '--proof', 'F-12']);
+    const before = read(dir);
+    const result = cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--status', id]);
+    assert.equal(result.code, 0, `${id}: ${result.stderr}`);
+    assert.equal(read(dir), setEntryStatus(before, id), `${id} did not round-trip byte for byte`);
+    const entry = parseMistakes(read(dir)).entries[0];
+    assert.equal(entry.status, id);
+    assert.equal(entry.statusKind, 'knowledge', `${id} stopped counting as a promotion`);
+    assert.equal(entry.initiative, 'add-billing-export', `${id} corrupted the trailer outside the status token`);
+  }
+  // A backtick is the one character the replacer cannot make safe: the trailer
+  // writes the status inside a backtick span, so the id would be read back
+  // shorter than it was written. Refused at the boundary, like --actor's.
+  const dir = repo();
+  add(dir);
+  const before = read(dir);
+  const quoted = cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--status', 'knowledge:$`x']);
+  assert.equal(quoted.code, 2);
+  assert.match(quoted.stderr, /--status must not contain a backtick/);
+  assert.equal(read(dir), before);
+});
+
+test('a signature already at `knowledge:` is not promoted a second time', () => {
+  // M14b — drop `promoteStatus`'s `fromKinds` filter (double-promotion
+  // prevention number one): the second promotion exits 0 and rewrites every
+  // entry to the new id, destroying the pointer to the knowledge entry that
+  // actually shipped — and reporting success while it does it.
+  const dir = repo();
+  for (const date of ['2026-08-14', '2026-08-19', '2026-09-02']) add(dir, ['--date', date]);
+  assert.equal(cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--status', 'knowledge:K-7']).code, 0);
+  const promoted = read(dir);
+  const again = cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--status', 'knowledge:K-99']);
+  assert.equal(again.code, 1);
+  assert.match(again.stderr, /was eligible/);
+  assert.equal(read(dir), promoted, 'a second promotion rewrote entries already promoted');
+});
+
+test('a `wontfix` entry is not swept into `law` by the promotion its siblings earn', () => {
+  // M14c — the same filter on the law step: `wontfix` is the documented way an
+  // operator says no, and a promotion that reaches it turns the refusal into
+  // the rule it refused.
+  const dir = repo();
+  earnLaw(dir);
+  add(dir, ['--date', '2026-10-01']);
+  writeFileSync(join(dir, 'MISTAKES.md'), setStatusOfEntry(read(dir), 0, 'wontfix'), 'utf8');
+  assert.equal(parseMistakes(read(dir)).entries[0].status, 'wontfix');
+  const result = cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]);
+  assert.equal(result.code, 0, result.stderr);
+  const statuses = parseMistakes(read(dir)).entries.map((entry) => entry.status);
+  assert.equal(statuses[0], 'wontfix', 'the operator\'s refusal was promoted anyway');
+  assert.deepEqual(statuses.slice(1), Array(5).fill('law'));
 });
 
 test('`promote` that matches nothing exits 1 and writes nothing', () => {
@@ -435,6 +627,138 @@ test('promoting the same signature twice does not duplicate the line', () => {
   assert.equal(second.code, 1);
   assert.equal(read(dir, 'CLAUDE.md'), after);
   assert.equal(fenceRules(after).length, 1);
+});
+
+test('a rule whose TEXT names another signature does not block that signature', () => {
+  // M20b — test the fence for the backticked signature ANYWHERE in a rule line
+  // instead of for the evidence parenthetical this tool writes: rule text
+  // naming another signature is the normal case (signatures are kebab-case
+  // slugs for repo concepts), and one such line then blocks that signature's
+  // own rule forever while its entries are flipped to `law` regardless — an
+  // unrecoverable state (lawCount = open + knowledge = 0 afterwards, so every
+  // re-run exits 1) that nothing downstream detects.
+  const dir = repo();
+  earnLaw(dir, 'sig-a');
+  earnLaw(dir, 'other-sig');
+  writeFileSync(join(dir, 'CLAUDE.md'), '# Repo\n', 'utf8');
+  const quoting = cli(dir, ['promote', '--signature', 'sig-a', '--law', '--rule', 'Never bypass the `other-sig` guard.']);
+  assert.equal(quoting.code, 0, quoting.stderr);
+  const second = cli(dir, ['promote', '--signature', 'other-sig', '--law', '--rule', 'Always run the linter.']);
+  assert.equal(second.code, 0, second.stderr);
+  const rules = fenceRules(read(dir, 'CLAUDE.md'));
+  assert.equal(rules.length, 2, '`other-sig` never got its own rule');
+  assert.deepEqual(rules.map(signatureOfRuleLine), ['sig-a', 'other-sig']);
+  const entries = parseMistakes(read(dir)).entries.filter((e) => e.signature === 'other-sig');
+  assert.equal(entries.every((e) => e.status === 'law'), true);
+});
+
+test('a promotion that cannot put the rule IN FORCE moves no status at all', () => {
+  // M20c — flip the trailers to `law` on the strength of a skipped or lost
+  // write: an entry claiming `law` whose rule exists in no file is the one
+  // state nothing downstream detects, and `countSignatures` then makes it
+  // permanent. Reachable without malice: an unclosed ``` in the operator's own
+  // CLAUDE.md swallows the fence block a promotion would append.
+  const dir = repo();
+  earnLaw(dir);
+  const swallowing = '# Repo\n\n```\nan example the operator never closed\n';
+  writeFileSync(join(dir, 'CLAUDE.md'), swallowing, 'utf8');
+  const before = read(dir);
+  const result = cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /would carry no rule for `worktree-missing-deps`/);
+  assert.equal(read(dir, 'CLAUDE.md'), swallowing, 'CLAUDE.md was written anyway');
+  assert.equal(read(dir), before, 'statuses moved with no rule in force');
+});
+
+test('markers inside a fenced code block are documentation, not the fence', () => {
+  // M23b — make `fenceState` code-fence-blind while `parseMistakes` is not:
+  // the operator who documents this mechanism with the ```markdown snippet
+  // docs/self-improvement.md ships gets the machine line written INSIDE their
+  // example, and — with a real fence as well — every promotion afterwards
+  // exits 2 on "2 start markers", killing the loop permanently.
+  const documented = [
+    '# Repo',
+    '',
+    'Tyran writes its rules between two markers:',
+    '',
+    '```markdown',
+    FENCE_START,
+    '- an example rule (`example-sig`, 5 occurrences)',
+    FENCE_END,
+    '```',
+  ].join('\n');
+  for (const [label, claude] of [
+    ['the example alone', `${documented}\n`],
+    ['the example plus a real fence', `${documented}\n\n${FENCE_START}\n${FENCE_END}\n`],
+  ]) {
+    const dir = repo();
+    earnLaw(dir);
+    writeFileSync(join(dir, 'CLAUDE.md'), claude, 'utf8');
+    const result = cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]);
+    assert.equal(result.code, 0, `${label}: ${result.stderr}`);
+    const after = read(dir, 'CLAUDE.md');
+    assert.ok(after.includes(documented), `${label}: the operator's example was edited`);
+    const rules = fenceRules(after);
+    assert.equal(rules.length, 1, label);
+    assert.equal(signatureOfRuleLine(rules[0]), 'worktree-missing-deps', label);
+  }
+});
+
+test('a fence nested under a list item gets a rule at the list\'s indentation', () => {
+  // M23c — splice the rule at column 0 whatever the fence's indentation: both
+  // markers match with leading whitespace, so a rule inserted flush left ends
+  // the operator's list early and renders as a sibling of it.
+  const dir = repo();
+  earnLaw(dir);
+  const claude = ['# Repo', '', '1. Read the law:', '', `   ${FENCE_START}`, `   ${FENCE_END}`, ''].join('\n');
+  writeFileSync(join(dir, 'CLAUDE.md'), claude, 'utf8');
+  assert.equal(cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]).code, 0);
+  const after = read(dir, 'CLAUDE.md');
+  const [rule] = fenceRules(after);
+  assert.ok(rule.startsWith('   - Link'), `the rule broke out of the list: ${JSON.stringify(rule)}`);
+  assert.equal(signatureOfRuleLine(rule), 'worktree-missing-deps', 'the indented line stopped being readable as evidence');
+  assert.equal(fenceState(after).problem, null);
+});
+
+test('a symlinked CLAUDE.md is written THROUGH, and stays a symlink', () => {
+  // M23d — rename the temp file over the link: an operator whose CLAUDE.md
+  // points at a shared or global instructions file loses the link, gets a
+  // regular file in its place, and the file they meant never receives the
+  // rule — while the tool reports that it wrote one.
+  const dir = repo();
+  earnLaw(dir);
+  const shared = mkdtempSync(join(tmpdir(), 'tyran-shared-'));
+  const target = join(shared, 'shared-CLAUDE.md');
+  writeFileSync(target, '# Shared standards\n', 'utf8');
+  symlinkSync(target, join(dir, 'CLAUDE.md'));
+  assert.equal(cli(dir, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]).code, 0);
+  assert.equal(lstatSync(join(dir, 'CLAUDE.md')).isSymbolicLink(), true, 'the operator\'s link was replaced by a file');
+  const linked = readFileSync(target, 'utf8');
+  assert.ok(linked.startsWith('# Shared standards'), 'the shared file was rewritten');
+  assert.equal(fenceRules(linked).length, 1, 'the file the link names never received the rule');
+});
+
+test('an IO failure on CLAUDE.md exits 2, not 1, and names the file', () => {
+  // M23e — let EISDIR/EACCES escape as an uncaught exception: the caller sees a
+  // stack trace and exit 1, the code this CLI reserves for "nothing matched",
+  // so the retro skill reads a broken promotion as "not earned yet" and moves
+  // on. Both halves: the read of CLAUDE.md, and the write to it.
+  const unreadable = repo();
+  earnLaw(unreadable);
+  mkdirSync(join(unreadable, 'CLAUDE.md'));
+  const reading = cli(unreadable, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]);
+  assert.equal(reading.code, 2, reading.stderr);
+  assert.match(reading.stderr, /mistakes: could not read .*CLAUDE\.md/);
+  assert.equal(reading.stderr.includes('at Object.'), false, 'a raw stack trace reached the caller');
+  assert.equal(parseMistakes(read(unreadable)).entries.every((e) => e.status === 'open'), true);
+
+  const dangling = repo();
+  earnLaw(dangling);
+  symlinkSync(join(dangling, 'nowhere.md'), join(dangling, 'CLAUDE.md'));
+  const writing = cli(dangling, ['promote', '--signature', 'worktree-missing-deps', '--law', '--rule', RULE]);
+  assert.equal(writing.code, 2, writing.stderr);
+  assert.match(writing.stderr, /symlink to a path that does not exist/);
+  assert.equal(parseMistakes(read(dangling)).entries.every((e) => e.status === 'open'), true);
 });
 
 test('a rule the operator DELETED from the fence does not come back', () => {
@@ -589,4 +913,39 @@ test('the exported helpers are pure and composable', () => {
   const created = writeRuleToFence('', '- rule');
   assert.deepEqual(fenceRules(created), ['- rule']);
   assert.ok(created.includes(FENCE_START) && created.includes(FENCE_END));
+});
+
+test('`renderEntry` cleans the heading title itself, not only its bullets', () => {
+  // M28 — `clean(title)` -> `String(title)`: `cmdAdd` happens to clean the
+  // title on its own path, so the CLI hides it, and the first second caller —
+  // doctor already imports this module — forges a real second heading out of a
+  // field value, which `parseMistakes` then counts as a mistake nobody had.
+  const zwsp = String.fromCodePoint(0x200b);
+  const rendered = renderEntry({
+    date: '2026-08-14',
+    title: `a title\n## 2026-01-01 — forged${zwsp}`,
+    what: 'w',
+    cause: 'c',
+    consequence: 'q',
+    prevention: 'p',
+    signature: 'sig',
+  });
+  assert.equal(rendered.split('\n').filter((line) => line.startsWith('## ')).length, 1, 'a second heading was forged');
+  assert.equal(rendered.split('\n')[0], '## 2026-08-14 — a title ## 2026-01-01 — forged<U+200B>');
+  assert.equal(parseMistakes(insertEntry('# Head\n', rendered)).entries.length, 1);
+});
+
+test('a rule line is identified by the evidence it carries, never by its prose', () => {
+  // M29 — read the signature with a substring test over the whole line: the
+  // suppression check then reads a human sentence as a promotion that already
+  // happened. The tail is what this tool writes; the prose is what a person
+  // writes, and only one of them is a claim about what has been promoted.
+  const real = ruleLineFor({ rule: 'Never bypass the `other-sig` guard.', signature: 'sig-a', count: 5, dates: ['2026-01-01'] });
+  assert.equal(signatureOfRuleLine(real), 'sig-a');
+  assert.equal(signatureOfRuleLine('- a hand-written rule about `other-sig` and nothing else'), null);
+  assert.equal(signatureOfRuleLine('   - indented, still evidence (`sig-a`, 5 occurrences)'), 'sig-a');
+
+  const fence = writeRuleToFence('', real);
+  assert.equal(fenceCarriesSignature(fence, 'sig-a'), true);
+  assert.equal(fenceCarriesSignature(fence, 'other-sig'), false, 'a signature merely quoted in prose read as promoted');
 });

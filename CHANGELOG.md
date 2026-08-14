@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.17 — 2026-08-14
+
+### A race test that picked a winner
+
+`two apply runs at once cannot both close one ask` accepted only two of the
+three exits its own race can produce. On a runner slow enough to serialise
+the two spawns, the first closes the queue and the second finds it empty and
+exits 1 — correct behaviour, asserted as a failure. It passed locally and in
+the PR checks and failed in the publish job, which is where a timing
+assumption usually surfaces, and it kept 0.1.15 and 0.1.16 off npm although
+both are merged and tagged.
+
+All three exits are now accepted, and the guarantee is asserted where it
+holds regardless of who won: no ask closed twice and no question closed by
+two gates, checked while the racing runs are the only writers, then
+completeness after one sequential settling run. Dropping the sitting lock
+still fails the test.
+
 ## 0.1.16 — 2026-08-14
 
 ### `cat hooks/…` was refused while `Read` handed you the same bytes

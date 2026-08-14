@@ -1,6 +1,6 @@
 {
   "name": "tyran",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "A task conductor for Claude Code: multi-agent orchestration with an enforced evidence contract, repo-specific learning, and update-safe local evolution.",
   "author": {
     "name": "Jacek Janczura",

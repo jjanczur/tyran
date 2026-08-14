@@ -6,6 +6,12 @@
  * when it is not), the ceiling refuses loudly, `--check` is byte-exact, the
  * HTML embeds no raw `<` inside its data block, and the serve handler never
  * derives a filesystem path from a URL.
+ *
+ * The page's own behaviour — four tabs, selectable cards, the commands that
+ * answer a question, the muted palette — is asserted against the RENDERED
+ * page string, because all of it lives in the client script. No other test in
+ * this repository executes that script, so a revert there is invisible
+ * everywhere else: board.json is unchanged by every mutation below.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,6 +46,9 @@ function tree(inits = {}) {
 }
 
 const demo = () => readFileSync(FIXTURE, 'utf8');
+
+/** The page exactly as an operator receives it, rendered from the fixture. */
+const demoHtml = () => renderAll(tree({ demo: demo() })).files[BOARD_HTML_FILE];
 
 function run(args) {
   try {
@@ -206,4 +215,90 @@ test('the spend charts rank by the metric on screen, not by the one the server s
     'the composition bar must reorder with the metric too');
   // Rows with no price sort last rather than claiming the top slot.
   assert.match(html, /if \(typeof av !== 'number'\) return 1;/);
+});
+
+test('the page is four tabs, opens on Overview, and carries the queue count in its label', () => {
+  // MUTANT 1: delete a tab and fold its panel back into the scroll. The four
+  // questions were competing for one screen, which is the state the tabs
+  // exist to end.
+  // MUTANT 2: drop `asks.length` from the questions label. An operator
+  // reading the Spend tab then has no signal anywhere that something is
+  // waiting on them — the count in the label is the only thing that survives
+  // being on another tab, and it is the board's whole reason to exist.
+  const html = demoHtml();
+  assert.match(html, /\['overview', 'Overview', null\]/);
+  assert.match(html, /\['board', 'Board', null\]/);
+  assert.match(html, /\['questions', 'Waiting on you', asks\.length\]/, 'the queue label must count the open asks');
+  assert.match(html, /\['spend', 'Spend', null\]/);
+  assert.match(html, /el\('span', 'count', '\(' \+ spec\[2\] \+ '\)'\)/, 'the count must reach the tab label');
+  assert.match(html, /panels\[k\]\.hidden = !on;/, 'an unselected tab must be hidden, not merely unstyled');
+  assert.match(html, /^\s*select\('overview'\);$/m, 'the page must open on Overview');
+});
+
+test('a lane card is a button that presses, so the detail panel has something to hang off', () => {
+  // MUTANT: render the cards as `div`s again, or drop `aria-pressed`. The
+  // card can then never be selected, the panel under the lanes never opens,
+  // and everything that does not fit on a card — the lane, the initiative,
+  // the agents, the annotation, the ticket's own spend — has nowhere to go
+  // but a wider card, which is what the lanes cannot afford.
+  const html = demoHtml();
+  assert.match(html, /var button = el\('button', 'card'\);/, 'a card must be a real button, not a clickable div');
+  assert.match(html, /button\.setAttribute\('aria-pressed', 'false'\);/);
+  assert.match(html, /button\.addEventListener\('click', function \(\) \{ showDetail\(c, lane, button\); \}\);/);
+  // exactly one card is pressed: the previous selection is released first
+  assert.match(html, /if \(selected\) selected\.setAttribute\('aria-pressed', 'false'\);/);
+  assert.match(html, /\.card\[aria-pressed="true"\]\{/, 'the pressed card must be the visibly selected one');
+  for (const row of [/row\('lane', lane\);/, /row\('initiative', card\.init\);/, /row\('agents',/, /row\('note', card\.annotation\);/]) {
+    assert.match(html, row, `the detail panel dropped ${row}`);
+  }
+});
+
+test('the questions tab prints the three commands that close a question', () => {
+  // MUTANT: delete the `pre.how` block from the questions panel. The queue
+  // then shows an operator precisely what is waiting on them and no way to
+  // answer it — `answer render` / `answer apply` is the one thing on this
+  // page that cannot be guessed from what is on screen. Spelled with `npx`
+  // because a plugin install puts no `tyran` on the PATH and an adopting repo
+  // has no `scripts/` of its own.
+  const html = demoHtml();
+  assert.match(html, /npx @jjanczur\/tyran answer render --dir \.tyran/);
+  assert.match(html, /\$EDITOR \.tyran\/state\/ANSWERS\.md/);
+  assert.match(html, /npx @jjanczur\/tyran answer apply --dir \.tyran/);
+  // and the answer words, because a blank line is a recorded decision and
+  // reads as one only if the page says so before it is typed
+  assert.match(html, /Blank takes the recorded default and is still written down as your decision; a single dash leaves it for next time\./);
+});
+
+test('the palette is the muted one, saturation on edges rather than on whole fills', () => {
+  // MUTANT: restore the first version's tokens — `--gold`, `--glow`, `--red`,
+  // `--green` at full saturation, filling whole bars and whole cards. It was
+  // rejected as "a bit too flashy" (operator, 2026-08-14): an alarm colour on
+  // every surface leaves nothing louder for the one card that IS an alarm.
+  // The roles are unchanged, so no other assertion in this suite moves.
+  const html = demoHtml();
+  for (const token of ['--brass:', '--steel:', '--clay:', '--sage:']) {
+    assert.ok(html.includes(token), `${token} is not defined`);
+  }
+  for (const gone of ['--gold', '--glow', '--red:', '--green:']) {
+    assert.ok(!html.includes(gone), `${gone} is a token of the flashy palette`);
+  }
+  // the large surfaces take the muted `-low` tone; the accent itself is spent
+  // on a border, a 3px rail and the text
+  assert.match(html, /\.ask\{background:var\(--brass-low\);border:1px solid var\(--brass-edge\);border-left:3px solid var\(--brass\)/);
+  assert.match(html, /\.paused\{background:var\(--clay-low\);border:1px solid var\(--clay\)/);
+  assert.match(html, /\.agent\{[^}]*border-left:3px solid var\(--steel-edge\)/);
+});
+
+test('spend reaches three places from the one fetch, and explains itself when there is none', () => {
+  // MUTANT: drop the overview headline, or the per-ticket row in showDetail.
+  // Both hang off the same payload the Spend tab fetches, so losing either
+  // costs nothing on the Spend tab — where every other spend test looks — and
+  // the number quietly stops following the operator to the tab they are on.
+  // MUTANT 2: delete the hint. A board opened over file:// then shows an
+  // empty panel, which reads as broken rather than as unserved.
+  const html = demoHtml();
+  assert.match(html, /ovSpend\.appendChild/, 'the overview must carry a spend headline once the fetch lands');
+  assert.match(html, /if \(cost\) \{/, 'a selected card must be able to show its own spend');
+  assert.match(html, /row\('spend', fmtTokens\(hit\.tokens\) \+ ' tokens [^']*' \+ fmtUsd\(hit\.usd\)\);/);
+  assert.match(html, /Over file:\/\/ there is no server, so this tab stays empty\./);
 });

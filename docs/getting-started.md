@@ -38,6 +38,34 @@ Requirements: Claude Code ≥ 2.1. No Node dependencies, no build step —
 Tyran's scripts are plain Node ≥ 22, bundled with the plugin; you don't run
 npm at any point.
 
+## Command-line use (outside Claude Code)
+
+Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/tyran)
+— scoped, not the bare name `tyran`, which carries an unpublish tombstone from
+2021-03-30 that npm's abuse policy blocks anyone from reusing, permanently. The
+command stays `tyran` either way; only the registry name is scoped, the same
+pattern as `@angular/cli` giving you `ng`.
+
+`bin/tyran.mjs` exposes the same scripts the plugin's hooks and skills already
+call — `doctor`, `scan-repo`, `tiers`, `journal`, `schema`, `knowledge`,
+`board`, `cost`, `answer`, `overnight`, `statusline`, `stop-check`,
+`scan-control-chars`, `desc-budget` — for a shell or a CI job with no Claude
+Code session. Zero dependencies; `--help` lists them.
+
+```bash
+npx @jjanczur/tyran doctor --hooks     # is any gate installed but unable to fire?
+npx @jjanczur/tyran scan-repo --dir .  # what this repo looks like, with provenance
+npx @jjanczur/tyran answer render      # the sheet of questions waiting on you
+```
+
+Exit codes propagate to the digit, so a CI step reddens exactly when the
+underlying script does.
+
+**This does not install the Claude Code plugin.** For that, use the steps
+above — `jjanczur/tyran` there is the Claude Code marketplace identity, a
+separate namespace from npm. The npm package is the tooling; the plugin is
+the conductor.
+
 ## First run
 
 ```text

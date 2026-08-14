@@ -468,6 +468,15 @@ test('the probe stops at the match and the byte cap bounds it — mechanism, not
   );
   assert.ok(capped > 0 && capped < 4000, `capped read delivered ${capped} of 4001 lines`);
 
+  // The stop signal is pinned HERE, at the primitive, and deliberately not at
+  // findTranscriptDir's call site. With the cap in place it saves only the
+  // parses inside one chunk — measured at 0-2 ms across 40 candidates of 4 MB,
+  // inside noise — so a fixture that killed a mutant of it would be a test
+  // written for the mutant rather than for a property anyone depends on. It
+  // becomes load-bearing again the moment PROBE_BYTES rises above CHUNK_BYTES
+  // or forEachLine gains a caller that passes no cap, and both are covered by
+  // the assertion above.
+
   assert.equal(transcriptDirFor(tree.repo, tree.projects), tree.project);
 });
 
@@ -586,4 +595,47 @@ test('--json refuses to print a path to a sidecar it could not write', () => {
   assert.equal(json.status, 2, json.stdout);
   assert.match(json.stderr, /could not write the sidecar/);
   assert.equal(json.stdout.trim(), '');
+});
+
+test('the resync flag survives every shape an over-long record can take', () => {
+  const tree = makeTree();
+  const cwd = resolve(tree.repo);
+  const oversized = 'a'.repeat(9 << 20);
+  const ghost = assistant('phantom', usage(0, 0, 0, 777777), 'GHOST', cwd);
+  const real = assistant('m-cheap', usage(0, 0, 0, 5), 'r-real', cwd);
+  const linesOf = (name, body) => {
+    const path = join(tree.project, name);
+    writeFileSync(path, body);
+    const seen = [];
+    forEachLine(path, (line) => {
+      seen.push(line);
+      return true;
+    });
+    return { seen, scan: scanTranscript(path) };
+  };
+
+  // MUTANT for all three: delete the resync flag. Each of these leaks the tail
+  // of an abandoned record as a record of its own — the round-two defect,
+  // whose failure mode is indistinguishable from the round-one one it
+  // replaced, which is exactly why the shapes are pinned rather than reasoned
+  // about.
+
+  // (a) Two oversized records back to back.
+  const a = linesOf('resync-a.jsonl', oversized + ghost + '\n' + oversized + ghost + '\n' + real + '\n');
+  assert.deepEqual(a.seen, [real], 'only the genuine record survives two discards');
+  assert.equal(a.scan.skippedLines, 2);
+  assert.deepEqual(Object.keys(a.scan.byModel), ['m-cheap']);
+
+  // (b) An oversized record that never terminates before EOF.
+  const b = linesOf('resync-b.jsonl', real + '\n' + oversized + ghost);
+  assert.deepEqual(b.seen, [real], 'a file ending mid-discard delivers no tail');
+  assert.equal(b.scan.skippedLines, 1);
+  assert.deepEqual(Object.keys(b.scan.byModel), ['m-cheap']);
+
+  // (f) A multi-byte character split across a read boundary DURING the
+  // discard: the decoder must still find the terminating newline.
+  const f = linesOf('resync-f.jsonl', oversized + '€'.repeat(400000) + '\n' + real + '\n');
+  assert.deepEqual(f.seen, [real], 'resync survives a split character in the discarded region');
+  assert.equal(f.scan.skippedLines, 1);
+  assert.deepEqual(Object.keys(f.scan.byModel), ['m-cheap']);
 });

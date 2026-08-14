@@ -98,6 +98,42 @@ into can have. Re-render it at the start of each sitting rather than reusing
 the last one — every block in an applied sheet names an ask that is now
 closed, and `apply` refuses the whole file rather than appending a duplicate.
 
+## Opening it
+
+Two ways, and the difference between them is spend.
+
+**Serve it** — the whole page, spend included:
+
+```bash
+npx @jjanczur/tyran board --dir .tyran --serve
+```
+
+It prints `board: serving http://127.0.0.1:4173/`. Open that. The board
+re-renders on every request, so a reload is always current, and the page
+reloads itself every 30 seconds anyway. `--port <n>` if 4173 is taken.
+`Ctrl-C` stops it. It binds loopback only and pins the `Host` header, so
+nothing outside your machine can reach it — and it is read-only: the server
+answers three URLs and derives a filesystem path from none of them.
+
+**Open the file** — no server, no spend:
+
+```bash
+open .tyran/state/board.html          # macOS
+xdg-open .tyran/state/board.html      # Linux
+start .tyran\state\board.html         # Windows
+```
+
+That file is regenerated after every agent and at every merge, so it is a
+real answer, not a stale one. It carries everything except the Spend tab,
+which is fetched rather than embedded — see [Spend](#spend) for why. Over
+`file://` the tab is empty and says nothing is wrong; over the server, a
+spend failure now says which failure it was.
+
+Inside a session you never type either command: **`/tyran:status` regenerates
+the board and tells you where it is.** The three commands are the same board
+from three directions — `--serve` for a browser you keep open, the file for a
+quick look, `BOARD.md` for reading in the terminal or in a diff.
+
 ## board.html, in four tabs
 
 The page an operator leaves open overnight: self-contained (inline CSS/JS,

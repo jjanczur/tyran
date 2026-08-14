@@ -162,16 +162,32 @@ echo "wrong branch — hold everything" > .tyran/STOP
 npx @jjanczur/tyran board --dir .tyran --serve
 ```
 
-A read-only board on loopback, re-rendered on every request. That command is
-the one place a Node version matters — `npx` runs the scripts outside Claude
-Code, and they need **Node ≥ 22**. Four tabs, because the page answers four
-questions:
+It prints `board: serving http://127.0.0.1:4173/` — **open that URL.** The
+board is read-only, bound to loopback, re-rendered on every request, and it
+reloads itself every 30 seconds; `--port <n>` if 4173 is taken, `Ctrl-C` to
+stop. That command is the one place a Node version matters, because `npx` runs
+the scripts outside Claude Code and they need **Node ≥ 22**.
 
-- **Overview** — what is waiting on you, agents running, progress, tickets that
-  need a human; then the agent strip, each chip carrying the time since that
-  agent last signalled.
+No terminal, no server: the same page is written to **`.tyran/state/board.html`**
+after every agent, so you can just open the file —
+
+```bash
+open .tyran/state/board.html      # xdg-open on Linux, start on Windows
+```
+
+— and inside a session you need neither command, because **`/tyran:status`
+regenerates the board and tells you where it is.**
+
+Four tabs, because the page answers four questions:
+
+- **Overview** — what is waiting on you, agents running, progress, and what
+  needs a human (blocked lanes **and** blocked agents); then the agent strip,
+  stalest first, each chip carrying its last signal and what it said it would
+  do next. Anything a journal could not account for is listed here rather than
+  quietly dropped.
 - **Board** — every ticket in exactly one of ten kanban lanes, strongest verdict
-  first. Click a card for its initiative, agents, note and spend.
+  first. Click a card for its initiative, agents, note, spend, and the files
+  that initiative actually has on disk.
 - **Waiting on you** — the open questions with their recommendations and
   recorded defaults, above the commands that answer them. The count sits in the
   tab label, so a pending question survives being on another tab.
@@ -179,9 +195,9 @@ questions:
   composition bar across input / cache write / cache read / output, and three
   ranked charts (by model, agent type, ticket) with a tokens/cost toggle.
 
-The same page is written to `.tyran/state/board.html` and refreshed after every
-agent, so you can also just open the file. Spend is served rather than embedded
-and absent over `file://` — [the board](https://jjanczur.github.io/tyran/board/) says why.
+Spend is served rather than embedded, so it is the one thing missing when you
+open the file directly — [the board](https://jjanczur.github.io/tyran/board/)
+says why, and covers the lanes, the drill-down and answering a question.
 
 ## What ships
 
@@ -215,7 +231,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1297 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1306 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

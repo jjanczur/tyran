@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/dependencies-0-success" alt="Zero dependencies">
   <img src="https://img.shields.io/badge/Claude_Code-plugin-d4a017" alt="Claude Code plugin">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
-  <a href="https://github.com/jjanczur/tyran/releases/latest"><img src="https://img.shields.io/github/v/release/jjanczur/tyran?color=d4a017" alt="Latest release"></a>
+  <a href="https://www.npmjs.com/package/@jjanczur/tyran"><img src="https://img.shields.io/npm/v/@jjanczur/tyran?color=d4a017&label=version" alt="Latest version"></a>
 </p>
 
 <p align="center">
@@ -20,177 +20,132 @@
 
 <h3 align="center">The more you use it, the better it gets.</h3>
 
-<p align="center">
-Never written a skill, spun up a subagent, or run an agent team yourself? Tyran does all
-three automatically, on your behalf — and the retrospective it runs after every initiative
-means it keeps learning your repo's way of working instead of repeating a generic playbook.
-</p>
+## What Tyran is
 
-<p align="center">
-Under the hood: it interviews you, plans, and drives a team of fresh-context agents through
-your work, routing every subtask to the cheapest model that can actually do it — so a file
-rename doesn't burn through your subscription at top-tier rates.
-</p>
+Tyran is a Claude Code plugin that runs a task as a **team of agents instead of
+one long chat**. You describe the work; it interviews you briefly, plans, and
+drives fresh-context subagents through it. Execution state lives in an
+append-only journal committed to your repo rather than in the session window, so
+a restart, a compaction and a colleague on another branch read the same thing.
+Zero runtime dependencies, no build step, Node ≥ 22.
 
----
+![The Tyran dashboard, recorded live: the waiting-on-you queue scrolling past, the strip of running agents with the time since each one last signalled, the kanban lanes with every ticket in one, and the Spend tab toggling between tokens and cost](assets/board-demo.gif)
 
-## The Problem
+## What it gives you
 
-Four failures, all of them ordinary, all of them silent. You will recognise
-every one.
+- **A model tier per role, resolved from one config file.** Model names appear
+  in exactly one place; skills, agents and policies are written in role names.
+  The expensive tier is kept for security review, arbitration and final
+  acceptance, and the first two sit on a floor no profile or risk flag crosses.
+- **Fresh context for every subagent.** Handoffs are self-contained, so the
+  conductor holds the plan and never accumulates its agents' transcripts.
+- **Reports that carry evidence, or are refused.** A `SubagentStop` hook
+  rejects a report with no raw command output — measured on 55 real reports
+  from this project's own agents: 53 pass, and both misses were not reports. It
+  blocks silence, not forgery; [the evidence gate](docs/evidence-gate.md) is
+  precise about the difference.
+- **State you can read without a session.** The journal is the single source of
+  truth; `STATE.md`, `PROGRESS.md`, `BOARD.md`, `board.json` and `board.html`
+  are generated projections of it.
+- **A retrospective after every initiative.** It writes durable facts about
+  your repo into `.tyran/knowledge/`, and repeated failures graduate out of
+  `MISTAKES.md` into rules.
+- **A spend ledger.** `npx @jjanczur/tyran cost` reports what the work cost, in
+  the tokens the platform itself reported, per model, per agent type and per
+  ticket — read out of the transcripts Claude Code already writes. Money
+  appears only under a rate card you write: Tyran does not know what you pay.
 
+## Tyran compared
 
-| | What happens | What it costs you |
+The axis, not the winner. These rows compare against an ordinary agent session
+— a comparison that can be made without guessing at another tool's internals.
+
+| | An ordinary agent session | Tyran |
 |---|---|---|
-| 🟥 **Fake green** | *"Done — all tests pass."* Nothing was run. | You find out at review, or at deploy. The report was cheaper to write than the work. |
-| 🟥 **Wrong model, wrong job** | The strongest, most expensive model renames a file, changes a button colour, runs a mechanical sweep. | You pay top rate for work any cheap tier does identically. Nobody notices, because it *worked*. |
-| 🟥 **Context collapse** | Nobody compacts on purpose. The window fills to 60, 70%. Auto-compact then fires **in the middle of a hard debugging run**. | The fine detail the model had just discovered — the thing that took an hour — is gone, and it does not know it is gone. |
-| 🟥 **Amnesia** | State lives in a chat window. Another dev, another branch, tomorrow morning — none of them can see where this got to. | The work is re-derived, or worse, half re-derived. |
+| Where execution state lives | the chat window, and it ends with the window | an append-only journal committed to your repo, with every human-readable file generated from it |
+| What makes a report trustworthy | you read the claim | a hook refuses a report with no raw command output |
+| Which model does which job | one model for the whole session | four tiers resolved from `.tyran/config.yaml`, per role, with a floor under the judgements everything downstream trusts |
+| What happens after the work | nothing | a retrospective writes what this repo taught it back into this repo |
+| What it adds to your install | — | zero runtime dependencies, no build step |
+| Skills · agents it ships | — | 14 · 4 |
 
-**Context collapse is the expensive one**, and it is worth being precise about
-why. Above roughly half the window, the model is carrying so much that it
-starts missing things it would have caught at 10%. And the compaction that
-should relieve that pressure is the very thing that destroys the detail:
+Worth knowing before tuning anything: cache reads were measured at roughly
+three quarters of a real session's cost, and the conductor's own context at
+between 44% and 86% of a tree's tokens — so the lever is context size and turn
+count, not the price of a model. A cell-by-cell comparison against four other
+Claude Code orchestrators, verified against their code and public issue
+trackers, is in
+[the FAQ](docs/faq.md#how-tyran-compares-to-other-claude-code-orchestrators).
 
-```mermaid
-flowchart LR
-    subgraph BAD["❌ one agent carries everything"]
-        direction LR
-        B1["0%<br/>sharp"] --> B2["50%<br/>still fine"] --> B3["70%<br/>missing things"] --> B4["auto-compact<br/>mid-debug"] --> B5["detail gone —<br/>and it does not<br/>know it is gone"]
-    end
-    classDef bad fill:#7f1d1d,stroke:#f87171,color:#fef2f2
-    classDef warn fill:#78350f,stroke:#fbbf24,color:#fffbeb
-    class B3,B4,B5 bad
-    class B2 warn
-```
+## Install
 
-## The Solution
-
-**Split the work so nobody has to carry all of it**, and put the state in a
-file instead of a window:
-
-```mermaid
-flowchart TB
-    OP(["you"]) -->|"describes the work"| C["<b>conductor</b><br/>plans · delegates · merges<br/><i>stays lean — it holds the plan,<br/>not the transcripts</i>"]
-
-    C -->|"self-contained handoff"| S["<b>scout</b><br/>fresh context<br/><i>cheap tier</i>"]
-    C -->|"self-contained handoff"| I["<b>implementer</b><br/>fresh context · own worktree<br/><i>work tier</i>"]
-    C -->|"self-contained handoff"| R["<b>reviewer</b><br/>fresh context · never the author<br/><i>work tier, top tier on security</i>"]
-
-    S & I & R -->|"report"| G{{"✋ EVIDENCE GATE<br/>raw command output,<br/>or the report is REFUSED"}}
-    G --> J[("append-only journal<br/>.tyran/ — committed to YOUR repo")]
-    J -->|"survives restart,<br/>compaction, and you"| C
-    J --> D["another dev · another branch<br/>· tomorrow morning"]
-    J --> RT{{"✋ RETRO GATE<br/>the initiative cannot end<br/>without learning something"}}
-    RT -->|"improves"| C
-
-    classDef gate fill:#7f1d1d,stroke:#f87171,color:#fef2f2
-    classDef store fill:#064e3b,stroke:#34d399,color:#ecfdf5
-    class G,RT gate
-    class J store
-```
-
-
-Each of the four failures gets a mechanism, not a paragraph of advice:
-
-| Failure | Mechanism | State |
-|---|---|---|
-| Fake green | A `SubagentStop` hook **rejects** a report with no raw command output. Measured on 55 real reports: 53 pass, and both misses were not reports. | ✅ shipped |
-| Wrong model | Every role resolves to a tier from **one config file**. `top` — the expensive one — is reserved for security review, arbitration and acceptance, and a floor stops any profile or flag pushing those down. Effort is a **separate dial**: *same model, think harder* costs nothing extra. | ✅ shipped |
-| Context collapse | Work goes to **fresh-context subagents** with self-contained handoffs, so the conductor never accumulates their transcripts. A `PreCompact` hook checkpoints before every compaction and **refuses a manual `/compact` it could not checkpoint**; `SessionStart` re-injects that checkpoint afterwards. | ✅ shipped · 🎯 a trigger that says *"compact now, this section is finished"* is **not built** |
-| Amnesia | The journal is an append-only file **in your repo**, not in a window. `STATE.md` and `PROGRESS.md` are generated from it. Another agent, another dev, another branch reads where this got to — including which agent is still running and which lease nobody released. | ✅ shipped |
-
-**Cheap where it doesn't matter, expensive where it does.** That is the whole
-cost argument, and it is why the routing table is a table and not a vibe:
-
-```mermaid
-flowchart LR
-    T1["<b>cheap</b><br/>recon · sweeps · bookkeeping"] --- T2["<b>work</b><br/>implementation<br/>ordinary review<br/><i>the default</i>"] --- T3["<b>deep</b><br/>root-cause · hard builds<br/>risky review"] --- T4["<b>top</b><br/>security review<br/>arbitration · acceptance<br/><i>and nothing else</i>"]
-    classDef c fill:#064e3b,stroke:#34d399,color:#ecfdf5
-    classDef w fill:#1e3a5f,stroke:#60a5fa,color:#eff6ff
-    classDef d fill:#78350f,stroke:#fbbf24,color:#fffbeb
-    classDef t fill:#7f1d1d,stroke:#f87171,color:#fef2f2
-    class T1 c
-    class T2 w
-    class T3 d
-    class T4 t
-```
-
-### And then it gets better on its own
-
-An initiative that ends without a retrospective is **refused one turn** by a
-`Stop` hook. The retro reads the ledger, the notes and the agents' own
-reports, and changes Tyran itself — through a filter whose default answer is
-*change nothing*, which prefers **deleting a rule to adding one**, and which
-is explicitly told not to breed agents, because a roster nobody can hold in
-their head is its own cognitive tax.
-
-```text
-Initiative 1   Infers your stack, your validation commands, your deployment
-               style from how the repo is actually worked. Asks once, about
-               what it genuinely could not establish.
-Initiative 5   Knows your shared-file hot zones, your flaky tests, your
-               review taste. Its retro has already DELETED two of its own
-               rules that weren't earning their keep.
-Initiative 20  Has written repo-specific skills for your recurring work and
-               merged two agents that overlapped. You mostly approve gates.
-```
-
-> **Three things are not built yet:** the update delta-review, cost-profile
-> benchmark receipts, and overnight mode. Everything else on this page exists
-> in code with tests behind it — nothing here is claimed before it ships, and
-> the [roadmap](#roadmap) says which is which.
-
-## Quick Start
+Inside Claude Code:
 
 ```text
 /plugin marketplace add jjanczur/tyran
 /plugin install tyran@tyran
-/tyran:setup          # scans the repo, writes .tyran/, installs /tyran
-/tyran                # then just describe what you want done
+/tyran:hello
 ```
 
-**Or paste this into Claude Code and let it install itself.** `/plugin` is a
-slash command a human has to type, so this asks for the same two steps
-through the `claude` CLI instead, which Claude Code can run on its own —
-followed by the restart those steps require, and a walkthrough of what setup
-inferred before it is trusted:
+Restart Claude Code afterwards — hooks and agents are read when a session
+starts, so an install you have not restarted into is an install you are not
+running. `/tyran:hello` is the smoke test. Requirements: Claude Code ≥ 2.1;
+Tyran's scripts are plain Node ≥ 22 and ship with the plugin, so you never run
+npm. `/plugin` is a slash command a human has to type — the prompt that has
+Claude Code install itself, the npm package for a shell or a CI job, updating
+and uninstalling are all in [getting started](docs/getting-started.md).
+
+## Use it
 
 ```text
-Install the Tyran plugin in this repository and set it up for me.
-
-1. Run: claude plugin marketplace add jjanczur/tyran
-2. Run: claude plugin install tyran@tyran
-3. Tell me to restart Claude Code, so the hooks and agents load.
-4. After the restart, run /tyran:setup, then /tyran:doctor. Setup writes the
-   two files under .tyran/ that Tyran needs - the config, and the autonomy
-   policy the write gate reads - and doctor proves the install actually
-   works. Walk me through what setup inferred - especially the validation
-   commands and the deployment autonomy class - before we commit it.
-
-Docs: https://jjanczur.github.io/tyran/getting-started/
+/tyran:setup          # once per repo: scans it, writes .tyran/, installs /tyran
+/tyran                # then describe what you want done
 ```
 
-Setup infers your stack, your validation commands and your deployment
-autonomy class from how the repo is actually worked, annotates every value
-with the fact that produced it, and asks you only about what it genuinely
-could not establish. It also installs the bare `/tyran` shortcut — plugin
-skills are namespaced, so the conductor is `/tyran:run`, and most people
-would rather type four letters.
-
-Then `/tyran` interviews you, sizes the work, and either does it itself
-(small changes) or drives the roster — `tyran:scout`, `tyran:implementer`,
-`tyran:reviewer`, `tyran:retro` — through it. Also: `/tyran:status`,
+Setup infers your stack, your validation commands and your deployment autonomy
+class from how the repo is actually worked, annotates every value with the fact
+that produced it, and asks only about what it could not establish. `/tyran`
+then interviews you, sizes the work, and either does it itself or drives the
+roster — `tyran:scout`, `tyran:implementer`, `tyran:reviewer`, `tyran:retro` —
+through it, stopping only at genuine decisions. Also `/tyran:status`,
 `/tyran:doctor`, `/tyran:retro`.
 
-### It is not only an orchestrator — it ships skills you can use yourself
+Hit the brake at any time, from anywhere, without killing the session:
 
-Fourteen skills and four agents come with the plugin. Six of the skills are
-the conductor's own machinery, but they are **commands, not internals**: you
-run `/tyran:doctor` on a repo you are debugging without ever starting an
-initiative. The other eight are standalone protocols — most of them have
-nothing to do with orchestration and work perfectly well in a session that
-never starts an initiative at all.
+```bash
+echo "wrong branch — hold everything" > .tyran/STOP
+```
+
+## The dashboard
+
+```bash
+npx @jjanczur/tyran board --dir .tyran --serve
+```
+
+A read-only board on loopback, re-rendered on every request. Four tabs, because
+the page answers four questions:
+
+- **Overview** — what is waiting on you, agents running, progress, tickets that
+  need a human; then the agent strip, each chip carrying the time since that
+  agent last signalled.
+- **Board** — every ticket in exactly one of ten kanban lanes, strongest verdict
+  first. Click a card for its initiative, agents, note and spend.
+- **Waiting on you** — the open questions with their recommendations and
+  recorded defaults, above the commands that answer them. The count sits in the
+  tab label, so a pending question survives being on another tab.
+- **Spend** — tokens, the amount under your rate card, the conductor's share, a
+  composition bar across input / cache write / cache read / output, and three
+  ranked charts (by model, agent type, ticket) with a tokens/cost toggle.
+
+The same page is written to `.tyran/state/board.html` and refreshed after every
+agent, so you can also just open the file. Spend is served rather than embedded
+and absent over `file://` — [the board](docs/board.md) says why.
+
+## What ships
+
+Fourteen skills and four agents. Six of the skills are the conductor's own
+machinery, though commands rather than internals — `/tyran:doctor` runs on any
+repo, initiative or not — and the other eight are standalone protocols.
 
 | Skill | What it does |
 |---|---|
@@ -200,284 +155,42 @@ never starts an initiative at all.
 | [`doctor`](skills/doctor/SKILL.md) | is any gate installed but unable to fire; is the state self-consistent |
 | [`retro`](skills/retro/SKILL.md) | the anti-bloat curator that changes Tyran, never your product code |
 | [`hello`](skills/hello/SKILL.md) | proves the plugin is installed and its paths resolve |
-| [`code-review`](skills/code-review/SKILL.md) | **standalone.** The dimensions a diff is read against, and the rule that you refute a finding before reporting it |
-| [`root-cause`](skills/root-cause/SKILL.md) | **standalone.** Reproduce first, one variable per experiment with the prediction written down, exit by naming the mechanism |
-| [`browser-check`](skills/browser-check/SKILL.md) | **standalone.** A UI pass that returns counts — console errors, failed responses, computed styles — instead of "looks fine" |
-| [`deslop`](skills/deslop/SKILL.md) | **standalone.** The optimization pass: delete before you add, one smell per pass, behaviour pinned by a test that ran first |
-| [`pr-feedback`](skills/pr-feedback/SKILL.md) | **standalone.** All three of GitHub's comment surfaces, a disposition for every comment, push before you reply |
-| [`fidelity-gate`](skills/fidelity-gate/SKILL.md) | **standalone.** Build 1:1 against a frozen mockup without drift, measured rather than eyeballed |
-| [`prompt-tuning`](skills/prompt-tuning/SKILL.md) | **standalone.** Tune anything whose quality is a non-deterministic model output — noise baseline first, then medians |
-| [`skill-writing`](skills/skill-writing/SKILL.md) | **standalone.** What a skill has to earn before it ships, and the activation test that proves it fires |
+| [`code-review`](skills/code-review/SKILL.md) | the dimensions a diff is read against, and the rule that you refute a finding before reporting it |
+| [`root-cause`](skills/root-cause/SKILL.md) | reproduce first, one variable per experiment, exit by naming the mechanism |
+| [`browser-check`](skills/browser-check/SKILL.md) | a UI pass that returns counts — console errors, failed responses, computed styles |
+| [`deslop`](skills/deslop/SKILL.md) | the optimization pass: delete before you add, behaviour pinned by a test that ran first |
+| [`pr-feedback`](skills/pr-feedback/SKILL.md) | all three of GitHub's comment surfaces, a disposition for every comment |
+| [`fidelity-gate`](skills/fidelity-gate/SKILL.md) | build 1:1 against a frozen mockup, measured rather than eyeballed |
+| [`prompt-tuning`](skills/prompt-tuning/SKILL.md) | tune a non-deterministic output without chasing noise — noise baseline first |
+| [`skill-writing`](skills/skill-writing/SKILL.md) | what a skill has to earn before it ships, and the test that proves it fires |
 
-Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story,
-own branch), `tyran:reviewer` (**no editing tools** — it cannot patch what it
-is grading), `tyran:retro`. What each one assumes, and who is expected to
-invoke it, is in [skills and agents](docs/skills.md); the tier and effort
-routing behind them is in [the roster](docs/agents.md).
-
-The standalone protocols exist because the rule alone was not enough.
-`fidelity-gate` had been inlined into three sentences and lost the inventory
-step that does the work; `prompt-tuning` kept its principle and lost
-everything the principle was distilled from. The rest were dangling
-references — the conductor ordered a browser pass, an optimization pass and a
-review without saying what any of them was, so each meant whatever the agent
-felt like that afternoon. **A skill is admitted here only when something
-already asks for the protocol by name**, which is why there are fourteen and
-not forty; the ceiling on their combined description length is enforced in
-CI, and raising it is an owner decision rather than a retrospective's.
-
-Hit the brake at any time, from anywhere, without killing the session:
-
-```bash
-echo "wrong branch — hold everything" > .tyran/STOP
-```
-
-## What makes Tyran different
-
-- 🧾 **Proof-or-it-didn't-happen.** Agent reports without raw command output
-  (exit codes, `X passed / Y failed`) are rejected *mechanically* at the
-  `SubagentStop` hook — not by asking nicely in a prompt. **This gate blocks
-  SILENCE, not FORGERY:** an agent that invents the text `232 passed / 0
-  failed` walks straight through it. The gate raises the price of a lie — it
-  has to be deliberately fabricated rather than simply waved away — and it does
-  not remove it. Nor is the criterion "raw command output" — mechanically it is
-  *"a digit next to one of seven test-runner keywords"*, so a build log without
-  an exit code is refused and a sentence containing `6 / 6 passed` is not.
-  Measured on 55 real reports from this project's own agents: 53 pass, and both
-  misses turned out not to be reports at all. Details, numbers in both
-  directions, and limits in [the evidence gate](docs/evidence-gate.md).
-- 🔁 **It learns *your* workflow — and the loop closes itself.** When an
-  initiative's tickets are all merged with no retrospective recorded since
-  the last merge, a `Stop` hook refuses **one** turn and names what is owed.
-  `tyran:retro` then distills your repo's rules into `.tyran/knowledge/` and
-  tunes Tyran's own playbook, through an anti-bloat filter with four
-  questions, a hard cap of three edits per retrospective, and a stated
-  preference for deleting rules over adding them — so *"I changed nothing"*
-  is a correct outcome, and so is declining the retro entirely. What was
-  learned reaches the agent that needs it: every handoff carries a budgeted
-  **knowledge brief** of the entries that apply to the files at hand, and
-  each agent's report grades the entries it received, so the store is
-  pruned on evidence. **You are
-  never blocked twice**, whichever you choose. This is a gate rather than a
-  sentence in a skill because the retro is the step most easily skipped: it
-  happens after the merge, when the interesting part is over.
-- 🔁 **Survives restarts and compaction.** Execution state lives in an
-  append-only journal in your repo; a session hook re-injects it after every
-  compaction or resume. The team forgets nothing.
-- 🎯 **Update-safe evolution.** *(designed, not built.)* Three layers:
-  immutable core plugin · your repo's data (`.tyran/`) · locally evolved
-  skills. The layout is real — `.tyran/` exists and is never written by the
-  plugin's own files — but the delta-review agent that reconciles a new core
-  version with what your repo has learned does not exist yet.
-- 💰 **Cost modes that resolve from config, not from habit.** Model names
-  appear in exactly ONE file. Everything else — skills, agents, policies — is
-  written in role names, so a model deprecation is a one-line edit instead of
-  a sweep through every prompt. `node scripts/tiers.mjs --role reviewer`
-  answers with an alias; `--risk high` escalates one tier. The default puts
-  everyday work on the mid tier and reserves the expensive ones for calls
-  where being wrong is both costly and hard to notice — and **security review
-  and arbitration have a floor no profile or risk flag can push them below**,
-  because otherwise `eco` would quietly become a one-flag downgrade of the two
-  judgements everything downstream trusts. A missing alias throws rather than
-  falling back to the session default: routing that silently does nothing
-  looks exactly like routing that works.
-- 🔒 **Autonomy with a gate on the irreversible step.** Every commit and push
-  is scanned for secrets before it happens — the gate assembles the payload
-  itself and verifies the scanner covered all of it, so a `.gitattributes`
-  line cannot hide anything from it. `--no-verify` (and its abbreviations) and
-  force-pushes are refused; a push to your production branch is refused at the
-  strictest autonomy class, including through `HEAD`, `@`, a shell variable or
-  a `git -c` alias. **What it does not do is stop an agent from raising the
-  class itself:** the config file holding it is `AUTO` in the shipped policy,
-  so an agent can edit it. That is deliberate — the same file holds your
-  validation commands, and an agent that cannot correct a wrong one is an
-  agent that runs your test suite wrong forever. Set the rule back to `GATED`
-  in one word if you want the other trade. Autonomy classes are a convention
-  the gate enforces downward, not a lock. Not a firewall, and
-  [docs/hooks.md](docs/hooks.md) says exactly where it stops — including the
-  scanner's own measured false-negative rate.
-
-## How it compares
-
-Verified against competitors' **code and public issue trackers** (July 2026),
-not their READMEs. ✅ shipped/enforced · ⚠️ partial or prompt-only · ❌ absent
-or broken · — not applicable · 🎯 **committed in the v2 design, ships
-test-gated** (flips to ✅ only when the tests exist and pass).
-
-| Capability | **Tyran v2** | oh-my-claudecode | metaswarm | pilotfish | pro-workflow |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Evidence contract that **blocks**: no raw command output → report rejected | ✅ | ⚠️ advisory¹ | ⚠️ prompt | ⚠️ prompt | ❌ |
-| Learns **your repo's** rules, with an anti-bloat curator + decision ledger | ✅⁹ | ⚠️ | ⚠️ | ❌ by design | ⚠️ regex-based |
-| Execution state survives restart & compaction (journal + re-inject) | ✅ | ⚠️ | ❌² | ❌ | ⚠️ |
-| Plugin update **never** destroys local learning (3 layers + delta agent) | 🎯 | ❌³ | — | — | ⚠️ |
-| Cost modes resolved from repo config (`eco`/`balanced`/`full`, role-based routing, model names in ONE file) | ✅ | ⚠️ docs-only | ❌ | ⚠️ global-only | ❌ |
-| Secret gate on commit/push with verified scan coverage, no `--no-verify` escape | ✅ | ❌ | ❌ | ❌ | ⚠️ |
-| Independent reviewer that never grades its own homework | ✅⁷ | ⚠️ | ⚠️ prompt | ⚠️ | ❌ |
-| Small curated core — no context tax, enforced in CI | ✅ | ❌⁴ | ⚠️ | ✅ | ❌ |
-| Safe parallelism: worktree per agent, leases, sequential merge | ✅⁸ | ⚠️ | ❌ | — | ❌⁵ |
-| Clean install: 2 commands, **never writes into your `~/.claude`** | ✅ | ❌³ | ⚠️ | ❌ | ⚠️ |
-| OSS hygiene: license, changelog, CI validation, pressure tests | ✅ | ⚠️ | ⚠️ | ✅ | ❌⁶ |
-| Skills · agents it ships, counted from the repo tree | 14 · 4¹⁰ | 41 · 19 | 14 · 19 | 0 · 8 | 41 · 8 |
-
-<sub>¹ Their deliverable check is explicitly non-blocking ("never prevents the
-agent from stopping"). ² Their issues #32/#33/#36: crash loses loop state.
-³ Open issues #3535/#3536: update deletes user files from `~/.claude`.
-⁴ Their issue #2943: "50+ skills exceeding context description budget."
-⁵ Their issues #73/#74: worktree hook broke isolated spawns. ⁶ "MIT" badge
-links to a LICENSE file that does not exist in the repo; the GitHub API
-reports no license for it. ⁷ The reviewer agent is granted no editing tools,
-so it cannot patch what it is grading — but it keeps `Bash` in order to run
-the tests, and `Bash` can write. This raises the price of self-approval; it
-does not make it impossible. ⁸ Worktrees, leases and sequential merge are
-specified in the conductor skill, and lease events are recorded in the
-journal, so `STATE.md` surfaces a lease released by a non-holder. Detection,
-not prevention: nothing physically stops a second agent from entering a held
-worktree. ⁹ The retrospective is triggered by a `Stop` gate and the curator's
-filter is enforced in the agent's own contract, but what it decides to record
-is a judgement, not a mechanism — and the gate deliberately accepts "I am
-skipping this" as a complete answer. ¹⁰ <b>The one row where a bigger number
-is not a better one, printed anyway.</b> Measured on each repo's default
-branch, July 2026: files matching <code>skills/*/SKILL.md</code> and
-<code>agents/*.md</code>. Two competitors ship three times as many skills as
-Tyran does, and that is the point of the "small curated core" row above —
-oh-my-claudecode's own issue #2943 is titled "50+ skills exceeding context
-description budget", which is the bill that arrives with the larger number.
-Tyran's fourteen are held under a description budget CI enforces on every
-push (4352 of 5000 characters, and a test fails if this sentence and the
-script ever disagree). That ceiling was 4000 for the first eight skills and
-was raised once, deliberately, with the reason in the changelog — the
-distinction being that #2943 describes a budget that was <i>exceeded</i>, and
-an agent here may propose a raise but not perform one. Counting files is not
-counting value: what each skill is for is in <a href="skills/">skills/</a>,
-one directory each.</sub>
-
-## Command-line use (outside Claude Code)
-
-Published on npm as [`@jjanczur/tyran`](https://www.npmjs.com/package/@jjanczur/tyran)
-— scoped, not the bare name `tyran`, which carries an unpublish tombstone from
-2021-03-30 that npm's abuse policy blocks anyone from reusing, permanently. The
-command stays `tyran` either way; only the registry name is scoped, the same
-pattern as `@angular/cli` giving you `ng`. `bin/tyran.mjs` exposes the same
-scripts the plugin's hooks and skills already call — `doctor`, `scan-repo`,
-`tiers`, `journal`, `schema`, `knowledge`, `board`, `cost`, `answer`, `overnight`, `statusline`, `stop-check`,
-`scan-control-chars`, `desc-budget` — for a shell or a CI job with no Claude
-Code session. Zero dependencies; `--help` lists them.
-
-```bash
-npx @jjanczur/tyran doctor --hooks     # is any gate installed but unable to fire?
-npx @jjanczur/tyran scan-repo --dir .  # what this repo looks like, with provenance
-npx @jjanczur/tyran answer render      # the sheet of questions waiting on you
-```
-
-Exit codes propagate to the digit, so a CI step reddens exactly when the
-underlying script does.
-
-> **This does not install the Claude Code plugin.** For that, run
-> `/plugin marketplace add jjanczur/tyran` inside Claude Code — that name is
-> the Claude Code marketplace identity, a separate namespace from npm. The npm
-> package is the tooling; the plugin is the conductor.
+Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story, own
+branch), `tyran:reviewer` (no editing tools — it cannot patch what it is
+grading), `tyran:retro`. A skill is admitted only when something already asks
+for the protocol by name, and every description is loaded into every session
+whether the skill fires or not — so the combined length is capped and CI
+enforces the cap (4352 of 5000 characters). What each one assumes, and who
+invokes it, is in [skills and agents](docs/skills.md). Behind all of it: 1289
+unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 
-**Everything below also reads as a site: [jjanczur.github.io/tyran](https://jjanczur.github.io/tyran/)**
-— same text, with search, rendered diagrams and per-page status badges.
+Everything below also reads as a site, with search and rendered diagrams:
+[jjanczur.github.io/tyran](https://jjanczur.github.io/tyran/).
 
-- 📖 [Getting started](https://jjanczur.github.io/tyran/getting-started/)
-- 🧰 [Skills and agents](https://jjanczur.github.io/tyran/skills/) — all fourteen skills and four agents, what each assumes, and who invokes it
-- ⚙️ [Configuration](https://jjanczur.github.io/tyran/configuration/) — `.tyran/config.yaml`, cost profiles, autonomy classes
-- 🎭 [The roster and model routing](https://jjanczur.github.io/tyran/agents/) — the four agents, the tier and effort table, dynamic overrides, the `.tyran/STOP` brake (shipped)
-- 🏛️ [Architecture](https://jjanczur.github.io/tyran/architecture/) — the three layers, the journal, the hooks
-- 📜 [Journal reference](https://jjanczur.github.io/tyran/journal/) — the append-only event schema (shipped)
-- 🧾 [Projections](https://jjanczur.github.io/tyran/projections/) — generated `STATE.md` / `PROGRESS.md` and `--check` (shipped)
-- 🩺 [Doctor](https://jjanczur.github.io/tyran/doctor/) — `--state` consistency check: drift, orphan leases, dead policy rules (shipped)
-- 🪝 [Hook runtime](https://jjanczur.github.io/tyran/hooks/) — gates vs probes, why hooks fail open, and what the deadline really promises (shipped)
-- 🧾 [Evidence gate](https://jjanczur.github.io/tyran/evidence-gate/) — the criterion, who it binds, the recorded escape hatch, and the line between silence and forgery (shipped)
-- 🛡️ [Policy gate](https://jjanczur.github.io/tyran/policy-gate/) — path classes, the deployment class, the one rule on reads, and where each stops (shipped)
-- 🧠 [Self-improvement](https://jjanczur.github.io/tyran/self-improvement/) — how Tyran learns your repo, and its guardrails
-- ❓ [FAQ](https://jjanczur.github.io/tyran/faq/)
-- 🤝 [Contributing](CONTRIBUTING.md) — not a docs-site page, so this one stays a repo link
-
-## Strategic principles
-
-1. **Native mechanisms only.** Built entirely on Claude Code's plugin surface:
-   agent frontmatter, hooks, skills-dir plugins. No custom runtime. When the
-   platform absorbs a capability, Tyran drops a layer instead of competing
-   with the vendor.
-2. **Enforcement over prompts.** A rule that matters becomes a hook or a
-   script. Prose is for judgment; mechanisms are for discipline.
-3. **Evidence over claims.** From agent reports to this README's comparison
-   table: nothing is asserted without receipts.
-4. **The repo is the memory.** All state and learned rules live in *your*
-   repository as reviewable text files. No hidden databases, no build step,
-   no silent degradation.
-5. **Local evolution, curated upstream.** Tyran adapts to each repo locally;
-   generalizable improvements travel to the core as pull requests.
-6. **Autonomy earns trust in layers.** Detected once, confirmed with you, and
-   enforced downward by the policy gate. Not *"never self-escalated"* — the
-   file holding the class is `AUTO`, so an agent can edit it, chosen so that
-   an agent can also repair the validation commands stored beside it.
-   Measured, not assumed; see [the policy gate](docs/policy-gate.md).
-
-## Roadmap
-
-- [x] Plugin skeleton, marketplace, CI (validate ×2, tests, description
-      budget, gitleaks, semgrep)
-- [x] `.tyran/` state layer: append-only journal, knowledge schema, generated
-      human-readable projections, `doctor --state`
-- [x] Enforcement hooks: evidence gate, secrets gate, policy gate, write
-      guard, state re-inject, and `doctor --hooks` — which catches a gate
-      that is installed but cannot fire
-- [x] `/tyran:run` conductor + the four-agent roster + role-to-model routing
-      resolved from `.tyran/config.yaml`, plus the `.tyran/STOP` brake
-- [x] `/tyran:setup` repo scanner (never infers `P3`) + `/tyran:doctor`,
-      `/tyran:status`, `/tyran:retro`, and the bare `/tyran` shortcut
-- [x] Self-improvement loop: a `Stop` gate that will not let an initiative
-      end unretrospected, plus knowledge accumulation into `.tyran/knowledge/`
-- [ ] Cost-profile benchmark receipts (three runs per profile on a fixture,
-      published as numbers rather than as a table of intentions)
-- [ ] Update delta-review: reconcile a new core version with what your repo
-      has learned locally
-- [x] Overnight mode: usage-limit pause + scheduled resume — the statusline
-      telemetry sidecar, a wind-down gate near the subscription window, and a
-      watcher that resumes (or, on a days-away weekly reset, notifies and
-      holds) — see [docs/overnight.md](docs/overnight.md)
-- [x] Read-only dashboard: the kanban board — `BOARD.md`/`board.json` next to
-      every journal, one cross-initiative `board.html` in the landing page's
-      own palette, refreshed on every subagent stop, plus `board.mjs --serve`
-- [x] The spend ledger: what the work actually cost, read out of the
-      transcripts Claude Code already writes — tokens per model, per agent type
-      and per ticket, money only under a rate card you write, and a Spend
-      section the board fetches rather than embeds — see
-      [docs/cost.md](docs/cost.md)
-- [x] The mistakes ledger: `MISTAKES.md` at your repo root — what went wrong
-      here and how often — where three occurrences of one signature graduate a
-      lesson into `.tyran/knowledge/` and five write a rule into your
-      `CLAUDE.md`, inside Tyran's own fence — see
-      [docs/self-improvement.md](docs/self-improvement.md)
-
-## Where this came from
-
-Tyran started as a teaching problem. One of us was mentoring the other
-through learning to program, and the mentee kept hitting the same wall — not
-with the code, with the *tool*. Claude would ask a pile of hard questions at
-once, lose the thread halfway through the answer, and burn a small fortune in
-tokens re-deriving what it had already worked out. From the outside it looked
-like a skill problem. It was a **context** problem.
-
-So we sat down and went through how Claude Code actually works underneath —
-agent teams, subagents, why a fresh context beats a long one, why the state
-has to live somewhere the window cannot take with it. That conversation
-turned into a plugin. The first version was **pure prompt**: a long, careful
-skill that told the model how to behave. It worked exactly as well as a
-written rule ever works — until the run got long, or expensive, or boring.
-
-That failure is the whole reason for v2. Every rule that mattered got
-demoted from a paragraph to a **mechanism**: a hook that refuses a report
-with no command output, a gate that will not let an initiative close
-unretrospected, a file that decides which model a role gets. The motto on the
-conductor skill — *a rule in prose loses to a mechanism that makes the mistake
-impossible* — is not a slogan we adopted. It is the lesson v1 taught us, in
-the order we learned it.
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | install, first run, the command line, updating |
+| [Architecture](docs/architecture.md) | the four failures, the three layers, the hooks, the principles, the roadmap |
+| [Skills and agents](docs/skills.md) · [the roster](docs/agents.md) | what each one assumes and who invokes it; the tier and effort table, the `.tyran/STOP` brake |
+| [Configuration](docs/configuration.md) | `.tyran/config.yaml`, cost profiles, the rate card, autonomy classes |
+| [Self-improvement](docs/self-improvement.md) | how Tyran learns your repo, and its guardrails |
+| [Journal](docs/journal.md) · [projections](docs/projections.md) | the append-only event schema, and what is generated from it |
+| [The board](docs/board.md) · [the spend ledger](docs/cost.md) | lanes, answering a question, and what a run cost |
+| [Overnight mode](docs/overnight.md) · [doctor](docs/doctor.md) | usage-limit pause and scheduled resume; the `--state` and `--hooks` checks |
+| [Hook runtime](docs/hooks.md) · [evidence gate](docs/evidence-gate.md) · [policy gate](docs/policy-gate.md) | gates versus probes and why hooks fail open; the criterion and its limits; path classes and where each stops |
+| [FAQ](docs/faq.md) | short answers, the comparison table, and where this came from |
+| [Contributing](CONTRIBUTING.md) | the dev loop, the test commands, the enforced rules |
 
 ## License
 

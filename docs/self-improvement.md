@@ -21,6 +21,21 @@ plus the git history of the work itself. Then it may improve **Tyran**
 - **or delete/weaken one of its own earlier rules** — the loop
   self-corrects downward, too.
 
+### What compounding looks like
+
+Not a log of a real install — the shape the loop is designed to produce:
+
+```text
+Initiative 1   Infers your stack, your validation commands, your deployment
+               style from how the repo is actually worked. Asks once, about
+               what it genuinely could not establish.
+Initiative 5   Knows your shared-file hot zones, your flaky tests, your
+               review taste. Its retro has already DELETED two of its own
+               rules that weren't earning their keep.
+Initiative 20  Has written repo-specific skills for your recurring work and
+               merged two agents that overlapped. You mostly approve gates.
+```
+
 ## The anti-bloat filter (default answer: change nothing)
 
 Every candidate change must pass all of:
@@ -41,6 +56,22 @@ debugging?* Generic programming knowledge is never extracted.
 
 A retro that changes **nothing** is a correct, common outcome. Rejected
 candidates are logged — they protect future retros from re-litigating.
+
+### Hard limits on a single retrospective
+
+Stated in the agent's own contract (`agents/retro.md`), because a filter with
+no ceiling is a preference rather than a limit:
+
+- **At most three changes to the conductor skill per retro.** More than that
+  is bloat with certainty rather than risk; the surplus is recorded as
+  candidates for next time and not implemented.
+- **Deletion is preferred to addition**, in that order: (a) delete or merge
+  what duplicates, (b) fix an existing sentence, (c) only then add. Several
+  retros in a row with no deletion means the filter is too soft.
+- **Do not breed agents.** A new agent only when the work has a genuinely
+  different *mode* — different tools, different model tier, different
+  lifecycle — never merely a different topic. A roster nobody can hold in
+  their head is its own cognitive tax.
 
 ## Guardrails (designed to be enforced, not promised)
 

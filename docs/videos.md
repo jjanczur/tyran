@@ -6,11 +6,11 @@ believe.
 
 | video | length | answers |
 |---|---|---|
-| [The explainer](#the-explainer) | 3:20 | What is this and why would I run it? |
-| [Your first session](#your-first-session) | 3:53 | I'm sold — what do I actually type? |
-| [One chat, one model](#one-chat-one-model-every-job) | 1:01 | Why is my bill high and my output worse? |
-| [The board](#the-board) | 0:59 | What does delegation look like from outside? |
-| [It learns you](#it-learns-you) | 1:22 | What does it do that a prompt pack cannot? |
+| [The explainer](https://youtu.be/ThulYtbYNXI) | 3:20 | What is this and why would I run it? |
+| [Your first session](https://youtu.be/vr49hKk9G8g) | 3:53 | I'm sold — what do I actually type? |
+| [One chat, one model](https://www.youtube.com/shorts/2EgRBR0fVRo) | 1:01 | Why is my bill high and my output worse? |
+| [The board](https://www.youtube.com/shorts/HKePDLkYDqA) | 0:59 | What does delegation look like from outside? |
+| [It learns you](https://www.youtube.com/shorts/EMcPJj7c0mk) | 1:22 | What does it do that a prompt pack cannot? |
 
 Everything on screen is real: the board is a published journal, the spend is
 the actual rollup, and the run being narrated is Tyran building Tyran. The
@@ -20,6 +20,8 @@ yourself](https://jjanczur.github.io/tyran/sandbox/) — no install.
 ---
 
 ## The explainer
+
+[![Watch the explainer on YouTube (3:20)](../assets/video/a-explainer-16x9.jpg)](https://youtu.be/ThulYtbYNXI)
 
 **3:20 · 16:9 · the one to watch first.**
 
@@ -39,6 +41,8 @@ Tyran. If you have one slot, this is it.
 
 ## Your first session
 
+[![Watch the first-session tutorial on YouTube (3:53)](../assets/video/a-onboarding-16x9.jpg)](https://youtu.be/vr49hKk9G8g)
+
 **3:53 · 16:9 · the tutorial.**
 
 Install, `/tyran:setup` on a real repository, brief the manager, watch the team
@@ -56,6 +60,8 @@ yet.
 
 ## One chat, one model, every job
 
+<a href="https://www.youtube.com/shorts/2EgRBR0fVRo"><img src="../assets/video/a-mistake-9x16.jpg" width="240" alt="Watch the Short on YouTube (1:01)"></a>
+
 **1:01 · 9:16 · the diagnosis.**
 
 The mistake, named and fixed in sixty seconds. No good team puts a principal
@@ -69,6 +75,8 @@ never explains the architecture.
 **Use it for:** Shorts, TikTok, X. The cold-audience opener.
 
 ## The board
+
+<a href="https://www.youtube.com/shorts/HKePDLkYDqA"><img src="../assets/video/a-board-9x16.jpg" width="240" alt="Watch the Short on YouTube (0:59)"></a>
 
 **0:59 · 9:16 · the flashy one.**
 
@@ -87,6 +95,8 @@ asks "so what do you actually get?" — pair it with the
 themselves.
 
 ## It learns you
+
+<a href="https://www.youtube.com/shorts/EMcPJj7c0mk"><img src="../assets/video/a-retro-9x16.jpg" width="240" alt="Watch the Short on YouTube (1:22)"></a>
 
 **1:22 · 9:16 · the differentiator.**
 

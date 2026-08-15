@@ -147,6 +147,13 @@ tutorial, and three vertical shorts (the mistake, the board, the retro), each
 with burned-in captions and an `.srt` sidecar. Catalogue and guidance on which
 to send when: [`docs/videos.md`](docs/videos.md).
 
+Published 2026-08-16 — [explainer](https://youtu.be/ThulYtbYNXI),
+[onboarding](https://youtu.be/vr49hKk9G8g), and the shorts
+[board](https://www.youtube.com/shorts/HKePDLkYDqA),
+[mistake](https://www.youtube.com/shorts/2EgRBR0fVRo),
+[retro](https://www.youtube.com/shorts/EMcPJj7c0mk). The IDs live in exactly
+one file, `site/src/data/videos.json`.
+
 Sources are tracked in `video/`; the renders are **not**. They come to roughly
 430 MB, and this repository is what `/plugin marketplace add jjanczur/tyran`
 clones, so committing them would put marketing video into every install of the

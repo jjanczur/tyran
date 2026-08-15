@@ -86,13 +86,13 @@ Mechanisms rather than instructions — which is the whole argument.
 <table>
 <tr>
 <td width="50%" align="center">
-  <a href="https://jjanczur.github.io/tyran/videos/#the-explainer"><img src="assets/video/a-explainer-16x9.jpg" width="100%" alt="Still from the Tyran explainer: the routing table, with each role resolving to a model tier"></a><br>
-  <b>You Didn't Install a Tool — You Hired a Manager</b><br>
+  <a href="https://youtu.be/ThulYtbYNXI"><img src="assets/video/a-explainer-16x9.jpg" width="100%" alt="Still from the Tyran explainer: the routing table, with each role resolving to a model tier"></a><br>
+  <b><a href="https://youtu.be/ThulYtbYNXI">You Didn't Install a Tool — You Hired a Manager</a></b><br>
   3:20 · the whole argument, end to end
 </td>
 <td width="50%" align="center">
-  <a href="https://jjanczur.github.io/tyran/videos/#your-first-session"><img src="assets/video/a-onboarding-16x9.jpg" width="100%" alt="Still from the Tyran onboarding video: the install commands typed into a terminal"></a><br>
-  <b>Your First Session</b><br>
+  <a href="https://youtu.be/vr49hKk9G8g"><img src="assets/video/a-onboarding-16x9.jpg" width="100%" alt="Still from the Tyran onboarding video: the install commands typed into a terminal"></a><br>
+  <b><a href="https://youtu.be/vr49hKk9G8g">Your First Session</a></b><br>
   3:53 · install, run, read the board
 </td>
 </tr>
@@ -100,9 +100,10 @@ Mechanisms rather than instructions — which is the whole argument.
 
 <p align="center">
   Three 60-second cuts too —
-  <a href="https://jjanczur.github.io/tyran/videos/#one-chat-one-model-every-job">the mistake</a> ·
-  <a href="https://jjanczur.github.io/tyran/videos/#the-board">the board</a> ·
-  <a href="https://jjanczur.github.io/tyran/videos/#it-learns-you">the retro</a>
+  <a href="https://www.youtube.com/shorts/2EgRBR0fVRo">the mistake</a> ·
+  <a href="https://www.youtube.com/shorts/HKePDLkYDqA">the board</a> ·
+  <a href="https://www.youtube.com/shorts/EMcPJj7c0mk">the retro</a> —
+  and <a href="https://jjanczur.github.io/tyran/videos/">which to send when</a>.
 </p>
 
 ## What it gives you

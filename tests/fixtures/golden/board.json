@@ -10,6 +10,10 @@
   "paused": null,
   "asks": [
     {
+      "blocks": {
+        "count": 0,
+        "ids": []
+      },
       "kind": "Q-1",
       "ticket": "T-10",
       "question": "flat fee or per-seat on the team plan?",
@@ -18,6 +22,7 @@
       "since": "2026-07-26T09:41:55.000Z"
     },
     {
+      "blocks": null,
       "kind": "Q-2",
       "ticket": null,
       "question": "en dash or em dash in headings?",
@@ -34,7 +39,10 @@
       "state": "blocked",
       "detail": "waiting on the worktree lease",
       "next": null,
-      "last_signal": "2026-07-26T09:41:40.000Z"
+      "last_signal": "2026-07-26T09:41:40.000Z",
+      "last_evidence": "2026-07-26T09:41:45.000Z",
+      "evidence_kind": "finding",
+      "since": "2026-07-26T09:36:01.000Z"
     }
   ],
   "lanes": {

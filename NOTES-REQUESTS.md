@@ -163,14 +163,18 @@ this study and both confirmed by reproduction:
   the whole Overnight section of the new Settings tab was dead text on every
   fresh install (0.1.24).
 
-Shipped since (0.1.25): the STOP half of item 1, item 4 (ticketless errors on
-the board) and item 5 (card ages). The machine-local half of item 1 —
-`paused-until.json`, `resume.json`, `usage.json` behind a `/run.json` route —
-is still open, and is what tells a stalled fleet apart from a scheduled pause.
+**All six are now shipped** — 0.1.25 (STOP, ticketless errors, card ages),
+0.1.26 (the tier fallback) and 0.1.27 (`/run.json`, blast radius,
+signal-vs-evidence, escalation on a failed attempt). What remains of item 1 is
+not routing but DETECTION: the limit surfaces inside a subagent's API call
+where no hook can see it, so the conductor still has to notice a dead agent and
+write `error {class: 'model-unavailable', model}` before `tiers.mjs` can act on
+it. That convention is the seam; closing it needs a platform signal Tyran does
+not have.
 
-Ranked, still to build:
+The original list, for the record:
 
-1. **`/run.json`: the machine-local half of "is the run supposed to be running"** Three chips reading
+1. ~~**`/run.json`: the machine-local half of "is the run supposed to be running"**~~ SHIPPED 0.1.27. Three chips reading
    "6 HOURS since last signal" cover four unrelated situations — an operator
    `STOP`, an overnight pause waiting on a reset, a dead resume watcher, and
    genuinely dead agents — and the board distinguishes none of them. Split by
@@ -179,14 +183,14 @@ Ranked, still to build:
    `usage.json` are machine-local and gitignored, so they must be SERVED, on
    the same argument `cost.json` already makes. `scheduleDecision`, `watcherAlive` and
    `humanWait` are already exported from `scripts/overnight.mjs`. **M.**
-2. **Blast radius on the waiting-on-you queue.** Asks sort by age alone, so
+2. ~~**Blast radius on the waiting-on-you queue.**~~ SHIPPED 0.1.27. Asks sort by age alone, so
    the question holding up six tickets sits below the one holding up nothing.
    `deps[]` is resolved forward in `boardOf` and never reversed. Build the
    reverse index, walk it transitively, sort by it in both `crossBoard()` and
    `answer.mjs renderSheet` — one queue, two renderings. Guard: `deps` is
    optional, and "blocks 0" everywhere is an absence rendered as a
    measurement. **M.**
-3. **Signal is not evidence.** Agent freshness comes from `progressByAgent`,
+3. ~~**Signal is not evidence.**~~ SHIPPED 0.1.27. Agent freshness comes from `progressByAgent`,
    which is the agent's own self-report: an agent emitting `working` every few
    minutes while achieving nothing is the healthiest-looking chip on the
    board. Keep a second map fed only by events another party produced
@@ -200,7 +204,7 @@ Ranked, still to build:
    with two meanings is the ADR-21 defect by name. **S.**
 5. ~~**Cards say how long they have stood still.**~~ SHIPPED 0.1.25. `boardOf()` already puts
    `since` on every card and the page never renders it. Client-side only. **S.**
-6. **Escalate the tier on a failed attempt.** A ticket that comes back
+6. ~~**Escalate the tier on a failed attempt.**~~ SHIPPED 0.1.27. A ticket that comes back
    `changes-requested` is re-spawned at the same tier and fails the same way,
    because the escalation rule lives in the conductor's memory — which iron
    rule 7 already names the least reliable store in the system. `tiers.mjs`
@@ -224,3 +228,14 @@ the measured install is at 31.
 One piece of dead weight the study found on the way: `budget:` in
 `scripts/schema.mjs`'s `known` list is validated, documented by its own
 validation, and read by nothing. It should be deleted.
+
+## 8. `budget:` in the config schema — left in place deliberately
+
+The munder-difflin study flagged `budget:` in `scripts/schema.mjs`'s `known`
+list as dead weight: validated, documented only by its own validation, read by
+nothing. That is accurate, and it is still there on purpose.
+
+Removing a key from `known` turns any config that carries it INVALID, and an
+invalid config makes the policy gate refuse every write in that repo. So the
+cost of the tidy-up lands on whoever set the key, and the benefit is a shorter
+array. It stays accepted and inert until there is a reason to migrate.

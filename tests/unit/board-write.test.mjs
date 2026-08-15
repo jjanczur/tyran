@@ -526,3 +526,68 @@ test('board.mjs refuses a --dir that is not a .tyran directory', () => {
     }
   })();
 });
+
+test('run.json serves the machine-local half of "is this supposed to be running"', () => {
+  // Three chips reading "6 HOURS since last signal" cover four unrelated
+  // situations. STOP is committed and travels in the artefact; the pause
+  // marker, the resume watcher and the usage sidecar are gitignored and
+  // different on every machine, so they are SERVED — the same split spend
+  // already makes. MUTANT: put any of this in board.json and --check fails on
+  // the next machine.
+  return (async () => {
+    const f = fixture();
+    const s = await serve(f.tyran, ['--write']);
+    try {
+      const quiet = await (await fetch(`${s.base}/run.json`)).json();
+      assert.deepEqual(quiet, { schema: 1, paused: null, watcher: null, usage: null });
+
+      writeFileSync(join(f.tyran, 'state', 'paused-until.json'), JSON.stringify({
+        paused_at: '2026-08-15T09:00:00.000Z',
+        window: 'five_hour',
+        used_percentage: 97.4,
+        resume_at: '2999-01-01T00:00:00.000Z',
+      }));
+      const paused = await (await fetch(`${s.base}/run.json`)).json();
+      assert.equal(paused.paused.window, 'five_hour');
+      assert.equal(paused.paused.used_percentage, 97.4);
+      assert.equal(paused.paused.overdue, false, 'a future resume time is not overdue');
+
+      // A marker whose resume time has passed is the shape of a dead watcher.
+      writeFileSync(join(f.tyran, 'state', 'paused-until.json'), JSON.stringify({
+        paused_at: '2026-08-15T09:00:00.000Z', resume_at: '2000-01-01T00:00:00.000Z',
+      }));
+      assert.equal((await (await fetch(`${s.base}/run.json`)).json()).paused.overdue, true);
+
+      // None of it may reach the committed artefact. Render it first —
+      // board.json does not exist until something writes it.
+      await fetch(`${s.base}/board.json`);
+      const { execFileSync } = await import('node:child_process');
+      execFileSync(process.execPath, [SCRIPT, '--dir', f.tyran], { stdio: 'pipe' });
+      const board = readFileSync(join(f.tyran, 'state', 'board.json'), 'utf8');
+      assert.doesNotMatch(board, /paused_at|used_percentage|resume_at/);
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});
+
+test('a damaged run-state file is absent, not fatal', () => {
+  // This answers a question ABOUT the run; it must never be the reason nobody
+  // can see the board. MUTANT: let JSON.parse throw out of runState.
+  return (async () => {
+    const f = fixture();
+    const s = await serve(f.tyran, ['--write']);
+    try {
+      writeFileSync(join(f.tyran, 'state', 'paused-until.json'), 'not json at all');
+      writeFileSync(join(f.tyran, 'state', 'resume.json'), '[]');
+      const run = await (await fetch(`${s.base}/run.json`)).json();
+      assert.equal(run.paused, null);
+      assert.equal(run.watcher, null);
+      assert.equal((await fetch(`${s.base}/`)).status, 200, 'and the board still renders');
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});

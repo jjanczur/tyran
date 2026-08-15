@@ -186,6 +186,60 @@ export function scheduleDecision(marker, { forceResume = false } = {}) {
 
 // --------------------------------------------------------------- plumbing
 
+/**
+ * The machine-local run state, for a reader that only wants to LOOK at it.
+ *
+ * Composed here rather than in the board, because these three files and the
+ * rules for reading them are this module's business: the marker says whether a
+ * pause is live, the resume state says whether a watcher is still breathing,
+ * and the sidecar says how full the window was when it was last written. All
+ * three are gitignored and different on every machine, which is why the board
+ * SERVES this rather than embedding it — the same argument spend makes.
+ *
+ * Everything is read defensively: a missing, oversized or unparseable file is
+ * simply absent. This answers a question about the run; it must never be the
+ * reason nobody can see the board.
+ */
+export function runState(repo, nowMs = Date.now()) {
+  const marker = readSmallJson(join(repo, MARKER_RELPATH));
+  const resume = readSmallJson(join(repo, RESUME_STATE_RELPATH));
+  const sidecar = readSmallJson(join(repo, SIDECAR_RELPATH));
+  const resumeAtMs = marker?.resume_at ? Date.parse(marker.resume_at) : NaN;
+  return {
+    paused: marker === null ? null : {
+      since: typeof marker.paused_at === 'string' ? marker.paused_at : null,
+      window: typeof marker.window === 'string' ? marker.window : null,
+      used_percentage: typeof marker.used_percentage === 'number' ? marker.used_percentage : null,
+      resume_at: typeof marker.resume_at === 'string' ? marker.resume_at : null,
+      // A marker whose resume time has passed while a watcher was supposed to
+      // act on it is the shape of a dead watcher, and it reads as an ordinary
+      // pause unless something says otherwise.
+      overdue: Number.isFinite(resumeAtMs) && resumeAtMs < nowMs,
+      wait: Number.isFinite(resumeAtMs) ? humanWait(resumeAtMs - nowMs) : null,
+    },
+    watcher: resume === null ? null : {
+      state: typeof resume.state === 'string' ? resume.state : null,
+      alive: watcherAlive(resume, nowMs),
+      resume_at: typeof resume.resume_at === 'string' ? resume.resume_at : null,
+    },
+    usage: sidecar === null ? null : {
+      written_at: typeof sidecar.written_at === 'string' ? sidecar.written_at : null,
+      stale: !(typeof sidecar.written_at === 'string' && nowMs - Date.parse(sidecar.written_at) < SIDECAR_FRESH_MS),
+      five_hour: pickWindow(sidecar.five_hour),
+      seven_day: pickWindow(sidecar.seven_day),
+    },
+  };
+}
+
+/** Numbers and an ISO string only — never a free payload string from a hook. */
+function pickWindow(w) {
+  if (w === null || typeof w !== 'object') return null;
+  return {
+    used_percentage: typeof w.used_percentage === 'number' ? w.used_percentage : null,
+    resets_at: typeof w.resets_at === 'string' ? w.resets_at : null,
+  };
+}
+
 function readSmallJson(path) {
   try {
     if (!existsSync(path) || statSync(path).size > 64 * 1024) return null;

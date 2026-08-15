@@ -29,6 +29,8 @@ import {
   resolveAll,
   loadConfig,
   readProfile,
+  ESCALATION_CEILING,
+  ticketHistory,
 } from '../../scripts/tiers.mjs';
 import { PROFILES } from '../../scripts/schema.mjs';
 
@@ -139,9 +141,9 @@ test('resolveAll covers every role and reports tier, model and effort', () => {
   // fallback came down FROM. Pinned in the shape rather than tested only
   // where it fires: a consumer that reads it must be able to rely on it
   // always being present.
-  assert.deepEqual(all.scout, { tier: 'cheap', model: 'haiku', effort: 'low', floored: false, fell_from: null });
-  assert.deepEqual(all['security-review'], { tier: 'top', model: 'fable', effort: 'max', floored: false, fell_from: null });
-  assert.deepEqual(all.implementer, { tier: 'work', model: 'sonnet', effort: 'medium', floored: false, fell_from: null });
+  assert.deepEqual(all.scout, { tier: 'cheap', model: 'haiku', effort: 'low', floored: false, fell_from: null, escalated_from: null, attempts: 0 });
+  assert.deepEqual(all['security-review'], { tier: 'top', model: 'fable', effort: 'max', floored: false, fell_from: null, escalated_from: null, attempts: 0 });
+  assert.deepEqual(all.implementer, { tier: 'work', model: 'sonnet', effort: 'medium', floored: false, fell_from: null, escalated_from: null, attempts: 0 });
 });
 
 // --- dynamic overrides: the conductor adjusting a single subtask -----------
@@ -214,6 +216,8 @@ test('CLI --field selects what lands on stdout', () => {
     effort: 'low',
     floored: false,
     fell_from: null,
+    escalated_from: null,
+    attempts: 0,
   });
 });
 
@@ -372,4 +376,75 @@ test('--unavailable is repeatable', () => {
     { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   );
   assert.equal(out.trim(), 'work');
+});
+
+// --- escalation: the journal remembers what the conductor forgets ----------
+
+test('a failed attempt escalates one step, and the journal is what remembers', () => {
+  // The escalation rule used to live in the conductor's memory, which iron
+  // rule 7 already names the least reliable store in the system: after a
+  // compaction, or under a second conductor, the ticket is re-spawned at the
+  // tier that has already failed twice. MUTANT: return the base tier from
+  // resolveModel regardless of `attempts`.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const at = (attempts) => resolveModel(doc, 'implementer', 'balanced', 'normal', { attempts });
+  assert.equal(at(0).tier, 'work');
+  assert.equal(at(0).escalated_from, null);
+  assert.equal(at(1).tier, 'deep');
+  assert.equal(at(1).escalated_from, 'work');
+  assert.equal(at(1).attempts, 1);
+});
+
+test('escalation stops at the ceiling, however many attempts there were', () => {
+  // A ticket that has failed five times does not need the most expensive model
+  // in the table — it needs a human, and the changes-requested lane already
+  // shows that. MUTANT: drop the ceiling and five failures reach `top`.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  for (const attempts of [2, 3, 9]) {
+    assert.equal(resolveModel(doc, 'implementer', 'balanced', 'normal', { attempts }).tier, ESCALATION_CEILING);
+  }
+  // A role that already resolves above the ceiling is not dragged down to it.
+  assert.equal(resolveModel(doc, 'security-review', 'balanced', 'normal', { attempts: 3 }).tier, 'top');
+});
+
+test('escalation happens first, then the fallback — and both are reported', () => {
+  // A re-try asks for a stronger model and only THEN discovers whether it is
+  // available. The other order would fall back from a tier the run was never
+  // going to use. MUTANT: swap them.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const r = resolveModel(doc, 'implementer', 'balanced', 'normal', { attempts: 2, unavailable: ['opus'] });
+  assert.equal(r.escalated_from, 'work', 'it climbed from work');
+  assert.equal(r.fell_from, 'deep', 'and fell from the tier it climbed to');
+  assert.equal(r.tier, 'work');
+});
+
+test('ticketHistory reads both facts out of the journal', () => {
+  // MUTANT: count every review instead of the non-approving ones — an
+  // approved ticket re-spawns on a more expensive model for no reason.
+  const events = [
+    { ev: 'review', data: { ticket: 'T-1', verdict: 'CHANGES-REQUESTED' } },
+    { ev: 'review', data: { ticket: 'T-1', verdict: 'APPROVE' } },
+    { ev: 'review', data: { ticket: 'T-2', verdict: 'CHANGES-REQUESTED' } },
+    { ev: 'error', data: { class: 'model-unavailable', model: 'fable' } },
+    { ev: 'error', data: { class: 'model-unavailable', model: 'fable' } },
+    { ev: 'error', data: { class: 'flaky-test', detail: 'unrelated' } },
+  ];
+  const h = ticketHistory(events, 'T-1');
+  assert.equal(h.attempts, 1, 'only the non-approving review on THIS ticket');
+  // A model that ran out is out for everything, not just for one ticket, and
+  // it is recorded once however many agents hit it.
+  assert.deepEqual(h.unavailable, ['fable']);
+  assert.equal(ticketHistory(events, 'T-9').attempts, 0);
+});
+
+test('a journal that cannot be read routes as a first attempt, loudly', () => {
+  // Routing must never DEPEND on a readable journal. MUTANT: let the read
+  // throw — every spawn in a repo with a damaged journal fails to resolve.
+  const dir = repoWithConfig();
+  const out = execFileSync(
+    process.execPath,
+    [SCRIPT, '--role', 'implementer', '--journal', join(dir, 'nope.jsonl'), '--ticket', 'T-1', '--field', 'json'],
+    { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  assert.equal(JSON.parse(out.trim()).attempts, 0);
 });

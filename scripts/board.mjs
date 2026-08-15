@@ -46,7 +46,8 @@ import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
 import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
 import { checkStopAt } from './stop-check.mjs';
-import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender } from './answer.mjs';
+import { runState } from './overnight.mjs';
+import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender, sortAsks } from './answer.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
 
@@ -232,14 +233,25 @@ export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
       for (const card of board.lanes.get(lane)) lanes[lane].push({ ...card, init: name });
     }
   }
-  asks.sort((a, b) => String(a.since ?? '').localeCompare(String(b.since ?? '')));
+  // The SAME rule the answer sheet uses, imported rather than restated: the
+  // sheet and the page are two renderings of one queue, and two orderings
+  // would make an operator answer them in different sequences depending on
+  // which surface they happened to open (ADR-21).
+  const ordered = sortAsks(asks);
+  asks.length = 0;
+  asks.push(...ordered);
   // Stalest FIRST. Rendering agents in the order the journals happened to spawn
   // them puts the one that has said nothing for six hours anywhere at all,
   // including last — and the whole reason the strip carries a last-signal time
   // is that the silent agent is the one worth looking at. `last_signal` is an
   // ISO string from the journal, so ascending string order IS ascending time;
   // an agent with no signal at all sorts to the front, where it belongs.
-  agents.sort((a, b) => String(a.last_signal ?? '').localeCompare(String(b.last_signal ?? '')));
+  // Sorted on EVIDENCE where there is any, falling back to the signal. An
+  // agent that has shown nothing for three hours belongs at the top even if it
+  // has been saying "working" every four minutes the whole time — which is
+  // exactly the case the old signal-only sort put last.
+  agents.sort((a, b) =>
+    String(a.last_evidence ?? a.since ?? '').localeCompare(String(b.last_evidence ?? b.since ?? '')));
   // Newest first: an error from four days ago is history, the one from ten
   // minutes ago is the reason you opened this page.
   logged.sort((a, b) => String(b.ts ?? '').localeCompare(String(a.ts ?? '')));
@@ -325,6 +337,9 @@ export function renderCrossMd(payload) {
     parts.push(`- **${inline(a.question ?? `(no question recorded — gate ${a.kind})`)}**\n`);
     if (a.recommendation != null) parts.push(`  - recommendation: ${inline(a.recommendation)}\n`);
     if (a.default != null) parts.push(`  - default: ${inline(a.default)}\n`);
+    if (a.blocks != null && a.blocks.count > 0) {
+      parts.push(`  - blocks ${a.blocks.count} ticket(s): ${a.blocks.ids.map((id) => inline(id)).join(', ')}\n`);
+    }
     parts.push(`  - ${inline(a.init)}${a.ticket != null ? ` · \`${inline(a.ticket)}\`` : ''} · since ${inline(a.since)}\n`);
   }
 
@@ -633,6 +648,20 @@ function main() {
         // `board.json` would break the byte-exact `--check` contract. Over
         // `file://` the fetch fails and the tab says how to open the board
         // with a server, which is the honest answer.
+        // The MACHINE-LOCAL half of "is this run supposed to be running".
+        // `.tyran/STOP` is committed and travels in the artefact; the pause
+        // marker, the resume watcher and the usage sidecar are gitignored and
+        // different on every machine, so they are served — the same split, and
+        // the same argument, spend already makes.
+        if (req.url === '/run.json') {
+          try {
+            sendJson(res, 200, { schema: 1, ...runState(resolve(dir, '..')) });
+          } catch (err) {
+            // A run-state failure must never take the board down with it.
+            sendJson(res, 503, { schema: 1, error: String(err?.message ?? err) });
+          }
+          return;
+        }
         if (req.url === '/settings.json') {
           sendJson(res, 200, { ...readSettings(dir), writable: flags.write });
           return;

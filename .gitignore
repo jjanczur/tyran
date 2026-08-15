@@ -16,3 +16,8 @@ locks/
 
 # Playwright MCP scratch output (snapshots, screenshots, console logs)
 .playwright-mcp/
+
+# Marketing video production — Hyperframes projects, generated VO/art, renders.
+# Untracked on purpose: .gitattributes declares no video/audio extension as
+# binary, so a tracked .mp4/.wav/.srt would fail scan-control-chars (ADR-19).
+video/

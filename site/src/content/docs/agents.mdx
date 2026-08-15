@@ -196,6 +196,42 @@ returning the bottom of the ladder. That case is not a routing problem — there
 is nothing left to substitute — and the thing that already knows how to wait
 for capacity is [overnight mode](../overnight/).
 
+### Re-trying a ticket that already failed
+
+The escalation rule used to live in the conductor's memory, which iron rule 7
+already names the least reliable store in the system: after a compaction, or
+under a second conductor, a ticket that has come back `changes-requested` twice
+is re-spawned at the tier that failed both times, burns the same money and
+fails the same way.
+
+```bash
+node scripts/tiers.mjs --role implementer \
+  --journal .tyran/state/<init>/journal.jsonl --ticket T-3 --field json
+# tiers: ESCALATED work -> deep after 2 failed attempt(s) on T-3 (ceiling deep).
+```
+
+The journal is what remembers. `--journal --ticket` counts the reviews on that
+ticket whose verdict was not an approval, and climbs one tier per failed
+attempt — capped twice over, at two steps and at a ceiling of `deep`. A ticket
+that has failed five times does not need the most expensive model in the table;
+it needs a human, and the `changes-requested` lane is where that is already
+visible. A role that already resolves above the ceiling is not dragged down to
+it.
+
+The same read picks up any model an `error` event has recorded as out of
+capacity — `{class: 'model-unavailable', model: '<alias>'}` — and feeds it to
+the fallback above. That convention is a convention on purpose: the failure
+surfaces inside a subagent's API call, where no hook can see it, so something
+has to write it down before routing can act on it. **Detection is still the
+operator's or the conductor's job; this is what makes the decision durable
+once it is made.**
+
+State the weakness rather than let someone find it: "did this attempt fail" is
+`APPROVING_RE`, which was written for lane assignment. "Approved with nits"
+reads as an approval and escalates nothing; "looks fine" does not and
+escalates. A journal that cannot be read routes as a first attempt, loudly —
+routing must never depend on a readable journal.
+
 ## The brake
 
 An operator can halt a running initiative without killing the session:

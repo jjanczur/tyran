@@ -1,5 +1,99 @@
 # Changelog
 
+## 0.1.27 — 2026-08-15
+
+The last four items of the munder-difflin plan, and the half of the model
+fallback that was still missing. `NOTES-REQUESTS.md` §7 is now closed.
+
+### The board says whether the run is supposed to be running
+
+Three agent chips reading "6 HOURS since last signal — likely dead" covered
+four unrelated situations, and 0.1.25 could only tell you about one of them:
+an operator `STOP`. That one is committed repo state and travels in the
+artefact. The rest is machine-local and gitignored — the pause marker, the
+resume watcher's pid, the usage sidecar — so `--serve` answers it at
+**`/run.json`**, on exactly the argument spend already makes.
+
+The page turns it into one banner above the tiles when any of three things is
+true: a usage-limit pause is live, a pause was due to resume and has not, or
+the resume watcher is not running. A damaged or missing file reads as absent —
+this answers a question *about* the run and must never be the reason nobody can
+see the board.
+
+### The queue knows what each question is holding up
+
+Nine open questions sorted by age alone put the one gating six tickets wherever
+it happened to fall. `deps` is resolved FORWARD everywhere else — a ticket is
+`ready` when its dependencies are merged — and the reverse direction was never
+computed at all.
+
+Each ask now carries `blocks: {count, ids}`, walked transitively and skipping
+merged tickets. The board sorts by it and **so does the answer sheet**, because
+those are two renderings of one queue. Two deliberate limits:
+no-recorded-default still sorts first (the only questions where saying nothing
+has no safe outcome), and an initiative that declares no dependencies reports
+`null` rather than `0` on every ask — an absence rendered as a measurement is
+worse than saying nothing.
+
+### Signal is not evidence
+
+The agent strip aged on `progress`, which an agent emits at will. An agent
+looping without achieving anything therefore had the freshest chip on the
+board — and, because the strip is stalest-first, sorted to the bottom.
+
+Agents now carry both times: **`last_signal`** is what it said,
+**`last_evidence`** is what it showed (a `report` with its `evidence[]`, a
+`finding` with its proof, a `review` verdict). The strip sorts on evidence, and
+an agent that has shown nothing ages from its **spawn** rather than from the
+last thing it said — otherwise the chatty agent still outranks one that
+produced something twenty minutes ago, which is the exact inversion this split
+exists to correct.
+
+No doctor finding for it, deliberately. The threshold separating "quiet because
+the work is hard" from "quiet because nothing is happening" is not one this
+project can pick for every repo, and a warning that fires on healthy agents is
+one people learn to scroll past.
+
+### A ticket that failed twice is re-tried a tier higher
+
+The escalation rule lived in the conductor's memory, which iron rule 7 already
+names the least reliable store in the system: after a compaction, the ticket is
+re-spawned at the tier that failed both times.
+
+```bash
+node scripts/tiers.mjs --role implementer \
+  --journal .tyran/state/<init>/journal.jsonl --ticket T-3 --field json
+# tiers: ESCALATED work -> deep after 2 failed attempt(s) on T-3 (ceiling deep).
+```
+
+Capped twice over — two steps, and a ceiling of `deep`. A ticket that has
+failed five times does not need the most expensive model in the table; it needs
+a human, and the `changes-requested` lane already shows that. The same read
+picks up any model an `error` event recorded as `model-unavailable` and feeds
+it to the fallback, so **the exclusion is durable in the ledger** rather than
+in a session that will be compacted. Escalation happens first and the fallback
+second: a re-try asks for a stronger model, then discovers whether it is
+available.
+
+The weakness, stated rather than left to be found: "did this attempt fail" is
+`APPROVING_RE`, written for lane assignment — "approved with nits" escalates
+nothing and "looks fine" escalates. And a journal that cannot be read routes as
+a first attempt, loudly, because routing must never depend on a readable
+journal.
+
+**Detection is still not automatic.** The limit surfaces inside a subagent's
+API call where no hook can see it, so something still has to notice and write
+the `error` event down. That seam is recorded in `NOTES-REQUESTS.md` rather
+than papered over.
+
+### Left alone on purpose
+
+`budget:` in the config schema is dead weight — validated, read by nothing —
+and it stays. Removing a key from the `known` list makes every config that
+carries it invalid, and an invalid config makes the policy gate refuse every
+write in that repo. The cost lands on whoever set the key; the benefit is a
+shorter array.
+
 ## 0.1.26 — 2026-08-15
 
 ### Answer a question from the board

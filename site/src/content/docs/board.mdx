@@ -382,6 +382,16 @@ the artefact rather than behind a route. Note what it does and does not mean:
 nothing new starts while it exists, and agents already running are not killed
 by it.
 
+**And whether a watcher is still breathing.** `STOP` is committed, so it
+travels in the artefact. The rest of "is this supposed to be running" is
+machine-local and gitignored — the pause marker, the resume watcher's pid, the
+usage sidecar — so `--serve` answers it at `/run.json` instead, on exactly the
+argument [Spend](#spend) makes. The page turns it into one banner above the
+tiles when any of three things is true: a usage-limit pause is live, a pause is
+overdue to resume and has not, or the resume watcher is not running. A damaged
+or missing file reads as absent: this answers a question about the run, and it
+must never be the reason nobody can see the board.
+
 **Cards say how long they have stood still.** The board would tell you an agent
 had been silent for three hours and refuse to tell you a ticket had been blocked
 for four days — the timestamp was in `board.json` all along and nothing rendered
@@ -398,10 +408,49 @@ Both are worded as observations rather than verdicts. The board reports the
 last event on a ticket; only you know whether that is a stall or a long test
 run.
 
+## What a question is holding up
+
+Nine open questions sorted by age put the one gating six tickets wherever it
+happened to fall. `deps` is resolved FORWARD everywhere else — a ticket is
+`ready` when its dependencies are merged — and the reverse direction was never
+computed at all.
+
+Each ask now carries `blocks: {count, ids}`: the tickets that cannot proceed
+until it is answered, walked transitively, skipping tickets already merged
+(nothing holds those up). The queue sorts by it, and so does the answer sheet,
+because those are two renderings of ONE queue and an operator should not meet a
+different order depending on which surface they opened.
+
+Two deliberate limits. No-recorded-default still sorts **first**, above any
+amount of downstream work: those are the only questions where saying nothing
+has no safe outcome. And an initiative that declares no dependencies at all
+reports `blocks: null` rather than `0` on every ask — an absence rendered as a
+measurement is worse than saying nothing.
+
+## Signal is not evidence
+
+The agent strip aged on `progress` events, which an agent emits at will. An
+agent looping without achieving anything therefore had the freshest chip on the
+board, and — because the strip is sorted stalest-first — sorted to the bottom.
+
+Every agent now carries two times. **`last_signal`** is what it SAID, from its
+own `progress` events. **`last_evidence`** is what it SHOWED: a `report` with
+its `evidence[]`, a `finding` with its proof, a `review` verdict. The strip
+sorts on evidence, and an agent that has shown nothing ages from its SPAWN
+rather than from the last thing it said — otherwise the chatty agent outranks
+one that produced something twenty minutes ago, which is the exact inversion
+this split exists to correct.
+
+There is deliberately no doctor finding for it. The threshold that separates
+"quiet because the work is hard" from "quiet because nothing is happening" is
+not one this project can pick for every repo, and a warning that fires on
+healthy agents is a warning people learn to scroll past.
+
 ## board.json, schema 1
 
 Fixed key order (`schema`, `as_of`, `totals`, `stop`, `paused`, `asks`,
-`agents`, `files`, `lanes`, `errors_logged`, `errors_logged_total`, `errors`,
+`agents` (each with `last_signal`, `last_evidence` and `since`), `files`,
+`lanes`, `errors_logged`, `errors_logged_total`, `errors`,
 `warned`); timestamps copied verbatim from events; invisibles escaped as
 `\uXXXX`, never removed; byte-identical reruns. Consumers check `schema === 1`
 — the HTML shows "regenerate with a newer Tyran" on a mismatch instead of

@@ -146,8 +146,16 @@ export function openAsks(tyranDir) {
  */
 export function sortAsks(asks) {
   return [...asks].sort(
+    // No-default FIRST, and that stays primary: those are the only questions
+    // where saying nothing has no safe outcome, which is a stronger claim on
+    // the operator than any amount of downstream work.
     (a, b) =>
       Number(a.default != null) - Number(b.default != null) ||
+      // Then blast radius. Nine questions sorted by age alone put the one
+      // gating six tickets wherever it happened to fall; `blocks` is null on a
+      // journal that declares no dependencies, and null sorts as zero so those
+      // queues keep their old order exactly.
+      (b.blocks?.count ?? 0) - (a.blocks?.count ?? 0) ||
       String(a.since ?? '').localeCompare(String(b.since ?? '')) ||
       naturalCompare(a.init, b.init) ||
       naturalCompare(a.kind, b.kind),

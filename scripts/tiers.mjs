@@ -36,6 +36,8 @@ import { fileURLToPath } from 'node:url';
 import { parse } from './yaml-lite.mjs';
 import { validateConfig, PROFILES, TIER_KEYS } from './schema.mjs';
 import { escapeInvisible } from './invisible.mjs';
+import { APPROVING_RE } from './project.mjs';
+import { readJournal } from './journal.mjs';
 
 /** Capability tiers, cheapest first. Index order is the escalation ladder. */
 export const TIER_ORDER = TIER_KEYS;
@@ -116,6 +118,52 @@ export const ROLE_FLOOR = Object.freeze({
 });
 
 export const ROLES = Object.freeze(Object.keys(ROLE_TIERS));
+
+/**
+ * The tier a fallback or an escalation may never pass.
+ *
+ * `top` is the most expensive thing Tyran can spend, and an automatic climb to
+ * it is a decision about money made while nobody is watching. Roles whose
+ * FLOOR is already `top` still resolve there — this bounds what escalation
+ * ADDS, not what the table asks for.
+ */
+export const ESCALATION_CEILING = 'deep';
+
+/** How many steps repeated failure may add, however many attempts there were. */
+export const MAX_ESCALATION_STEPS = 2;
+
+/**
+ * What the journal says about a ticket that is being re-tried.
+ *
+ * Both facts live in the ledger rather than in the conductor's memory, which
+ * iron rule 7 already names the least reliable store in the system: a session
+ * that compacts, or a second conductor picking the work up, otherwise re-spawns
+ * at the tier that has already failed twice and on the model that has already
+ * run out.
+ *
+ *  - `attempts` counts reviews that did NOT approve. The regex is the board's
+ *    own, imported, because "did this attempt fail" must not have two answers.
+ *  - `unavailable` collects models an `error` event named as out of capacity.
+ *    The convention is `{class: 'model-unavailable', model: '<alias>'}` and it
+ *    is a convention on purpose: the failure surfaces inside a subagent's API
+ *    call, where no hook can see it, so SOMETHING has to write it down before
+ *    routing can act on it.
+ */
+export function ticketHistory(events, ticket) {
+  const id = String(ticket);
+  let attempts = 0;
+  const unavailable = [];
+  for (const e of events) {
+    if (e?.ev === 'review' && String(e.data?.ticket) === id && !APPROVING_RE.test(String(e.data?.verdict ?? ''))) {
+      attempts += 1;
+    }
+    if (e?.ev === 'error' && e.data?.class === 'model-unavailable' && typeof e.data?.model === 'string') {
+      // NOT scoped to the ticket: a model that ran out is out for everything.
+      if (!unavailable.includes(e.data.model)) unavailable.push(e.data.model);
+    }
+  }
+  return { attempts, unavailable };
+}
 
 function validateInputs(role, profile, risk) {
   if (!Object.hasOwn(ROLE_TIERS, role)) {
@@ -220,21 +268,48 @@ export function resolveModel(config, role, profile, risk = 'normal', override = 
     (ROLE_EFFORT_FLOOR[role] !== undefined && override.effort !== undefined && override.effort !== effort);
 
   const unavailable = normalizeUnavailable(override.unavailable);
-  const resolved = { tier, model: aliasFor(tier), effort, floored, fell_from: null };
+  // Escalation first, fallback second, and the order matters: a re-try should
+  // ask for a stronger model, and only then discover whether that model is
+  // available. Doing it the other way round would fall back from a tier the
+  // run was never going to use.
+  const attempts = Number.isInteger(override.attempts) && override.attempts > 0 ? override.attempts : 0;
+  const climbed = attempts === 0 ? tier : escalateTier(tier, attempts);
+  const resolved = {
+    tier: climbed,
+    model: aliasFor(climbed),
+    effort,
+    floored,
+    fell_from: null,
+    escalated_from: climbed === tier ? null : tier,
+    attempts,
+  };
   if (unavailable.length === 0 || !unavailable.includes(resolved.model)) return resolved;
 
-  const substitute = fallbackTier(config, role, tier, unavailable);
+  const substitute = fallbackTier(config, role, resolved.tier, unavailable);
   return {
+    ...resolved,
     tier: substitute,
     model: aliasFor(substitute),
     // Effort follows the ORIGINAL tier, not the substitute. The judgement
     // "this task needs deep reasoning" did not change because a model ran out
     // of capacity, and dropping both dials at once turns a substitution into a
     // second, unasked-for downgrade.
-    effort,
-    floored,
-    fell_from: tier,
+    fell_from: resolved.tier,
   };
+}
+
+/**
+ * One step up per failed attempt, capped twice over: by MAX_ESCALATION_STEPS,
+ * and by the ceiling. A ticket that has failed four times does not need the
+ * most expensive model in the table — it needs a human, and the board's
+ * changes-requested lane is where that is already visible.
+ */
+function escalateTier(from, attempts) {
+  const ceiling = Math.min(TIER_ORDER.indexOf(ESCALATION_CEILING), TIER_ORDER.length - 1);
+  const start = TIER_ORDER.indexOf(from);
+  // Never lower a role that already resolves above the ceiling.
+  if (start >= ceiling) return from;
+  return TIER_ORDER[Math.min(start + Math.min(attempts, MAX_ESCALATION_STEPS), ceiling)];
 }
 
 function normalizeUnavailable(value) {
@@ -338,7 +413,28 @@ function main() {
   const field = flag('field', 'model');
   // Repeatable: an overnight run can exhaust more than one tier.
   const unavailable = args.reduce((acc, arg, i) => (arg === '--unavailable' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
-  const override = { tier: flag('tier', undefined), effort: flag('effort', undefined), unavailable };
+  // The ledger, not the conductor's memory. `--journal <path> --ticket T-n`
+  // counts the failed attempts on that ticket and picks up any model an error
+  // event has recorded as out of capacity, so a re-spawn after a compaction
+  // routes the same way a re-spawn before it would have.
+  const journalPath = flag('journal', null);
+  const ticket = flag('ticket', null);
+  let history = { attempts: 0, unavailable: [] };
+  if (journalPath !== null && ticket !== null) {
+    try {
+      history = ticketHistory(readJournal(resolve(journalPath)).events, ticket);
+    } catch (error) {
+      // Routing must not depend on a readable journal: a missing or damaged
+      // one means no history, which is the same answer as a first attempt.
+      console.error(`tiers: could not read ${escapeInvisible(journalPath)} (${error.message}) — routing without history`);
+    }
+  }
+  const override = {
+    tier: flag('tier', undefined),
+    effort: flag('effort', undefined),
+    unavailable: [...unavailable, ...history.unavailable],
+    attempts: history.attempts,
+  };
 
   try {
     if (role === null) {
@@ -365,6 +461,17 @@ function main() {
     }
     // A substitution that said nothing would be the routing table quietly
     // meaning something else than it says.
+    if (resolved.escalated_from) {
+      // The tier the CLIMB reached, which is what a fallback then fell FROM.
+      // Reporting `resolved.tier` here narrated "work -> work" whenever both
+      // happened, which is the one case where a reader most needs the two
+      // steps told apart.
+      const climbedTo = resolved.fell_from ?? resolved.tier;
+      console.error(
+        `tiers: ESCALATED ${resolved.escalated_from} -> ${climbedTo} after ${resolved.attempts} failed attempt(s) ` +
+          `on ${escapeInvisible(String(ticket))} (ceiling ${ESCALATION_CEILING}).`,
+      );
+    }
     if (resolved.fell_from !== null) {
       console.error(
         `tiers: FELL BACK ${resolved.fell_from} -> ${resolved.tier} because the ${resolved.fell_from} model is ` +

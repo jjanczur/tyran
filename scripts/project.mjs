@@ -205,6 +205,21 @@ function clearBlockageBy(state, agent) {
 }
 
 /** A `review`/`merge` settles the ticket for EVERY agent blocked on it. */
+/**
+ * Record that an agent SHOWED something, as opposed to said something.
+ *
+ * Newest wins, and only ever moves forward: events arrive in journal order, but
+ * a hand-edited file need not be monotonic, and an older evidence event must
+ * not make an agent look staler than the board already knows it is.
+ */
+function noteEvidence(state, agent, kind, ts) {
+  if (agent == null) return;
+  const key = String(agent);
+  const prev = state.evidenceByAgent.get(key);
+  if (prev !== undefined && String(prev.ts ?? '') > String(ts ?? '')) return;
+  state.evidenceByAgent.set(key, { kind, ts });
+}
+
 function clearBlockagesOn(state, ticketId) {
   for (const [key, blockage] of state.blockages) {
     // A ticketless blockage is keyed to its agent and belongs to no ticket —
@@ -264,6 +279,13 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
     ambiguousAgents: [],
     // agent name -> latest self-reported signal (last one wins)
     progressByAgent: new Map(),
+    // What an agent has SHOWN, as opposed to what it has said. A `progress`
+    // event is a heartbeat an agent emits at will; the events here each carry
+    // a work product — a report with its evidence[], a finding with its proof,
+    // a review or a merge on the agent's ticket. An agent looping without
+    // achieving anything can keep `progressByAgent` perfectly fresh, and used
+    // to sort to the BOTTOM of a strip ordered by staleness.
+    evidenceByAgent: new Map(),
     // agent name -> that agent's open blockage, the ticket inside the value.
     //
     // Keyed by AGENT and not by ticket, because one agent has at most one live
@@ -412,6 +434,7 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         break;
       }
       case 'report': {
+        noteEvidence(state, data.agent ?? actor, 'report', ts);
         // A report that pairSpawns matched to a spawn has already been applied
         // to that spawn's row above — this branch only has to render what
         // pairing left over, so the two never compute the same thing twice.
@@ -458,6 +481,7 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         break;
       }
       case 'finding':
+        noteEvidence(state, actor, 'finding', ts);
         state.findings.push({
           id: data.id ?? null,
           area: data.area ?? null,
@@ -520,6 +544,7 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         // and the same correlator closes what that spawn left behind. Without
         // it a reviewer's ticketless blockage outlived its own review with no
         // later event that could ever clear it.
+        noteEvidence(state, data.by ?? actor, 'review', ts);
         if (data.by != null) closeAgent(state, data.by);
         break;
       }
@@ -631,7 +656,16 @@ export const LANES = Object.freeze([
   'done',
 ]);
 
-const APPROVING_RE = /^approv|^lgtm$|^pass/i;
+/**
+ * A review verdict that counts as an approval.
+ *
+ * Exported because `tiers.mjs` counts FAILED attempts on a ticket to decide
+ * whether to escalate, and "did this attempt fail" must not have two answers
+ * (ADR-21). Note the asymmetry this creates, stated because someone will meet
+ * it: the pattern was written for lane assignment, so "approved with nits"
+ * reads as an approval and "looks fine" does not.
+ */
+export const APPROVING_RE = /^approv|^lgtm$|^pass/i;
 
 /**
  * The kanban view of a folded state. PURE and clock-free: every timestamp is
@@ -658,10 +692,45 @@ export function boardOf(state) {
     (g) => PAUSED_RE.test(g.kind) && !GATE_PASS.has(String(g.result ?? '').toLowerCase()),
   ) ?? null;
 
+  // What each open question is HOLDING UP.
+  //
+  // `deps` is resolved forward everywhere else — a ticket is ready when its
+  // dependencies are merged — and the reverse direction was never computed, so
+  // a queue of nine questions sorted by age alone put the one gating six
+  // tickets wherever it happened to fall. The walk is transitive and skips
+  // merged tickets, which are not held up by anything.
+  //
+  // Only when the initiative declares deps at all: on a journal that records
+  // none, every ask would report "blocks 0", and an absence rendered as a
+  // measurement is worse than saying nothing.
+  const declaresDeps = state.ticketList.some((x) => Array.isArray(x.deps) && x.deps.length > 0);
+  const dependents = new Map();
+  if (declaresDeps) {
+    for (const x of state.ticketList) {
+      for (const d of Array.isArray(x.deps) ? x.deps.map(String) : []) {
+        dependents.set(d, [...(dependents.get(d) ?? []), x.id]);
+      }
+    }
+  }
+  const blockedBy = (ticket) => {
+    if (!declaresDeps || ticket == null) return null;
+    const seen = new Set();
+    const queue = [String(ticket)];
+    while (queue.length > 0) {
+      for (const next of dependents.get(queue.shift()) ?? []) {
+        if (seen.has(next) || mergedIds.has(next)) continue;
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+    return { count: seen.size, ids: [...seen].sort(naturalCompare) };
+  };
+
   const asks = [];
   for (const g of state.openGates) {
     if (WAITING_RE.test(String(g.result ?? ''))) {
       asks.push({
+        blocks: blockedBy(g.ticket),
         kind: g.kind,
         ticket: g.ticket ?? null,
         question: g.question ?? null,
@@ -731,6 +800,7 @@ export function boardOf(state) {
     .filter((a) => a.status === 'running')
     .map((a) => {
       const signal = state.progressByAgent.get(a.agent) ?? null;
+      const evidence = state.evidenceByAgent.get(a.agent) ?? null;
       return {
         agent: a.agent,
         role: a.role,
@@ -739,6 +809,17 @@ export function boardOf(state) {
         detail: signal?.detail ?? null,
         next: signal?.next ?? null,
         last_signal: signal?.ts ?? a.spawnTs,
+        // What it has SHOWN. Null until it shows something, which is the
+        // ordinary state of an agent that has just started — the strip says
+        // "nothing yet" rather than implying silence.
+        last_evidence: evidence?.ts ?? null,
+        evidence_kind: evidence?.kind ?? null,
+        // When it started. An agent that has shown nothing is stale from its
+        // SPAWN, not from the last thing it said — without this an agent
+        // chattering every four minutes and producing nothing outranks one
+        // that produced something twenty minutes ago, which is the exact
+        // inversion the evidence split exists to correct.
+        since: a.spawnTs,
       };
     });
 

@@ -682,3 +682,73 @@ test('the sandbox ships spend built by the real rollup, not a hand-written blob'
   // model name anywhere but `tiers:`, and a sandbox is not an exemption.
   assert.doesNotMatch(src, /\b(haiku|sonnet|opus|fable)\b/i);
 });
+
+test('an ask says what it is holding up, and the queue sorts by it', () => {
+  // `deps` is resolved FORWARD everywhere (a ticket is ready when its
+  // dependencies are merged) and the reverse direction was never computed, so
+  // nine questions sorted by age alone put the one gating six tickets wherever
+  // it happened to fall. MUTANT: delete the blocks term from sortAsks.
+  const ev = (ts, e, data, actor = 'c') => JSON.stringify({ ts, ev: e, init: 'x', actor, data });
+  const journal = [
+    ev('2026-01-01T00:00:00Z', 'init.created', { title: 't' }),
+    ev('2026-01-01T00:01:00Z', 'ticket.created', { id: 'T-1', title: 'base', deps: [] }),
+    ev('2026-01-01T00:02:00Z', 'ticket.created', { id: 'T-2', title: 'b', deps: ['T-1'] }),
+    ev('2026-01-01T00:03:00Z', 'ticket.created', { id: 'T-3', title: 'c', deps: ['T-2'] }),
+    ev('2026-01-01T00:04:00Z', 'ticket.created', { id: 'T-4', title: 'd', deps: ['T-1'] }),
+    ev('2026-01-01T00:05:00Z', 'ticket.created', { id: 'T-5', title: 'e', deps: [] }),
+    ev('2026-01-01T00:06:00Z', 'merge', { ticket: 'T-4', sha: 'a' }),
+    // The SMALL question is older, so age alone would put it first.
+    ev('2026-01-01T00:07:00Z', 'gate', { kind: 'Q-1', result: 'WAITING_ON_OPERATOR', ticket: 'T-5', question: 'small', default: 'd' }),
+    ev('2026-01-01T00:08:00Z', 'gate', { kind: 'Q-2', result: 'WAITING_ON_OPERATOR', ticket: 'T-1', question: 'big', default: 'd' }),
+  ].join('\n') + '\n';
+  const { payload, files } = renderAll(tree({ x: journal }));
+
+  const big = payload.asks.find((a) => a.kind === 'Q-2');
+  // Transitive, and a MERGED dependent is not held up by anything.
+  assert.deepEqual(big.blocks, { count: 2, ids: ['T-2', 'T-3'] });
+  assert.deepEqual(payload.asks.find((a) => a.kind === 'Q-1').blocks, { count: 0, ids: [] });
+  assert.equal(payload.asks[0].kind, 'Q-2', 'the question holding work up comes first');
+  assert.match(files[BOARD_FILE], /blocks 2 ticket\(s\): T-2, T-3/);
+});
+
+test('an initiative that declares no dependencies reports nothing rather than zero', () => {
+  // "blocks 0" on every ask is an absence rendered as a measurement, which is
+  // worse than silence. MUTANT: always compute the reverse index.
+  const { payload } = renderAll(tree({ demo: demo() }));
+  const noDeps = payload.asks.find((a) => a.ticket === null);
+  assert.equal(noDeps.blocks, null, 'an ask with no ticket cannot block anything');
+});
+
+test('the strip sorts on what agents SHOWED, not on what they said', () => {
+  // An agent emitting progress every few minutes while achieving nothing is
+  // the healthiest-looking chip on the board and sorted to the BOTTOM of a
+  // strip ordered by staleness. MUTANT: sort on last_signal again.
+  const ev = (ts, e, data, actor = 'c') => JSON.stringify({ ts, ev: e, init: 'x', actor, data });
+  const journal = [
+    ev('2026-01-01T00:00:00Z', 'init.created', { title: 't' }),
+    ev('2026-01-01T00:01:00Z', 'ticket.created', { id: 'T-1', title: 'a', deps: [] }),
+    ev('2026-01-01T00:02:00Z', 'ticket.created', { id: 'T-2', title: 'b', deps: [] }),
+    ev('2026-01-01T00:03:00Z', 'spawn', { agent: 'chatty', role: 'implementer', ticket: 'T-1' }),
+    ev('2026-01-01T00:04:00Z', 'spawn', { agent: 'quiet', role: 'implementer', ticket: 'T-2' }),
+    // `quiet` showed something early and has said nothing since.
+    ev('2026-01-01T00:05:00Z', 'finding', { area: 'x', claim: 'c', proof: 'p', ticket: 'T-2' }, 'quiet'),
+    // `chatty` has shown nothing at all and keeps saying it is working.
+    ev('2026-01-01T00:30:00Z', 'progress', { agent: 'chatty', state: 'working', ticket: 'T-1' }, 'chatty'),
+  ].join('\n') + '\n';
+  const { payload } = renderAll(tree({ x: journal }));
+  const strip = payload.agents.map((a) => a.agent);
+  assert.deepEqual(strip, ['chatty', 'quiet'], 'the one that has shown nothing is at the top');
+
+  const chatty = payload.agents.find((a) => a.agent === 'chatty');
+  assert.equal(chatty.last_evidence, null, 'it has shown nothing');
+  assert.equal(chatty.last_signal, '2026-01-01T00:30:00Z', 'while saying plenty — timestamps are verbatim from the journal');
+  const quiet = payload.agents.find((a) => a.agent === 'quiet');
+  assert.equal(quiet.last_evidence, '2026-01-01T00:05:00Z');
+  assert.equal(quiet.evidence_kind, 'finding');
+});
+
+test('the page shows signal and evidence as two different facts', () => {
+  const html = demoHtml();
+  assert.match(html, /nothing shown yet/, 'an agent that has shown nothing says so');
+  assert.match(html, /a\.evidence_kind/, 'and what it showed is named');
+});

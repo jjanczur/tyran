@@ -440,6 +440,15 @@ if (data.schema !== 1) {
         : ageMs >= 10800000 ? Math.round(ageMs / 3600000) + ' HOURS since last signal — likely dead'
         : Math.round(ageMs / 60000) + ' min since last signal';
       chip.appendChild(el('div', ageClass(ageMs), ageText));
+      // Signal is what the agent SAID; evidence is what it SHOWED. An agent
+      // emitting progress every few minutes while achieving nothing is the
+      // healthiest-looking chip on the board, and the strip is sorted by the
+      // first of those two, so it also sorts to the bottom.
+      var evMs = ageMsOf(a.last_evidence);
+      chip.appendChild(el('div', evMs === null ? 'age-cold' : ageClass(evMs),
+        evMs === null
+          ? 'nothing shown yet'
+          : (a.evidence_kind || 'evidence') + ' ' + ago(a.last_evidence)));
       strip.appendChild(chip);
     });
     return strip;
@@ -797,6 +806,7 @@ if (data.schema !== 1) {
       hasDefault ? 'decision \\u00b7 a default is recorded' : 'blocking \\u00b7 no safe default'));
     card.appendChild(el('div', 'q', a.question || '(no question recorded — gate ' + a.kind + ')'));
     [['answer with', a.kind], ['recommendation', a.recommendation], ['default', a.default],
+     ['blocks', a.blocks && a.blocks.count > 0 ? a.blocks.count + ' ticket(s): ' + a.blocks.ids.join(', ') : null],
      ['ticket', a.ticket], ['initiative', a.init], ['since', a.since]].forEach(function (pair) {
       if (pair[1] === null || pair[1] === undefined) return;
       var row = el('div', 'row');
@@ -1256,6 +1266,36 @@ if (data.schema !== 1) {
       if (key === 'settings') holdRefresh(); else armRefresh();
     });
   });
+
+  // Machine-local run state, fetched beside spend. A 404 means this page is
+  // not being served by a board server — a copy on a docs site, a file behind
+  // some other host — and that is an answer, not a failure.
+  fetch('run.json', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (run) {
+      if (run === null || run.schema !== 1) return;
+      var lines = [];
+      if (run.paused) {
+        lines.push(run.paused.overdue
+          ? 'A usage-limit pause was due to resume ' + ago(run.paused.resume_at) + ' and has not.'
+          : 'Paused on the ' + (run.paused.window || 'usage') + ' window at ' +
+            (run.paused.used_percentage === null ? 'the threshold' : run.paused.used_percentage + '%') +
+            '. Resumes ' + (run.paused.wait || 'later') + '.');
+      }
+      if (run.watcher && run.watcher.alive === false) {
+        lines.push('The resume watcher is not running, so nothing will restart this by itself.');
+      }
+      if (run.usage && run.usage.stale === true) {
+        lines.push('Usage telemetry is stale — the statusline helper may not be installed.');
+      }
+      if (lines.length === 0) return;
+      var box = el('div', 'paused');
+      box.appendChild(el('b', null, 'This run is not simply working. '));
+      lines.forEach(function (line) { box.appendChild(el('div', 'hint', line)); });
+      box.appendChild(el('div', 'hint', 'npx @jjanczur/tyran overnight status --dir .tyran'));
+      ov.insertBefore(box, ov.firstChild);
+    })
+    .catch(function () { /* no server, or none of this applies */ });
 
   fetch('settings.json', { headers: { accept: 'application/json' } })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })

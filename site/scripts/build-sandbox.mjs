@@ -34,6 +34,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderAll, BOARD_HTML_FILE } from '../../scripts/board.mjs';
 import { costJson, rollup } from '../../scripts/cost.mjs';
+import { readSettings } from '../../scripts/settings.mjs';
 
 /**
  * Spend for the sandbox, built through the REAL rollup.
@@ -92,8 +93,39 @@ function sandboxCostJson() {
   return costJson(report);
 }
 
+/**
+ * Settings for the sandbox, read out of the SHIPPED TEMPLATES.
+ *
+ * Same argument as spend: run the real reader over the real files, so the tab
+ * a reader clicks is laid out by the code their own board runs and shows the
+ * defaults they will actually get. `writable` is false because a static page
+ * has no server behind it — every control renders disabled, and the banner
+ * says which flag turns them on, which is exactly the true answer here.
+ *
+ * The absolute paths `readSettings` reports are replaced with the ones an
+ * operator would see: the build machine's temp directory is not a fact about
+ * anyone else's repository, and it has no business in a published file.
+ */
+function sandboxSettingsJson(templatesDir) {
+  const work = mkdtempSync(join(tmpdir(), 'tyran-sandbox-settings-'));
+  try {
+    const tyran = join(work, '.tyran');
+    mkdirSync(join(tyran, 'policies'), { recursive: true });
+    writeFileSync(join(tyran, 'config.yaml'), readFileSync(join(templatesDir, 'config.yaml'), 'utf8'));
+    writeFileSync(join(tyran, 'policies', 'autonomy.yaml'), readFileSync(join(templatesDir, 'policies', 'autonomy.yaml'), 'utf8'));
+    const payload = readSettings(tyran);
+    payload.files.config.path = join('.tyran', 'config.yaml');
+    payload.files.policy.path = join('.tyran', 'policies', 'autonomy.yaml');
+    payload.writable = false;
+    return JSON.stringify(payload, null, 2) + '\n';
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SANDBOX_SRC = join(HERE, '..', 'sandbox');
+const TEMPLATES = join(HERE, '..', '..', 'templates');
 const OUT_DIR = join(HERE, '..', 'public', 'sandbox');
 
 /** Newest event lands here, in minutes before the build. */
@@ -173,6 +205,7 @@ try {
   // path the client already fetches — so the sandbox exercises the same code
   // path a real board does, rather than a special case for the demo.
   writeFileSync(join(OUT_DIR, 'cost.json'), sandboxCostJson());
+  writeFileSync(join(OUT_DIR, 'settings.json'), sandboxSettingsJson(TEMPLATES));
   const t = payload.totals;
   console.log(
     `sandbox: ${t.initiatives} initiative(s), ${t.tickets} ticket(s), ${t.agents} agent(s), ` +

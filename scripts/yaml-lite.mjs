@@ -115,7 +115,16 @@ function parseScalar(raw, lineNo, { allowFlow = true } = {}) {
   return value;
 }
 
-function stripComment(line, lineNo) {
+/**
+ * Split a line into its code and its trailing comment.
+ *
+ * Exported because an EDITOR needs the half a parser throws away. Patching one
+ * value in a hand-written config means putting the operator's comment back
+ * afterwards, and a second `#`-finder written elsewhere would disagree with
+ * this one about `url: 'http://x/#frag'` on exactly the files where being
+ * wrong costs a comment.
+ */
+export function splitInlineComment(line, lineNo) {
   // Comments start at ` #` outside quotes; a leading `#` is a full-line comment.
   let inSingle = false;
   let inDouble = false;
@@ -156,7 +165,11 @@ function stripComment(line, lineNo) {
       lineNo,
     );
   }
-  return cut === -1 ? line : line.slice(0, cut);
+  return cut === -1 ? { code: line, comment: '' } : { code: line.slice(0, cut), comment: line.slice(cut) };
+}
+
+function stripComment(line, lineNo) {
+  return splitInlineComment(line, lineNo).code;
 }
 
 /** Parse a YAML-subset document into a plain JS object. */
@@ -377,7 +390,17 @@ function formatKey(key) {
   return s;
 }
 
-function formatScalar(value) {
+/**
+ * Render one scalar as this subset spells it — quoting whenever an unquoted
+ * spelling would read back as something else.
+ *
+ * Exported for the same reason as `splitInlineComment`: an editor that writes
+ * a single value into an existing file must quote it by exactly the rules
+ * `parse` reads by. `mode: off` is the standing proof — bare `off` is the
+ * boolean false in YAML, so the string "off" has to come back quoted or the
+ * overnight gate silently changes meaning.
+ */
+export function formatScalar(value) {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'boolean' || typeof value === 'number') return String(value);
   const s = String(value);

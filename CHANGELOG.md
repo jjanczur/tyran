@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.1.24 — 2026-08-15
+
+### Settings: the board can now change what Tyran does
+
+`board --serve --write` turns the dashboard's new **Settings** tab into an
+editor for the two operator-owned files — `.tyran/config.yaml` and
+`.tyran/policies/autonomy.yaml`. Every knob carries a sentence saying what
+turning it actually does, and every policy rule shows its own recorded reason.
+Until now the answer to "where do I change this?" was an editor and a memory
+of what each key meant.
+
+**Writes are off by default and per-invocation.** Without `--write` the tab
+renders with every control disabled and the command that turns it on. A board
+someone left running is reachable by anything on the machine, and the
+difference between reading that and editing the autonomy policy through it is
+the difference the flag exists to make.
+
+**One line moves, and the comments stay.** The plan of record said the
+comments were expendable because the screen could carry the explanations. That
+turned out not to be necessary: `scripts/yaml-patch.mjs` rewrites the line
+that owns a value rather than round-tripping the document through a
+serializer, so `templates/config.yaml` keeps all 60 of its comment lines — the
+only place anyone is told that bare `off` is the YAML boolean false, which is
+also the value that would have silently changed meaning had this been done the
+obvious way.
+
+**The edit is proved, not trusted.** Every patch is applied, parsed back, and
+compared against the document that was intended: the target holds the new
+value and every other path holds exactly what it held before. Then the whole
+result goes through the same `validateConfig` / `validatePolicy` that
+`schema.mjs validate` runs. A locator bug cannot ship a wrong file — it can
+only fail loudly, and a refused write leaves the file byte-identical.
+
+### Loosening a boundary is not the same click as tightening one
+
+Found by an independent review of the above, before it shipped, and it was
+worse than the review guessed. `validatePolicy` defends exactly two globs —
+`hooks/**` and `.tyran/policies/**` — so the first version of this screen
+would take `.claude/settings.json` from KERNEL to AUTO in one press, on a rule
+whose own stated reason is *"anything that can edit it can switch every gate
+off"*. So would `.tyran/STOP` (*"a loop that can clear its own stop signal has
+none"*), and so would the policy `default`, and `autonomy: P1 → P3` sat in an
+ordinary dropdown next to the cost profile.
+
+Loosening now takes a second, deliberate act: the first request is refused
+with the rule's own reason quoted back and a confirmation token, and the token
+is **the new value itself** rather than a boolean, so nothing widens a
+boundary by sending a truthy flag beside whatever value it liked. Tightening
+still applies on the first click — friction on making a boundary stricter is
+how you teach someone to stop making boundaries stricter.
+
+What guards the route, stated exactly: the `Host` pin, an `Origin` check and a
+required `application/json` content type close the browser paths. They do not
+stop another process on the machine that can already reach loopback; nothing
+served on localhost does. The flag is the control that matters there, and the
+kernel invariant is what holds even when the flag is on. `docs/board.md` says
+this in those words rather than claiming a sandbox.
+
+### Two things a fresh install could not do
+
+Both found by the same study, both reproduced before being believed.
+
+- **`board --dir .tyran` crashed on a repo that had been set up and never
+  run** — `ENOENT`, naming a temp file nobody had heard of, on the one command
+  the README leads with. `.tyran/state/` is created by the first initiative;
+  `writeAllAtomic` staged into it and never made it.
+- **A scanned config carried no `limits:` block at all**, so the entire
+  Overnight section of the new Settings tab was seven lines of dead text on
+  every fresh install — the editor deliberately refuses to invent keys. It is
+  now written out in full at the shipped defaults, with the feature off, which
+  is the same inert state as omitting it. `doctor`'s `limit-telemetry-missing`
+  could never fire before this either, for the same reason.
+
+### Four findings from the independent review, fixed before merge
+
+- **The editor only worked on two-space indentation.** `yaml-lite` recurses
+  with whatever indent the next line has, so a four-space `config.yaml` is
+  entirely legal and `validateConfig` accepts it — but the patcher assumed a
+  step of 2, so on such a file eleven of the fifteen controls rendered
+  **enabled and populated** (the page reads the parsed document) and then
+  failed on click with *"is not in this file"*, which was false, and whose
+  paired advice told the operator to add a key that was already there. The
+  step is now read from the file. The one step that stays fixed is a sequence
+  item's siblings at dash + 2, because `- ` is two characters wide and that is
+  what `yaml-lite` itself does.
+- **A value the subset cannot spell returned 500.** `formatScalar` throws for
+  a newline or an invisible codepoint — ordinary rejected input, someone
+  pasting a model name with a stray newline — and it escaped as a server
+  fault, complete with a `settings write failed` line in the terminal the docs
+  designate as the audit trail. Now a 400, quietly.
+- **The round-trip proof had no test that failed when it was deleted.** The
+  reviewer neutered the comparison and the suite stayed green; 2772 fuzzed
+  triples fired it zero times, because every wrong case is refused earlier by
+  the locator, the comment guard or `formatScalar`. `sameValue` is now
+  exported and tested directly — it is the mutable logic the guarantee rests
+  on — and the module says plainly that the proof is defence in depth with no
+  known reachable input. Two bare `assert.throws` calls gained an error class;
+  the missing one is what let the 500 above through.
+- **A wrong number in three places.** `templates/config.yaml` is 90 lines of
+  which 63 are comments, not 60 of 91.
+
+Also from the review, unprompted: a failure inside the settings renderer was
+being reported as "the board server did not answer", sending the operator to
+restart something that was answering perfectly well.
+
+### The sandbox has a Settings tab too
+
+`site/scripts/build-sandbox.mjs` runs the real `readSettings` over the shipped
+templates, so the published sample board shows the real defaults, laid out by
+the code an operator's own board runs, read-only and saying which flag would
+make it otherwise.
+
 ## 0.1.23 — 2026-08-15
 
 ### The sandbox Spend tab shows spend

@@ -13,6 +13,12 @@ written by `scripts/scan-repo.mjs` · validated by `scripts/schema.mjs`
 All per-repo configuration lives in `.tyran/config.yaml` — committed, human
 reviewable, written by `/tyran:setup` and editable by hand.
 
+**Or from the board.** `npx @jjanczur/tyran board --serve --write` puts every
+key below on a screen with a sentence explaining what it does, and writes your
+change back into this file one line at a time, comments intact — including the
+autonomy policy. See [the Settings tab](../board/#settings) for what it will and
+will not touch, and for why loosening a boundary there takes a second press.
+
 ## `.tyran/config.yaml`
 
 ```yaml

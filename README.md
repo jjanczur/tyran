@@ -184,10 +184,15 @@ npx @jjanczur/tyran board --dir .tyran --serve
 ```
 
 It prints `board: serving http://127.0.0.1:4173/` — **open that URL.** The
-board is read-only, bound to loopback, re-rendered on every request, and it
-reloads itself every 30 seconds; `--port <n>` if 4173 is taken, `Ctrl-C` to
-stop. That command is the one place a Node version matters, because `npx` runs
-the scripts outside Claude Code and they need **Node ≥ 22**.
+board is bound to loopback, re-rendered on every request, and it reloads itself
+every 30 seconds; `--port <n>` if 4173 is taken, `Ctrl-C` to stop. That command
+is the one place a Node version matters, because `npx` runs the scripts outside
+Claude Code and they need **Node ≥ 22**.
+
+Add `--write` and the **Settings** tab becomes an editor for `.tyran/config.yaml`
+and the autonomy policy — every knob with a sentence explaining it, your
+comments kept, and loosening a boundary behind a second deliberate press. It is
+read-only without that flag.
 
 No terminal, no server: the same page is written to **`.tyran/state/board.html`**
 after every agent, so you can just open the file —

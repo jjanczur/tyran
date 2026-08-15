@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.1.25 — 2026-08-15
+
+### The sandbox is now Tyran building Tyran
+
+The published sample board was two invented initiatives about someone else's
+payment system. It showed what the dashboard looked like and nothing about what
+it is like to work this way, which is half of what a reader opens it for.
+
+It now carries **three initiatives that actually built the board you are
+looking at** — the lanes, overnight mode, and the Settings tab — written as
+journals from the real work. Every finding on it is a finding that was made:
+the artefact must never read a clock or `--check` can never pass twice; the
+page must build DOM with `textContent` only, because journal values reach the
+browser verbatim; the hook payload does not carry `rate_limits` and a plugin
+cannot install a statusline. Every logged error is one that happened, including
+the backtick in a comment that terminated the client's template literal.
+
+All ten lanes are populated, five agents run at ages from two minutes to three
+hours, two questions wait on the operator, and the banner's counts are read
+from the payload rather than typed — it said "two invented initiatives" for a
+release after a third was added.
+
+### Three findings while writing those journals, all in shipped code
+
+- **Every reviewer on the published sandbox rendered as still running, for
+  ever.** A `review` closes its spawn by `data.by`; the sandbox journals said
+  `data.agent`, so no review ever closed anything and the headline agent count
+  was wrong on the one page whose job is to show what the product looks like.
+- **The test that was supposed to catch that validated nothing.**
+  `validateJournal` takes a file PATH and the test handed it an array of
+  events, so it read an empty journal and returned `ok`. It has been passing
+  against journals carrying thirteen real errors.
+- **An `error` event that named a ticket produced two rows on the board**, one
+  from `state.errors` and one from `unknownErrorTickets`. The ticket now
+  travels on the error itself, where a consumer that wants both can have both
+  without joining two lists by timestamp.
+
+### The board answers "is this supposed to be running?"
+
+Three chips reading "6 HOURS since last signal — likely dead" covered four
+unrelated situations and the board could tell them apart in none of them.
+
+- **A STOP is on the board**, above everything else, carrying the first line of
+  `.tyran/STOP` as its reason. It is committed repo state, identical in every
+  clone, so it travels in the artefact — as `{stopped, reason}` and
+  deliberately not the path, which would make two clones disagree and fail
+  `--check`.
+- **An error with no ticket is finally visible.** The fold has collected
+  `state.errors` since errors existed and the board carried neither it nor the
+  unknown-ticket list, so an agent logging a hard failure showed nothing at all
+  on the page that exists to say "not all is well". The key is
+  `errors_logged`, not `errors`: that name already means "this journal could
+  not be read", and one key with two meanings is the defect ADR-21 is named
+  after. Capped at 20 newest-first with the true count beside it, because this
+  artefact is committed.
+- **Cards say how long they have stood still.** The board would tell you an
+  agent had been quiet for three hours and refuse to tell you a ticket had been
+  blocked for four days — the timestamp was in `board.json` all along. Only on
+  the lanes where standing still IS the defect: `backlog` and `ready` are
+  excluded, because an unstarted ticket is waiting its turn, and marking every
+  one of them stale makes the mark worthless where it means something.
+
+All three use one staleness vocabulary, shared with the agent strip. Three
+renderings of "how long ago" would let the same gap read as fine in one place
+and alarming in another.
+
 ## 0.1.24 — 2026-08-15
 
 ### Settings: the board can now change what Tyran does

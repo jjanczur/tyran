@@ -140,6 +140,9 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .card .id{font-family:var(--mono);color:var(--heading)}
 .card .init{font-family:var(--mono);color:var(--muted);font-size:.68rem}
 .card .note{color:var(--muted);font-size:.74rem;display:block}
+.card .note.age-warm{color:var(--brass)}
+.card .note.age-cold{color:var(--clay)}
+.card .note.age-dead{color:var(--clay-bright);font-weight:600}
 .empty{color:var(--hairline);font-size:.78rem}
 
 /* ---- detail ---- */
@@ -368,6 +371,31 @@ if (data.schema !== 1) {
     return box;
   };
 
+  // One staleness vocabulary, used by the agent strip, the logged errors and
+  // the lane cards. Three renderings of "how long ago" would let the same
+  // gap read as fine in one place and alarming in another.
+  //
+  // This is the only clock on the page. The ARTEFACT never reads one — "as of"
+  // is the newest event timestamp, which is what keeps --check valid for the
+  // HTML — so every age here is computed in the reader's own browser.
+  var ageMsOf = function (ts) {
+    if (!ts) return null;
+    var t = Date.parse(ts);
+    return isNaN(t) ? null : Date.now() - t;
+  };
+  var ageClass = function (ms) {
+    if (ms === null) return 'age-cold';
+    return ms < 600000 ? 'age-fresh' : ms < 1800000 ? 'age-warm' : ms < 10800000 ? 'age-cold' : 'age-dead';
+  };
+  var ago = function (ts) {
+    var ms = ageMsOf(ts);
+    if (ms === null) return 'no time recorded';
+    if (ms < 60000) return 'just now';
+    if (ms < 3600000) return Math.round(ms / 60000) + ' min ago';
+    if (ms < 172800000) return Math.round(ms / 3600000) + ' h ago';
+    return Math.round(ms / 86400000) + ' d ago';
+  };
+
   var fmtTokens = function (n) {
     if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B';
     if (n >= 1e6) return (n / 1e6).toFixed(1) + ' M';
@@ -395,15 +423,14 @@ if (data.schema !== 1) {
       // shown it — so the chip could say an agent went quiet without saying
       // what it went quiet in the middle of.
       if (a.next) chip.appendChild(el('div', 'note', 'next: ' + a.next));
-      var ageMs = a.last_signal ? Date.now() - Date.parse(a.last_signal) : null;
-      var cls = ageMs === null ? 'age-cold' : ageMs < 600000 ? 'age-fresh' : ageMs < 1800000 ? 'age-warm' : 'age-cold';
       // Four buckets, not three. The old top bucket was "30 minutes or six
       // hours", which are not the same event: one is a long test run, the
       // other is an agent that is not coming back.
+      var ageMs = ageMsOf(a.last_signal);
       var ageText = ageMs === null ? 'no signal recorded'
         : ageMs >= 10800000 ? Math.round(ageMs / 3600000) + ' HOURS since last signal — likely dead'
         : Math.round(ageMs / 60000) + ' min since last signal';
-      chip.appendChild(el('div', ageMs !== null && ageMs >= 10800000 ? 'age-dead' : cls, ageText));
+      chip.appendChild(el('div', ageClass(ageMs), ageText));
       strip.appendChild(chip);
     });
     return strip;
@@ -411,6 +438,16 @@ if (data.schema !== 1) {
 
   // ---- overview ---------------------------------------------------------
   var ov = panels.overview;
+  // A STOP outranks everything, and it goes first. It is the one state in
+  // which a strip of silent agents is the system doing exactly as it was told,
+  // and without it that strip reads identically to a fleet that died.
+  if (data.stop && data.stop.stopped === true) {
+    var stopBox = el('div', 'paused');
+    stopBox.appendChild(el('b', null, 'STOPPED \\u2014 '));
+    stopBox.appendChild(el('span', null, 'an operator halted this repo: ' + (data.stop.reason || '(no reason given)')));
+    stopBox.appendChild(el('div', 'hint', 'Nothing new will be started until .tyran/STOP is deleted. Agents already running are not killed by it.'));
+    ov.appendChild(stopBox);
+  }
   (data.paused || []).forEach(function (p) {
     ov.appendChild(el('div', 'paused', 'PAUSED — ' + p.init + ': gate ' + p.kind + ' (' + p.result + ') since ' + p.since));
   });
@@ -481,6 +518,24 @@ if (data.schema !== 1) {
     });
   }
 
+  // An agent that logged a hard error with no ticket to hang it on used to
+  // land in that initiative's STATE.md and nowhere else, so the page whose
+  // whole job is to say "not all is well" showed nothing at all.
+  var logged = data.errors_logged || [];
+  if (logged.length > 0) {
+    var total = data.errors_logged_total || logged.length;
+    ov.appendChild(el('h2', null, 'Errors logged (' + total + ')'));
+    ov.appendChild(el('div', 'hint', 'Agents recorded these as failures. Newest first. An error carrying no ticket belongs to the initiative rather than to any one card, which is why it appears here and in no lane.'));
+    logged.forEach(function (e) {
+      var text = (e.class || 'error') + (e.detail ? ': ' + e.detail : '')
+        + (e.ticket_unknown ? ' \u2014 it names ticket ' + e.ticket + ', which this journal has never declared' : '');
+      ov.appendChild(el('div', 'damaged', e.init + ' \\u00b7 ' + text + ' \\u00b7 ' + ago(e.ts)));
+    });
+    if (total > logged.length) {
+      ov.appendChild(el('div', 'hint', 'and ' + (total - logged.length) + ' older \\u2014 the journals have the rest.'));
+    }
+  }
+
   // The same argument one step down. An initiative whose journal is PARTLY
   // damaged folds to a board with nothing wrong on it — the lost half leaves
   // no trace — so it used to render as an initiative in perfect health.
@@ -500,6 +555,13 @@ if (data.schema !== 1) {
   // ---- board ------------------------------------------------------------
   var bd = panels.board;
   bd.appendChild(el('div', 'hint', 'Every lane is derived from the journal — moving a ticket means appending an event, never editing this page. Select a card to see what the board knows about it.'));
+  // Lanes where a ticket sitting still is worth saying out loud. The backlog
+  // and ready lanes are deliberately absent — an unstarted ticket is not
+  // stalling, it is waiting its turn, and marking every one of them stale
+  // would make the signal worthless on the lanes where it means something.
+  // Done, likewise: a merged ticket is supposed to stop moving.
+  var STALLABLE = ['blocked', 'changes-requested', 'in-review', 'waiting-operator', 'in-progress', 'paused-limit'];
+
   var detail = el('div');
   var selected = null;
   var lanesWrap = el('div', 'lanes');
@@ -525,6 +587,7 @@ if (data.schema !== 1) {
     // is already done — precisely when the running-agents list is empty.
     row('worked by', card.worked_by && card.worked_by.length ? card.worked_by.join(', ') : null);
     row('note', card.annotation);
+    row('last event', card.since ? ago(card.since) + ' (' + card.since + ')' : null);
     if (cost) {
       var hit = (cost.by_ticket || []).filter(function (r) { return r.ticket === card.id; })[0];
       if (hit) row('spend', fmtTokens(hit.tokens) + ' tokens · ' + fmtUsd(hit.usd));
@@ -589,6 +652,18 @@ if (data.schema !== 1) {
       if (moved[(c.init || '') + '/' + c.id]) button.appendChild(el('span', 'movedtag', 'moved'));
       if (c.agents && c.agents.length) button.appendChild(el('span', 'note', 'agents: ' + c.agents.join(', ')));
       if (c.annotation) button.appendChild(el('span', 'note', c.annotation));
+      // How long this card has stood still, on the lanes where standing still
+      // IS the defect. The board would tell you an agent had been quiet for
+      // three hours and refuse to tell you a ticket had been blocked for four
+      // days — the timestamp has been in board.json since the lanes existed
+      // and nothing ever rendered it.
+      //
+      // Worded as an observation, never a verdict: the board reports the last
+      // event on the ticket, and only a human knows whether that is a stall or
+      // a long test run.
+      if (STALLABLE.indexOf(lane) !== -1 && c.since) {
+        button.appendChild(el('span', 'note ' + ageClass(ageMsOf(c.since)), 'no event ' + ago(c.since).replace(/ ago$/, '')));
+      }
       button.addEventListener('click', function () { showDetail(c, lane, button); });
       box.appendChild(button);
       buttons.push(button);

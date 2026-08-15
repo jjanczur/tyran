@@ -100,10 +100,12 @@ closed, and `apply` refuses the whole file rather than appending a duplicate.
 
 ## Opening it
 
-**[Try the sandbox board](https://jjanczur.github.io/tyran/sandbox/)** — the real
-page, rendered by this same code from two invented initiatives. Nothing to
-install: click the tabs, filter the lanes, select a card. Spend is the one
-thing it cannot show, because spend is served rather than embedded.
+**[Try the sandbox board](https://jjanczur.github.io/tyran/sandbox/)** — the
+real page, rendered by this same code. Nothing to install: click the tabs,
+filter the lanes, select a card. Its three initiatives are the ones that built
+the board itself — the lanes, overnight mode and the Settings tab — so every
+finding, logged error and open question on it is one that actually happened
+while the thing was made.
 
 Two ways, and the difference between them is spend.
 
@@ -156,7 +158,7 @@ and the page opens on Overview:
 
 | tab | what it answers |
 |---|---|
-| **Overview** | is anything on fire — four tiles (waiting on you · agents running · progress · needs a human), any PAUSED banner, the agent strip with its signal-freshness colours, a spend headline once spend has loaded, and the UNREADABLE list |
+| **Overview** | is anything on fire — four tiles (waiting on you · agents running · progress · needs a human), any STOPPED or PAUSED banner, the agent strip with its signal-freshness colours, a spend headline once spend has loaded, the errors agents logged, and the UNREADABLE list |
 | **Board** | where every ticket is — the lanes, and the detail of whichever card you select |
 | **Waiting on you** | what is blocked on a decision, and the commands that unblock it |
 | **Spend** | what the work has cost |
@@ -324,10 +326,52 @@ KERNEL invariant is what holds even if the flag is on. Every write also prints
 a line to the terminal running the server, and lands in `git diff` — those two
 are the audit trail.
 
+## Is it supposed to be running?
+
+Three agent chips reading "6 HOURS since last signal — likely dead" cover four
+completely different situations, and for a long time the board could tell them
+apart in none of them: an operator wrote `.tyran/STOP`, overnight mode paused
+on a usage limit, the resume watcher died, or the agents really are gone.
+
+**A STOP is now on the board**, above everything else — `**STOPPED**` in
+`BOARD.md`, a banner on the page, carrying the first line of the file as its
+reason. It is committed repo state, identical in every clone, so it travels in
+the artefact rather than behind a route. Note what it does and does not mean:
+nothing new starts while it exists, and agents already running are not killed
+by it.
+
+**Cards say how long they have stood still.** The board would tell you an agent
+had been silent for three hours and refuse to tell you a ticket had been blocked
+for four days — the timestamp was in `board.json` all along and nothing rendered
+it. Now every card in a lane where standing still IS the defect (`blocked`,
+`changes-requested`, `in-review`, `waiting-operator`, `in-progress`,
+`paused-limit`) carries its age, in the same four colours the agent strip uses.
+`backlog`, `ready` and `done` do not: an unstarted ticket is waiting its turn,
+not stalling, and marking every one of them stale makes the mark worthless
+where it means something.
+
+Both are worded as observations rather than verdicts. The board reports the
+last event on a ticket; only you know whether that is a stall or a long test
+run.
+
 ## board.json, schema 1
 
-Fixed key order (`schema`, `as_of`, `totals`, `paused`, `asks`, `agents`,
-`lanes`, `errors`); timestamps copied verbatim from events; invisibles
-escaped as `\uXXXX`, never removed; byte-identical reruns. Consumers check
-`schema === 1` — the HTML shows "regenerate with a newer Tyran" on a
-mismatch instead of rendering garbage.
+Fixed key order (`schema`, `as_of`, `totals`, `stop`, `paused`, `asks`,
+`agents`, `files`, `lanes`, `errors_logged`, `errors_logged_total`, `errors`,
+`warned`); timestamps copied verbatim from events; invisibles escaped as
+`\uXXXX`, never removed; byte-identical reruns. Consumers check `schema === 1`
+— the HTML shows "regenerate with a newer Tyran" on a mismatch instead of
+rendering garbage.
+
+Two of those keys are easy to confuse, so they are named apart on purpose.
+**`errors`** is the list of initiatives whose journal could not be read at all.
+**`errors_logged`** is what agents recorded as failures with an `error` event —
+newest first, capped at 20 with the true count in `errors_logged_total`,
+because this artefact is committed and compared byte for byte. One key with two
+meanings is the defect ADR-21 is named after.
+
+Nothing in the payload is machine-local. `stop` carries `{stopped, reason}` and
+deliberately not the path `checkStop` also returns: an absolute path would make
+two clones of one journal disagree on a machine whose home directory is spelled
+differently, which is the same rule that keeps spend served rather than
+embedded.

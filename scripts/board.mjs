@@ -45,6 +45,7 @@ import { jsonEscapeInvisible } from './invisible.mjs';
 import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
 import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
+import { checkStopAt } from './stop-check.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
 
@@ -155,10 +156,20 @@ export function initiativeFiles(tyranDir, name) {
 }
 
 /** Pure merge of per-initiative boards into the one payload. */
-export function crossBoard({ initiatives, errors, warned = [] }) {
+/**
+ * How many logged errors travel in the payload.
+ *
+ * `board.json` is committed and compared byte for byte, so an unbounded list
+ * would grow the artefact with every bad night. Newest first and a count for
+ * the rest: the board's job is to say something is wrong, not to be the log.
+ */
+export const MAX_LOGGED_ERRORS = 20;
+
+export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
   const asks = [];
   const agents = [];
   const paused = [];
+  const logged = [];
   const files = {};
   const lanes = Object.fromEntries(LANES.map((lane) => [lane, []]));
   let merged = 0;
@@ -173,6 +184,22 @@ export function crossBoard({ initiatives, errors, warned = [] }) {
     for (const a of board.agents) agents.push({ ...a, init: name });
     if (board.paused !== null) paused.push({ ...board.paused, init: name });
     if (docs !== undefined && docs.length > 0) files[name] = docs;
+    // An `error` event with no ticket landed in STATE.md's Errors table and
+    // nowhere else: the fold collects it, and the board that exists to say
+    // "not all is well" carried neither `state.errors` nor the tickets an
+    // error named that the journal has never seen. A whole class of agent
+    // failure was invisible on the one screen meant to show it.
+    for (const e of state.errors) {
+      logged.push({
+        init: name,
+        class: e.class,
+        detail: e.detail,
+        ticket: e.ticket ?? null,
+        ticket_unknown: e.ticket_unknown === true,
+        ts: e.ts,
+        actor: e.actor,
+      });
+    }
     for (const lane of LANES) {
       for (const card of board.lanes.get(lane)) lanes[lane].push({ ...card, init: name });
     }
@@ -185,6 +212,9 @@ export function crossBoard({ initiatives, errors, warned = [] }) {
   // ISO string from the journal, so ascending string order IS ascending time;
   // an agent with no signal at all sorts to the front, where it belongs.
   agents.sort((a, b) => String(a.last_signal ?? '').localeCompare(String(b.last_signal ?? '')));
+  // Newest first: an error from four days ago is history, the one from ten
+  // minutes ago is the reason you opened this page.
+  logged.sort((a, b) => String(b.ts ?? '').localeCompare(String(a.ts ?? '')));
 
   return {
     schema: 1,
@@ -203,11 +233,26 @@ export function crossBoard({ initiatives, errors, warned = [] }) {
       blocked: lanes.blocked.length + lanes['changes-requested'].length
         + agents.filter((a) => a.state === 'blocked').length,
     },
+    // Committed repo state, so it belongs in the artefact rather than behind a
+    // route: `.tyran/STOP` is identical in every clone, and `--check` stays
+    // byte-exact. The machine-local half of "is this run supposed to be
+    // running" — the pause marker, the resume watcher — is served instead,
+    // for the same reason spend is.
+    // `{stopped, reason}` and NOT the path `checkStopAt` also returns: an
+    // absolute path in a committed, byte-compared artefact makes two clones of
+    // one journal disagree on a machine whose home directory is spelled
+    // differently. The same trap the initiative file list was caught in.
+    stop: stop === null ? null : { stopped: stop.stopped, reason: stop.reason },
     paused,
     asks,
     agents,
     files,
     lanes,
+    // The key is `errors_logged`, NOT `errors`: `errors` on this payload
+    // already means "this initiative's journal could not be read at all", and
+    // one key with two meanings is the defect ADR-21 is named after.
+    errors_logged: logged.slice(0, MAX_LOGGED_ERRORS),
+    errors_logged_total: logged.length,
     errors,
     warned,
   };
@@ -224,6 +269,11 @@ export function renderCrossMd(payload) {
     `**${t.agents} agent(s) running across ${t.initiatives} initiative(s) · ` +
       `${t.merged}/${t.tickets} tickets merged (${t.percent}%) · as of ${inline(payload.as_of)}**\n`,
   );
+  // First, and above the pause: a STOP outranks everything. It is the one
+  // state where a strip of silent agents is the system doing as it was told.
+  if (payload.stop?.stopped === true) {
+    parts.push(`\n**STOPPED** — an operator halted this repo: ${inline(payload.stop.reason)}\n`);
+  }
   for (const p of payload.paused) {
     parts.push(`\n**PAUSED** — ${inline(p.init)}: gate ${inline(p.kind)} (${inline(p.result)}) since ${inline(p.since)}\n`);
   }
@@ -233,6 +283,13 @@ export function renderCrossMd(payload) {
   for (const d of payload.warned ?? []) {
     for (const w of d.warnings) parts.push(`\n**WARNING** — ${inline(d.name)}: ${inline(w)}\n`);
   }
+  for (const e of payload.errors_logged ?? []) {
+    const what = `${inline(e.class ?? 'error')}${e.detail != null ? `: ${inline(e.detail)}` : ''}` +
+      (e.ticket_unknown ? ` — it names ticket ${inline(e.ticket)}, which this journal has never declared` : '');
+    parts.push(`\n**ERROR** — ${inline(e.init)}: ${what} (${inline(e.ts)})\n`);
+  }
+  const hidden = (payload.errors_logged_total ?? 0) - (payload.errors_logged ?? []).length;
+  if (hidden > 0) parts.push(`\n**ERROR** — and ${hidden} older error(s); read the journals for the rest\n`);
 
   parts.push('\n## Waiting on you\n\n');
   if (payload.asks.length === 0) parts.push('_none — the agents have what they need_\n');
@@ -281,7 +338,12 @@ export function renderCrossMd(payload) {
 }
 
 export function renderAll(tyranDir) {
-  const payload = crossBoard(readInitiativeBoards(tyranDir));
+  const payload = crossBoard({
+    ...readInitiativeBoards(tyranDir),
+    // Named from the board's own directory rather than reconstructed from a
+    // repo root: `--dir` need not be spelled `.tyran`.
+    stop: checkStopAt(join(tyranDir, 'STOP')),
+  });
   const json = crossJson(payload);
   return {
     payload,

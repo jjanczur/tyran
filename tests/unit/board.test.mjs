@@ -16,7 +16,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import {
   BOARD_HTML_FILE,
   MAX_INITIATIVES,
+  MAX_LOGGED_ERRORS,
   crossBoard,
   crossJson,
   readInitiativeBoards,
@@ -509,6 +510,114 @@ test('nothing-started and nothing-finished do not render as the same board', () 
   assert.match(html, /no tickets declared yet/);
 });
 
+test('a STOP is on the board, because a halted fleet and a dead one look identical', () => {
+  // Three chips reading "6 HOURS since last signal" cover four unrelated
+  // situations, and the board could tell them apart in none of them. STOP is
+  // committed repo state — identical in every clone — so it belongs in the
+  // artefact rather than behind a route. MUTANT: drop `stop` from crossBoard.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-stop-'));
+  try {
+    mkdirSync(join(dir, 'state', 'demo'), { recursive: true });
+    writeFileSync(join(dir, 'state', 'demo', 'journal.jsonl'), readFileSync(FIXTURE, 'utf8'));
+    assert.equal(renderAll(dir).payload.stop.stopped, false);
+
+    writeFileSync(join(dir, 'STOP'), 'ci is red on main, do not continue\nsecond line ignored\n');
+    const { payload, files } = renderAll(dir);
+    assert.equal(payload.stop.stopped, true);
+    assert.equal(payload.stop.reason, 'ci is red on main, do not continue');
+    assert.match(files[BOARD_FILE], /\*\*STOPPED\*\* — an operator halted this repo: ci is red on main/);
+    assert.match(files[BOARD_HTML_FILE], /STOPPED/);
+
+    // The path `checkStopAt` also returns must NOT travel: board.json is
+    // committed and compared byte for byte, so an absolute path makes two
+    // clones of one journal disagree. MUTANT: spread the whole result in.
+    assert.equal(payload.stop.path, undefined);
+    assert.doesNotMatch(files[BOARD_JSON_FILE], /"path": "\//);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an error with no ticket reaches the board, under a key that does not already mean something else', () => {
+  // `fold()` collects state.errors and crossBoard carried neither it nor the
+  // unknown-ticket list, so an agent logging a hard error showed nothing at
+  // all on the page whose whole job is to say "not all is well".
+  //
+  // The key is `errors_logged`, NOT `errors`: that name already means "this
+  // journal could not be read", and one key with two meanings is the defect
+  // ADR-21 is named after. MUTANT: merge them into `errors`, and an unreadable
+  // initiative and a logged error become indistinguishable.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-errs-'));
+  try {
+    mkdirSync(join(dir, 'state', 'demo'), { recursive: true });
+    const lines = [
+      '{"ts":"2026-07-26T09:00:00.000Z","ev":"init.created","init":"demo","actor":"c","data":{"title":"t"}}',
+      '{"ts":"2026-07-26T09:01:00.000Z","ev":"error","init":"demo","actor":"impl-1","data":{"class":"test-suite-hangs","detail":"vitest never exits"}}',
+      '{"ts":"2026-07-26T09:02:00.000Z","ev":"error","init":"demo","actor":"impl-1","data":{"class":"x","detail":"y","ticket":"T-99"}}',
+    ];
+    writeFileSync(join(dir, 'state', 'demo', 'journal.jsonl'), lines.join('\n') + '\n');
+    const { payload, files } = renderAll(dir);
+    assert.equal(payload.errors_logged_total, 2);
+    assert.equal(payload.errors_logged[0].class, 'x', 'newest first');
+    assert.equal(payload.errors_logged.find((e) => e.ticket === 'T-99').ticket, 'T-99');
+    assert.deepEqual(payload.errors, [], 'the unreadable-journal list is untouched');
+    assert.match(files[BOARD_FILE], /\*\*ERROR\*\* — demo: test-suite-hangs: vitest never exits/);
+    assert.match(files[BOARD_FILE], /never declared/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the logged-error list is capped, because board.json is committed', () => {
+  // MUTANT: drop the slice. A repo having a bad night grows a byte-compared
+  // artefact without limit.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-errcap-'));
+  try {
+    mkdirSync(join(dir, 'state', 'demo'), { recursive: true });
+    const lines = ['{"ts":"2026-07-26T09:00:00.000Z","ev":"init.created","init":"demo","actor":"c","data":{"title":"t"}}'];
+    for (let i = 0; i < MAX_LOGGED_ERRORS + 7; i += 1) {
+      lines.push(`{"ts":"2026-07-26T10:${String(i).padStart(2, '0')}:00.000Z","ev":"error","init":"demo","actor":"a","data":{"class":"c${i}"}}`);
+    }
+    writeFileSync(join(dir, 'state', 'demo', 'journal.jsonl'), lines.join('\n') + '\n');
+    const { payload, files } = renderAll(dir);
+    assert.equal(payload.errors_logged.length, MAX_LOGGED_ERRORS);
+    assert.equal(payload.errors_logged_total, MAX_LOGGED_ERRORS + 7);
+    // Silent truncation reads as "that was all of them".
+    assert.match(files[BOARD_FILE], /and 7 older error\(s\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cards say how long they have stood still, on the lanes where that is the defect', () => {
+  // The board would tell you an agent had been silent for three hours and
+  // refuse to tell you a ticket had been blocked for four days. MUTANT: delete
+  // the STALLABLE branch — every string below still renders except this one.
+  const html = demoHtml();
+  assert.match(html, /STALLABLE/, 'the lane set exists');
+  assert.match(html, /'no event ' \+ ago\(c\.since\)/, 'the face carries the age');
+  assert.match(html, /row\('last event'/, 'and the detail panel carries the timestamp');
+  // Backlog and ready must NOT be in it: an unstarted ticket is waiting its
+  // turn, not stalling, and marking every one stale makes the mark worthless.
+  const set = html.slice(html.indexOf('var STALLABLE'), html.indexOf('var STALLABLE') + 220);
+  for (const lane of ['blocked', 'changes-requested', 'in-review', 'waiting-operator']) {
+    assert.ok(set.includes(`'${lane}'`), `${lane} should be markable as stalled`);
+  }
+  for (const lane of ['backlog', 'ready', 'done']) {
+    assert.ok(!set.includes(`'${lane}'`), `${lane} must not be marked as stalled`);
+  }
+});
+
+test('one staleness vocabulary, shared by the strip, the errors and the cards', () => {
+  // Three renderings of "how long ago" would let the same gap read as fine in
+  // one place and alarming in another. MUTANT: re-inline the age arithmetic in
+  // the agent strip.
+  const html = demoHtml();
+  assert.match(html, /var ageMsOf = function/);
+  assert.match(html, /var ageClass = function/);
+  assert.match(html, /chip\.appendChild\(el\('div', ageClass\(ageMs\), ageText\)\)/);
+});
+
 test('the sandbox journals the docs publish are real journals', () => {
   // MUTANT: hand-edit site/sandbox/*.jsonl into something the fold silently
   // drops — a misspelled `ev`, a `progress` with no agent. The sandbox would
@@ -521,7 +630,12 @@ test('the sandbox journals the docs publish are real journals', () => {
   for (const name of names) {
     const read = readJournal(join(dir, name));
     assert.equal(read.badLines.length, 0, `${name} has unparseable lines`);
-    const { errors } = validateJournal(read.events);
+    // The PATH, not the events. `validateJournal` reads the file itself, so
+    // handing it an array made it validate an empty journal and return ok —
+    // this assertion passed for weeks against sandbox journals carrying
+    // thirteen real errors, including reviews with no `by`, which meant every
+    // reviewer on the published demo rendered as still running forever.
+    const { errors } = validateJournal(join(dir, name));
     assert.deepEqual(errors, [], `${name} is not a journal Tyran would accept`);
     assert.ok(read.events.length > 5, `${name} is too thin to show anything`);
   }

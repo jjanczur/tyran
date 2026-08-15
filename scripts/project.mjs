@@ -554,7 +554,20 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         state.retro.push({ kind: data.kind ?? null, target: data.target ?? null, confidence: data.confidence ?? null, ts });
         break;
       case 'error': {
-        state.errors.push({ class: data.class ?? null, detail: data.detail ?? null, ts, actor });
+        // The ticket travels ON the error, not only in the separate
+        // unknown-ticket list. A consumer that wanted both — the board does —
+        // otherwise had to join the two by timestamp, and emitted one event as
+        // two rows when it could not.
+        const errTicket = data.ticket != null ? String(data.ticket) : null;
+        const errKnown = errTicket !== null && state.tickets.has(errTicket);
+        state.errors.push({
+          class: data.class ?? null,
+          detail: data.detail ?? null,
+          ts,
+          actor,
+          ticket: errTicket,
+          ticket_unknown: errTicket !== null && !errKnown,
+        });
         // `data.ticket` is optional metadata on an error, so a typo here is a
         // typo nothing rejected at append. Binding it to a ticket the journal
         // has never seen would MINT that ticket, and a minted ticket is one

@@ -42,7 +42,18 @@ const REASON_BYTES = 2000;
  * be asked. A brake that releases itself when it is damaged is not a brake.
  */
 export function checkStop(repoDir) {
-  const path = join(repoDir, STOP_PATH);
+  return checkStopAt(join(repoDir, STOP_PATH));
+}
+
+/**
+ * The same answer, for a caller that already knows where the file is.
+ *
+ * The board is given a `--dir` that need not be spelled `.tyran`, so it cannot
+ * reconstruct the path by joining a repo root to a constant. A second
+ * existsSync-and-read there would be a second spelling of the fail-CLOSED rule
+ * below, which is exactly the rule that must not have two spellings.
+ */
+export function checkStopAt(path) {
   if (!existsSync(path)) return { stopped: false, reason: null, path };
   try {
     if (statSync(path).isDirectory()) {

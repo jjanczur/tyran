@@ -48,7 +48,8 @@ updates:
       # that package — so accepting TS 7 here breaks the deploy, not a test.
       # Drop this entry the day @astrojs/check widens its peer range.
       - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
+        update-types:
+          - 'version-update:semver-major'
     groups:
       # One PR for the doc-site toolchain instead of five. These move together
       # and are validated by one command (`npm run build`), so splitting them

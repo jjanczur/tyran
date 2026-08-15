@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Tyran — you hired a manager (16:9)</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #12100e; }
+
+      :root {
+        --stone: #12100e; --raised: #1c1917; --sunken: #0d0c0a;
+        --text: #d9d2c6; --heading: #f5efe3; --muted: #a29788;
+        --hairline: #3b342c;
+        --gold: #d4a017; --gold-bright: #e8bc4d; --gold-dim: #6d5410; --gold-low: #2a2110;
+        --glow: #8fd8ea; --red: #f2665e;
+        /* board tokens, for every native board surface */
+        --bg-raised: #1c1a16; --hair: #332e27; --bmuted: #8f8779; --bheading: #ece5d7; --btext: #cec7ba;
+        --brass: #a8863c; --brass-bright: #cfae63; --brass-low: #221c11; --brass-edge: #5d4c22;
+        --steel: #7d9ea9; --steel-bright: #9dbcc6; --steel-low: #17242a;
+        --clay: #c07a70; --clay-bright: #d9998f; --sage: #88a06a; --sage-bright: #a3ba86;
+        --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --cap-cold: #f5efe3; --cap-hot: #e8bc4d;
+      }
+
+      #ground { position: absolute; inset: 0; background: var(--stone); }
+      #wash-cold { position: absolute; inset: 0;
+        background: radial-gradient(44% 34% at 50% 12%, rgba(143,216,234,.12) 0%, rgba(143,216,234,0) 72%); }
+      #wash-warm { position: absolute; inset: 0;
+        background: radial-gradient(40% 30% at 16% 90%, rgba(212,160,23,.09) 0%, rgba(212,160,23,0) 74%); }
+      #frame-dark { position: absolute; inset: 0; opacity: 0;
+        background: radial-gradient(70% 52% at 50% 42%, rgba(0,0,0,0) 0%, rgba(0,0,0,.72) 100%); }
+      #grain { position: absolute; inset: 0; opacity: .05;
+        background-image: radial-gradient(rgba(245,239,227,.9) .5px, transparent .6px); background-size: 3px 3px; }
+      .clip { position: absolute; inset: 0; }
+
+      /* THE SPINE: the desk's brass hairline. Planted in shot one at the left
+         edge; it thickens into the desk at the turn and never leaves. */
+      #spine { position: absolute; left: 96px; top: 150px; width: 3px; height: 660px;
+        background: linear-gradient(180deg, rgba(212,160,23,0), var(--gold) 18%, var(--gold) 82%, rgba(212,160,23,0));
+        transform-origin: 50% 50%; }
+
+      /* ---- terminals ---------------------------------------------------------- */
+      .term { background: var(--sunken); border: 1px solid var(--hairline); border-radius: 14px;
+        overflow: hidden; box-shadow: 0 30px 90px rgba(0,0,0,.62); }
+      .term--ref { border-color: #5a2f2c; }
+      .term__bar { display: flex; align-items: center; gap: 11px; padding: 15px 22px;
+        border-bottom: 1px solid var(--hairline); background: #151310; }
+      .dot { display: block; width: 12px; height: 12px; border-radius: 50%; background: #2f2a24; }
+      .term__t { margin-left: 10px; font: 400 21px var(--mono); color: #948b7c; }
+      .term__s { margin-left: auto; font: 400 19px var(--mono); color: #948b7c; }
+      .term__b { padding: 24px 26px 28px; font: 400 25px/1.66 var(--mono); color: var(--text); }
+      .term__b .l { display: block; white-space: pre-wrap; }
+      .go { color: var(--gold-bright); } .cy { color: var(--glow); }
+      .dim { color: #948b7c; } .rd { color: var(--red); font-weight: 700; }
+      .sg { color: var(--sage-bright); }
+      .chip { display: inline-block; font: 700 19px var(--mono); letter-spacing: .07em;
+        color: var(--stone); background: var(--gold); padding: 4px 11px; border-radius: 5px; margin-left: 14px; }
+
+      #t1 { position: absolute; left: 500px; top: 300px; width: 1120px; }
+      .stamps { position: absolute; right: 150px; top: 640px; text-align: right; }
+      .stamp { display: block; font: 700 32px var(--mono); letter-spacing: .09em; color: var(--muted); margin-bottom: 10px; }
+
+      /* ---- the desk and the splay --------------------------------------------- */
+      #desk { position: absolute; left: 96px; top: 380px; width: 430px;
+        background: var(--brass-low); border: 2px solid var(--brass-edge); border-radius: 13px; padding: 22px 26px; }
+      #desk .who { display: block; font: 700 34px var(--mono); color: var(--brass-bright); margin-bottom: 8px; }
+      #desk .sub { display: block; font: 400 22px/1.4 var(--mono); color: var(--bmuted); }
+
+      #brief { position: absolute; left: 130px; top: 230px; width: 640px;
+        font: 400 34px/1.38 var(--font); color: var(--gold-bright); text-shadow: 0 6px 26px rgba(0,0,0,.85); }
+      #qs { position: absolute; left: 620px; top: 250px; width: 620px; }
+      .q { display: block; background: var(--raised); border: 1px solid var(--hairline);
+        border-left: 4px solid var(--brass); border-radius: 0 10px 10px 0; padding: 16px 20px; margin-bottom: 13px;
+        font: 400 23px/1.4 var(--mono); color: var(--text); }
+      .q i { display: block; font-style: normal; color: var(--bmuted); font-size: 20px; margin-top: 6px; }
+
+      .agent { position: absolute; width: 380px; background: var(--bg-raised);
+        border: 1px solid var(--hair); border-left: 5px solid var(--steel); border-radius: 0 11px 11px 0;
+        padding: 17px 20px; }
+      .agent .who { display: block; font: 700 25px var(--mono); color: var(--steel-bright); margin-bottom: 6px; }
+      .agent .meta { display: block; font: 400 20px/1.4 var(--mono); color: var(--bmuted); }
+      .agent .tools { display: block; margin-top: 8px; font: 400 18px var(--mono); color: #9a9184; }
+      #ag-scout { left: 700px; top: 300px; border-left-color: var(--sage); }
+      #ag-scout .who { color: var(--sage-bright); }
+      #ag-i1 { left: 1120px; top: 250px; }
+      #ag-i2 { left: 1180px; top: 430px; }
+      #ag-rev { left: 1080px; top: 620px; border-left-color: var(--brass); }
+      #ag-rev .who { color: var(--brass-bright); }
+
+      /* ---- routing ------------------------------------------------------------- */
+      #routing { position: absolute; left: 500px; top: 250px; width: 1000px; }
+      #floor-cmd { position: absolute; left: 500px; top: 620px; width: 1000px; }
+
+      /* ---- the native board ----------------------------------------------------- */
+      #board { position: absolute; left: 260px; top: 150px; width: 1400px; }
+      #board .bhd { display: flex; align-items: baseline; margin-bottom: 14px; }
+      #board .bhd .t { font: 400 34px var(--display); color: var(--bheading); }
+      #board .bhd .s { margin-left: 22px; font: 400 20px var(--mono); color: var(--bmuted); }
+      #btabs { display: flex; gap: 10px; margin-bottom: 16px; }
+      .btab { display: block; font: 400 21px var(--mono); color: var(--bmuted);
+        padding: 8px 14px; border: 1px solid transparent; border-radius: 7px; }
+      .btab--on { color: var(--brass-bright); background: var(--brass-low); border-color: var(--brass-edge); }
+      #btophair { height: 1px; background: var(--hair); margin-bottom: 18px; position: relative; }
+      #bstrike { position: absolute; left: 0; top: -1px; width: 0; height: 3px; background: var(--gold); }
+
+      #tiles { display: flex; gap: 14px; margin-bottom: 18px; }
+      .tile { flex: 1; background: var(--bg-raised); border: 1px solid var(--hair); border-radius: 10px; padding: 16px 18px; }
+      .tile .k { display: block; font: 400 17px var(--mono); color: var(--bmuted);
+        text-transform: uppercase; letter-spacing: .05em; margin-bottom: 7px; }
+      .tile .v { display: block; font: 400 38px/1 var(--mono); color: var(--bheading); }
+      .tile .v.g { color: var(--brass-bright); }
+
+      #lane-win { height: 400px; overflow: hidden; position: relative; }
+      #lanes { position: absolute; left: 0; top: 0; width: 2046px; }
+      .lane { position: absolute; top: 0; width: 320px; height: 390px; background: #16130f;
+        border: 1px solid var(--hair); border-radius: 11px; padding: 14px 12px; }
+      .lane .hd { display: block; font: 700 18px var(--mono); letter-spacing: .07em;
+        color: #9a9184; text-transform: uppercase; margin-bottom: 12px; }
+      .card { display: block; background: var(--bg-raised); border: 1px solid var(--hair);
+        border-left: 3px solid var(--hair); border-radius: 8px; padding: 12px 13px; margin-bottom: 10px;
+        font: 400 19px/1.3 var(--mono); color: var(--btext); }
+      .card b { display: block; color: var(--bheading); font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+      .card .ini { display: block; color: #9a9184; font-size: 16px; margin-top: 4px; }
+      .r-brass { border-left-color: var(--brass); } .r-steel { border-left-color: var(--steel); }
+      .r-sage { border-left-color: var(--sage); } .r-clay { border-left-color: var(--clay); }
+
+      #aside { position: absolute; left: 340px; top: 470px; width: 900px;
+        font: 400 38px/1.34 var(--font); color: var(--gold-bright); text-shadow: 0 6px 30px rgba(0,0,0,.9); }
+      #receipt { position: absolute; right: 0; top: 62px; font: 400 19px var(--mono); color: #9a9184; opacity: 0; }
+
+      .bpanel { position: absolute; left: 0; right: 0; top: 250px; }
+      #q-card { background: var(--brass-low); border: 1px solid var(--brass-edge); border-radius: 12px; padding: 24px 26px; }
+      #q-card .badge { display: inline-block; font: 400 18px var(--mono); color: var(--steel-bright);
+        background: var(--steel-low); border: 1px solid #3a545d; padding: 5px 11px; border-radius: 5px; margin-bottom: 14px; }
+      #q-card .qt { display: block; font: 700 30px/1.34 var(--font); color: var(--brass-bright); margin-bottom: 16px; }
+      #q-card .kv { display: block; font: 400 22px/1.5 var(--mono); color: var(--btext); margin-bottom: 8px; }
+      #q-card .kv i { color: var(--bmuted); font-style: normal; margin-right: 10px; }
+      #q-ans { display: block; margin-top: 14px; background: #17140f; border: 1px solid var(--hair);
+        border-radius: 8px; padding: 14px 16px; font: 400 23px var(--mono); color: var(--btext); }
+
+      .rk { display: flex; align-items: center; gap: 14px; margin-bottom: 11px; }
+      .rk .n { display: block; width: 230px; font: 400 23px var(--mono); color: var(--btext); }
+      .rk .track { flex: 1; height: 20px; background: #201c18; border-radius: 3px; overflow: hidden; }
+      .rk .bar { display: block; height: 20px; background: var(--brass); transform-origin: 0 50%; }
+      .rk .qq { display: block; width: 120px; text-align: right; font: 400 23px var(--mono); color: var(--bmuted); }
+      #row-scout .bar { background: var(--sage); }
+      #row-cond .n { font-style: italic; color: var(--bmuted); }
+
+      /* ---- the three fates and the ladder --------------------------------------- */
+      #fates { position: absolute; left: 380px; top: 300px; width: 1160px; }
+      .fate { display: flex; align-items: center; gap: 18px; font: 400 27px var(--mono);
+        padding: 16px 22px; margin-bottom: 14px; background: #16130f;
+        border: 1px solid #241f19; border-radius: 10px; }
+      .fate .s { display: block; width: 26px; font-weight: 700; }
+      .f-add .s { color: var(--sage); } .f-rej .s { color: var(--bmuted); } .f-del .s { color: var(--clay); }
+      .f-del .b { color: #948b7c; text-decoration: line-through; }
+      .f-rej .b { color: #948b7c; }
+
+      #ladder { position: absolute; left: 560px; top: 250px; width: 800px; height: 470px; }
+      .shelf { position: absolute; left: 0; right: 0; height: 1px; background: var(--hairline); }
+      .shelf span { position: absolute; left: 0; top: -30px; font: 400 21px var(--mono); color: var(--muted); }
+      #ls1 { top: 400px; } #ls2 { top: 240px; } #ls3 { top: 80px; }
+      #lcard { position: absolute; left: 300px; top: 330px; width: 380px; background: var(--bg-raised);
+        border: 1px solid var(--brass-edge); border-radius: 10px; padding: 14px 16px;
+        font: 400 21px var(--mono); color: var(--brass-bright); }
+      #tally { position: absolute; left: 0; top: 430px; font: 400 24px var(--mono); color: var(--clay); }
+
+      /* ---- landing ---------------------------------------------------------------- */
+      #end { position: absolute; left: 0; right: 0; top: 210px; text-align: center; }
+      #mark { display: inline-block; width: 132px; height: 132px; color: var(--gold);
+        filter: drop-shadow(0 0 28px rgba(212,160,23,.3)); }
+      #wordmark { display: block; margin-top: 18px; font: 400 94px/1 var(--display);
+        letter-spacing: .2em; text-indent: .2em; color: var(--heading); }
+      #tag { display: block; margin-top: 16px; font: 400 30px var(--font); color: var(--muted); }
+      #tag em { color: var(--gold-bright); font-style: italic; }
+      #cmds { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 34px; }
+      #cmds span { display: block; font: 400 27px var(--mono); color: var(--heading);
+        background: #1c1917; border: 1px solid var(--hairline); padding: 13px 26px; border-radius: 9px; }
+      #cmds .acc { color: var(--gold-bright); border-color: #5d4c22; background: #221c11; }
+      #oss { display: block; margin-top: 22px; font: 400 24px var(--mono); color: var(--muted); }
+
+      #captions { position: absolute; left: 250px; right: 250px; top: 880px; height: 170px; }
+      .hf-cue { position: absolute; left: 0; right: 0; top: 0; text-align: center;
+        font: 700 49px/1.26 var(--font); color: var(--cap-cold);
+        text-shadow: 0 5px 26px rgba(0,0,0,.94), 0 0 2px rgba(0,0,0,.85); }
+      .hf-w { display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="200.33"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="bg" class="clip" data-start="0" data-duration="200.33" data-track-index="0">
+        <div id="ground"></div>
+        <div id="wash-warm"></div>
+        <div id="wash-cold"></div>
+        <div id="frame-dark"></div>
+      </div>
+
+      <div id="spine-layer" class="clip" data-start="0" data-duration="17.4" data-track-index="1">
+        <div id="spine"></div>
+      </div>
+
+      <!-- 01..02 · the wince, and the diagnosis · 0.4–15.9 -->
+      <div id="s1" class="clip" data-start="0" data-duration="16.4" data-track-index="2">
+        <div id="s1-in">
+          <div class="term" id="t1">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">one session · hour four</span>
+            </div>
+            <div class="term__b">
+              <span class="l"><span class="go">&gt;</span> rename handleReq to handleRequest<span class="chip">TOP TIER</span></span>
+              <span class="l"><span class="go">&gt;</span> review the auth boundary in api/session.ts<span class="chip">TOP TIER</span></span>
+              <span class="l">&nbsp;</span>
+              <span class="l dim">same chat · same model · same context</span>
+            </div>
+          </div>
+          <div class="stamps">
+            <span class="stamp sm">ONE CHAT</span>
+            <span class="stamp sm">ONE MODEL</span>
+            <span class="stamp sm">EVERY JOB</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 03..04 · the turn and the interview · 16.5–30.0 -->
+      <div id="s2" class="clip" data-start="16.2" data-duration="14.2" data-track-index="3">
+        <div id="s2-in">
+          <span id="brief">“ship the spend ledger, and don't break the board”</span>
+          <div id="desk"><span class="who">TYRAN</span><span class="sub">the manager · the only one you talk to</span></div>
+          <div id="qs">
+            <span class="q qq1">Merge to main, or open a pull request?<i>recommendation: pull request — main is protected</i></span>
+            <span class="q qq1">Run the full suite, or the changed files?<i>recommendation: the full suite</i></span>
+            <span class="q qq1">Is the rate card yours, or a sample?<i>recommendation: yours — it is already in config</i></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 05 · the plan becomes tickets · 30.4–35.1 · and 06..08 · the splay -->
+      <div id="s3" class="clip" data-start="30.2" data-duration="32.2" data-track-index="4">
+        <div id="s3-in">
+          <div id="desk" style="top:380px"><span class="who">TYRAN</span><span class="sub">holds the plan · never the transcripts</span></div>
+          <div class="agent" id="ag-scout">
+            <span class="who">scout</span><span class="meta">reads the repo · cheap tier · read only</span>
+            <span class="tools">Read Grep Glob</span>
+          </div>
+          <div class="agent" id="ag-i1">
+            <span class="who">implementer</span><span class="meta">T-6/sandbox · own branch · empty scrollback</span>
+            <span class="tools">from impl: finding F-12 · cost.mjs dedupes on requestId</span>
+          </div>
+          <div class="agent" id="ag-i2">
+            <span class="who">implementer</span><span class="meta">T-7/spend-ledger · own branch · empty scrollback</span>
+            <span class="tools">journal.jsonl · committed to your repo</span>
+          </div>
+          <div class="agent" id="ag-rev">
+            <span class="who">reviewer</span><span class="meta">grades the diff · runs its own checks</span>
+            <span class="tools">Read Grep Glob Bash — no Edit, no Write</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 09..10 · routing and the floor · 62.7–76.2 -->
+      <div id="s4" class="clip" data-start="62.4" data-duration="14.2" data-track-index="5">
+        <div id="s4-in">
+          <div class="term" id="routing">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">.tyran/config.yaml</span>
+            </div>
+            <div class="term__b">
+              <span class="l rl"><span class="dim"># the ONLY place model names appear</span></span>
+              <span class="l rl"><span class="cy">tiers</span>:</span>
+              <span class="l rl">  <span class="cy">cheap</span>: <span class="go">····</span>  <span class="dim"># scout, mechanical sweeps</span></span>
+              <span class="l rl">  <span class="cy">work</span>:  <span class="go">····</span>  <span class="dim"># implementation, ordinary review</span></span>
+              <span class="l rl">  <span class="cy">deep</span>:  <span class="go">····</span>  <span class="dim"># root-cause, hard implementation</span></span>
+              <span class="l rl">  <span class="cy">top</span>:   <span class="go">····</span>  <span class="dim"># security review, arbitration</span></span>
+            </div>
+          </div>
+          <div class="term term--ref" id="floor-cmd">
+            <div class="term__b">
+              <span class="l"><span class="go">$</span> tiers --role security-review --tier cheap</span>
+              <span class="l rd">refused: security review sits on a floor.</span>
+              <span class="l dim">no cost profile and no risk flag can lower it.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 11..18 · the board, the aside, the ticket, the question, the bill -->
+      <div id="s5" class="clip" data-start="76.6" data-duration="55.6" data-track-index="6">
+        <div id="board">
+          <div class="bhd"><span class="t">Tyran board</span><span class="s">3 initiative(s) · 8/17 merged (47%)</span></div>
+          <div id="btabs">
+            <span class="btab btab--on" id="bt-board">Board</span>
+            <span class="btab" id="bt-q">Waiting on you (2)</span>
+            <span class="btab" id="bt-spend">Spend</span>
+          </div>
+          <div id="btophair"><div id="bstrike"></div></div>
+          <span id="receipt">journal: ticket.declare T-9 · appended</span>
+
+          <div id="tiles">
+            <span class="tile"><span class="k">agents running</span><span class="v" id="tl-a">5</span></span>
+            <span class="tile"><span class="k">waiting on you</span><span class="v g" id="tl-q">2</span></span>
+            <span class="tile"><span class="k">progress</span><span class="v" id="tl-p">47%</span></span>
+            <span class="tile"><span class="k">needs a human</span><span class="v" id="tl-h">4</span></span>
+          </div>
+
+          <div id="lane-win">
+            <div id="lanes">
+              <div class="lane" style="left:0"><span class="hd">in-review (1)</span>
+                <span class="card r-brass" id="c-t5" data-layout-allow-overlap><b>T-5 — the waiting-on-you queue</b><span class="ini">the-board · rev-queue</span></span>
+              </div>
+              <div class="lane" style="left:341px"><span class="hd">in-progress (1)</span>
+                <span class="card r-brass"><b>T-6 — a clickable sandbox</b><span class="ini">the-board</span></span>
+              </div>
+              <div class="lane" style="left:682px"><span class="hd">ready (1)</span>
+                <span class="card r-steel"><b>T-7 — the spend ledger</b><span class="ini">the-board</span></span>
+              </div>
+              <div class="lane" style="left:1023px"><span class="hd">backlog (1)</span>
+                <span class="card r-steel"><b>T-4 — hold the machine awake</b><span class="ini">overnight-mode</span></span>
+                <span class="card r-brass" id="c-t9"><b>T-9 — rate-limit the webhook</b><span class="ini">queued · unassigned</span></span>
+              </div>
+              <div class="lane" style="left:1364px"><span class="hd">done (8)</span>
+                <span class="card r-sage" data-layout-allow-overlap><b>T-2 — byte-exact projections</b><span class="ini">the-board</span></span>
+                <span class="card r-sage" data-layout-allow-overlap><b>T-1 — derive lanes</b><span class="ini">the-board</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bpanel" id="pq">
+            <div id="q-card">
+              <span class="badge">DECISION · A DEFAULT IS RECORDED</span>
+              <span class="qt">The board reloads every 30 seconds, which wipes a half-typed value. Pause the refresh while Settings is open?</span>
+              <span class="kv"><i>RECOMMENDATION</i>pause it while Settings is open</span>
+              <span class="kv"><i>BLOCKS</i>1 ticket: T-5</span>
+              <span id="q-ans">yes — pause it</span>
+            </div>
+          </div>
+
+          <div class="bpanel" id="pspend">
+            <div id="tiles2" style="display:flex;gap:14px;margin-bottom:20px">
+              <span class="tile"><span class="k">tokens</span><span class="v" id="sp-tok">4.5 M</span></span>
+              <span class="tile"><span class="k">requests</span><span class="v" id="sp-req">404</span></span>
+              <span class="tile"><span class="k">cost through the api</span><span class="v g" id="sp-usd">$16.97</span></span>
+              <span class="tile"><span class="k">conductor overhead</span><span class="v" id="sp-oh">55%</span></span>
+            </div>
+            <div class="rk" id="row-cond"><span class="n">conductor</span><span class="track"><span class="bar sb" style="width:100%"></span></span><span class="qq">$8.73</span></div>
+            <div class="rk"><span class="n">implementer</span><span class="track"><span class="bar sb" style="width:77%"></span></span><span class="qq">$6.72</span></div>
+            <div class="rk"><span class="n">reviewer</span><span class="track"><span class="bar sb" style="width:17%"></span></span><span class="qq">$1.48</span></div>
+            <div class="rk" id="row-scout"><span class="n">scout</span><span class="track"><span class="bar sb" style="width:2%"></span></span><span class="qq">$0.03</span></div>
+          </div>
+        </div>
+        <div id="aside">“also — rate-limit the webhook”</div>
+      </div>
+
+      <!-- 19..21 · the hooks · 132.5–157.5 -->
+      <div id="s6" class="clip" data-start="132.2" data-duration="25.7" data-track-index="7">
+        <div id="s6-in">
+          <div class="term term--ref" style="position:absolute;left:340px;top:230px;width:1240px">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">PreToolUse → REFUSED</span><span class="term__s">secrets-gate.mjs</span>
+            </div>
+            <div class="term__b">
+              <span class="l hk"><span class="go">$</span> git commit -m "notes" docs/setup.md</span>
+              <span class="l hk dim">docs/setup.md · line 42 · AWS_SECRET_ACCESS_KEY=…</span>
+              <span class="l hk">&nbsp;</span>
+              <span class="l hk rd">refused — a secret in a markdown file is still a secret.</span>
+              <span class="l hk dim">a key is burned the moment it is published.</span>
+            </div>
+          </div>
+          <div class="term term--ref" style="position:absolute;left:340px;top:590px;width:1240px">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">SubagentStop → REFUSED</span><span class="term__s">evidence-gate.mjs</span>
+            </div>
+            <div class="term__b">
+              <span class="l hk2 dim">“Ran the suite — everything is green.”</span>
+              <span class="l hk2 rd">refused — this report carries no raw command output.</span>
+              <span class="l hk2 dim">it blocks silence, not forgery.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 22..24 · the retro, three fates, the ladder · 158.1–183.4 -->
+      <div id="s7" class="clip" data-start="157.8" data-duration="26.0" data-track-index="8">
+        <div id="s7-in">
+          <div id="fates">
+            <div class="fate f-add ft"><span class="s">+</span><span class="b">knowledge: worktrees link the dependency directory</span></div>
+            <div class="fate f-rej ft"><span class="s">×</span><span class="b">candidate rejected — already covered by an existing rule</span></div>
+            <div class="fate f-del ft"><span class="s">−</span><span class="b">K-07 retired — used 6 times, helped 0</span></div>
+            <div class="fate f-add ft"><span class="s">+</span><span class="b">skill: regenerate-client — you asked three times</span></div>
+          </div>
+          <div id="ladder">
+            <div class="shelf" id="ls3"><span>CLAUDE.md — a rule</span></div>
+            <div class="shelf" id="ls2"><span>.tyran/knowledge/ — knowledge</span></div>
+            <div class="shelf" id="ls1"><span>MISTAKES.md — a signature</span></div>
+            <div id="lcard">worktree-missing-deps</div>
+            <span id="tally">×3</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 25..26 · the close · 184.0–195.8 -->
+      <div id="s8" class="clip" data-start="183.6" data-duration="16.73" data-track-index="9">
+        <div id="end">
+          <svg id="mark" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z" fill="currentColor" />
+            <circle cx="33" cy="33" r="2.6" fill="#12100e" />
+            <path id="mark-lash" d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none" />
+          </svg>
+          <span id="wordmark">TYRAN</span>
+          <span id="tag">you didn't install a tool — <em>you hired a manager</em></span>
+          <div id="cmds">
+            <span class="acc">/plugin marketplace add jjanczur/tyran</span>
+            <span class="acc">/plugin install tyran@tyran</span>
+            <span>then: slash tyran setup</span>
+          </div>
+          <span id="oss">open source · Apache-2.0 · 0 runtime dependencies</span>
+        </div>
+      </div>
+
+      <div id="cap-layer" class="clip" data-start="0" data-duration="200.33" data-track-index="11">
+        <div id="captions"></div>
+      </div>
+      <div id="grain-layer" class="clip" data-start="0" data-duration="200.33" data-track-index="12">
+        <div id="grain"></div>
+      </div>
+
+      <audio id="vo" src="assets/vo.wav" data-start="0" data-duration="200.33" data-track-index="14" data-volume="1"></audio>
+    </div>
+
+    <script src="caption-data.js"></script>
+    <script src="captions.js"></script>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* Beats against assets/vo/explainer.timing.json:
+         01 0.4-7.5 · 02 8.0-15.9 · 03 16.5-23.7 · 04 24.2-30.0 · 05 30.4-35.1
+         06 35.5-40.9 · 07 41.3-55.7 · 08 56.2-62.1 · 09 62.7-69.3 · 10 69.8-76.2
+         11 76.9-83.1 · 12 83.5-91.0 · 13 91.5-95.4 · 14 95.7-101.3
+         15 101.9-108.6 · 16 109.1-116.0 · 17 116.4-124.7 · 18 125.2-131.8
+         19 132.5-145.6 · 20 146.0-150.8 · 21 151.3-157.5 · 22 158.1-166.0
+         23 166.5-176.0 · 24 176.5-183.4 · 25 184.0-189.5 · 26 190.1-195.8 */
+
+      const markLash = document.getElementById("mark-lash");
+      const lashLen = markLash.getTotalLength();
+      markLash.setAttribute("stroke-dasharray", lashLen);
+      markLash.setAttribute("stroke-dashoffset", lashLen);
+
+      function typeIn(sel, cps, at) {
+        const el = document.querySelector(sel);
+        gsap.set(el, { clipPath: "inset(0 100% 0 0)" });
+        tl.to(el, { clipPath: "inset(0 0% 0 0)", duration: el.textContent.length / cps, ease: "none" }, at);
+      }
+
+      gsap.set(".stamp", { autoAlpha: 0 });
+      gsap.set("#qs .q", { autoAlpha: 0 });
+      gsap.set(".agent", { autoAlpha: 0 });
+      gsap.set("#pq", { autoAlpha: 0, x: 70 });
+      gsap.set("#pspend", { autoAlpha: 0, x: 70 });
+      gsap.set("#aside", { autoAlpha: 0 });
+      gsap.set("#c-t9", { autoAlpha: 0 });
+      gsap.set("#floor-cmd", { autoAlpha: 0 });
+      gsap.set(".ft", { autoAlpha: 0 });
+      gsap.set("#ladder", { autoAlpha: 0 });
+
+      /* ---- 01..02 · the wince, then the pull-back --------------------------- */
+      tl.fromTo("#t1", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, .2);
+      /* the camera acts: a real pull-back, not an 8% nudge */
+      tl.to("#s1-in", { scale: .58, y: 70, duration: 1.6, ease: "sine.inOut" }, 8.1);
+      tl.to("#frame-dark", { autoAlpha: .5, duration: 1.6, ease: "sine.inOut" }, 8.1);
+      tl.fromTo(".sm", { autoAlpha: 0, y: 12 },
+        { autoAlpha: 1, y: 0, duration: .24, stagger: .13, ease: "power2.out" }, 9.4);
+      tl.to("#s1-in", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 15.9);
+      tl.set("#s1-in", { autoAlpha: 0, immediateRender: false }, 16.40);
+
+      /* ---- 03 · the spine thickens into THE DESK ---------------------------- */
+      tl.to("#spine", { scaleX: 5, duration: .45, ease: "power2.inOut" }, 16.4);
+      tl.to("#spine-layer", { autoAlpha: 0, duration: .3 }, 16.9);
+      tl.fromTo("#s2-in #desk", { autoAlpha: 0, scaleY: .5, transformOrigin: "50% 50%" },
+        { autoAlpha: 1, scaleY: 1, duration: .5, ease: "power2.inOut" }, 16.7);
+      tl.fromTo("#brief", { autoAlpha: 0, y: -110 }, { autoAlpha: 1, y: 0, duration: .55, ease: "power3.out" }, 17.6);
+      tl.to("#s2-in #desk", { y: 6, duration: .12, yoyo: true, repeat: 1 }, 18.1);
+
+      /* ---- 04 · he interviews you, in batches ------------------------------- */
+      tl.to("#qs .q", { autoAlpha: 1, x: 0, duration: .34, stagger: .5, ease: "power3.out" }, 24.4);
+      tl.fromTo("#qs .q", { x: -26 }, { x: 0, duration: .34, stagger: .5, ease: "power3.out" }, 24.4);
+      tl.to("#s2-in", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 30.0);
+      tl.set("#s2-in", { autoAlpha: 0, immediateRender: false }, 30.40);
+
+      /* ---- 05..08 · the splay · cards are BORN at the desk ------------------- */
+      tl.fromTo("#s3-in #desk", { autoAlpha: 0 }, { autoAlpha: 1, duration: .35 }, 30.3);
+      tl.fromTo("#ag-scout", { autoAlpha: 0, scale: .3, x: -560, y: 90 },
+        { autoAlpha: 1, scale: 1, x: 0, y: 0, duration: .55, ease: "power2.out" }, 35.6);
+      tl.fromTo("#ag-i1", { autoAlpha: 0, scale: .3, x: -960, y: 140 },
+        { autoAlpha: 1, scale: 1, x: 0, y: 0, duration: .5, ease: "power2.out" }, 41.5);
+      tl.fromTo("#ag-i2", { autoAlpha: 0, scale: .3, x: -1020, y: -40 },
+        { autoAlpha: 1, scale: 1, x: 0, y: 0, duration: .68, ease: "power2.out" }, 41.9);
+      /* the handoff line is the proof that the team is stateful */
+      tl.fromTo("#ag-i1 .tools", { autoAlpha: 0 }, { autoAlpha: 1, duration: .4 }, 47.5);
+      tl.fromTo("#ag-i2 .tools", { autoAlpha: 0 }, { autoAlpha: 1, duration: .4 }, 50.5);
+      tl.fromTo("#ag-rev", { autoAlpha: 0, scale: .3, x: -900, y: -220 },
+        { autoAlpha: 1, scale: 1, x: 0, y: 0, duration: .6, ease: "power2.out" }, 56.3);
+      tl.to("#ag-rev .tools", { color: "#d9998f", duration: .35 }, 59.4);
+      tl.to("#s3-in", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 62.2);
+      tl.set("#s3-in", { autoAlpha: 0, immediateRender: false }, 62.60);
+
+      /* ---- 09..10 · routing, and the floor that cannot be lowered ----------- */
+      tl.fromTo(".rl", { autoAlpha: 0, x: -14 },
+        { autoAlpha: 1, x: 0, duration: .26, stagger: .2, ease: "power2.out" }, 62.9);
+      tl.to("#floor-cmd", { autoAlpha: 1, duration: .4 }, 70.0);
+      tl.to("#floor-cmd", { x: -8, duration: .09, yoyo: true, repeat: 3 }, 71.6);
+      tl.to("#s4-in", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 76.3);
+      tl.set("#s4-in", { autoAlpha: 0, immediateRender: false }, 76.60);
+
+      /* ---- 11 · the board ARRIVES as one object ----------------------------- */
+      tl.fromTo("#board", { autoAlpha: 0, y: 30, scale: .98 },
+        { autoAlpha: 1, y: 0, scale: 1, duration: .55, ease: "power3.out" }, 76.8);
+      tl.fromTo(".tile", { autoAlpha: 0, y: 14 },
+        { autoAlpha: 1, y: 0, duration: .3, stagger: .13, ease: "power2.out" }, 77.2);
+
+      /* ---- 12 · a card crosses into done by itself -------------------------- */
+      tl.to("#c-t5", { x: 1364, duration: .8, ease: "back.out(1.5)" }, 84.6);
+      tl.to("#c-t5", { borderLeftColor: "#88a06a", duration: .35 }, 84.6);
+      tl.to("#lanes", { x: -420, duration: 2.2, ease: "sine.inOut" }, 85.6);
+
+      /* ---- 13..14 · THE PEAK · your aside becomes ticket T-9 ---------------- */
+      tl.set("#aside", { autoAlpha: 1, rotate: 2.2, immediateRender: false }, 91.6);
+      typeIn("#aside", 17, 91.6);
+      tl.to("#board", { filter: "brightness(0.9)", duration: .3 }, 91.6);
+      tl.to("#bstrike", { width: 1400, duration: .35, ease: "power2.in" }, 96.4);
+      tl.to("#aside", { rotate: 0, scale: .58, color: "#cfae63", x: 300, y: 120,
+        transformOrigin: "0% 50%", duration: .18, ease: "power4.out" }, 96.75);
+      tl.to("#bstrike", { autoAlpha: 0, duration: .25 }, 97.0);
+      tl.to("#board", { filter: "brightness(1)", duration: .4 }, 97.0);
+      tl.to("#aside", { autoAlpha: 0, duration: .2 }, 98.3);
+      tl.to("#c-t9", { autoAlpha: 1, duration: .01 }, 98.4);
+      tl.fromTo("#c-t9", { scale: .82, y: -60 },
+        { scale: 1, y: 0, duration: .5, ease: "back.out(1.8)" }, 98.4);
+      tl.to("#receipt", { autoAlpha: .85, duration: .25 }, 99.4);
+      tl.to("#receipt", { autoAlpha: 0, duration: .5 }, 100.6);
+
+      /* ---- 15 · the question, answered on the board ------------------------- */
+      tl.to("#bt-board", { color: "#8f8779", backgroundColor: "rgba(0,0,0,0)", borderColor: "rgba(0,0,0,0)", duration: .25 }, 101.9);
+      tl.to("#bt-q", { color: "#cfae63", backgroundColor: "#221c11", borderColor: "#5d4c22", duration: .25 }, 101.9);
+      tl.to("#lane-win", { autoAlpha: 0, x: -70, duration: .4, ease: "power3.out" }, 101.9);
+      tl.to("#tiles", { autoAlpha: 0, duration: .3 }, 101.9);
+      tl.to("#pq", { autoAlpha: 1, x: 0, duration: .4, ease: "power3.out" }, 101.95);
+      typeIn("#q-ans", 17, 106.0);
+
+      /* ---- 16..18 · the bill, the overhead, the three cents ----------------- */
+      tl.to("#bt-q", { color: "#8f8779", backgroundColor: "rgba(0,0,0,0)", borderColor: "rgba(0,0,0,0)", duration: .25 }, 109.1);
+      tl.to("#bt-spend", { color: "#cfae63", backgroundColor: "#221c11", borderColor: "#5d4c22", duration: .25 }, 109.1);
+      tl.to("#pq", { autoAlpha: 0, x: -70, duration: .4, ease: "power3.out" }, 109.1);
+      tl.to("#pspend", { autoAlpha: 1, x: 0, duration: .4, ease: "power3.out" }, 109.15);
+      const tk = { v: 0 }, rq = { v: 0 }, us = { v: 0 };
+      tl.to(tk, { v: 4.5, duration: .8, ease: "power2.out",
+        onUpdate: function () { document.getElementById("sp-tok").textContent = tk.v.toFixed(1) + " M"; } }, 109.8);
+      tl.to(rq, { v: 404, duration: .8, ease: "power2.out", snap: { v: 1 },
+        onUpdate: function () { document.getElementById("sp-req").textContent = String(Math.round(rq.v)); } }, 110.0);
+      tl.to(us, { v: 16.97, duration: .8, ease: "power2.out",
+        onUpdate: function () { document.getElementById("sp-usd").textContent = "$" + us.v.toFixed(2); } }, 110.2);
+      /* the least flattering number is volunteered, not hidden */
+      tl.to("#sp-oh", { scale: 1.12, color: "#cfae63", duration: .4, yoyo: true, repeat: 1, ease: "power2.out" }, 117.0);
+      tl.fromTo(".sb", { scaleX: 0 }, { scaleX: 1, duration: .5, ease: "power2.out", stagger: .55 }, 118.4);
+      tl.to("#row-scout .n", { color: "#a3ba86", duration: .3 }, 126.4);
+      tl.to("#row-scout .qq", { scale: 1.18, color: "#a3ba86", duration: .4, yoyo: true, repeat: 1, ease: "back.out(2)" }, 126.6);
+      tl.to("#s5", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 131.8);
+      tl.set("#s5", { autoAlpha: 0, immediateRender: false }, 132.20);
+
+      /* ---- 19..21 · a hook decides before the tool ever runs ---------------- */
+      tl.fromTo(".hk", { autoAlpha: 0, x: -12 },
+        { autoAlpha: 1, x: 0, duration: .3, stagger: .55, ease: "power2.out" }, 132.6);
+      tl.to("#s6-in .term--ref:nth-of-type(1)", { x: -10, duration: .08, yoyo: true, repeat: 3 }, 146.2);
+      tl.fromTo(".hk2", { autoAlpha: 0, x: -12 },
+        { autoAlpha: 1, x: 0, duration: .3, stagger: .5, ease: "power2.out" }, 151.5);
+      tl.to("#s6-in", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 157.5);
+      tl.set("#s6-in", { autoAlpha: 0, immediateRender: false }, 157.90);
+
+      /* ---- 22..23 · the retro, and three fates in one frame ----------------- */
+      tl.fromTo(".ft", { autoAlpha: 0, x: -22 },
+        { autoAlpha: 1, x: 0, duration: .38, stagger: 2.1, ease: "power3.out" }, 159.0);
+      tl.to("#fates", { autoAlpha: 0, duration: .4 }, 176.0);
+
+      /* ---- 24 · the ladder: three strikes, then five ------------------------ */
+      tl.to("#ladder", { autoAlpha: 1, duration: .35 }, 176.4);
+      tl.to("#lcard", { y: -160, duration: .42, ease: "power3.out" }, 177.6);
+      tl.to("#lcard", { y: -154, duration: .18, ease: "sine.inOut" }, 178.02);
+      tl.to("#tally", { color: "#e8bc4d", duration: .3 }, 177.6);
+      tl.to("#lcard", { y: -320, duration: .42, ease: "power3.out" }, 180.6);
+      tl.to("#lcard", { y: -314, duration: .18, ease: "sine.inOut" }, 181.02);
+      tl.to("#lcard", { borderColor: "#e8bc4d", duration: .3 }, 180.9);
+      tl.to("#s7-in", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 183.4);
+      tl.set("#s7-in", { autoAlpha: 0, immediateRender: false }, 183.80);
+
+      /* ---- 25..26 · the close ------------------------------------------------ */
+      tl.fromTo("#mark", { autoAlpha: 0, scale: .72, y: 20 },
+        { autoAlpha: 1, scale: 1, y: 0, duration: .7, ease: "back.out(1.9)" }, 184.0);
+      tl.fromTo("#mark-lash", { strokeDashoffset: lashLen },
+        { strokeDashoffset: 0, duration: .9, ease: "power2.inOut" }, 184.5);
+      tl.fromTo("#wordmark", { autoAlpha: 0, y: 22 }, { autoAlpha: 1, y: 0, duration: .6, ease: "power3.out" }, 184.9);
+      tl.fromTo("#tag", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: .55, ease: "power2.out" }, 185.6);
+      tl.fromTo("#cmds span", { autoAlpha: 0, y: 16 },
+        { autoAlpha: 1, y: 0, duration: .45, stagger: .5, ease: "power2.out" }, 190.3);
+      tl.fromTo("#oss", { autoAlpha: 0 }, { autoAlpha: 1, duration: .45 }, 192.6);
+
+      const holdAt = 194.0, holdFor = 200.33 - holdAt, cyc = 2.6;
+      tl.to("#end", { scale: 1.01, duration: cyc / 2, ease: "sine.inOut",
+        yoyo: true, repeat: Math.max(0, Math.floor(holdFor / cyc) * 2 - 1) }, holdAt);
+      tl.to("#wash-cold", { autoAlpha: .6, duration: holdFor, ease: "sine.inOut" }, holdAt);
+
+      window.hfCaptions(tl, { mount: "#captions" });
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

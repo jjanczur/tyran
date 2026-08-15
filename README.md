@@ -14,6 +14,7 @@
 <p align="center">
   <b><a href="https://jjanczur.github.io/tyran/">📖 Documentation</a></b> ·
   <a href="https://jjanczur.github.io/tyran/getting-started/">Getting started</a> ·
+  <a href="https://jjanczur.github.io/tyran/videos/">Videos</a> ·
   <a href="https://jjanczur.github.io/tyran/architecture/">Architecture</a> ·
   <a href="https://github.com/jjanczur/tyran/releases/latest">Releases</a>
 </p>
@@ -22,41 +23,53 @@
 
 ## What Tyran is
 
-Every long Claude Code session ends the same way. The context fills up, the
-plan is somewhere in the scrollback, and *"the tests pass"* is a sentence
-rather than something you can check. Start a new session and you start
-explaining from the beginning.
+Your most expensive model just renamed a variable. In the same chat, it judged
+an authentication boundary.
 
-Tyran is an orchestrator. You describe a task; it interviews you until the goal
-is unambiguous, sizes it, plans it, and hands each piece to a **dedicated
-subagent with fresh context and a model tier matched to how hard that piece
-actually is** — cheap for a mechanical sweep, expensive for a security
-boundary, never one model for a whole session. They run in parallel, as an
-Agent Team where the platform offers one.
+One chat, one model, every job — that is why the bill is high and the work gets
+worse. The context fills up, the plan is somewhere in the scrollback, and
+*"the tests pass"* is a sentence rather than something you can check.
+
+**You didn't install a tool. You hired a manager.** You describe the work once;
+he interviews you until the goal is unambiguous — batches of at most four
+questions, each with his recommendation — turns the plan into tickets on a
+board, and hands each piece to a **dedicated subagent with fresh context and a
+model tier matched to how hard that piece actually is.** A good manager doesn't
+put a principal engineer on a grep: a scout reads the repo on the cheap tier,
+implementers take one story each on their own branch, the reviewer has no
+editing tools at all, and security review always gets the strongest tier — a
+floor no cost profile or flag can lower.
 
 That is a cost lever and a quality lever at the same time. The conductor holds
 the plan and never accumulates its agents' transcripts, which is where the
 tokens in a long session actually go; and an agent that never saw the last six
 failed attempts cannot inherit them, so the second opinion is a real one.
 
+**Nothing you say is lost.** Remember something halfway through a run and say
+it — it doesn't land in the scrollback, it becomes a ticket. Every decision,
+spawn, report, merge and open question is appended to a journal **committed to
+your repo**, so a restart, a compaction and a colleague on another branch all
+read the same thing.
+
 **It learns your repo while it works.** Setup reads how the repo is really
 worked — stack, validation commands, how things get deployed — rather than
-asking you to describe it. A retrospective after every initiative writes what
-it learnt into `.tyran/knowledge/`, and a failure that repeats graduates out of
-`MISTAKES.md` into a rule. Meanwhile every decision, spawn, report, merge and
-open question is appended to a journal **committed to your repo**, so a
-restart, a compaction and a colleague on another branch all read the same
-thing.
+asking you to describe it. After every initiative the team runs a retrospective
+on itself, and what it changes is Tyran, never your product code. The same
+failure three times becomes knowledge pasted into every matching handoff; five
+times and it becomes a rule in your `CLAUDE.md`, carrying the dates that earned
+it. Most retros correctly change nothing.
 
-All of it is one plugin, and it comes with a **dashboard**: what every agent is
-doing right now, which questions are waiting on you, and what the work cost —
-in the tokens the platform itself reported, per model, per agent and per
-ticket.
+All of it lands on one page — a **board**: what every agent is doing right now,
+which questions are waiting on you (answer them there and the run carries on),
+and what the work cost, in the tokens the platform itself reported, per model,
+per agent and per ticket. The conductor gets its own row, so its overhead never
+hides inside the total.
 
-Underneath, **deterministic hooks hold the line**: a report with no raw command
-output is rejected, every write is classified against a policy file you own
-before it happens, and a commit carrying a secret is refused. Mechanisms rather
-than instructions — which is the whole argument.
+Underneath, **a hook decides before the tool ever runs** — none of this is a
+prompt asking nicely. A report with no raw command output is refused: it blocks
+silence, not forgery. Every write is classified against a policy file you own.
+And a commit carrying a secret is refused, even inside a markdown file.
+Mechanisms rather than instructions — which is the whole argument.
 
 <p align="center">
   <img src="assets/board-demo.gif" width="100%" alt="The Tyran dashboard, recorded live, moving through four of its tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost">
@@ -66,6 +79,31 @@ than instructions — which is the whole argument.
   <b><a href="https://jjanczur.github.io/tyran/sandbox/">▶ Open the sandbox board</a></b> —
   the real page with sample data, in your browser. Click the tabs, filter the
   lanes, select a card.
+</p>
+
+### Watch it
+
+<table>
+<tr>
+<td width="50%" align="center">
+  <a href="https://youtu.be/ThulYtbYNXI"><img src="assets/video/a-explainer-16x9.jpg" width="100%" alt="Still from the Tyran explainer: the routing table, with each role resolving to a model tier"></a><br>
+  <b><a href="https://youtu.be/ThulYtbYNXI">You Didn't Install a Tool — You Hired a Manager</a></b><br>
+  3:20 · the whole argument, end to end
+</td>
+<td width="50%" align="center">
+  <a href="https://youtu.be/vr49hKk9G8g"><img src="assets/video/a-onboarding-16x9.jpg" width="100%" alt="Still from the Tyran onboarding video: the install commands typed into a terminal"></a><br>
+  <b><a href="https://youtu.be/vr49hKk9G8g">Your First Session</a></b><br>
+  3:53 · install, run, read the board
+</td>
+</tr>
+</table>
+
+<p align="center">
+  Three 60-second cuts too —
+  <a href="https://www.youtube.com/shorts/2EgRBR0fVRo">the mistake</a> ·
+  <a href="https://www.youtube.com/shorts/HKePDLkYDqA">the board</a> ·
+  <a href="https://www.youtube.com/shorts/EMcPJj7c0mk">the retro</a> —
+  and <a href="https://jjanczur.github.io/tyran/videos/">which to send when</a>.
 </p>
 
 ## What it gives you

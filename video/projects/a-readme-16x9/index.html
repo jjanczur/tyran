@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1280, height=720" />
+    <title>Tyran — the board, silently (README loop)</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1280px; height: 720px; overflow: hidden; background: #12100e; }
+
+      :root {
+        --stone: #12100e; --raised: #1c1917; --sunken: #0d0c0a;
+        --text: #d9d2c6; --heading: #f5efe3; --muted: #a29788;
+        --hairline: #3b342c;
+        --gold: #d4a017; --gold-bright: #e8bc4d;
+        --glow: #8fd8ea;
+        --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+
+      #ground { position: absolute; inset: 0; background: var(--stone); }
+      #wash {
+        position: absolute; inset: 0;
+        background: radial-gradient(58% 50% at 50% 12%, rgba(143,216,234,.10) 0%, rgba(143,216,234,0) 72%);
+      }
+      #grain {
+        position: absolute; inset: 0; opacity: .045;
+        background-image: radial-gradient(rgba(245,239,227,.9) .5px, transparent .6px);
+        background-size: 3px 3px;
+      }
+
+      .clip { position: absolute; inset: 0; }
+
+      /* ---- 1 · the command ------------------------------------------------- */
+      .stage { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: grid; place-items: center; }
+      .term {
+        width: 900px; background: var(--sunken); border: 1px solid var(--hairline);
+        border-radius: 12px; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.6);
+      }
+      .term__bar {
+        display: flex; align-items: center; gap: 9px; padding: 13px 18px;
+        border-bottom: 1px solid var(--hairline); background: #151310;
+      }
+      .dot { display: block; width: 11px; height: 11px; border-radius: 50%; background: #2f2a24; }
+      .term__body { padding: 22px 24px 26px; font: 400 23px/1.7 var(--mono); color: var(--text); }
+      .term__body .l { display: block; white-space: pre; }
+      .go { color: var(--gold-bright); }
+      .cy { color: var(--glow); }
+      .type-wrap { display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; }
+      .caret { display: inline-block; width: 11px; height: 24px; vertical-align: -4px; background: var(--glow); margin-left: 3px; }
+
+      /* ---- 2..5 · the tabs ---------------------------------------------------
+         The page is shown inside a fixed viewport that the image crawls
+         through, so each tab gets a real camera move rather than a cut. */
+      .shot {
+        position: absolute; left: 90px; top: 74px;
+        width: 1100px; height: 566px; overflow: hidden;
+        border-radius: 11px; border: 1px solid var(--hairline);
+        box-shadow: 0 26px 80px rgba(0,0,0,.7);
+        background: #141210;
+      }
+      .shot img { display: block; width: 1100px; transform-origin: 50% 0%; }
+
+      .label {
+        position: absolute; left: 90px; top: 22px;
+        display: flex; align-items: baseline; gap: 14px;
+      }
+      .label .n { display: block; font: 400 19px var(--mono); color: var(--gold-bright); letter-spacing: .1em; }
+      .label .t { display: block; font: 400 27px var(--display); color: var(--heading); }
+      .label .d { display: block; font: 400 19px var(--font); color: var(--muted); }
+
+      /* ---- 6 · the mark ------------------------------------------------------ */
+      .lockup { display: flex; align-items: center; justify-content: center; gap: 22px; }
+      #mark { display: block; width: 82px; height: 82px; color: var(--gold);
+        filter: drop-shadow(0 0 20px rgba(212,160,23,.24)); }
+      .wordmark { display: block; font: 400 62px/1 var(--display); letter-spacing: .2em; text-indent: .2em; color: var(--heading); }
+      .tagline { display: block; margin-top: 22px; text-align: center; font: 400 22px var(--font); color: var(--muted); }
+      .tagline em { color: var(--gold-bright); font-style: italic; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="18"
+      data-width="1280"
+      data-height="720"
+    >
+      <div id="bg" class="clip" data-start="0" data-duration="18" data-track-index="0">
+        <div id="ground"></div>
+        <div id="wash"></div>
+      </div>
+
+      <!-- 1 · serve the board -->
+      <div id="s1" class="clip" data-start="0" data-duration="3.4" data-track-index="1">
+        <div class="stage"><div id="s1-in">
+          <div class="term">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </div>
+            <div class="term__body">
+              <span class="l"><span class="go">$</span> <span class="type-wrap"><span id="cmd">npx @jjanczur/tyran board --dir .tyran --serve</span></span><span id="caret" class="caret"></span></span>
+              <span class="l" id="echo"><span class="cy">board: serving http://127.0.0.1:4173/</span></span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 2 · Overview -->
+      <div id="s2" class="clip" data-start="3.2" data-duration="4.1" data-track-index="2">
+        <div id="s2-in">
+          <div class="label"><span class="n">01</span><span class="t">Overview</span><span class="d">what is waiting on you, and what is running</span></div>
+          <div class="shot"><img id="img2" src="assets/hi-overview.png" alt="" data-layout-allow-overflow /></div>
+        </div>
+      </div>
+
+      <!-- 3 · Board -->
+      <div id="s3" class="clip" data-start="7.1" data-duration="4.1" data-track-index="3">
+        <div id="s3-in">
+          <div class="label"><span class="n">02</span><span class="t">Board</span><span class="d">every ticket in exactly one of ten lanes</span></div>
+          <div class="shot"><img id="img3" src="assets/hi-board.png" alt="" data-layout-allow-overflow /></div>
+        </div>
+      </div>
+
+      <!-- 4 · Spend -->
+      <div id="s4" class="clip" data-start="11.0" data-duration="4.1" data-track-index="4">
+        <div id="s4-in">
+          <div class="label"><span class="n">03</span><span class="t">Spend</span><span class="d">per model, per agent type, per ticket</span></div>
+          <div class="shot"><img id="img4" src="assets/hi-spend.png" alt="" data-layout-allow-overflow /></div>
+        </div>
+      </div>
+
+      <!-- 5 · the mark -->
+      <div id="s5" class="clip" data-start="14.9" data-duration="3.1" data-track-index="5">
+        <div class="stage"><div id="s5-in">
+          <div class="lockup">
+            <svg id="mark" viewBox="0 0 64 64" aria-hidden="true">
+              <path d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z" fill="currentColor" />
+              <circle cx="33" cy="33" r="2.6" fill="#12100e" />
+              <path d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none" />
+            </svg>
+            <span class="wordmark">TYRAN</span>
+          </div>
+          <span class="tagline">the more you use it, <em>the better it gets</em></span>
+        </div></div>
+      </div>
+
+      <div id="grain-layer" class="clip" data-start="0" data-duration="18" data-track-index="9">
+        <div id="grain"></div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* Measured once, synchronously, at page load. */
+      const cmd = document.getElementById("cmd");
+      const cmdW = Math.ceil(cmd.getBoundingClientRect().width);
+      cmd.parentElement.style.width = cmdW + "px";
+
+      /* ---- 1 · the command types itself ------------------------------------ */
+      tl.fromTo("#s1-in", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .38, ease: "power2.out" }, 0);
+      tl.fromTo(cmd.parentElement, { width: 0 }, { width: cmdW, duration: 1.25, ease: "steps(44)" }, .28);
+      tl.fromTo("#echo", { autoAlpha: 0 }, { autoAlpha: 1, duration: .28 }, 1.75);
+      tl.to("#caret", { autoAlpha: 0, duration: .3, yoyo: true, repeat: 3, ease: "steps(1)" }, 1.85);
+      tl.to("#s1-in", { autoAlpha: 0, y: -16, duration: .34, ease: "power2.in" }, 3.06);
+
+      /* ---- 2..4 · each tab gets one continuous camera move ------------------
+         A cut would throw the spatial relationship away; a crawl keeps the
+         three tabs reading as one page. */
+      function tab(inSel, imgSel, at, dur, travel) {
+        tl.fromTo(inSel, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: .42, ease: "power2.out" }, at);
+        tl.fromTo(imgSel, { y: 0, scale: 1.015 }, { y: travel, scale: 1, duration: dur, ease: "sine.inOut" }, at);
+        tl.to(inSel, { autoAlpha: 0, y: -16, duration: .38, ease: "power2.in" }, at + dur - .1);
+      }
+      tab("#s2-in", "#img2", 3.3, 3.8, -560);
+      tab("#s3-in", "#img3", 7.2, 3.8, -520);
+      tab("#s4-in", "#img4", 11.1, 3.8, -180);
+
+      /* ---- 5 · the mark, never frozen --------------------------------------- */
+      tl.fromTo("#mark", { autoAlpha: 0, scale: .74, y: 14 },
+        { autoAlpha: 1, scale: 1, y: 0, duration: .56, ease: "back.out(1.9)" }, 15.1);
+      tl.fromTo(".wordmark", { autoAlpha: 0, x: -16 }, { autoAlpha: 1, x: 0, duration: .5, ease: "power3.out" }, 15.35);
+      tl.fromTo(".tagline", { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: .48, ease: "power2.out" }, 15.7);
+      /* A README loop restarts constantly, so the last frame must not read as a
+         freeze — it breathes, then the loop takes it. */
+      const holdAt = 16.3, holdFor = 18 - holdAt, cyc = 1.7;
+      tl.to(".lockup", {
+        scale: 1.015, duration: cyc / 2, ease: "sine.inOut",
+        yoyo: true, repeat: Math.max(0, Math.floor(holdFor / cyc) * 2 - 1),
+      }, holdAt);
+      tl.to("#wash", { autoAlpha: .6, duration: holdFor, ease: "sine.inOut" }, holdAt);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

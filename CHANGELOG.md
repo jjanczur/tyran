@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.1.29 — 2026-08-16
+
+Tyran has videos. Five cuts, and a page that says which one to send.
+
+### The slate
+
+A 3:20 explainer, a 3:53 first-session tutorial, and three vertical shorts —
+the mistake, the board, the retrospective. Built with Hyperframes (HTML in,
+deterministic MP4 out) and a Gemini voiceover, with burned-in captions and an
+`.srt` sidecar each.
+
+They are not five lengths of one video, which is the point of
+[`docs/videos.md`](docs/videos.md): each answers a different question, and the
+shorts and the tutorial fail at each other's jobs. The explainer argues, the
+tutorial instructs, the board short shows rather than argues, and the retro
+short is the only one whose subject is restraint.
+
+### The written surfaces now say what the video says
+
+The README and the landing hero were accurate and abstract where the explainer
+is concrete. Both now open on the same sentence it does — your most expensive
+model renaming a variable in the same chat it judged an authentication
+boundary — and carry the manager framing through to the board, the bill and the
+retro. Two descriptions of one product drifting apart is the defect this repo
+calls ADR-21, and the video is now the widest-reach description of Tyran, so it
+is the one the prose should agree with.
+
+### The claims in the explainer, checked against the code
+
+Every spoken claim was audited (`NOTES-REQUESTS.md` §10). Nine are exact, and
+several turn out to be near-verbatim quotes of the mechanism's own
+documentation: the four-question interview batch, the reviewer that ships with
+no editing tools, the role floor applied after both the risk shift and the
+override, and the three-to-knowledge / five-to-law ladder.
+
+Two are not, and are recorded rather than quietly left:
+
+- **"cheap tier, read only"** — the scout is granted `Bash`. *"You change
+  nothing"* is the first line of its instructions, which is the one form of
+  guarantee this project refuses to accept anywhere else. The fix is a
+  read-only agent class in the policy gate, not a rewording.
+- **"this is not an estimate, it is the bill"** — the figures are exactly what
+  the sandbox board shows (404 requests, 4.53M tokens, 54.9% conductor) and the
+  rollup computing them is the real one, but the usage feeding it is authored,
+  and the board honestly labels those models `sample-large` / `sample-small`.
+  Publishing a real `cost.json` into the sandbox makes the line true and makes
+  the sandbox a better artefact than the video.
+
+### What is in the repository, and what is not
+
+The video *sources* are tracked — compositions, the voiceover pipeline, the
+scripts, the storyboards — because they are text and they are how a cut gets
+rebuilt. The renders are not. They come to roughly 430 MB, and this repository
+is what `/plugin marketplace add jjanczur/tyran` clones, so committing them
+would put marketing video into every install of the plugin. Git LFS was
+considered and rejected on the same ground: a clone without `git-lfs` gets
+pointer files, which breaks both the Pages build and the install.
+
+`assets/video/` carries 1.1 MB of poster frames and caption sidecars, which is
+everything the README and the docs page actually reference. The cuts live on
+YouTube, and their IDs live in exactly one file,
+`site/src/data/videos.json`.
+
+Tyran's own secrets gate refused the first attempt at that commit — the payload
+was past the 4 MiB it can scan inside its budget, and it refuses rather than
+scanning a prefix, because a partial scan that reports nothing looks exactly
+like a clean one. That is the gate behaving as designed, and it is what forced
+the question of which bytes really needed to be in the tree. Two MP4s turned
+out to be referenced by nothing.
+
 ## 0.1.28 — 2026-08-15
 
 A maintenance release: the documentation site's dependencies, and three

@@ -1,0 +1,487 @@
+1
+00:00:00,400 --> 00:00:02,700
+This is the whole first session.
+
+2
+00:00:03,740 --> 00:00:04,960
+Install it, set it up on
+
+3
+00:00:04,960 --> 00:00:05,740
+a real repo,
+
+4
+00:00:06,520 --> 00:00:07,070
+run something,
+
+5
+00:00:07,640 --> 00:00:08,190
+read the board.
+
+6
+00:00:08,417 --> 00:00:11,157
+One idea to hold on to.
+
+7
+00:00:12,017 --> 00:00:13,457
+Tyran is a manager for a
+
+8
+00:00:13,457 --> 00:00:14,097
+team of agents.
+
+9
+00:00:14,997 --> 00:00:16,057
+You stay the stakeholder.
+
+10
+00:00:16,766 --> 00:00:19,826
+Install is two slash commands inside
+
+11
+00:00:19,826 --> 00:00:20,466
+Claude Code.
+
+12
+00:00:21,026 --> 00:00:21,786
+Then restart.
+
+13
+00:00:22,646 --> 00:00:24,166
+Hooks and agents load at session
+
+14
+00:00:24,166 --> 00:00:24,679
+start.
+
+15
+00:00:24,709 --> 00:00:27,929
+Slash tyrant hello is the smoke
+
+16
+00:00:27,929 --> 00:00:28,339
+test.
+
+17
+00:00:28,369 --> 00:00:30,209
+If it answers, you are running.
+
+18
+00:00:30,829 --> 00:00:32,869
+The only requirement is Claude Code
+
+19
+00:00:32,869 --> 00:00:33,769
+two point one.
+
+20
+00:00:34,312 --> 00:00:37,092
+Speak clearly at a natural pace
+
+21
+00:00:37,632 --> 00:00:39,612
+with quiet confidence and a little
+
+22
+00:00:39,612 --> 00:00:40,212
+warmth
+
+23
+00:00:41,292 --> 00:00:42,372
+Slash tyrant setup,
+
+24
+00:00:43,052 --> 00:00:43,872
+once per repository.
+
+25
+00:00:44,752 --> 00:00:46,212
+It reads how the repo is
+
+26
+00:00:46,212 --> 00:00:46,952
+really worked.
+
+27
+00:00:47,512 --> 00:00:48,732
+Not how a the docs describes
+
+28
+00:00:48,732 --> 00:00:49,011
+it.
+
+29
+00:00:49,041 --> 00:00:51,921
+Every value it infers carries the
+
+30
+00:00:51,921 --> 00:00:53,101
+fact that produced it.
+
+31
+00:00:53,681 --> 00:00:55,521
+And it never grants itself the
+
+32
+00:00:55,521 --> 00:00:56,641
+right to merge to main.
+
+33
+00:00:57,099 --> 00:00:59,739
+Then commit the dot tyran folder.
+
+34
+00:01:00,879 --> 00:01:02,879
+Agents work in git worktrees, and
+
+35
+00:01:02,879 --> 00:01:05,179
+a worktree carries no untracked files.
+
+36
+00:01:05,728 --> 00:01:08,348
+Type slash tyran and describe the
+
+37
+00:01:08,348 --> 00:01:08,618
+work.
+
+38
+00:01:08,648 --> 00:01:10,548
+He interviews you first.
+
+39
+00:01:10,948 --> 00:01:12,208
+At most four questions.
+
+40
+00:01:12,477 --> 00:01:14,697
+After you accept the plan, the
+
+41
+00:01:14,697 --> 00:01:15,577
+questions stop.
+
+42
+00:01:16,617 --> 00:01:18,717
+Shall I continue is forbidden in
+
+43
+00:01:18,717 --> 00:01:19,977
+the conductor's own file.
+
+44
+00:01:20,445 --> 00:01:22,165
+Then the team goes out.
+
+45
+00:01:22,685 --> 00:01:24,605
+A scout reads the repo first.
+
+46
+00:01:25,405 --> 00:01:26,805
+Cheap tier, read only,
+
+47
+00:01:27,505 --> 00:01:28,055
+fresh context.
+
+48
+00:01:28,327 --> 00:01:31,127
+Implementers take one story each, on
+
+49
+00:01:31,127 --> 00:01:31,887
+their own branch.
+
+50
+00:01:32,487 --> 00:01:34,167
+Every one starts with an empty
+
+51
+00:01:34,167 --> 00:01:34,787
+scrollback.
+
+52
+00:01:35,134 --> 00:01:37,554
+The reviewer has no editing tools
+
+53
+00:01:37,554 --> 00:01:38,114
+at all.
+
+54
+00:01:38,794 --> 00:01:40,234
+A reviewer who can fix what
+
+55
+00:01:40,234 --> 00:01:42,494
+they found approves their own patch.
+
+56
+00:01:43,140 --> 00:01:44,280
+Open the board.
+
+57
+00:01:45,140 --> 00:01:46,880
+One command, and this is the
+
+58
+00:01:46,880 --> 00:01:48,940
+one place a Node version matters.
+
+59
+00:01:49,314 --> 00:01:51,454
+Overview answers one question.
+
+60
+00:01:52,134 --> 00:01:53,194
+Is anything on fire.
+
+61
+00:01:54,274 --> 00:01:55,894
+Two waiting on you.
+
+62
+00:01:56,694 --> 00:01:57,634
+Five agents running.
+
+63
+00:01:58,694 --> 00:02:00,014
+Forty seven percent merged.
+
+64
+00:02:00,505 --> 00:02:02,725
+The Board tab is every ticket,
+
+65
+00:02:03,065 --> 00:02:05,065
+in exactly one of ten lanes.
+
+66
+00:02:06,005 --> 00:02:07,965
+Moving a ticket means appending an
+
+67
+00:02:07,965 --> 00:02:08,515
+event.
+
+68
+00:02:08,786 --> 00:02:11,246
+Say something halfway through and it
+
+69
+00:02:11,246 --> 00:02:13,146
+does not land in the scrollback.
+
+70
+00:02:13,726 --> 00:02:14,906
+It becomes a ticket.
+
+71
+00:02:15,666 --> 00:02:16,926
+Queued as T nine.
+
+72
+00:02:17,127 --> 00:02:19,307
+The queue carries its open count
+
+73
+00:02:19,307 --> 00:02:20,287
+in the tab label.
+
+74
+00:02:20,987 --> 00:02:22,827
+A question you cannot see is
+
+75
+00:02:22,827 --> 00:02:24,167
+a question you do not answer.
+
+76
+00:02:24,498 --> 00:02:26,678
+Each card says whether a default
+
+77
+00:02:26,678 --> 00:02:27,458
+is recorded.
+
+78
+00:02:28,538 --> 00:02:29,098
+Type your answer.
+
+79
+00:02:30,098 --> 00:02:30,648
+Press Answer.
+
+80
+00:02:31,358 --> 00:02:32,618
+And the run carries on.
+
+81
+00:02:33,254 --> 00:02:35,174
+Spend is what it cost.
+
+82
+00:02:35,834 --> 00:02:38,434
+By model, by agent type, by
+
+83
+00:02:38,434 --> 00:02:38,984
+ticket.
+
+84
+00:02:39,434 --> 00:02:41,914
+The scout's whole reconnaissance was three
+
+85
+00:02:41,914 --> 00:02:42,464
+cents.
+
+86
+00:02:42,648 --> 00:02:44,968
+Fifty five percent of those tokens
+
+87
+00:02:44,968 --> 00:02:47,148
+were the manager's own context.
+
+88
+00:02:47,788 --> 00:02:49,848
+Its own row, so nothing hides.
+
+89
+00:02:50,728 --> 00:02:52,028
+Tyran does not know what you
+
+90
+00:02:52,028 --> 00:02:52,578
+pay.
+
+91
+00:02:52,848 --> 00:02:53,988
+You write the rate card.
+
+92
+00:02:54,574 --> 00:02:56,894
+Two hooks will refuse things.
+
+93
+00:02:57,494 --> 00:02:59,434
+A report with no command output
+
+94
+00:02:59,434 --> 00:03:00,494
+is one.
+
+95
+00:03:00,794 --> 00:03:01,914
+It blocks silence,
+
+96
+00:03:02,434 --> 00:03:03,014
+not forgery.
+
+97
+00:03:03,421 --> 00:03:05,481
+And a commit carrying a secret
+
+98
+00:03:05,481 --> 00:03:06,521
+is refused.
+
+99
+00:03:07,081 --> 00:03:08,501
+Even inside a markdown file.
+
+100
+00:03:09,441 --> 00:03:11,761
+Install gitleaks first, or that gate
+
+101
+00:03:11,761 --> 00:03:13,021
+has nothing to scan with.
+
+102
+00:03:13,607 --> 00:03:15,427
+When the last ticket merges,
+
+103
+00:03:16,127 --> 00:03:17,007
+try to end the session.
+
+104
+00:03:17,867 --> 00:03:18,417
+It refuses.
+
+105
+00:03:19,467 --> 00:03:20,017
+Once.
+
+106
+00:03:20,072 --> 00:03:22,492
+It reads the journals and the
+
+107
+00:03:22,492 --> 00:03:23,022
+reports,
+
+108
+00:03:23,052 --> 00:03:24,872
+then changes Tyran itself.
+
+109
+00:03:25,612 --> 00:03:26,492
+Never your product code.
+
+110
+00:03:27,292 --> 00:03:29,632
+Most retros change nothing, and that
+
+111
+00:03:29,632 --> 00:03:30,182
+is correct.
+
+112
+00:03:30,480 --> 00:03:33,280
+The same failure three times becomes
+
+113
+00:03:33,280 --> 00:03:33,880
+knowledge,
+
+114
+00:03:34,600 --> 00:03:36,380
+pasted into every matching handoff.
+
+115
+00:03:37,220 --> 00:03:37,820
+Five times,
+
+116
+00:03:38,360 --> 00:03:39,600
+it becomes a rule in your
+
+117
+00:03:39,600 --> 00:03:40,180
+CLAUDE file.
+
+118
+00:03:40,741 --> 00:03:42,901
+One line in a STOP file
+
+119
+00:03:42,901 --> 00:03:44,301
+halts everything,
+
+120
+00:03:44,821 --> 00:03:45,371
+from anywhere.
+
+121
+00:03:46,081 --> 00:03:47,501
+You keep every decision.
+
+122
+00:03:48,261 --> 00:03:49,461
+The team does the rest.

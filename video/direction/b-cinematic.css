@@ -1,0 +1,74 @@
+/*
+ * Direction B — brand-first, cinematic.
+ *
+ * The same palette and the same negative list as Direction A. What changes is
+ * the ground: instead of flat stone and a Swiss grid, every scene sits in the
+ * hall from assets/banner.jpg, extended by Nano Banana Pro plates that were
+ * generated WITH the banner attached as a style reference.
+ *
+ * Three rules keep it from becoming a slideshow with words on top:
+ *
+ *  1. THE PLATE ALWAYS MOVES. A still photograph under type reads as a stock
+ *     background. Every plate gets one continuous, slow move — a push, a drift,
+ *     or a parallax against the scrim. Never a cut from still to still.
+ *
+ *  2. THE SCRIM IS PART OF THE COMPOSITION, not a fix applied afterwards.
+ *     Each plate was prompted with its negative space on a named side, and the
+ *     scrim deepens exactly that side so the type has somewhere to live and the
+ *     art keeps the rest.
+ *
+ *  3. GOLD IS STILL THE ONLY ACCENT. The plates carry gold and cyan because
+ *     the banner does; nothing else is allowed in, and cyan stays a light
+ *     source rather than becoming a second accent colour.
+ *
+ * Inlined into each b-* composition rather than linked — Hyperframes
+ * compositions are standalone HTML and must not fetch at render time.
+ */
+
+/* the scrim: a directional darkening that gives type its ground */
+.b-scrim-left {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(10, 9, 8, 0.94) 0%, rgba(10, 9, 8, 0.72) 34%, rgba(10, 9, 8, 0.1) 66%, rgba(10, 9, 8, 0) 100%);
+}
+.b-scrim-bottom {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 9, 8, 0.3) 0%, rgba(10, 9, 8, 0) 32%, rgba(10, 9, 8, 0.82) 74%, rgba(10, 9, 8, 0.96) 100%);
+}
+.b-scrim-full {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(72% 62% at 50% 46%, rgba(10, 9, 8, 0.18) 0%, rgba(10, 9, 8, 0.78) 78%, rgba(10, 9, 8, 0.94) 100%);
+}
+
+/* the plate: always larger than the frame, so a move has somewhere to go */
+.b-plate {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.b-plate img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: 50% 50%;
+  /* GSAP owns transform; the centring offset lives in margin so a tween
+     cannot overwrite it. */
+  margin-left: -60%;
+  margin-top: -60%;
+  width: 120%;
+  height: 120%;
+  object-fit: cover;
+}
+
+/* display type for the cinematic direction — larger and more theatrical than A */
+.b-title {
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  color: #f5efe3;
+  text-shadow: 0 6px 40px rgba(0, 0, 0, 0.9);
+}
+.b-title em {
+  color: #e8bc4d;
+  font-style: italic;
+}

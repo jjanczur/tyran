@@ -1210,6 +1210,13 @@ export function writeAllAtomic(entries) {
   const staged = [];
   try {
     for (const [path, content] of entries) {
+      // The directory may not exist yet, and the first time that matters is
+      // the worst time: `.tyran/state/` is created by the first initiative, so
+      // `board.mjs --dir .tyran` on a freshly set-up repo — the command the
+      // README leads with — died with an ENOENT naming a temp file nobody had
+      // heard of. Staging into a directory is not a decision, it is what
+      // writing a file there means.
+      mkdirSync(dirname(path), { recursive: true });
       const tmp = tempPathFor(path);
       writeFileSync(tmp, content, 'utf8');
       staged.push([tmp, path]);

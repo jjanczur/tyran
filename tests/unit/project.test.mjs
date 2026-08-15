@@ -1243,15 +1243,22 @@ test('writeAllAtomic: an unwritable directory fails before touching anything', (
 });
 
 test('writeAllAtomic stages EVERY file before renaming any of them', () => {
-  // The first entry stages fine; the second cannot even be staged (its
-  // directory does not exist). A rename-as-you-go implementation would have
-  // already swapped STATE.md by then — this is what pins the ordering.
+  // The first entry stages fine; the second cannot even be staged. A
+  // rename-as-you-go implementation would have already swapped STATE.md by
+  // then — this is what pins the ordering.
+  //
+  // The unstageable entry is one whose PARENT is a regular file, not one
+  // whose parent is merely absent: an absent directory is now created, so
+  // that a board can be rendered on a repo that has been set up and never
+  // run. A parent that exists and is not a directory still cannot be made
+  // into one, which is the same failure at the same point.
   const out = dir();
   writeFileSync(join(out, STATE_FILE), 'OLD STATE\n');
+  writeFileSync(join(out, 'not-a-dir'), 'I am a file\n');
   assert.throws(() =>
     writeAllAtomic([
       [join(out, STATE_FILE), 'NEW STATE\n'],
-      [join(out, 'no-such-dir', PROGRESS_FILE), 'NEW PROGRESS\n'],
+      [join(out, 'not-a-dir', PROGRESS_FILE), 'NEW PROGRESS\n'],
     ]),
   );
   assert.equal(
@@ -1259,7 +1266,18 @@ test('writeAllAtomic stages EVERY file before renaming any of them', () => {
     'OLD STATE\n',
     'STATE.md was swapped before the whole set could be staged',
   );
-  assert.deepEqual(readdirSync(out), [STATE_FILE], 'a temp file was left behind');
+  assert.deepEqual(readdirSync(out).sort(), [STATE_FILE, 'not-a-dir'].sort(), 'a temp file was left behind');
+});
+
+test('writeAllAtomic creates a directory that is merely absent', () => {
+  // `.tyran/state/` is created by the first initiative, so `board.mjs` on a
+  // repo that has been set up and never run had nowhere to stage and died
+  // with an ENOENT naming a temp file nobody had heard of — on the one
+  // command the README leads with. MUTANT: drop the mkdirSync.
+  const out = dir();
+  writeAllAtomic([[join(out, 'state', STATE_FILE), 'NEW STATE\n']]);
+  assert.equal(readFileSync(join(out, 'state', STATE_FILE), 'utf8'), 'NEW STATE\n');
+  assert.deepEqual(readdirSync(join(out, 'state')), [STATE_FILE], 'no temp file left behind');
 });
 
 test('writeAllAtomic leaves no orphaned .tmp when a RENAME fails', () => {

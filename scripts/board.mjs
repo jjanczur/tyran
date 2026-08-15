@@ -20,7 +20,7 @@
  * initiative reads as "all is well" exactly when it is not.
  *
  * CLI:
- *   node board.mjs [--dir <.tyran>] [--check] [--serve [--port <n>]]
+ *   node board.mjs [--dir <.tyran>] [--check] [--serve [--port <n>] [--write]]
  * Exit: 0 ok · 1 drift (--check) · 2 usage/IO
  */
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
@@ -39,10 +39,12 @@ import {
   inline,
   warnings,
   writeAllAtomic,
+  writeAtomic,
 } from './project.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
 import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
+import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
 
@@ -136,8 +138,10 @@ export function readInitiativeBoards(tyranDir) {
  * rather than embedded. Relative is also the more useful form — it is what
  * the reader pastes, from the repo root, into an editor.
  *
- * Nothing is served: `--serve` routes three URLs and derives a filesystem
- * path from none of them, which is worth more than a clickable link.
+ * Nothing is served from here: `--serve` derives a filesystem path from no
+ * URL at all, which is worth more than a clickable link. The one route that
+ * writes — Settings, behind `--write` — reaches two fixed files named in
+ * `settings.mjs` and takes a KEY from the request, never a path.
  */
 export const INITIATIVE_FILES = Object.freeze(['PLAN.md', 'NOTES.md', 'RETRO.md', 'STATE.md', 'PROGRESS.md']);
 
@@ -289,13 +293,116 @@ export function renderAll(tyranDir) {
   };
 }
 
+// ------------------------------------------------------- the write channel
+
+/** A request body big enough for any setting and small enough to ignore. */
+const MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * Read a JSON request body, or reject it.
+ *
+ * Three refusals, all deliberate. A body over the cap is dropped rather than
+ * buffered, because this server has no reason to hold a megabyte of anything.
+ * A body that is not `application/json` is refused BEFORE it is read — that
+ * content type is what forces a browser to preflight a cross-origin POST, and
+ * accepting `text/plain` here would hand back the exact hole the preflight
+ * closes. And anything that is not a JSON object is refused, so a handler
+ * never reasons about a string that happens to have a `.value`.
+ */
+function readJsonBody(req) {
+  return new Promise((resolve_, reject) => {
+    const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+    if (type !== 'application/json') {
+      reject(new SettingsError('this route takes application/json'));
+      return;
+    }
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new SettingsError('request body is too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('error', (err) => reject(err));
+    req.on('end', () => {
+      let parsed;
+      try {
+        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        reject(new SettingsError('request body is not JSON'));
+        return;
+      }
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        reject(new SettingsError('request body must be a JSON object'));
+        return;
+      }
+      resolve_(parsed);
+    });
+  });
+}
+
+/**
+ * `Origin`, on top of the `Host` pin the whole server already carries.
+ *
+ * The two answer different questions and neither covers the other. `Host` says
+ * which name the client dialled, which stops DNS rebinding. `Origin` says
+ * which page is asking, which is the only thing that distinguishes the board's
+ * own fetch from a POST issued by some other tab the operator has open. A
+ * request with no `Origin` at all is allowed: that is `curl`, and a local
+ * process that can reach loopback needs no browser's help — see the honest
+ * statement of what this does and does not defend in `docs/board.md`.
+ */
+function originAllowed(req) {
+  const origin = req.headers.origin;
+  if (origin === undefined || origin === 'null') return true;
+  try {
+    const { hostname } = new URL(String(origin));
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+const sendJson = (res, status, body) => {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body) + '\n');
+};
+
+/**
+ * Apply one edit and write it, or change nothing and say why.
+ *
+ * The write itself is `writeAtomic` — the same rename-into-place the
+ * projections use — so a config file can never be found half-written, however
+ * the process dies.
+ */
+function handleSettingsWrite(dir, route, body) {
+  // `confirm` is only ever compared for equality against the value the server
+  // itself computed, so a caller cannot widen anything by sending a truthy
+  // flag — it has to name the exact change it is making.
+  const confirm = typeof body.confirm === 'string' ? body.confirm : null;
+  const applied =
+    route === 'config'
+      ? applySetting(dir, String(body.id ?? ''), body.value, confirm)
+      : applyPolicyClass(dir, body.path === null || body.path === undefined ? null : String(body.path), String(body.class ?? ''), confirm);
+  writeAtomic(applied.file, applied.text);
+  // The operator's terminal is the audit trail. A change made from a web page
+  // that left no trace anywhere a person looks is how a settings screen turns
+  // into a thing nobody trusts.
+  console.log(`board: wrote ${applied.file} — ${applied.path.join('.')}: ${JSON.stringify(applied.before)} -> ${JSON.stringify(applied.after)}`);
+  return { ok: true, file: applied.file, path: applied.path, before: applied.before, after: applied.after };
+}
+
 // ------------------------------------------------------------------- CLI
 
-const BOOLEAN_FLAGS = ['check', 'serve'];
+const BOOLEAN_FLAGS = ['check', 'serve', 'write'];
 const VALUE_FLAGS = ['dir', 'port'];
 
 function parseArgs(argv) {
-  const flags = { dir: '.tyran', port: 4173, check: false, serve: false };
+  const flags = { dir: '.tyran', port: 4173, check: false, serve: false, write: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith('--')) throw new UsageError(`unexpected argument "${arg}"`);
@@ -321,7 +428,11 @@ function main() {
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
     console.error(`board: ${err.message}`);
-    console.error('usage: board.mjs [--dir <.tyran>] [--check] [--serve [--port <n>]]');
+    console.error('usage: board.mjs [--dir <.tyran>] [--check] [--serve [--port <n>] [--write]]');
+    process.exit(2);
+  }
+  if (flags.write && !flags.serve) {
+    console.error('board: --write only means anything with --serve (it is what the served page may edit)');
     process.exit(2);
   }
   const dir = resolve(flags.dir);
@@ -352,6 +463,55 @@ function main() {
         if (host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]') {
           res.writeHead(403, { 'content-type': 'text/plain' });
           res.end('forbidden: this board answers to 127.0.0.1 only\n');
+          return;
+        }
+        // ---- settings: the routes that read and write config -----------
+        //
+        // Config is served rather than embedded for the same reason spend is:
+        // it is not journal state, it is not a projection, and writing it into
+        // `board.json` would break the byte-exact `--check` contract. Over
+        // `file://` the fetch fails and the tab says how to open the board
+        // with a server, which is the honest answer.
+        if (req.url === '/settings.json') {
+          sendJson(res, 200, { ...readSettings(dir), writable: flags.write });
+          return;
+        }
+        if (req.url === '/settings/config' || req.url === '/settings/policy') {
+          const route = req.url.slice('/settings/'.length);
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { ok: false, error: 'this route takes POST' });
+            return;
+          }
+          // Writes are OFF unless the operator asked for them on the command
+          // line. A board someone left running is a board that can be reached
+          // by anything on this machine, and the difference between reading
+          // that and editing the autonomy policy through it is the difference
+          // this flag exists to make. The refusal names the flag, because a
+          // 403 an operator cannot act on is just a bug report.
+          if (!flags.write) {
+            sendJson(res, 403, {
+              ok: false,
+              error: 'this board is read-only. Restart it with: npx @jjanczur/tyran board --serve --write',
+            });
+            return;
+          }
+          if (!originAllowed(req)) {
+            sendJson(res, 403, { ok: false, error: 'forbidden: this board answers its own pages only' });
+            return;
+          }
+          readJsonBody(req)
+            .then((body) => sendJson(res, 200, handleSettingsWrite(dir, route, body)))
+            .catch((err) => {
+              const known = err instanceof SettingsError;
+              if (!known) console.error(`board: settings write failed: ${String(err?.message ?? err)}`);
+              sendJson(res, known ? 400 : 500, {
+                ok: false,
+                error: String(err?.message ?? err),
+                // Present only on a refusal the operator can answer, and it
+                // carries the exact token that answers it.
+                ...(err?.widens === true ? { widens: true, confirm_with: err.confirm_with } : {}),
+              });
+            });
           return;
         }
         // Spend is served, never rendered into the artefacts. It is derived
@@ -409,7 +569,10 @@ function main() {
       process.exitCode = 2;
     });
     server.listen(flags.port, '127.0.0.1', () => {
-      console.log(`board: serving http://127.0.0.1:${flags.port}/ (read-only; Ctrl-C to stop)`);
+      console.log(
+        `board: serving http://127.0.0.1:${flags.port}/ ` +
+          `(${flags.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'}; Ctrl-C to stop)`,
+      );
     });
     return;
   }

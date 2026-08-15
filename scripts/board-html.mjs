@@ -52,7 +52,8 @@ const CSS = `
   --hairline:#332e27;--hairline-soft:#26221d;
   --brass:#a8863c;--brass-bright:#cfae63;--brass-low:#221c11;--brass-edge:#5d4c22;
   --steel:#7d9ea9;--steel-bright:#9dbcc6;--steel-low:#17242a;--steel-edge:#3a545d;
-  --clay:#c07a70;--clay-bright:#d9998f;--clay-low:#2a1a18;--sage:#88a06a;
+  --clay:#c07a70;--clay-bright:#d9998f;--clay-low:#2a1a18;--clay-edge:#5a3430;
+  --sage:#88a06a;--sage-bright:#a3ba86;
   --display:ui-serif,'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,'Times New Roman',serif;
   --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
@@ -178,6 +179,39 @@ pre.how .c{color:var(--muted)}
 .chartrow.dim .rl{color:var(--muted);font-style:italic}
 .chartrow.dim .rb i{background:var(--hairline)}
 .chartrow .rv{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--text);min-width:5.5rem;text-align:right}
+
+/* ---- settings ---- */
+.setnote{border:1px solid var(--hairline);border-left:3px solid var(--steel);border-radius:.4rem;padding:.6rem .8rem;margin:.2rem 0 1.2rem;font-size:.85rem;color:var(--muted);line-height:1.6}
+.setnote.warn{border-left-color:var(--brass)}
+.setnote.bad{border-left-color:var(--clay)}
+.setnote b{color:var(--heading);font-weight:600}
+.setnote code{font-family:var(--mono);font-size:.8rem;color:var(--brass-bright);background:var(--brass-low);padding:.08rem .3rem;border-radius:.25rem}
+.sgroup{margin:0 0 1.6rem}
+.sgroup .blurb{font-size:.85rem;color:var(--muted);line-height:1.6;margin:.15rem 0 .9rem;max-width:60rem}
+.srow{display:grid;grid-template-columns:minmax(10rem,14rem) 1fr;gap:.4rem 1.1rem;padding:.75rem 0;border-top:1px solid var(--hairline);align-items:start}
+.srow .sname{font-weight:600;color:var(--heading);font-size:.88rem;padding-top:.3rem}
+.srow .sname .sunit{font-family:var(--mono);font-weight:400;color:var(--muted);font-size:.76rem}
+.srow .sbody{min-width:0}
+.srow select,.srow input[type="text"],.srow textarea{display:block;font-family:var(--font);font-size:.85rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.35rem;padding:.3rem .5rem;max-width:32rem;width:100%}
+.srow textarea{font-family:var(--mono);font-size:.8rem;line-height:1.7;min-height:5rem;resize:vertical}
+.srow input[type="number"]{display:block;font-family:var(--mono);font-size:.85rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.35rem;padding:.3rem .5rem;width:7rem}
+.srow select:focus-visible,.srow input:focus-visible,.srow textarea:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
+.srow select:disabled,.srow input:disabled,.srow textarea:disabled{opacity:.55;cursor:not-allowed}
+.srow .shelp{font-size:.8rem;color:var(--muted);line-height:1.6;margin-top:.35rem;max-width:52rem}
+.srow .schoice{font-size:.8rem;color:var(--text);line-height:1.6;margin-top:.3rem;padding-left:.6rem;border-left:2px solid var(--steel-edge)}
+.sstat{font-family:var(--mono);font-size:.75rem;line-height:1.7;margin-top:.35rem;color:var(--muted);word-break:break-word;white-space:pre-wrap}
+.sstat.ok{color:var(--sage-bright)}
+.sstat.bad{color:var(--clay-bright)}
+.sbtn{font-family:var(--font);font-size:.78rem;font-weight:600;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);border-radius:.35rem;padding:.26rem .7rem;cursor:pointer;margin-top:.4rem}
+.sbtn:hover:not(:disabled){background:var(--brass-edge)}
+.sbtn:disabled{opacity:.5;cursor:not-allowed}
+.sbtn.danger{background:var(--clay-low);color:var(--clay-bright);border-color:var(--clay-edge);margin-top:.5rem}
+.sbtn.danger:hover:not(:disabled){background:var(--clay-edge);color:var(--heading)}
+.rule{display:grid;grid-template-columns:1fr minmax(7rem,9rem);gap:.3rem .9rem;padding:.6rem 0;border-top:1px solid var(--hairline);align-items:start}
+.rule .glob{font-family:var(--mono);font-size:.82rem;color:var(--heading);word-break:break-all}
+.rule .why{font-size:.78rem;color:var(--muted);line-height:1.6;grid-column:1;max-width:52rem}
+.rule .lock{font-family:var(--mono);font-size:.72rem;color:var(--clay-bright);border:1px solid var(--clay-edge);background:var(--clay-low);border-radius:.3rem;padding:.16rem .4rem;text-align:center;align-self:start}
+.rule .sstat{grid-column:1 / -1}
 .caveat{color:var(--muted);font-size:.76rem;margin-top:.5rem;max-width:52rem}
 footer{margin-top:2rem;color:var(--muted);font-size:.72rem;border-top:1px solid var(--hairline-soft);padding-top:.6rem}
 `;
@@ -301,6 +335,7 @@ if (data.schema !== 1) {
     ['board', 'Board', null],
     ['questions', 'Waiting on you', asks.length],
     ['spend', 'Spend', null],
+    ['settings', 'Settings', null],
   ];
   var select = function (key) {
     for (var i = 0; i < TABS.length; i += 1) {
@@ -778,6 +813,290 @@ if (data.schema !== 1) {
         showCostFailure('Spend could not be read: the board server did not answer. It is served, never embedded — start it with: npx @jjanczur/tyran board --dir .tyran --serve');
       });
   }
+
+  // ---- settings ---------------------------------------------------------
+  //
+  // The one tab that writes. Everything else on this page is a projection of
+  // the journal and hand-editing it would be drift; config and the autonomy
+  // policy are the opposite — operator-owned files that nothing generates, and
+  // the only place they could be changed until now was an editor and a memory
+  // of what each key meant.
+  //
+  // Served, never embedded, exactly like spend: these are not journal state,
+  // so writing them into board.json would break the byte-exact check and make
+  // two clones of one journal disagree.
+  var st = panels.settings;
+  var stBody = el('div');
+  st.appendChild(stBody);
+  stBody.appendChild(el('div', 'setnote', 'Settings are read from .tyran/config.yaml and .tyran/policies/autonomy.yaml, and they are served rather than embedded — open this board with "board.mjs --serve" to see them.'));
+
+  // A meta refresh and a form are incompatible: half a typed model name would
+  // vanish every thirty seconds. The tag stays in the HTML (a page whose JS
+  // never runs still refreshes, and the docs sandbox strips the tag to stop
+  // itself reloading), but at boot it is swapped for a timer that can be
+  // paused — and the Settings tab pauses it. Present tag, same 30 seconds;
+  // absent tag, no timer at all, which is what the sandbox wants.
+  var refreshTag = document.querySelector('meta[http-equiv="refresh"]');
+  var refreshTimer = null;
+  var armRefresh = function () {
+    if (refreshTag === null || refreshTimer !== null) return;
+    refreshTimer = setTimeout(function () { location.reload(); }, 30000);
+  };
+  var holdRefresh = function () {
+    if (refreshTimer !== null) { clearTimeout(refreshTimer); refreshTimer = null; }
+  };
+  if (refreshTag !== null && refreshTag.parentNode) {
+    refreshTag.parentNode.removeChild(refreshTag);
+    armRefresh();
+  }
+
+  var post = function (route, body, status, onDone) {
+    status.className = 'sstat';
+    status.textContent = 'saving\\u2026';
+    fetch(route, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (payload) { return { ok: r.ok, payload: payload }; });
+    }).then(function (result) {
+      var payload = result.payload || {};
+      if (!result.ok || payload.ok !== true) {
+        status.className = 'sstat bad';
+        status.textContent = show(payload.error || 'the change was refused');
+        // A refusal the operator can answer, rather than one they can only
+        // read. The server sends back the exact token that answers it, and
+        // pressing this re-sends the same change carrying that token — which
+        // is why nothing here decides what "confirmed" means.
+        if (payload.widens === true && typeof payload.confirm_with === 'string') {
+          var go = el('button', 'sbtn danger', 'Yes \\u2014 loosen it');
+          go.setAttribute('type', 'button');
+          go.addEventListener('click', function () {
+            var again = {};
+            Object.keys(body).forEach(function (k) { again[k] = body[k]; });
+            again.confirm = payload.confirm_with;
+            post(route, again, status, onDone);
+          });
+          status.appendChild(document.createElement('br'));
+          status.appendChild(go);
+        }
+        if (onDone) onDone(false);
+        return;
+      }
+      status.className = 'sstat ok';
+      status.textContent = show('saved \\u2014 ' + JSON.stringify(payload.before) + ' \\u2192 ' + JSON.stringify(payload.after));
+      if (onDone) onDone(true);
+    }).catch(function () {
+      status.className = 'sstat bad';
+      status.textContent = 'the board server did not answer \\u2014 nothing was written';
+      if (onDone) onDone(false);
+    });
+  };
+
+  var settingRow = function (setting, writable) {
+    var row = el('div', 'srow');
+    var name = el('div', 'sname', setting.label);
+    if (setting.unit) name.appendChild(el('span', 'sunit', ' ' + setting.unit));
+    row.appendChild(name);
+    var bodyCell = el('div', 'sbody');
+    row.appendChild(bodyCell);
+
+    var status = el('div', 'sstat');
+    var choiceNote = null;
+    var control = null;
+
+    if (setting.present !== true) {
+      // Absent is not the same as unset, and saying so beats an empty box: a
+      // key that is not in the file has no line for the patcher to edit, and
+      // inventing one means choosing where it goes and what comment explains
+      // it. That is authoring, and it stays a hand edit.
+      bodyCell.appendChild(el('div', 'shelp', 'Not set in this config. Add the key by hand once and it becomes editable here.'));
+      bodyCell.appendChild(el('div', 'shelp', setting.help));
+      return row;
+    }
+
+    if (setting.kind === 'choice') {
+      control = el('select');
+      setting.choices.forEach(function (c) {
+        var option = el('option', null, c.value);
+        option.value = c.value;
+        if (c.value === setting.value) option.selected = true;
+        control.appendChild(option);
+      });
+      choiceNote = el('div', 'schoice');
+      var describe = function () {
+        var picked = setting.choices.filter(function (c) { return c.value === control.value; })[0];
+        choiceNote.textContent = show(picked ? picked.describe : '');
+      };
+      describe();
+      control.addEventListener('change', function () {
+        describe();
+        post('/settings/config', { id: setting.id, value: control.value }, status);
+      });
+    } else if (setting.kind === 'boolean') {
+      control = el('select');
+      [['false', 'off'], ['true', 'on']].forEach(function (pair) {
+        var option = el('option', null, pair[1]);
+        option.value = pair[0];
+        if ((pair[0] === 'true') === (setting.value === true)) option.selected = true;
+        control.appendChild(option);
+      });
+      control.addEventListener('change', function () {
+        post('/settings/config', { id: setting.id, value: control.value === 'true' }, status);
+      });
+    } else if (setting.kind === 'number') {
+      control = el('input');
+      control.type = 'number';
+      control.value = String(setting.value);
+      if (setting.min !== null) control.min = String(setting.min);
+      if (setting.max !== null) control.max = String(setting.max);
+      control.addEventListener('change', function () {
+        post('/settings/config', { id: setting.id, value: Number(control.value) }, status);
+      });
+    } else if (setting.kind === 'list') {
+      control = el('textarea');
+      control.value = (setting.value || []).join('\\n');
+      if (setting.placeholder) control.placeholder = setting.placeholder + '\\n(one per line)';
+    } else {
+      control = el('input');
+      control.type = 'text';
+      control.value = String(setting.value === null ? '' : setting.value);
+      if (setting.placeholder) control.placeholder = setting.placeholder;
+    }
+
+    control.disabled = !writable;
+    bodyCell.appendChild(control);
+
+    // Discrete controls save the moment they change; free text does not,
+    // because there is no moment during typing that is the whole value.
+    if (setting.kind === 'list' || setting.kind === 'text') {
+      var save = el('button', 'sbtn', 'Save');
+      save.setAttribute('type', 'button');
+      save.disabled = !writable;
+      control.addEventListener('input', holdRefresh);
+      save.addEventListener('click', function () {
+        var value = setting.kind === 'list'
+          ? control.value.split('\\n').map(function (line) { return line.trim(); }).filter(function (line) { return line !== ''; })
+          : control.value;
+        post('/settings/config', { id: setting.id, value: value }, status, function (ok) { if (ok) armRefresh(); });
+      });
+      bodyCell.appendChild(save);
+    }
+
+    if (choiceNote) bodyCell.appendChild(choiceNote);
+    bodyCell.appendChild(el('div', 'shelp', setting.help));
+    bodyCell.appendChild(status);
+    return row;
+  };
+
+  // The address is what the write route is told to change, and it is NOT the
+  // label: the file's own default key is addressed as null, while a rule is
+  // addressed by its path glob. By glob and not by position, so that a file
+  // edited underneath an open page cannot land the write on a neighbouring
+  // boundary — the server re-resolves the glob against the file as it is now.
+  var ruleRow = function (rule, classes, describe, writable, address) {
+    var row = el('div', 'rule');
+    row.appendChild(el('div', 'glob', rule.path));
+    var status = el('div', 'sstat');
+    if (rule.locked) {
+      var lock = el('div', 'lock', rule.class + ' \\u00b7 locked');
+      lock.title = 'This path protects the gate itself and cannot be lowered.';
+      row.appendChild(lock);
+    } else {
+      var pick = el('select');
+      classes.forEach(function (klass) {
+        var option = el('option', null, klass);
+        option.value = klass;
+        if (klass === rule.class) option.selected = true;
+        pick.appendChild(option);
+      });
+      pick.disabled = !writable;
+      pick.addEventListener('change', function () {
+        post('/settings/policy', { path: address, class: pick.value }, status);
+      });
+      row.appendChild(pick);
+    }
+    if (rule.reason) row.appendChild(el('div', 'why', rule.reason));
+    else if (rule.locked) row.appendChild(el('div', 'why', describe[rule.class] || ''));
+    row.appendChild(status);
+    return row;
+  };
+
+  var renderSettings = function (payload) {
+    clear(stBody);
+    var writable = payload.writable === true;
+    var note = el('div', writable ? 'setnote' : 'setnote warn');
+    if (writable) {
+      note.appendChild(el('b', null, 'Changes are written straight to disk.'));
+      note.appendChild(el('span', null,
+        ' Comments in these files are kept; the value on one line is all that moves, and every write is checked by the same validator "tyran doctor" runs before it lands. Nothing is written if the result would be invalid. Review what changed with git diff.'));
+    } else {
+      note.appendChild(el('b', null, 'Read-only.'));
+      note.appendChild(el('span', null, ' This board was started without editing. To turn these controls on, restart it with: '));
+      note.appendChild(el('code', null, 'npx @jjanczur/tyran board --dir .tyran --serve --write'));
+    }
+    stBody.appendChild(note);
+
+    [['config', payload.files.config], ['policy', payload.files.policy]].forEach(function (pair) {
+      if (pair[1].present && pair[1].error === null) return;
+      var bad = el('div', 'setnote bad');
+      bad.appendChild(el('b', null, pair[1].present ? 'This file does not parse: ' : 'This file is missing: '));
+      bad.appendChild(el('span', null, pair[1].path + (pair[1].error ? ' \\u2014 ' + pair[1].error : '')));
+      stBody.appendChild(bad);
+    });
+
+    payload.groups.forEach(function (group) {
+      var box = el('div', 'sgroup');
+      box.appendChild(el('h2', null, group.title));
+      box.appendChild(el('div', 'blurb', group.blurb));
+      group.settings.forEach(function (setting) { box.appendChild(settingRow(setting, writable)); });
+      stBody.appendChild(box);
+    });
+
+    var policy = payload.policy || {};
+    var pol = el('div', 'sgroup');
+    pol.appendChild(el('h2', null, 'Autonomy policy'));
+    pol.appendChild(el('div', 'blurb',
+      'Which paths agents may write on their own. The most specific matching rule wins, and a path no rule matches gets the default. ' +
+      (policy.classes || []).map(function (k) { return k + ' \\u2014 ' + (policy.describe || {})[k]; }).join('  \\u00b7  ')));
+    if (policy.default !== null && policy.default !== undefined) {
+      pol.appendChild(ruleRow(
+        { path: 'default \\u2014 everything no rule matches', class: policy.default, reason: 'GATED is the safe answer: it means "ask me".', locked: false },
+        policy.classes || [], policy.describe || {}, writable, null));
+    }
+    (policy.rules || []).forEach(function (rule) {
+      pol.appendChild(ruleRow(rule, policy.classes || [], policy.describe || {}, writable, rule.path));
+    });
+    stBody.appendChild(pol);
+  };
+
+  // Leaving this tab re-arms the refresh, entering it stops it. A page that
+  // reloads under an open select is a page that loses the change you were
+  // halfway through making, and the board has three other tabs that want to
+  // stay live.
+  Object.keys(buttons).forEach(function (key) {
+    buttons[key].addEventListener('click', function () {
+      if (key === 'settings') holdRefresh(); else armRefresh();
+    });
+  });
+
+  fetch('settings.json', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })
+    .then(function (payload) {
+      if (payload.schema !== 1) {
+        clear(stBody);
+        stBody.appendChild(el('div', 'setnote bad', 'Settings were served in a format this page does not know (schema ' +
+          (payload.schema || 'absent') + ') \\u2014 regenerate the board with the Tyran that served it.'));
+        return;
+      }
+      renderSettings(payload);
+    })
+    .catch(function () {
+      if (String(location.protocol) === 'file:') return;
+      clear(stBody);
+      stBody.appendChild(el('div', 'setnote bad',
+        'Settings could not be read: the board server did not answer. They are served, never embedded \\u2014 start it with: npx @jjanczur/tyran board --dir .tyran --serve --write'));
+    });
 
   select('overview');
 

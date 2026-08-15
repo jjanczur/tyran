@@ -910,10 +910,12 @@ test('THIS repository scans clean end to end', () => {
     'scripts/scan-control-chars.mjs',
     'scripts/scan-repo.mjs',
     'scripts/schema.mjs',
+    'scripts/settings.mjs',
     'scripts/statusline.mjs',
     'scripts/stop-check.mjs',
     'scripts/tiers.mjs',
     'scripts/yaml-lite.mjs',
+    'scripts/yaml-patch.mjs',
     'site/.gitignore',
     'site/astro.config.mjs',
     'site/package-lock.json',
@@ -995,6 +997,7 @@ test('THIS repository scans clean end to end', () => {
     'tests/pressure/.gitkeep',
     'tests/unit/agents.test.mjs',
     'tests/unit/answer.test.mjs',
+    'tests/unit/board-write.test.mjs',
     'tests/unit/board.test.mjs',
     'tests/unit/cli.test.mjs',
     'tests/unit/cost.test.mjs',
@@ -1026,10 +1029,12 @@ test('THIS repository scans clean end to end', () => {
     'tests/unit/scan-control-chars.test.mjs',
     'tests/unit/scan-repo.test.mjs',
     'tests/unit/schema.test.mjs',
+    'tests/unit/settings.test.mjs',
     'tests/unit/statusline.test.mjs',
     'tests/unit/stop-check.test.mjs',
     'tests/unit/tiers.test.mjs',
     'tests/unit/yaml-lite.test.mjs',
+    'tests/unit/yaml-patch.test.mjs',
   ], 'the set of scanned files changed — confirm nothing left the scan by accident');
 
   // The count stays asserted too, derived from the list rather than typed

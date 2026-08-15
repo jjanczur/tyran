@@ -355,6 +355,26 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
     tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' },
     validation,
     shared_zones: [],
+    // Written out in full, every value at its shipped default, with the
+    // feature OFF. Nothing here enables anything — `mode: 'off'` is the same
+    // inert state as omitting the block entirely.
+    //
+    // The difference is that an absent key cannot be edited. The board's
+    // Settings tab patches values that exist and deliberately refuses to
+    // invent keys (choosing where a key goes and what comment explains it is
+    // authoring, not editing), so a scanned config with no `limits:` rendered
+    // the whole Overnight section as dead text on every fresh install. So did
+    // doctor's `limit-telemetry-missing`, which is conditioned on a mode that
+    // was never written.
+    limits: {
+      mode: 'off',
+      pause_at_percent: 97,
+      weekly_pause_at_percent: 97,
+      wait_max_hours: 5,
+      long_wait: 'hold',
+      resume_margin_minutes: 5,
+      keep_awake: false,
+    },
   };
 
   const questions = [];

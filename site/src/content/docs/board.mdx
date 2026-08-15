@@ -120,8 +120,9 @@ It prints `board: serving http://127.0.0.1:4173/`. Open that. The board
 re-renders on every request, so a reload is always current, and the page
 reloads itself every 30 seconds anyway. `--port <n>` if 4173 is taken.
 `Ctrl-C` stops it. It binds loopback only and pins the `Host` header, so
-nothing outside your machine can reach it — and it is read-only: the server
-answers three URLs and derives a filesystem path from none of them.
+nothing outside your machine can reach it, and it derives a filesystem path
+from no URL at all. It is read-only unless you add `--write`, which turns on
+the [Settings](#settings) tab and nothing else.
 
 **Open the file** — no server, no spend:
 
@@ -132,17 +133,18 @@ start .tyran\state\board.html         # Windows
 ```
 
 That file is regenerated after every agent and at every merge, so it is a
-real answer, not a stale one. It carries everything except the Spend tab,
-which is fetched rather than embedded — see [Spend](#spend) for why. Over
-`file://` the tab is empty and says nothing is wrong; over the server, a
-spend failure now says which failure it was.
+real answer, not a stale one. It carries everything except **Spend** and
+**Settings**, which are fetched rather than embedded — see [Spend](#spend)
+for why, and the same reasoning covers config. Over `file://` both tabs say
+where their data comes from rather than rendering an empty panel; over the
+server, a failure says which failure it was.
 
 Inside a session you never type either command: **`/tyran:status` regenerates
 the board and tells you where it is.** The three commands are the same board
 from three directions — `--serve` for a browser you keep open, the file for a
 quick look, `BOARD.md` for reading in the terminal or in a diff.
 
-## board.html, in four tabs
+## board.html, in five tabs
 
 The page an operator leaves open overnight: self-contained (inline CSS/JS,
 zero external hosts and zero CDNs, complete over `file://`; the one
@@ -161,6 +163,7 @@ and the page opens on Overview:
 | **Board** | where every ticket is — the lanes, and the detail of whichever card you select |
 | **Waiting on you** | what is blocked on a decision, and the commands that unblock it |
 | **Spend** | what the work has cost |
+| **Settings** | what Tyran is configured to do, and — with `--write` — how to change it |
 
 The queue's tab label carries its open count, because the operator is usually
 looking at one of the other three, and a question they cannot see is a
@@ -197,10 +200,13 @@ client builds DOM with `createElement`/`textContent` only.
 node scripts/board.mjs --dir .tyran            # render all three artefacts
 node scripts/board.mjs --dir .tyran --check    # byte-exact drift check, exit 1
 node scripts/board.mjs --dir .tyran --serve    # localhost viewer, always fresh
+node scripts/board.mjs --dir .tyran --serve --write   # ... and Settings can edit
 ```
 
 `--serve` binds `127.0.0.1` only, re-renders per request, and never derives a
-filesystem path from a URL. The initiative ceiling is 64, refused loudly —
+filesystem path from a URL; `--write` adds the [Settings](#settings) routes and
+nothing else, and refuses on its own (`--write` without `--serve` is a usage
+error, not a silent no-op). The initiative ceiling is 64, refused loudly —
 archive closed initiatives rather than boarding them. An unreadable journal
 renders as a visible **UNREADABLE** entry: a board that omits a broken
 initiative would read as "all is well" exactly when it is not.
@@ -234,6 +240,92 @@ one same-origin request to loopback, and the same defences cover it: the
 `--serve` (a foreign `Host` gets 403, verified), and a cost read that fails
 returns 503 rather than taking the board down — the board answers "what is
 going on", and that answer does not depend on knowing what it cost.
+
+## Settings
+
+The **Settings** tab is the only thing on this page that writes. Everything
+else is a projection of the journal, where hand-editing is drift; config and
+the autonomy policy are the opposite — operator-owned files that nothing
+generates, and until this tab existed the only way to change them was an
+editor and a memory of what each key meant.
+
+```bash
+npx @jjanczur/tyran board --dir .tyran --serve --write
+```
+
+Without `--write` the tab still renders, every control disabled, with the
+command that turns it on. **Writes are off by default and per-invocation**:
+a board left running is reachable by anything on the machine, and the
+difference between reading that and editing the autonomy policy through it is
+the difference this flag exists to make.
+
+What it edits, with a sentence of prose on every knob:
+
+| | |
+|---|---|
+| `.tyran/config.yaml` | cost profile · deployment autonomy · the four model tiers · validation commands · shared zones · the whole `limits:` block |
+| `.tyran/policies/autonomy.yaml` | the `default` class, and the class of any existing rule |
+
+**One line moves.** The file is not round-tripped through a serializer —
+`scripts/yaml-patch.mjs` finds the line that owns the value and rewrites that
+line, keeping its trailing comment, the blank lines, the key order and your
+own spacing. `templates/config.yaml` is 60 lines of comment out of 91, and
+those comments are the only place anyone is told that bare `off` is the YAML
+boolean false; a serializer round-trip would delete all of it silently the
+first time someone moved a control.
+
+**The edit is proved, not trusted.** Every patch is applied and then parsed
+back and compared to the document that was intended: the target holds the new
+value, and every other path holds exactly what it held before. Then the result
+goes through the same `validateConfig` / `validatePolicy` that
+`node scripts/schema.mjs validate` runs. If either check fails, nothing is
+written and the page says why. A refused change leaves the file byte-identical.
+
+**The boundary still protects itself.** `hooks/**` and `.tyran/policies/**`
+are rendered as locked KERNEL rows with no control at all, and the write route
+refuses them twice over — once by name, and once because `validatePolicy`
+rejects any policy in which a kernel path resolves below KERNEL, however the
+rule is spelled. A screen that could lower the class of its own enforcement
+would be the way around the gate rather than the way to configure it.
+
+**Loosening takes a second, deliberate act. Tightening does not.** Those two
+protected globs are the only ones the validator defends, and the shipped
+policy carries several more whose own stated reason is that they must not
+move — `.claude/settings.json` ("anything that can edit it can switch every
+gate off"), `.tyran/STOP` ("a loop that can clear its own stop signal has
+none"). A dropdown treats those like any other choice, so:
+
+- **moving a class toward AUTO**, or **raising `autonomy`** (P1 → P2 → P3), is
+  refused on the first request. The refusal quotes the rule's own `reason:`
+  and names a confirmation token; the page turns that into one extra
+  **Yes — loosen it** press, and the second request carries the token.
+- the token is the **new value itself**, not a boolean, so nothing can widen a
+  boundary by sending a truthy flag beside whatever value it liked.
+- **tightening applies on the first click**, exactly like every other setting.
+  Friction on making a boundary stricter is how you teach someone to stop
+  making boundaries stricter.
+
+`validation:` is not in that set, deliberately. It is a list of shell commands
+and it looks like it belongs — but `.tyran/config.yaml` is class AUTO in the
+shipped policy, so an agent can already edit it directly. A confirmation on
+the page would add friction without adding a boundary; tighten that rule
+instead, on the same screen, if the trade is wrong for your repo.
+
+**What it deliberately will not do**: create a key that is not already in the
+file (absent knobs render as "add it by hand once"), author or delete a policy
+rule (a boundary's written `reason` is load-bearing, and a one-line reason
+typed into a form is how a policy turns into a list of unexplained globs), or
+edit `pricing:` (a rate card is a table copied from a vendor's price list).
+
+**What guards the route, stated exactly.** The `Host` pin that covers the whole
+server, plus an `Origin` check and a required `application/json` content type —
+together those close the browser paths: a page on another origin cannot read
+the board, and its POST is preflighted and refused. What they do **not** do is
+stop another process on your machine that can already reach loopback; nothing
+served on localhost can. The flag is the control that matters there, and the
+KERNEL invariant is what holds even if the flag is on. Every write also prints
+a line to the terminal running the server, and lands in `git diff` — those two
+are the audit trail.
 
 ## board.json, schema 1
 

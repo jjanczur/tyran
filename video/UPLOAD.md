@@ -256,8 +256,27 @@ Live board — https://jjanczur.github.io/tyran/sandbox/
 
 ---
 
-## After uploading
+## Published 2026-08-16
 
-Send the five URLs back and they get written into `site/src/data/videos.json`,
-which is the single place the docs page and the README read video IDs from.
-Until then both surfaces link to the repo instead of to a dead embed.
+| cut | URL |
+|---|---|
+| explainer | https://youtu.be/ThulYtbYNXI |
+| onboarding | https://youtu.be/vr49hKk9G8g |
+| the board | https://www.youtube.com/shorts/HKePDLkYDqA |
+| the mistake | https://www.youtube.com/shorts/2EgRBR0fVRo |
+| the retro | https://www.youtube.com/shorts/EMcPJj7c0mk |
+
+The IDs live in `site/src/data/videos.json`. That is the file to edit if a link
+ever moves — the README, `docs/videos.md` and the docs page all point at these
+five cuts, and three surfaces disagreeing about a URL is the shape of defect
+this project calls ADR-21.
+
+Still worth doing, in order of value:
+
+1. **Captions.** The `.srt` sidecars in `out/` are not uploaded yet. They are
+   what makes the videos searchable inside YouTube, which is most of how a
+   channel with no subscribers gets found at all.
+2. **End screens** on the two long cuts: the explainer should point at the
+   onboarding, and both at the sandbox link.
+3. **A designed thumbnail.** `assets/video/*.jpg` are frames pulled from the
+   cut — honest, and beaten by anything with a face or four large words on it.

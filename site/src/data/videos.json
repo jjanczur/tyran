@@ -1,9 +1,10 @@
 {
-  "_comment": "YouTube IDs for the video catalogue. This is the ONE place they live — docs/videos.md and site/src/content/docs/videos.mdx both quote the watch URLs, and the landing page reads this file. Fill `youtube` with the 11-character video ID (not the full URL) as each cut is published; an empty string renders the poster without a link instead of a dead one.",
+  "_comment": "YouTube IDs for the video catalogue. This is the ONE place they live — docs/videos.md, site/src/content/docs/videos.mdx and the README all point at these cuts, and a moved link is fixed here first. `youtube` is the 11-character video ID, never the full URL; an empty string renders the poster without a link instead of a dead one. `short` marks a 9:16 cut, which embeds portrait and lives under /shorts/ on YouTube's own site.",
   "videos": [
     {
       "id": "explainer",
-      "youtube": "",
+      "youtube": "ThulYtbYNXI",
+      "short": false,
       "title": "You Didn't Install a Tool — You Hired a Manager",
       "length": "3:20",
       "aspect": "16:9",
@@ -11,7 +12,8 @@
     },
     {
       "id": "onboarding",
-      "youtube": "",
+      "youtube": "vr49hKk9G8g",
+      "short": false,
       "title": "Your First Session",
       "length": "3:53",
       "aspect": "16:9",
@@ -19,7 +21,8 @@
     },
     {
       "id": "mistake",
-      "youtube": "",
+      "youtube": "2EgRBR0fVRo",
+      "short": true,
       "title": "One Chat, One Model, Every Job",
       "length": "1:01",
       "aspect": "9:16",
@@ -27,7 +30,8 @@
     },
     {
       "id": "board",
-      "youtube": "",
+      "youtube": "HKePDLkYDqA",
+      "short": true,
       "title": "Your Agents Move Their Own Tickets",
       "length": "0:59",
       "aspect": "9:16",
@@ -35,7 +39,8 @@
     },
     {
       "id": "retro",
-      "youtube": "",
+      "youtube": "EMcPJj7c0mk",
+      "short": true,
       "title": "It Learns You",
       "length": "1:22",
       "aspect": "9:16",

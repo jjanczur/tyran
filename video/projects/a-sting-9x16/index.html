@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Tyran — logo sting 9:16</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #12100e;
+      }
+
+      /* tokens — see video/direction/tokens.css */
+      :root {
+        --stone: #12100e;
+        --heading: #f5efe3;
+        --muted: #a29788;
+        --gold: #d4a017;
+        --gold-bright: #e8bc4d;
+        --glow: #8fd8ea;
+        --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+          Georgia, "Times New Roman", serif;
+        --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+      }
+
+      /* Full-bleed CHILD carries the ground fill. Never the root: the
+         producer's frame compositing can drop the root's own background and
+         render black, even though preview and snapshot look correct. */
+      #ground {
+        position: absolute;
+        inset: 0;
+        background: var(--stone);
+      }
+
+      /* The cold screen glow, top-right, as a light source rather than an accent. */
+      #glow-wash {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          58% 52% at 78% 16%,
+          rgba(143, 216, 234, 0.13) 0%,
+          rgba(143, 216, 234, 0.05) 38%,
+          rgba(143, 216, 234, 0) 72%
+        );
+      }
+
+      /* A warm counter-light low-left, so the stone reads warm rather than flat. */
+      #warm-wash {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          52% 46% at 16% 88%,
+          rgba(212, 160, 23, 0.09) 0%,
+          rgba(212, 160, 23, 0) 68%
+        );
+      }
+
+      .clip {
+        position: absolute;
+        inset: 0;
+      }
+
+      #lash-stage {
+        display: grid;
+        place-items: center;
+      }
+      #lash-svg {
+        width: 940px;
+        height: 520px;
+        display: block;
+        overflow: visible;
+      }
+      #lash-path {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 7;
+        stroke-linecap: round;
+      }
+
+      #lockup-stage {
+        display: grid;
+        place-items: center;
+      }
+      #lockup {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 30px;
+        width: 900px;
+      }
+      #mark {
+        display: block;
+        width: 250px;
+        height: 250px;
+        color: var(--gold);
+        filter: drop-shadow(0 0 26px rgba(212, 160, 23, 0.28));
+      }
+      #wordmark {
+        display: block;
+        font-family: var(--display);
+        font-size: 108px;
+        line-height: 1;
+        letter-spacing: 0.2em;
+        text-indent: 0.2em;
+        color: var(--heading);
+        white-space: nowrap;
+      }
+      #subline {
+        display: block;
+        font-family: var(--font);
+        font-size: 34px;
+        line-height: 1.4;
+        letter-spacing: 0.02em;
+        color: var(--muted);
+        text-align: center;
+      }
+      #subline em {
+        color: var(--gold-bright);
+        font-style: italic;
+      }
+
+      /* A single hairline rule under the lockup, drawn by scaleX.
+         Block-level and sized, or the transform is a no-op. */
+      #rule {
+        display: block;
+        width: 560px;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          rgba(212, 160, 23, 0) 0%,
+          rgba(232, 188, 77, 1) 50%,
+          rgba(212, 160, 23, 0) 100%
+        );
+        transform-origin: 50% 50%;
+      }
+
+      /* Film grain: a fixed, seeded dot field. No randomness at render time —
+         the positions are baked into this gradient list. */
+      #grain {
+        position: absolute;
+        inset: 0;
+        opacity: 0.055;
+        background-image: radial-gradient(rgba(245, 239, 227, 0.9) 0.5px, transparent 0.6px);
+        background-size: 3px 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="6"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div id="bg" class="clip" data-start="0" data-duration="6" data-track-index="0">
+        <div id="ground"></div>
+        <div id="warm-wash"></div>
+        <div id="glow-wash"></div>
+      </div>
+
+      <div id="lash-stage" class="clip" data-start="0" data-duration="2.6" data-track-index="1">
+        <svg id="lash-svg" viewBox="0 0 940 520" aria-hidden="true">
+          <path
+            id="lash-path"
+            d="M50 380 C 190 210, 330 500, 470 320 S 750 90, 890 210"
+          />
+        </svg>
+      </div>
+
+      <div id="lockup-stage" class="clip" data-start="1.2" data-duration="4.8" data-track-index="2">
+        <div id="lockup">
+          <svg id="mark" viewBox="0 0 64 64" role="img" aria-label="Tyran">
+            <path
+              id="mark-head"
+              d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z"
+              fill="currentColor"
+            />
+            <circle id="mark-eye" cx="33" cy="33" r="2.6" fill="#12100e" />
+            <path
+              id="mark-lash"
+              d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51"
+              stroke="currentColor"
+              stroke-width="3.5"
+              stroke-linecap="round"
+              fill="none"
+            />
+          </svg>
+          <span id="wordmark">TYRAN</span>
+          <span id="rule"></span>
+          <span id="subline">the more you use it, <em>the better it gets</em></span>
+        </div>
+      </div>
+
+      <div id="grain-layer" class="clip" data-start="0" data-duration="6" data-track-index="3">
+        <div id="grain"></div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* Measured once, synchronously, at page load — never inside a timeline
+         callback, where the DOM state depends on how the renderer seeked. */
+      const lashPath = document.getElementById("lash-path");
+      const lashLen = lashPath.getTotalLength();
+      lashPath.setAttribute("stroke-dasharray", lashLen);
+      lashPath.setAttribute("stroke-dashoffset", lashLen);
+
+      const markLash = document.getElementById("mark-lash");
+      const markLashLen = markLash.getTotalLength();
+      markLash.setAttribute("stroke-dasharray", markLashLen);
+      markLash.setAttribute("stroke-dashoffset", markLashLen);
+
+      /* ---- 0.15s the lash cracks across the frame -------------------------- */
+      /* autoAlpha carries the first beat so the round cap cannot paint a dot
+         at zero dash length before the stroke exists. */
+      tl.fromTo("#lash-path", { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.12 }, 0.15);
+      tl.fromTo(
+        "#lash-path",
+        { strokeDashoffset: lashLen },
+        { strokeDashoffset: 0, duration: 1.05, ease: "power3.inOut" },
+        0.15
+      );
+
+      /* ---- 1.2s it retracts toward the mark, handing the frame over -------- */
+      tl.to("#lash-svg", { scale: 0.36, y: -14, duration: 0.7, ease: "power2.inOut" }, 1.15);
+      tl.to("#lash-path", { autoAlpha: 0, duration: 0.45, ease: "power2.in" }, 1.35);
+
+      /* ---- 1.45s the mark lands, with overshoot and follow-through --------- */
+      tl.fromTo(
+        "#mark",
+        { autoAlpha: 0, scale: 0.72, y: 26 },
+        { autoAlpha: 1, scale: 1, y: 0, duration: 0.72, ease: "back.out(1.9)" },
+        1.45
+      );
+      /* the mark's own lash draws a beat behind the head — follow-through */
+      tl.fromTo(
+        "#mark-lash",
+        { strokeDashoffset: markLashLen },
+        { strokeDashoffset: 0, duration: 0.5, ease: "power2.out" },
+        1.85
+      );
+
+      /* ---- 2.0s wordmark, then the rule, then the subline ------------------ */
+      tl.fromTo(
+        "#wordmark",
+        { autoAlpha: 0, y: 34 },
+        { autoAlpha: 1, y: 0, duration: 0.7, ease: "power3.out" },
+        2.0
+      );
+      tl.fromTo(
+        "#rule",
+        { scaleX: 0, autoAlpha: 0 },
+        { scaleX: 1, autoAlpha: 1, duration: 0.8, ease: "power2.out" },
+        2.32
+      );
+      tl.fromTo(
+        "#subline",
+        { autoAlpha: 0, y: 16 },
+        { autoAlpha: 1, y: 0, duration: 0.7, ease: "power2.out" },
+        2.5
+      );
+
+      /* ---- ambient hold: nothing ever fully stops -------------------------- */
+      /* 3.2s → 6.0s. A 1.2% breathing scale on the lockup and a slow drift on
+         the cold wash. Finite repeats, floor()'d so they cannot overshoot
+         data-duration and trip gsap_repeat_ceil_overshoot. */
+      const holdStart = 3.2;
+      const holdLen = 6 - holdStart;
+
+      const breathCycle = 2.8;
+      tl.to(
+        "#lockup",
+        {
+          scale: 1.012,
+          duration: breathCycle / 2,
+          ease: "sine.inOut",
+          yoyo: true,
+          repeat: Math.max(0, Math.floor(holdLen / breathCycle) * 2 - 1),
+        },
+        holdStart
+      );
+
+      tl.to("#glow-wash", { autoAlpha: 0.72, duration: holdLen, ease: "sine.inOut" }, holdStart);
+      tl.to("#mark", { y: -5, duration: holdLen, ease: "sine.inOut" }, holdStart);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

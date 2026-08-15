@@ -108,6 +108,7 @@ export default defineConfig({
           label: 'Start',
           items: [
             { label: 'Getting started', slug: 'getting-started' },
+            { label: 'Videos', slug: 'videos' },
             { label: 'Architecture', slug: 'architecture' },
             { label: 'Configuration', slug: 'configuration' },
           ],

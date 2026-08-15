@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Tyran — your first session (16:9)</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #12100e; }
+
+      :root {
+        --stone: #12100e; --raised: #1c1917; --sunken: #0d0c0a;
+        --text: #d9d2c6; --heading: #f5efe3; --muted: #a29788;
+        --hairline: #3b342c;
+        --gold: #d4a017; --gold-bright: #e8bc4d; --gold-low: #2a2110;
+        --glow: #8fd8ea; --red: #f2665e;
+        --bg-raised: #1c1a16; --hair: #332e27; --bmuted: #9a9184; --bheading: #ece5d7; --btext: #cec7ba;
+        --brass: #a8863c; --brass-bright: #cfae63; --brass-low: #221c11; --brass-edge: #5d4c22;
+        --steel: #7d9ea9; --steel-bright: #9dbcc6; --steel-low: #17242a;
+        --clay: #c07a70; --clay-bright: #d9998f; --sage: #88a06a; --sage-bright: #a3ba86;
+        --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --cap-cold: #f5efe3; --cap-hot: #e8bc4d;
+      }
+
+      #ground { position: absolute; inset: 0; background: var(--stone); }
+      #wash-cold { position: absolute; inset: 0;
+        background: radial-gradient(44% 32% at 74% 12%, rgba(143,216,234,.11) 0%, rgba(143,216,234,0) 72%); }
+      #wash-warm { position: absolute; inset: 0;
+        background: radial-gradient(38% 28% at 14% 90%, rgba(212,160,23,.09) 0%, rgba(212,160,23,0) 74%); }
+      #grain { position: absolute; inset: 0; opacity: .05;
+        background-image: radial-gradient(rgba(245,239,227,.9) .5px, transparent .6px); background-size: 3px 3px; }
+      .clip { position: absolute; inset: 0; }
+
+      /* the chapter rail — separate elements cross-faded, never one retitled:
+         a zero-duration tl.set on innerText has immediateRender:true and fires
+         at BUILD time, so the last chapter wins from frame zero. */
+      #chapters { position: absolute; left: 110px; top: 58px; height: 52px; }
+      .chap { position: absolute; left: 0; top: 0; display: flex; align-items: baseline; gap: 18px; white-space: nowrap; }
+      .chap .n { display: block; font: 700 21px var(--mono); letter-spacing: .14em;
+        color: var(--stone); background: var(--gold); padding: 6px 13px; border-radius: 5px; }
+      .chap .t { display: block; font: 400 33px var(--display); color: var(--heading); }
+
+      .stage { position: absolute; left: 0; right: 0; top: 150px; height: 690px; display: grid; place-items: center; }
+
+      .term { background: var(--sunken); border: 1px solid var(--hairline); border-radius: 14px;
+        overflow: hidden; box-shadow: 0 30px 90px rgba(0,0,0,.6); }
+      .term--ref { border-color: #5a2f2c; }
+      .term__bar { display: flex; align-items: center; gap: 11px; padding: 15px 22px;
+        border-bottom: 1px solid var(--hairline); background: #151310; }
+      .dot { display: block; width: 12px; height: 12px; border-radius: 50%; background: #2f2a24; }
+      .term__t { margin-left: 10px; font: 400 21px var(--mono); color: var(--bmuted); }
+      .term__s { margin-left: auto; font: 400 19px var(--mono); color: var(--bmuted); }
+      .term__b { padding: 26px 28px 30px; font: 400 26px/1.68 var(--mono); color: var(--text); }
+      .term__b .l { display: block; white-space: pre-wrap; }
+      .go { color: var(--gold-bright); } .cy { color: var(--glow); }
+      .dim { color: var(--bmuted); } .rd { color: var(--red); font-weight: 700; }
+      .sg { color: var(--sage-bright); }
+
+      .say { text-align: center; width: 1400px; }
+      .say .big { display: block; font: 400 66px/1.2 var(--display); color: var(--heading); }
+      .say .big em { color: var(--gold-bright); font-style: italic; }
+      .say .sub { display: block; margin-top: 24px; font: 400 32px/1.4 var(--font); color: var(--muted); }
+
+      .prov { display: block; margin-top: 22px; padding: 18px 24px; background: var(--gold-low);
+        border: 1px solid var(--brass-edge); border-radius: 10px;
+        font: 400 24px/1.5 var(--mono); color: var(--gold-bright); }
+
+      /* the team */
+      .team { width: 1500px; }
+      .cond { display: block; width: 470px; margin: 0 auto 26px; text-align: center;
+        font: 700 30px var(--mono); color: var(--brass-bright);
+        background: var(--brass-low); border: 2px solid var(--brass-edge); border-radius: 11px; padding: 20px; }
+      .kids { display: flex; gap: 20px; justify-content: center; }
+      .kid { display: block; width: 350px; background: var(--bg-raised); border: 1px solid var(--hair);
+        border-top: 4px solid var(--steel); border-radius: 10px; padding: 20px 22px; }
+      .kid .who { display: block; font: 700 25px var(--mono); color: var(--steel-bright); margin-bottom: 8px; }
+      .kid .job { display: block; font: 400 21px/1.4 var(--mono); color: var(--bmuted); }
+      .kid--s { border-top-color: var(--sage); } .kid--s .who { color: var(--sage-bright); }
+      .kid--r { border-top-color: var(--brass); } .kid--r .who { color: var(--brass-bright); }
+      .note { display: block; margin-top: 26px; text-align: center; font: 400 26px var(--font); color: var(--muted); }
+      .note em { color: var(--gold-bright); font-style: italic; }
+
+      /* the board */
+      #board { width: 1500px; }
+      #board .bhd { display: flex; align-items: baseline; margin-bottom: 12px; }
+      #board .bhd .t { font: 400 32px var(--display); color: var(--bheading); }
+      #board .bhd .s { margin-left: 20px; font: 400 20px var(--mono); color: var(--bmuted); }
+      #btabs { display: flex; gap: 10px; margin-bottom: 14px; }
+      .btab { display: block; font: 400 21px var(--mono); color: var(--bmuted);
+        padding: 8px 14px; border: 1px solid transparent; border-radius: 7px; }
+      .btab--on { color: var(--brass-bright); background: var(--brass-low); border-color: var(--brass-edge); }
+      #bhair { height: 1px; background: var(--hair); margin-bottom: 18px; }
+      #tiles { display: flex; gap: 14px; margin-bottom: 18px; }
+      .tile { flex: 1; background: var(--bg-raised); border: 1px solid var(--hair); border-radius: 10px; padding: 16px 18px; }
+      .tile .k { display: block; font: 400 17px var(--mono); color: var(--bmuted);
+        text-transform: uppercase; letter-spacing: .05em; margin-bottom: 7px; }
+      .tile .v { display: block; font: 400 38px/1 var(--mono); color: var(--bheading); }
+      .tile .v.g { color: var(--brass-bright); }
+
+      #lanewin { height: 330px; overflow: hidden; position: relative; }
+      #lanes { position: absolute; left: 0; top: 0; width: 2046px; }
+      .lane { position: absolute; top: 0; width: 320px; height: 320px; background: #16130f;
+        border: 1px solid var(--hair); border-radius: 11px; padding: 14px 12px; }
+      .lane .hd { display: block; font: 700 18px var(--mono); letter-spacing: .07em;
+        color: var(--bmuted); text-transform: uppercase; margin-bottom: 12px; }
+      .card { display: block; background: var(--bg-raised); border: 1px solid var(--hair);
+        border-left: 3px solid var(--hair); border-radius: 8px; padding: 12px 13px; margin-bottom: 10px;
+        font: 400 19px/1.3 var(--mono); color: var(--btext); }
+      .card b { display: block; color: var(--bheading); font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+      .card .ini { display: block; color: var(--bmuted); font-size: 16px; margin-top: 4px; }
+      .r-brass { border-left-color: var(--brass); } .r-steel { border-left-color: var(--steel); }
+      .r-sage { border-left-color: var(--sage); }
+
+      #qcard { width: 1400px; background: var(--brass-low); border: 1px solid var(--brass-edge);
+        border-radius: 12px; padding: 26px 30px; }
+      #qcard .badge { display: inline-block; font: 400 18px var(--mono); color: var(--steel-bright);
+        background: var(--steel-low); border: 1px solid #3a545d; padding: 5px 11px; border-radius: 5px; margin-bottom: 14px; }
+      #qcard .qt { display: block; font: 700 32px/1.34 var(--font); color: var(--brass-bright); margin-bottom: 18px; }
+      #qcard .kv { display: block; font: 400 23px/1.5 var(--mono); color: var(--btext); margin-bottom: 9px; }
+      #qcard .kv i { color: var(--bmuted); font-style: normal; margin-right: 10px; }
+      #qans { display: block; margin-top: 14px; background: #17140f; border: 1px solid var(--hair);
+        border-radius: 8px; padding: 14px 18px; font: 400 24px var(--mono); color: var(--btext); }
+
+      #spend { width: 1400px; }
+      #spend .tiles2 { display: flex; gap: 14px; margin-bottom: 22px; }
+      .rk { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+      .rk .n { display: block; width: 230px; font: 400 24px var(--mono); color: var(--btext); }
+      .rk .track { flex: 1; height: 22px; background: #201c18; border-radius: 3px; overflow: hidden; }
+      .rk .bar { display: block; height: 22px; background: var(--brass); transform-origin: 0 50%; }
+      .rk .qq { display: block; width: 120px; text-align: right; font: 400 24px var(--mono); color: var(--bmuted); }
+      #r-scout .bar { background: var(--sage); }
+      #r-cond .n { font-style: italic; color: var(--bmuted); }
+
+      .fates { width: 1300px; }
+      .fate { display: flex; align-items: center; gap: 18px; font: 400 27px var(--mono);
+        padding: 16px 22px; margin-bottom: 13px; background: #16130f;
+        border: 1px solid #241f19; border-radius: 10px; }
+      .fate .s { display: block; width: 26px; font-weight: 700; }
+      .f-add .s { color: var(--sage); } .f-rej .s { color: var(--bmuted); } .f-del .s { color: var(--clay); }
+      .f-del .b { color: var(--bmuted); text-decoration: line-through; }
+      .f-rej .b { color: var(--bmuted); }
+
+      #end { text-align: center; }
+      #mark { display: inline-block; width: 128px; height: 128px; color: var(--gold);
+        filter: drop-shadow(0 0 26px rgba(212,160,23,.3)); }
+      #wordmark { display: block; margin-top: 18px; font: 400 88px/1 var(--display);
+        letter-spacing: .2em; text-indent: .2em; color: var(--heading); }
+      #tag { display: block; margin-top: 16px; font: 400 30px var(--font); color: var(--muted); }
+      #tag em { color: var(--gold-bright); font-style: italic; }
+      #oss { display: block; margin-top: 28px; font: 400 24px var(--mono); color: var(--muted); }
+
+      #captions { position: absolute; left: 250px; right: 250px; top: 880px; height: 170px; }
+      .hf-cue { position: absolute; left: 0; right: 0; top: 0; text-align: center;
+        font: 700 48px/1.26 var(--font); color: var(--cap-cold);
+        text-shadow: 0 5px 26px rgba(0,0,0,.94), 0 0 2px rgba(0,0,0,.85); }
+      .hf-w { display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="232.65"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="bg" class="clip" data-start="0" data-duration="232.65" data-track-index="0">
+        <div id="ground"></div>
+        <div id="wash-warm"></div>
+        <div id="wash-cold"></div>
+      </div>
+
+      <div id="chap-layer" class="clip" data-start="16.2" data-duration="214" data-track-index="1">
+        <div id="chapters">
+          <span class="chap c1"><span class="n">01</span><span class="t">Install</span></span>
+          <span class="chap c2"><span class="n">02</span><span class="t">Set up on your repo</span></span>
+          <span class="chap c3"><span class="n">03</span><span class="t">Brief the manager</span></span>
+          <span class="chap c4"><span class="n">04</span><span class="t">The team goes out</span></span>
+          <span class="chap c5"><span class="n">05</span><span class="t">The board</span></span>
+          <span class="chap c6"><span class="n">06</span><span class="t">The hooks</span></span>
+          <span class="chap c7"><span class="n">07</span><span class="t">The retrospective</span></span>
+        </div>
+      </div>
+
+      <!-- 01..02 · the frame · 0.4–16.0 -->
+      <div id="s0" class="clip" data-start="0" data-duration="16.4" data-track-index="2">
+        <div class="stage"><div id="s0-in" class="say">
+          <span class="big" id="s0a">Your first session,<br />end to end.</span>
+          <span class="sub" id="s0b">Tyran is a manager for a team of agents.<br />You stay the stakeholder.</span>
+        </div></div>
+      </div>
+
+      <!-- 03..04 · install · 16.8–33.5 -->
+      <div id="s1" class="clip" data-start="16.4" data-duration="17.5" data-track-index="3">
+        <div class="stage"><div id="s1-in">
+          <div class="term" style="width:1240px">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">Claude Code</span>
+            </div>
+            <div class="term__b">
+              <span class="l i1"><span class="go">&gt;</span> /plugin marketplace add jjanczur/tyran</span>
+              <span class="l i1"><span class="go">&gt;</span> /plugin install tyran@tyran</span>
+              <span class="l i1"><span class="dim">— restart · hooks and agents load at session start —</span></span>
+              <span class="l i1">&nbsp;</span>
+              <span class="l i1"><span class="go">&gt;</span> /tyran:hello</span>
+              <span class="l i1"><span class="sg">tyran · 14 skills · 4 agents · paths resolve</span></span>
+              <span class="l i1"><span class="dim">requires Claude Code 2.1 or newer</span></span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 05..07 · setup, provenance, commit · 34.3–64.9 -->
+      <div id="s2" class="clip" data-start="33.9" data-duration="31.4" data-track-index="4">
+        <div class="stage"><div id="s2-in">
+          <div class="term" style="width:1320px">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">.tyran/config.yaml — written by /tyran:setup</span>
+            </div>
+            <div class="term__b">
+              <span class="l"><span class="cy">stack</span>: node · npm · vitest</span>
+              <span class="l"><span class="cy">validate</span>: npm run typecheck &amp;&amp; npm test</span>
+              <span class="l">&nbsp;</span>
+              <span class="l"><span class="cy">autonomy</span>:</span>
+              <span class="l">  value: P1 <span class="dim"># branch only — the safe default</span></span>
+              <span class="l" id="prov-line">  <span class="go">source</span>: 'git log: last 50 merges are PRs, main is protected'</span>
+              <span class="l">  confidence: 0.9</span>
+            </div>
+          </div>
+          <span class="prov" id="prov-note">Every inferred value carries the fact that produced it —
+            and it never grants itself more autonomy than it found. Commit <span class="go">.tyran/</span>:
+            worktrees carry no untracked files.</span>
+        </div></div>
+      </div>
+
+      <!-- 08..09 · brief the manager · 65.7–79.8 -->
+      <div id="s3" class="clip" data-start="65.3" data-duration="14.9" data-track-index="5">
+        <div class="stage"><div id="s3-in" class="say">
+          <span class="big">He interviews you first.<br />At most <em>four questions</em>.</span>
+          <span class="sub" id="s3b">Then you accept the plan, and the questions stop.<br />
+            “Shall I continue?” is forbidden in the conductor's own skill.</span>
+        </div></div>
+      </div>
+
+      <!-- 10..12 · the team · 80.4–102.3 -->
+      <div id="s4" class="clip" data-start="80.0" data-duration="22.7" data-track-index="6">
+        <div class="stage"><div id="s4-in" class="team">
+          <span class="cond">TYRAN · holds the plan</span>
+          <div class="kids">
+            <span class="kid kid--s k"><span class="who">scout</span><span class="job">reads the repo first · cheap tier · read only · fresh context</span></span>
+            <span class="kid k"><span class="who">implementer</span><span class="job">T-6 · own branch · empty scrollback</span></span>
+            <span class="kid k"><span class="who">implementer</span><span class="job">T-7 · own branch · empty scrollback</span></span>
+            <span class="kid kid--r k"><span class="who">reviewer</span><span class="job">no editing tools at all</span></span>
+          </div>
+          <span class="note" id="s4n">A reviewer who can fix what they found <em>approves their own patch</em>.</span>
+        </div></div>
+      </div>
+
+      <!-- 13..15 · the board · 103.1–127.7 -->
+      <div id="s5" class="clip" data-start="102.7" data-duration="25.4" data-track-index="7">
+        <div class="stage"><div id="s5-in">
+          <div id="board">
+            <div class="bhd"><span class="t">Tyran board</span><span class="s">npx @jjanczur/tyran board --dir .tyran --serve · needs Node 22</span></div>
+            <div id="btabs">
+              <span class="btab btab--on">Overview</span><span class="btab">Board</span>
+              <span class="btab">Waiting on you (2)</span><span class="btab">Spend</span>
+            </div>
+            <div id="bhair"></div>
+            <div id="tiles">
+              <span class="tile"><span class="k">waiting on you</span><span class="v g" id="t-q">2</span></span>
+              <span class="tile"><span class="k">agents running</span><span class="v" id="t-a">5</span></span>
+              <span class="tile"><span class="k">progress</span><span class="v" id="t-p">47%</span></span>
+              <span class="tile"><span class="k">needs a human</span><span class="v" id="t-h">4</span></span>
+            </div>
+            <div id="lanewin"><div id="lanes">
+              <div class="lane" style="left:0"><span class="hd">blocked (1)</span>
+                <span class="card r-brass"><b>T-5 — reboot-surviving resume</b><span class="ini">overnight-mode</span></span></div>
+              <div class="lane" style="left:341px"><span class="hd">in-review (1)</span>
+                <span class="card r-brass"><b>T-5 — the answer sheet</b><span class="ini">the-board</span></span></div>
+              <div class="lane" style="left:682px"><span class="hd">in-progress (1)</span>
+                <span class="card r-brass"><b>T-6 — a clickable sandbox</b><span class="ini">the-board</span></span></div>
+              <div class="lane" style="left:1023px"><span class="hd">backlog (1)</span>
+                <span class="card r-steel"><b>T-4 — hold the machine awake</b><span class="ini">overnight-mode</span></span>
+                <span class="card r-brass" id="c-t9"><b>T-9 — rate-limit the webhook</b><span class="ini">queued · from your aside</span></span></div>
+              <div class="lane" style="left:1364px"><span class="hd">done (8)</span>
+                <span class="card r-sage"><b>T-2 — byte-exact projections</b><span class="ini">the-board</span></span></div>
+            </div></div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 16..18 · the ticket and the question · 128.2–152.5 -->
+      <div id="s6" class="clip" data-start="127.9" data-duration="25.1" data-track-index="8">
+        <div class="stage"><div id="s6-in">
+          <div id="qcard">
+            <span class="badge">DECISION · A DEFAULT IS RECORDED</span>
+            <span class="qt">The board reloads every 30 seconds, which wipes a half-typed value. Pause the refresh while Settings is open?</span>
+            <span class="kv"><i>RECOMMENDATION</i>pause it while Settings is open</span>
+            <span class="kv"><i>DEFAULT</i>pause it while Settings is open</span>
+            <span class="kv"><i>BLOCKS</i>1 ticket: T-5</span>
+            <span id="qans">yes — pause it while Settings is open</span>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 19..20 · the bill · 153.3–173.8 -->
+      <div id="s7" class="clip" data-start="153.0" data-duration="21.2" data-track-index="9">
+        <div class="stage"><div id="s7-in"><div id="spend">
+          <div class="tiles2">
+            <span class="tile"><span class="k">tokens</span><span class="v" id="sp-t">4.5 M</span></span>
+            <span class="tile"><span class="k">requests</span><span class="v" id="sp-r">404</span></span>
+            <span class="tile"><span class="k">cost through the api</span><span class="v g" id="sp-u">$16.97</span></span>
+            <span class="tile"><span class="k">conductor overhead</span><span class="v" id="sp-o">55%</span></span>
+          </div>
+          <div class="rk" id="r-cond"><span class="n">conductor</span><span class="track"><span class="bar sb" style="width:100%"></span></span><span class="qq">$8.73</span></div>
+          <div class="rk"><span class="n">implementer</span><span class="track"><span class="bar sb" style="width:77%"></span></span><span class="qq">$6.72</span></div>
+          <div class="rk"><span class="n">reviewer</span><span class="track"><span class="bar sb" style="width:17%"></span></span><span class="qq">$1.48</span></div>
+          <div class="rk" id="r-scout"><span class="n">scout</span><span class="track"><span class="bar sb" style="width:2%"></span></span><span class="qq">$0.03</span></div>
+        </div></div></div>
+      </div>
+
+      <!-- 21..22 · the hooks · 174.6–192.8 -->
+      <div id="s8" class="clip" data-start="174.2" data-duration="19.0" data-track-index="10">
+        <div class="stage"><div id="s8-in">
+          <div class="term term--ref" style="width:1300px;margin-bottom:26px">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">SubagentStop → REFUSED</span><span class="term__s">evidence-gate.mjs</span>
+            </div>
+            <div class="term__b">
+              <span class="l h1 dim">“Ran the suite — everything is green.”</span>
+              <span class="l h1 rd">refused — this report carries no raw command output.</span>
+              <span class="l h1 dim">it blocks silence, not forgery.</span>
+            </div>
+          </div>
+          <div class="term term--ref" style="width:1300px">
+            <div class="term__bar">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="term__t">PreToolUse → REFUSED</span><span class="term__s">secrets-gate.mjs</span>
+            </div>
+            <div class="term__b">
+              <span class="l h2"><span class="go">$</span> git commit -m "notes" docs/setup.md</span>
+              <span class="l h2 rd">refused — a secret in a markdown file is still a secret.</span>
+              <span class="l h2 dim">that gate scans with gitleaks — install it, or nothing is scanning.</span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 23..25 · the retro · 193.6–220.0 -->
+      <div id="s9" class="clip" data-start="193.2" data-duration="27.2" data-track-index="11">
+        <div class="stage"><div id="s9-in" class="fates">
+          <div class="fate f-add ff"><span class="s">+</span><span class="b">knowledge: worktrees link the dependency directory</span></div>
+          <div class="fate f-rej ff"><span class="s">×</span><span class="b">candidate rejected — already covered by an existing rule</span></div>
+          <div class="fate f-del ff"><span class="s">−</span><span class="b">K-07 retired — used 6 times, helped 0</span></div>
+          <div class="fate f-add ff"><span class="s">+</span><span class="b">3 strikes → knowledge · 5 strikes → a rule in CLAUDE.md</span></div>
+          <span class="note" id="s9n">It changes <em>Tyran</em>, never your product code.</span>
+        </div></div>
+      </div>
+
+      <!-- 26 · the brake, and the close · 220.7–229.3 -->
+      <div id="s10" class="clip" data-start="220.3" data-duration="12.35" data-track-index="12">
+        <div class="stage"><div id="end">
+          <div class="term" style="width:1180px;margin-bottom:34px">
+            <div class="term__b">
+              <span class="l"><span class="go">$</span> echo "wrong branch — hold everything" &gt; .tyran/STOP</span>
+              <span class="l dim">halts every spawn and every merge · needs no session</span>
+            </div>
+          </div>
+          <svg id="mark" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z" fill="currentColor" />
+            <circle cx="33" cy="33" r="2.6" fill="#12100e" />
+            <path id="mark-lash" d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none" />
+          </svg>
+          <span id="wordmark">TYRAN</span>
+          <span id="tag">you keep every decision — <em>the team does the rest</em></span>
+          <span id="oss">open source · Apache-2.0 · 0 runtime dependencies</span>
+        </div></div>
+      </div>
+
+      <div id="cap-layer" class="clip" data-start="0" data-duration="232.65" data-track-index="14">
+        <div id="captions"></div>
+      </div>
+      <div id="grain-layer" class="clip" data-start="0" data-duration="232.65" data-track-index="15">
+        <div id="grain"></div>
+      </div>
+
+      <audio id="vo" src="assets/vo.wav" data-start="0" data-duration="232.65" data-track-index="16" data-volume="1"></audio>
+    </div>
+
+    <script src="caption-data.js"></script>
+    <script src="captions.js"></script>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      const markLash = document.getElementById("mark-lash");
+      const lashLen = markLash.getTotalLength();
+      markLash.setAttribute("stroke-dasharray", lashLen);
+      markLash.setAttribute("stroke-dashoffset", lashLen);
+
+      function typeIn(sel, cps, at) {
+        const el = document.querySelector(sel);
+        gsap.set(el, { clipPath: "inset(0 100% 0 0)" });
+        tl.to(el, { clipPath: "inset(0 0% 0 0)", duration: el.textContent.length / cps, ease: "none" }, at);
+      }
+
+      /* the chapter rail: one element per chapter, cross-faded */
+      const CH = [[".c1", 16.6, 33.8], [".c2", 34.1, 65.1], [".c3", 65.5, 79.9],
+                  [".c4", 80.2, 102.5], [".c5", 102.9, 152.7], [".c6", 174.4, 193.0],
+                  [".c7", 193.4, 220.2]];
+      CH.forEach(function (c) {
+        gsap.set(c[0], { autoAlpha: 0 });
+        tl.to(c[0], { autoAlpha: 1, duration: .34, ease: "power2.out" }, c[1]);
+        tl.to(c[0], { autoAlpha: 0, duration: .28, ease: "power2.in" }, c[2]);
+      });
+
+      /* ---- 01..02 ------------------------------------------------------------ */
+      tl.fromTo("#s0a", { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: .65, ease: "power3.out" }, .3);
+      tl.fromTo("#s0b", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: .6, ease: "power2.out" }, 8.4);
+      tl.to("#s0-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 15.9);
+      tl.set("#s0-in", { autoAlpha: 0, immediateRender: false }, 16.40);
+
+      /* ---- 03..04 · install, line by line on the narration ------------------- */
+      tl.fromTo(".i1", { autoAlpha: 0, x: -16 },
+        { autoAlpha: 1, x: 0, duration: .3, stagger: 1.6, ease: "power2.out" }, 17.0);
+      tl.to("#s1-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 33.4);
+      tl.set("#s1-in", { autoAlpha: 0, immediateRender: false }, 33.90);
+
+      /* ---- 05..07 · setup, and the provenance line that is the point --------- */
+      tl.fromTo("#s2-in", { autoAlpha: 0, y: 24 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, 34.2);
+      tl.fromTo("#prov-line", { autoAlpha: .25 }, { autoAlpha: 1, duration: .5, ease: "power2.out" }, 49.2);
+      tl.fromTo("#prov-note", { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: .55, ease: "power2.out" }, 50.4);
+      tl.to("#s2-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 64.9);
+      tl.set("#s2-in", { autoAlpha: 0, immediateRender: false }, 65.30);
+
+      /* ---- 08..09 · the interview ------------------------------------------- */
+      tl.fromTo("#s3-in .big", { autoAlpha: 0, y: 26 }, { autoAlpha: 1, y: 0, duration: .6, ease: "power3.out" }, 65.8);
+      tl.fromTo("#s3b", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .55, ease: "power2.out" }, 72.6);
+      tl.to("#s3-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 79.7);
+      tl.set("#s3-in", { autoAlpha: 0, immediateRender: false }, 80.00);
+
+      /* ---- 10..12 · the team, one member per phrase -------------------------- */
+      tl.fromTo(".cond", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power3.out" }, 80.3);
+      tl.fromTo(".k", { autoAlpha: 0, y: 26, scale: .95 },
+        { autoAlpha: 1, y: 0, scale: 1, duration: .5, stagger: 1.5, ease: "back.out(1.5)" }, 80.9);
+      tl.fromTo("#s4n", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: .5 }, 96.0);
+      tl.to(".kid--r", { scale: 1.03, duration: 1.0, yoyo: true, repeat: 3, ease: "sine.inOut" }, 96.4);
+      tl.to("#s4-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 102.3);
+      tl.set("#s4-in", { autoAlpha: 0, immediateRender: false }, 102.70);
+
+      /* ---- 13..15 · the board ------------------------------------------------ */
+      gsap.set("#c-t9", { autoAlpha: 0 });
+      tl.fromTo("#s5-in", { autoAlpha: 0, y: 26 }, { autoAlpha: 1, y: 0, duration: .55, ease: "power2.out" }, 103.0);
+      tl.fromTo(".tile", { autoAlpha: 0, y: 14 },
+        { autoAlpha: 1, y: 0, duration: .3, stagger: .14, ease: "power2.out" }, 109.5);
+      /* the lateral pan across the lanes, on the "ten lanes" line */
+      tl.to("#lanes", { x: -560, duration: 3.6, ease: "sine.inOut" }, 120.8);
+      tl.to("#s5-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 127.7);
+      tl.set("#s5-in", { autoAlpha: 0, immediateRender: false }, 127.90);
+
+      /* ---- 16..18 · the question, answered ---------------------------------- */
+      tl.fromTo("#s6-in", { autoAlpha: 0, y: 26 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, 128.2);
+      typeIn("#qans", 17, 148.4);
+      tl.to("#s6-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 152.6);
+      tl.set("#s6-in", { autoAlpha: 0, immediateRender: false }, 153.00);
+
+      /* ---- 19..20 · the bill, and the overhead volunteered ------------------- */
+      tl.fromTo("#s7-in", { autoAlpha: 0, y: 26 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, 153.3);
+      const a = { v: 0 }, b = { v: 0 }, c = { v: 0 };
+      tl.to(a, { v: 4.5, duration: .8, ease: "power2.out",
+        onUpdate: function () { document.getElementById("sp-t").textContent = a.v.toFixed(1) + " M"; } }, 153.8);
+      tl.to(b, { v: 404, duration: .8, ease: "power2.out", snap: { v: 1 },
+        onUpdate: function () { document.getElementById("sp-r").textContent = String(Math.round(b.v)); } }, 154.0);
+      tl.to(c, { v: 16.97, duration: .8, ease: "power2.out",
+        onUpdate: function () { document.getElementById("sp-u").textContent = "$" + c.v.toFixed(2); } }, 154.2);
+      tl.fromTo(".sb", { scaleX: 0 }, { scaleX: 1, duration: .5, ease: "power2.out", stagger: .5 }, 155.6);
+      tl.to("#r-scout .qq", { scale: 1.16, color: "#a3ba86", duration: .4, yoyo: true, repeat: 1, ease: "back.out(2)" }, 159.6);
+      tl.to("#sp-o", { scale: 1.12, color: "#cfae63", duration: .4, yoyo: true, repeat: 1, ease: "power2.out" }, 163.2);
+      tl.to("#s7-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 173.9);
+      tl.set("#s7-in", { autoAlpha: 0, immediateRender: false }, 174.20);
+
+      /* ---- 21..22 · two hooks that refuse ------------------------------------ */
+      tl.fromTo(".h1", { autoAlpha: 0, x: -14 },
+        { autoAlpha: 1, x: 0, duration: .3, stagger: .55, ease: "power2.out" }, 174.8);
+      tl.fromTo(".h2", { autoAlpha: 0, x: -14 },
+        { autoAlpha: 1, x: 0, duration: .3, stagger: .6, ease: "power2.out" }, 183.6);
+      tl.to("#s8-in .term--ref:nth-of-type(2)", { x: -9, duration: .08, yoyo: true, repeat: 3 }, 186.4);
+      tl.to("#s8-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 192.9);
+      tl.set("#s8-in", { autoAlpha: 0, immediateRender: false }, 193.20);
+
+      /* ---- 23..25 · the retro's three fates and the ladder ------------------- */
+      tl.fromTo(".ff", { autoAlpha: 0, x: -22 },
+        { autoAlpha: 1, x: 0, duration: .4, stagger: 3.4, ease: "power3.out" }, 194.2);
+      tl.fromTo("#s9n", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: .5 }, 208.0);
+      tl.to("#s9-in", { autoAlpha: 0, y: -20, duration: .4, ease: "power2.in" }, 220.0);
+      tl.set("#s9-in", { autoAlpha: 0, immediateRender: false }, 220.30);
+
+      /* ---- 26 · the brake, and the close ------------------------------------- */
+      tl.fromTo("#end .term", { autoAlpha: 0, y: 22 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, 220.6);
+      tl.fromTo("#mark", { autoAlpha: 0, scale: .74, y: 18 },
+        { autoAlpha: 1, scale: 1, y: 0, duration: .68, ease: "back.out(1.9)" }, 224.8);
+      tl.fromTo("#mark-lash", { strokeDashoffset: lashLen },
+        { strokeDashoffset: 0, duration: .9, ease: "power2.inOut" }, 225.3);
+      tl.fromTo("#wordmark", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: .55, ease: "power3.out" }, 225.6);
+      tl.fromTo("#tag", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, 226.2);
+      tl.fromTo("#oss", { autoAlpha: 0 }, { autoAlpha: 1, duration: .45 }, 227.2);
+
+      const holdAt = 228.4, holdFor = 232.65 - holdAt, cyc = 2.4;
+      tl.to("#end", { scale: 1.01, duration: cyc / 2, ease: "sine.inOut",
+        yoyo: true, repeat: Math.max(0, Math.floor(holdFor / cyc) * 2 - 1) }, holdAt);
+      tl.to("#wash-cold", { autoAlpha: .6, duration: holdFor, ease: "sine.inOut" }, holdAt);
+
+      window.hfCaptions(tl, { mount: "#captions" });
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

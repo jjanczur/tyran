@@ -51,6 +51,7 @@ export const RELEASE = `${REPO}/releases/latest`;
 /** Documentation pages this landing links to, by the slug Starlight serves. */
 export const DOCS = {
   gettingStarted: url('getting-started/'),
+  videos: url('videos/'),
   architecture: url('architecture/'),
   configuration: url('configuration/'),
   agents: url('agents/'),

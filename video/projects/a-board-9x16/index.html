@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Tyran — the board (9:16)</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #141210; }
+
+      :root {
+        /* the board's own tokens — scripts/board-html.mjs, verbatim */
+        --bg: #141210; --bg-raised: #1c1a16; --bg-sunken: #100e0c;
+        --btext: #cec7ba; --bheading: #ece5d7; --bmuted: #8f8779;
+        --hair: #332e27; --hair-soft: #26221d;
+        --brass: #a8863c; --brass-bright: #cfae63; --brass-low: #221c11; --brass-edge: #5d4c22;
+        --steel: #7d9ea9; --steel-bright: #9dbcc6; --steel-low: #17242a;
+        --clay: #c07a70; --clay-bright: #d9998f;
+        --sage: #88a06a; --sage-bright: #a3ba86;
+        --gold: #d4a017; --gold-bright: #e8bc4d;
+        --glow: #8fd8ea;
+        --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --cap-cold: #f5efe3; --cap-hot: #e8bc4d;
+      }
+
+      #ground { position: absolute; inset: 0; background: var(--bg); }
+      #wash { position: absolute; inset: 0;
+        background: radial-gradient(58% 24% at 50% 12%, rgba(143,216,234,.10) 0%, rgba(143,216,234,0) 74%); }
+      #grain { position: absolute; inset: 0; opacity: .05;
+        background-image: radial-gradient(rgba(245,239,227,.9) .5px, transparent .6px); background-size: 3px 3px; }
+      .clip { position: absolute; inset: 0; }
+
+      /* ---- the board: ONE object, on screen from frame zero ------------------ */
+      #board-wrap { position: absolute; left: 0; right: 0; top: 150px; height: 1010px;
+        transform-origin: 50% 40%; }
+
+      /* the brass rail — the manager's presence, down the left edge, always */
+      #brass-rail { position: absolute; left: 40px; top: 0; bottom: 0; width: 3px;
+        background: linear-gradient(180deg, rgba(168,134,60,0), var(--brass) 14%, var(--brass) 86%, rgba(168,134,60,0)); }
+
+      #hdr { position: absolute; left: 70px; right: 60px; top: 0; }
+      #hdr .t { display: block; font: 400 44px var(--display); color: var(--bheading); }
+      #hdr .s { display: block; margin-top: 8px; font: 400 22px var(--mono); color: var(--bmuted); }
+      #tophair { position: absolute; left: 70px; right: 60px; top: 196px; height: 1px; background: var(--hair); }
+      #strike { position: absolute; left: 70px; top: 195px; width: 0; height: 3px; background: var(--gold); }
+
+      /* pinned tab bar — panels slide UNDER it; they never dissolve */
+      #tabs { position: absolute; left: 70px; right: 60px; top: 118px; display: flex; gap: 10px; }
+      .tab { display: block; font: 400 24px var(--mono); color: var(--bmuted);
+        padding: 9px 16px; border: 1px solid transparent; border-radius: 7px; }
+      .tab--on { color: var(--brass-bright); background: var(--brass-low); border-color: var(--brass-edge); }
+
+      /* the lane strip, panned laterally */
+      #lane-window { position: absolute; left: 0; right: 0; top: 230px; height: 700px; overflow: hidden; }
+      #lanes { position: absolute; left: 70px; top: 0; width: 3410px; height: 700px; }
+      .lane { position: absolute; top: 0; width: 320px; height: 660px;
+        background: #16130f; border: 1px solid var(--hair); border-radius: 11px; padding: 15px 13px; }
+      .lane .hd { display: block; font: 700 20px var(--mono); letter-spacing: .07em;
+        color: var(--bmuted); text-transform: uppercase; margin-bottom: 14px; }
+      .card { display: block; background: var(--bg-raised); border: 1px solid var(--hair);
+        border-left: 3px solid var(--hair); border-radius: 8px; padding: 13px 14px; margin-bottom: 11px;
+        font: 400 21px/1.32 var(--mono); color: var(--btext); }
+      .card b { display: block; color: var(--bheading); font-weight: 700; font-size: 20px; margin-bottom: 5px; }
+      .card .ini { display: block; color: var(--bmuted); font-size: 18px; margin-top: 5px; }
+      .card .age { display: block; font-size: 18px; margin-top: 6px; color: var(--bmuted); }
+      .r-brass { border-left-color: var(--brass); }
+      .r-steel { border-left-color: var(--steel); }
+      .r-sage  { border-left-color: var(--sage); }
+      .r-clay  { border-left-color: var(--clay); }
+
+      /* the aside: human words — sans, unaligned, tilted — until they harden */
+      #aside {
+        position: absolute; left: 96px; top: 300px; width: 830px;
+        font: 400 40px/1.36 var(--font); color: var(--gold-bright);
+        text-shadow: 0 6px 30px rgba(0,0,0,.9);
+      }
+      #receipt { position: absolute; left: 70px; top: 214px; font: 400 21px var(--mono); color: var(--bmuted); opacity: 0; }
+
+      /* panels that slide in under the tab bar */
+      .panel { position: absolute; left: 70px; right: 60px; top: 240px; }
+      #panel-q .q { background: var(--brass-low); border: 1px solid var(--brass-edge);
+        border-radius: 12px; padding: 26px 28px; }
+      #panel-q .badge { display: inline-block; font: 400 19px var(--mono); color: var(--steel-bright);
+        background: var(--steel-low); border: 1px solid #3a545d; padding: 5px 12px; border-radius: 5px; margin-bottom: 16px; }
+      #panel-q .qt { display: block; font: 700 32px/1.34 var(--font); color: var(--brass-bright); margin-bottom: 20px; }
+      #panel-q .kv { display: block; font: 400 23px/1.5 var(--mono); color: var(--btext); margin-bottom: 10px; }
+      #panel-q .kv i { color: var(--bmuted); font-style: normal; margin-right: 10px; }
+      #answer-box { display: block; margin-top: 18px; background: #17140f; border: 1px solid var(--hair);
+        border-radius: 8px; padding: 16px 18px; font: 400 24px var(--mono); color: var(--btext); min-height: 62px; }
+      #btn-answer { display: inline-block; margin-top: 16px; font: 400 24px var(--mono);
+        color: var(--brass-bright); background: var(--brass-low); border: 1px solid var(--brass-edge);
+        padding: 12px 26px; border-radius: 7px; }
+
+      #panel-spend .tiles { display: flex; gap: 14px; margin-bottom: 20px; }
+      #panel-spend .tile { flex: 1; background: var(--bg-raised); border: 1px solid var(--hair);
+        border-radius: 10px; padding: 18px; }
+      #panel-spend .tile .k { display: block; font: 400 18px var(--mono); color: var(--bmuted);
+        text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+      #panel-spend .tile .v { display: block; font: 400 42px/1 var(--mono); color: var(--bheading); }
+      #panel-spend .tile .v.g { color: var(--brass-bright); }
+      .rk { display: flex; align-items: center; gap: 14px; margin-bottom: 13px; }
+      .rk .n { display: block; width: 210px; font: 400 24px var(--mono); color: var(--btext); }
+      .rk .track { flex: 1; height: 22px; background: #201c18; border-radius: 3px; overflow: hidden; }
+      .rk .bar { display: block; height: 22px; background: var(--brass); transform-origin: 0 50%; }
+      .rk .qq { display: block; width: 120px; text-align: right; font: 400 24px var(--mono); color: var(--bmuted); }
+      #row-scout .bar { background: var(--sage); }
+
+      #inis { position: absolute; left: 70px; top: 962px; display: flex; gap: 22px; }
+      #inis span { display: block; font: 400 24px var(--mono); color: var(--bmuted); opacity: .45; }
+      #provenance { position: absolute; left: 70px; top: 1002px; font: 400 22px var(--mono); color: var(--bmuted); opacity: 0; }
+
+      /* ---- end card ----------------------------------------------------------- */
+      #end { position: absolute; left: 0; right: 0; top: 470px; text-align: center; }
+      #mark { display: inline-block; width: 170px; height: 170px; color: var(--gold);
+        filter: drop-shadow(0 0 30px rgba(212,160,23,.32)); }
+      #wordmark { display: block; margin-top: 22px; font: 400 92px/1 var(--display);
+        letter-spacing: .2em; text-indent: .2em; color: #f5efe3; }
+      #url { display: block; margin-top: 28px; font: 400 38px var(--mono); color: var(--gold-bright); }
+      #url-caret { display: inline-block; width: 13px; height: 30px; vertical-align: -5px;
+        background: var(--glow); margin-left: 5px; }
+      #nothing { display: block; margin-top: 18px; font: 400 28px var(--font); color: var(--bmuted); }
+
+      #captions { position: absolute; left: 74px; right: 74px; top: 1255px; height: 320px; }
+      .hf-cue { position: absolute; left: 0; right: 0; top: 0; text-align: center;
+        font: 800 60px/1.24 var(--font); color: var(--cap-cold);
+        text-shadow: 0 5px 26px rgba(0,0,0,.94), 0 0 2px rgba(0,0,0,.85); }
+      .hf-w { display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="58.72"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div id="bg" class="clip" data-start="0" data-duration="58.72" data-track-index="0">
+        <div id="ground"></div>
+        <div id="wash"></div>
+      </div>
+
+      <!-- THE BOARD. Present from frame zero. Never cut to, never dissolved. -->
+      <div id="board-layer" class="clip" data-start="0" data-duration="53.9" data-track-index="1">
+        <div id="board-wrap">
+          <div id="brass-rail"></div>
+          <div id="hdr">
+            <span class="t">Tyran board</span>
+            <span class="s">3 initiative(s) · 8/17 tickets merged (47%)</span>
+          </div>
+          <div id="tabs">
+            <span class="tab tab--on" id="tab-board">Board</span>
+            <span class="tab" id="tab-questions">Waiting on you (2)</span>
+            <span class="tab" id="tab-spend">Spend</span>
+          </div>
+          <div id="tophair"></div>
+          <div id="strike"></div>
+          <span id="receipt">journal: ticket.declare T-9 · appended</span>
+
+          <div id="lane-window">
+            <div id="lanes">
+              <div class="lane" style="left:0"><span class="hd" id="hd-l0">waiting-operator (1)</span>
+                <span class="card r-brass"><b>T-4 — the Settings tab itself</b><span class="ini">settings-editor</span><span class="age">no event 2 h</span></span>
+              </div>
+              <div class="lane" style="left:341px"><span class="hd" id="hd-l1">paused-limit (1)</span>
+                <span class="card r-brass"><b>T-3 — the resume watcher</b><span class="ini">overnight-mode</span></span>
+              </div>
+              <div class="lane" style="left:682px"><span class="hd" id="hd-l2">blocked (1)</span>
+                <span class="card r-clay" id="card-blocked"><b>T-5 — a reboot-surviving resume</b><span class="ini">overnight-mode · impl-reboot</span><span class="age" id="age-t5">no event 4 h</span></span>
+              </div>
+              <div class="lane" style="left:1023px"><span class="hd" id="hd-l3">changes-requested (1)</span>
+                <span class="card r-clay"><b>T-3 — the write route</b><span class="ini">settings-editor</span></span>
+              </div>
+              <div class="lane" style="left:1364px"><span class="hd" id="hd-l4">in-review (1)</span>
+                <span class="card r-brass" id="card-t5r" data-layout-allow-overlap><b>T-5 — the waiting-on-you queue</b><span class="ini">the-board · rev-queue</span></span>
+              </div>
+              <div class="lane" style="left:1705px"><span class="hd" id="hd-l5">in-progress (1)</span>
+                <span class="card r-brass" id="card-t6" data-layout-allow-overlap><b>T-6 — a clickable sandbox</b><span class="ini">the-board · impl-sandbox</span></span>
+              </div>
+              <div class="lane" style="left:2046px"><span class="hd" id="hd-l6">ready (1)</span>
+                <span class="card r-steel"><b>T-7 — the spend ledger</b><span class="ini">the-board</span></span>
+              </div>
+              <div class="lane" style="left:2387px"><span class="hd" id="hd-l7">backlog (1)</span>
+                <span class="card r-steel"><b>T-4 — hold the machine awake</b><span class="ini">overnight-mode</span></span>
+                <span class="card r-brass" id="card-t9"><b>T-9 — rate-limit the webhook</b><span class="ini">queued · unassigned</span></span>
+              </div>
+              <div class="lane" style="left:2728px"><span class="hd" id="hd-l8">parked (1)</span>
+                <span class="card r-steel"><b>T-5 — per-role tier overrides</b><span class="ini">settings-editor</span></span>
+              </div>
+              <div class="lane" style="left:3069px"><span class="hd" id="hd-l9">done (8)</span>
+                <span class="card r-sage" data-layout-allow-overlap><b>T-2 — byte-exact projections</b><span class="ini">the-board</span></span>
+                <span class="card r-sage" data-layout-allow-overlap><b>T-1 — derive lanes from the journal</b><span class="ini">the-board</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div id="inis"><span id="ini-1">the-board</span><span id="ini-2">overnight-mode</span><span id="ini-3">settings-editor</span></div>
+          <span id="provenance">every question and error on this board actually happened</span>
+
+          <div class="panel" id="panel-q">
+            <div class="q">
+              <span class="badge">DECISION · A DEFAULT IS RECORDED</span>
+              <span class="qt">The board reloads every 30 seconds, which wipes a half-typed value. Pause the refresh while Settings is open?</span>
+              <span class="kv" id="q-rec"><i>RECOMMENDATION</i>pause it while Settings is open</span>
+              <span class="kv" id="q-default"><i>DEFAULT</i>pause it while Settings is open</span>
+              <span class="kv" id="q-blocks"><i>BLOCKS</i>1 ticket: T-5</span>
+              <span id="answer-box"><span id="answer-text">yes — pause it</span></span>
+              <span id="btn-answer">Answer</span>
+            </div>
+          </div>
+
+          <div class="panel" id="panel-spend">
+            <div class="tiles">
+              <span class="tile"><span class="k">tokens</span><span class="v" id="v-tok">4.5 M</span></span>
+              <span class="tile"><span class="k">requests</span><span class="v" id="v-req">404</span></span>
+              <span class="tile"><span class="k">cost</span><span class="v g" id="v-usd">$16.97</span></span>
+            </div>
+            <div class="rk"><span class="n">conductor</span><span class="track"><span class="bar bb" style="width:100%"></span></span><span class="qq">$8.73</span></div>
+            <div class="rk"><span class="n">implementer</span><span class="track"><span class="bar bb" style="width:77%"></span></span><span class="qq">$6.72</span></div>
+            <div class="rk"><span class="n">reviewer</span><span class="track"><span class="bar bb" style="width:16%"></span></span><span class="qq">$1.41</span></div>
+            <div class="rk" id="row-scout"><span class="n">scout</span><span class="track"><span class="bar bb" style="width:2%"></span></span><span class="qq">$0.03</span></div>
+          </div>
+        </div>
+
+        <div id="aside">“also — rate-limit the webhook”</div>
+      </div>
+
+      <div id="end-layer" class="clip" data-start="53.4" data-duration="5.32" data-track-index="2">
+        <div id="end">
+          <svg id="mark" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z" fill="currentColor" />
+            <circle cx="33" cy="33" r="2.6" fill="#141210" />
+            <path id="mark-lash" d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none" />
+          </svg>
+          <span id="wordmark">TYRAN</span>
+          <span id="url">jjanczur.github.io/tyran/sandbox<span id="url-caret"></span></span>
+          <span id="nothing">the live board, in your browser · nothing to install</span>
+        </div>
+      </div>
+
+      <div id="cap-layer" class="clip" data-start="0" data-duration="58.72" data-track-index="8">
+        <div id="captions"></div>
+      </div>
+      <div id="grain-layer" class="clip" data-start="0" data-duration="58.72" data-track-index="9">
+        <div id="grain"></div>
+      </div>
+
+      <audio id="vo" src="assets/vo.wav" data-start="0" data-duration="58.72" data-track-index="10" data-volume="1"></audio>
+    </div>
+
+    <script src="caption-data.js"></script>
+    <script src="captions.js"></script>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* Beats against assets/vo/board.timing.json:
+         01 0.30-2.72 · 02 3.12-4.99 · 03 5.54-9.40 · 04 9.80-12.93
+         05 13.58-22.78 · 06 23.18-27.53 · 07 27.88-31.41 · 08 32.01-35.16
+         09 35.61-38.64 · 10 38.99-41.38 · 11 41.98-46.19 · 12 46.59-49.53
+         13 50.08-53.18 · 14 53.68-56.12
+
+         Lane pitch is 341px; the strip starts at left:70. To centre lane i in a
+         1080 frame: x = 540 - 70 - (i*341 + 160) = 310 - i*341. */
+      const laneX = (i) => 310 - i * 341;
+
+      const markLash = document.getElementById("mark-lash");
+      const lashLen = markLash.getTotalLength();
+      markLash.setAttribute("stroke-dasharray", lashLen);
+      markLash.setAttribute("stroke-dashoffset", lashLen);
+
+      /* Authored hidden state stated explicitly, so a cold seek restores it. */
+      gsap.set("#panel-q", { autoAlpha: 0, x: 80 });
+      gsap.set("#panel-spend", { autoAlpha: 0, x: 80 });
+      gsap.set("#aside", { autoAlpha: 0 });
+      gsap.set("#card-t9", { autoAlpha: 0 });
+      gsap.set("#provenance", { autoAlpha: 0 });
+      gsap.set("#lanes", { x: laneX(5) });
+
+      /* Deterministic typing: a clip-path sweep, never a character loop. */
+      function typeIn(sel, cps, at) {
+        const el = document.querySelector(sel);
+        gsap.set(el, { clipPath: "inset(0 100% 0 0)" });
+        tl.to(el, { clipPath: "inset(0 0% 0 0)", duration: el.textContent.length / cps, ease: "none" }, at);
+      }
+
+      /* ---- 01 · already running when the viewer arrives --------------------- */
+      tl.fromTo("#card-t6", { borderLeftColor: "#a8863c" },
+        { borderLeftColor: "#cfae63", duration: .9, yoyo: true, repeat: 1, ease: "sine.inOut" }, 0);
+
+      /* ---- 02 · the card moves itself; there is no cursor anywhere ----------
+         A lane that receives a card MAKES ROOM for it. Without the resident
+         shift the traveller lands on top of the card already there and the
+         two sets of text overlap — which the layout check catches as
+         content_overlap, and which reads as a rendering bug on screen. */
+      gsap.set("#card-t6", { zIndex: 5, position: "relative" });
+      gsap.set("#card-t5r", { zIndex: 4, position: "relative" });
+      tl.to("#card-t6", { x: -341, y: -12, duration: .55, ease: "back.out(1.7)" }, 3.2);
+      tl.to("#card-t6", { borderLeftColor: "#7d9ea9", duration: .3 }, 3.2);
+      tl.to("#card-t5r", { y: 104, duration: .5, ease: "power2.out" }, 3.3);
+
+      /* ---- 03 · one lateral pan across all ten lanes ------------------------ */
+      tl.to("#lanes", { x: laneX(9), duration: 2.9, ease: "sine.inOut" }, 5.6);
+      /* headers brighten as they cross centre — pre-placed, no scroll listeners */
+      for (let i = 0; i < 10; i++) {
+        const at = 5.6 + (i / 9) * 2.6;
+        tl.to("#hd-l" + i, { color: "#ece5d7", duration: .18 }, at);
+        tl.to("#hd-l" + i, { color: "#8f8779", duration: .3 }, at + .32);
+      }
+
+      /* ---- 04 · snap back onto BLOCKED, and the age turns clay -------------- */
+      tl.to("#lanes", { x: laneX(2), duration: .35, ease: "power3.inOut" }, 9.85);
+      tl.to("#card-blocked", { scale: 1.12, duration: .35, ease: "power3.inOut" }, 9.85);
+      tl.to("#age-t5", { color: "#c07a70", fontWeight: 700, duration: .3 }, 10.2);
+      tl.to("#card-blocked", { scale: 1, duration: .4, ease: "power2.inOut" }, 12.4);
+
+      /* ---- 05 · your aside interrupts a board that is already live ---------- */
+      tl.to("#lanes", { x: laneX(7), duration: .7, ease: "power2.inOut" }, 13.6);
+      tl.to("#board-wrap", { filter: "brightness(0.88)", duration: .3 }, 13.6);
+      tl.set("#aside", { autoAlpha: 1, rotate: 2.5, immediateRender: false }, 15.4);
+      typeIn("#aside", 15, 15.4);
+
+      /* ---- 06 · THE PEAK · human words harden into machine state ------------ */
+      tl.to("#strike", { width: 860, duration: .35, ease: "power2.in" }, 23.3);
+      /* The hardening: tilt straightens, colour cools to brass, the sentence
+         shrinks toward ticket size and drops to the lane. Scale, never
+         fontSize — a font-size tween reflows text and snaps glyphs to integer
+         device pixels, which stutters under seek-by-frame capture
+         (gsap_non_transform_motion). */
+      tl.to("#aside", {
+        rotate: 0, scale: .75, color: "#cfae63", x: -20, y: 300,
+        transformOrigin: "0% 50%", duration: .18, ease: "power4.out",
+      }, 23.65);
+      tl.to("#strike", { autoAlpha: 0, duration: .25 }, 23.9);
+      tl.to("#board-wrap", { filter: "brightness(1)", duration: .4 }, 23.9);
+      /* and lands in BACKLOG as a real ticket */
+      tl.to("#aside", { autoAlpha: 0, duration: .2 }, 25.4);
+      tl.to("#card-t9", { autoAlpha: 1, duration: .01 }, 25.5);
+      tl.fromTo("#card-t9", { scale: .84, y: -70 },
+        { scale: 1, y: 0, duration: .5, ease: "back.out(1.8)" }, 25.5);
+
+      /* ---- 07 · the receipt: it was written down ---------------------------- */
+      tl.to("#receipt", { autoAlpha: .8, duration: .25 }, 28.0);
+      tl.to("#receipt", { autoAlpha: 0, duration: .5 }, 29.3);
+      tl.to("#card-t9", { borderLeftColor: "#7d9ea9", duration: .3 }, 29.6);
+
+      /* ---- 08 · an agent moves its own card to done ------------------------- */
+      tl.to("#lanes", { x: laneX(9), duration: 1.0, ease: "sine.inOut" }, 32.1);
+      /* DONE makes room the same way: the traveller takes the top slot and the
+         finished work slides down under it. */
+      tl.to("#card-t5r", { x: 1705, y: 0, duration: .5, ease: "back.out(1.7)" }, 33.4);
+      tl.to("#card-t5r", { borderLeftColor: "#88a06a", duration: .3 }, 33.4);
+      tl.to(".r-sage", { y: 104, duration: .5, ease: "power2.out" }, 33.5);
+
+      /* ---- 09 · the questions panel slides under the pinned tab bar --------- */
+      tl.to("#tab-board", { color: "#8f8779", backgroundColor: "rgba(0,0,0,0)", borderColor: "rgba(0,0,0,0)", duration: .25 }, 35.65);
+      tl.to("#tab-questions", { color: "#cfae63", backgroundColor: "#221c11", borderColor: "#5d4c22", duration: .25 }, 35.65);
+      tl.to("#lane-window", { autoAlpha: 0, x: -80, duration: .4, ease: "power3.out" }, 35.65);
+      tl.to("#panel-q", { autoAlpha: 1, x: 0, duration: .4, ease: "power3.out" }, 35.7);
+
+      /* ---- 10 · recommendation included, and you answer here ---------------- */
+      tl.fromTo("#q-rec", { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: .26, ease: "power2.out" }, 39.05);
+      tl.fromTo("#q-default", { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: .26, ease: "power2.out" }, 39.21);
+      tl.fromTo("#q-blocks", { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: .26, ease: "power2.out" }, 39.33);
+      typeIn("#answer-text", 18, 39.9);
+      tl.to("#btn-answer", { backgroundColor: "#a8863c", color: "#141210", duration: .2 }, 40.9);
+
+      /* ---- 11 · the bill, under the same tab bar ---------------------------- */
+      tl.to("#tab-questions", { color: "#8f8779", backgroundColor: "rgba(0,0,0,0)", borderColor: "rgba(0,0,0,0)", duration: .25 }, 42.0);
+      tl.to("#tab-spend", { color: "#cfae63", backgroundColor: "#221c11", borderColor: "#5d4c22", duration: .25 }, 42.0);
+      tl.to("#panel-q", { autoAlpha: 0, x: -80, duration: .4, ease: "power3.out" }, 42.0);
+      tl.to("#panel-spend", { autoAlpha: 1, x: 0, duration: .4, ease: "power3.out" }, 42.05);
+      /* the tiles count up rather than arriving finished */
+      const tok = { v: 0 }, req = { v: 0 }, usd = { v: 0 };
+      tl.to(tok, { v: 4.5, duration: .8, ease: "power2.out",
+        onUpdate: function () { document.getElementById("v-tok").textContent = tok.v.toFixed(1) + " M"; } }, 42.6);
+      tl.to(req, { v: 404, duration: .8, ease: "power2.out", snap: { v: 1 },
+        onUpdate: function () { document.getElementById("v-req").textContent = String(Math.round(req.v)); } }, 42.78);
+      tl.to(usd, { v: 16.97, duration: .8, ease: "power2.out",
+        onUpdate: function () { document.getElementById("v-usd").textContent = "$" + usd.v.toFixed(2); } }, 42.92);
+
+      /* ---- 12 · three cents, and it is the bill ----------------------------- */
+      tl.fromTo(".bb", { scaleX: 0 }, { scaleX: 1, duration: .45, ease: "power2.out", stagger: .22 }, 46.65);
+      tl.to("#row-scout .n", { color: "#cfae63", duration: .3 }, 48.3);
+      tl.to("#row-scout .qq", { scale: 1.16, duration: .35, yoyo: true, repeat: 1, ease: "back.out(2)" }, 48.4);
+
+      /* ---- 13 · pull back: this board is Tyran, building Tyran -------------- */
+      tl.to("#panel-spend", { autoAlpha: 0, x: -80, duration: .4, ease: "power3.out" }, 50.1);
+      tl.to("#lane-window", { autoAlpha: 1, x: 0, duration: .45, ease: "power3.out" }, 50.15);
+      tl.to("#tab-spend", { color: "#8f8779", backgroundColor: "rgba(0,0,0,0)", borderColor: "rgba(0,0,0,0)", duration: .25 }, 50.1);
+      tl.to("#tab-board", { color: "#cfae63", backgroundColor: "#221c11", borderColor: "#5d4c22", duration: .25 }, 50.1);
+      tl.fromTo("#board-wrap", { scale: 1.06 }, { scale: 1.0, duration: 1.4, ease: "sine.inOut" }, 50.1);
+      tl.to("#ini-1", { opacity: 1, duration: .3, ease: "power2.out" }, 50.6);
+      tl.to("#ini-2", { opacity: 1, duration: .3, ease: "power2.out" }, 50.82);
+      tl.to("#ini-3", { opacity: 1, duration: .3, ease: "power2.out" }, 50.95);
+      tl.to("#provenance", { autoAlpha: .7, duration: .4 }, 51.4);
+      tl.to("#board-layer", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 53.3);
+      tl.set("#board-layer", { autoAlpha: 0, immediateRender: false }, 53.90);
+
+      /* ---- 14 · the live end card ------------------------------------------- */
+      tl.fromTo("#mark", { autoAlpha: 0, scale: .96 }, { autoAlpha: 1, scale: 1, duration: .6, ease: "power2.out" }, 53.5);
+      tl.fromTo("#mark-lash", { strokeDashoffset: lashLen },
+        { strokeDashoffset: 0, duration: .9, ease: "power2.inOut" }, 53.6);
+      tl.fromTo("#wordmark", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power3.out" }, 54.1);
+      typeIn("#url", 24, 54.5);
+      tl.fromTo("#nothing", { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: .4 }, 55.6);
+      tl.to("#url-caret", { autoAlpha: 0, duration: .55, repeat: 5, yoyo: true, ease: "steps(1)" }, 55.9);
+
+      const holdAt = 56.6, holdFor = 58.72 - holdAt, cyc = 2.0;
+      tl.to("#end", { scale: 1.012, duration: cyc / 2, ease: "sine.inOut",
+        yoyo: true, repeat: Math.max(0, Math.floor(holdFor / cyc) * 2 - 1) }, holdAt);
+
+      window.hfCaptions(tl, { mount: "#captions" });
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

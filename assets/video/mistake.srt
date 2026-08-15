@@ -1,0 +1,131 @@
+1
+00:00:00,250 --> 00:00:03,330
+Your most expensive model just renamed
+
+2
+00:00:03,330 --> 00:00:03,880
+a variable.
+
+3
+00:00:04,089 --> 00:00:06,269
+Then in the same chat, it
+
+4
+00:00:06,269 --> 00:00:07,909
+judged an authentication boundary.
+
+5
+00:00:08,253 --> 00:00:09,173
+One chat.
+
+6
+00:00:09,793 --> 00:00:10,343
+One model.
+
+7
+00:00:11,013 --> 00:00:11,893
+Every single job.
+
+8
+00:00:12,077 --> 00:00:13,677
+That is why the bill is
+
+9
+00:00:13,677 --> 00:00:15,557
+high, and the work gets worse.
+
+10
+00:00:15,929 --> 00:00:18,149
+No good team puts a principal
+
+11
+00:00:18,149 --> 00:00:19,489
+engineer on a grep.
+
+12
+00:00:19,716 --> 00:00:21,296
+Tyran is the manager.
+
+13
+00:00:22,156 --> 00:00:23,416
+You brief him once.
+
+14
+00:00:23,565 --> 00:00:26,105
+A scout reads the repo first.
+
+15
+00:00:26,785 --> 00:00:28,025
+Cheap tier, read only.
+
+16
+00:00:28,209 --> 00:00:31,069
+Implementers take one story each, on
+
+17
+00:00:31,069 --> 00:00:31,749
+their own branch.
+
+18
+00:00:31,954 --> 00:00:33,994
+None of them re reads your
+
+19
+00:00:33,994 --> 00:00:34,594
+conversation.
+
+20
+00:00:35,554 --> 00:00:37,354
+None inherits six failed attempts.
+
+21
+00:00:37,751 --> 00:00:40,791
+Security review still gets the strongest
+
+22
+00:00:40,791 --> 00:00:41,391
+tier.
+
+23
+00:00:41,831 --> 00:00:43,091
+No setting can lower it.
+
+24
+00:00:43,313 --> 00:00:46,433
+The scout's whole reconnaissance cost three
+
+25
+00:00:46,433 --> 00:00:46,983
+cents.
+
+26
+00:00:47,473 --> 00:00:48,093
+That is the bill,
+
+27
+00:00:48,813 --> 00:00:49,363
+not an estimate.
+
+28
+00:00:49,605 --> 00:00:51,645
+One chat and one model.
+
+29
+00:00:52,405 --> 00:00:52,965
+Or a team.
+
+30
+00:00:53,246 --> 00:00:55,406
+Terrain Open source.
+
+31
+00:00:56,026 --> 00:00:57,366
+The board is live in your
+
+32
+00:00:57,366 --> 00:00:57,916
+browser,
+
+33
+00:00:58,346 --> 00:00:59,026
+nothing to install.

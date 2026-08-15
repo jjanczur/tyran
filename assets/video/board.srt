@@ -1,0 +1,115 @@
+1
+00:00:00,300 --> 00:00:02,700
+Your agents have a Kanban board
+
+2
+00:00:02,700 --> 00:00:03,090
+now.
+
+3
+00:00:03,120 --> 00:00:05,180
+And they move the tickets themselves.
+
+4
+00:00:05,543 --> 00:00:06,523
+Ten lanes.
+
+5
+00:00:07,083 --> 00:00:09,443
+Every ticket sits in exactly one.
+
+6
+00:00:09,799 --> 00:00:11,119
+This one is blocked.
+
+7
+00:00:11,579 --> 00:00:13,119
+The board says for how long.
+
+8
+00:00:13,579 --> 00:00:15,119
+Halfway through,
+
+9
+00:00:16,159 --> 00:00:17,359
+you remember something.
+
+10
+00:00:18,139 --> 00:00:19,239
+So you say it.
+
+11
+00:00:22,419 --> 00:00:23,019
+And
+
+12
+00:00:23,178 --> 00:00:25,578
+It doesn't land in the scrollback.
+
+13
+00:00:26,318 --> 00:00:27,558
+It becomes a ticket.
+
+14
+00:00:27,879 --> 00:00:30,259
+Cued as T nine.
+
+15
+00:00:31,219 --> 00:00:31,959
+Written into the journal.
+
+16
+00:00:32,007 --> 00:00:34,287
+An agent finishes, and moves its
+
+17
+00:00:34,287 --> 00:00:35,387
+own card to done.
+
+18
+00:00:35,612 --> 00:00:37,312
+Hit a real decision,
+
+19
+00:00:37,972 --> 00:00:38,832
+and it asks you here.
+
+20
+00:00:38,987 --> 00:00:40,307
+Recommendation included. You answer on the board,
+
+21
+00:00:40,867 --> 00:00:41,607
+and it carries on.
+
+22
+00:00:41,985 --> 00:00:43,345
+Then the bill.
+
+23
+00:00:44,625 --> 00:00:46,165
+Four and a half million tokens.
+
+24
+00:00:46,590 --> 00:00:48,930
+The scout did the reconnaissance for
+
+25
+00:00:48,930 --> 00:00:49,690
+three cents.
+
+26
+00:00:50,077 --> 00:00:51,737
+This board is Tyran,
+
+27
+00:00:52,617 --> 00:00:53,317
+building Tyran.
+
+28
+00:00:53,676 --> 00:00:54,856
+Click it yourself.
+
+29
+00:00:55,696 --> 00:00:56,276
+Nothing to install.

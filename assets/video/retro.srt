@@ -1,0 +1,171 @@
+1
+00:00:00,300 --> 00:00:01,780
+Every ticket merged.
+
+2
+00:00:02,480 --> 00:00:03,340
+You close the session.
+
+3
+00:00:04,360 --> 00:00:04,960
+It refuses.
+
+4
+00:00:06,446 --> 00:00:08,466
+Once. The team has not run its
+
+5
+00:00:08,466 --> 00:00:09,366
+retrospective yet.
+
+6
+00:00:09,616 --> 00:00:12,036
+Say no and it records that.
+
+7
+00:00:12,556 --> 00:00:13,616
+It never asks twice.
+
+8
+00:00:14,045 --> 00:00:16,165
+The retro reads the record.
+
+9
+00:00:17,225 --> 00:00:17,775
+Ledger,
+
+10
+00:00:18,505 --> 00:00:19,055
+reports,
+
+11
+00:00:19,225 --> 00:00:19,775
+git history.
+
+12
+00:00:20,028 --> 00:00:22,028
+It asked you the same shallow
+
+13
+00:00:22,028 --> 00:00:23,428
+question three times.
+
+14
+00:00:23,667 --> 00:00:26,027
+So it edits that question out
+
+15
+00:00:26,027 --> 00:00:27,007
+of its own instructions.
+
+16
+00:00:27,566 --> 00:00:30,046
+Speak clearly at a natural pace
+
+17
+00:00:30,406 --> 00:00:32,346
+with quiet confidence and a little
+
+18
+00:00:32,346 --> 00:00:32,896
+warmth
+
+19
+00:00:33,806 --> 00:00:35,306
+You asked for the same thing
+
+20
+00:00:35,306 --> 00:00:36,466
+three times too.
+
+21
+00:00:36,565 --> 00:00:38,385
+That becomes a skill.
+
+22
+00:00:39,245 --> 00:00:40,825
+A skill has to earn its
+
+23
+00:00:40,825 --> 00:00:41,375
+context.
+
+24
+00:00:41,780 --> 00:00:44,280
+A rule that never helped gets
+
+25
+00:00:44,280 --> 00:00:45,360
+retired instead.
+
+26
+00:00:45,545 --> 00:00:46,705
+Speak clearly
+
+27
+00:00:47,345 --> 00:00:48,345
+at a natural pace
+
+28
+00:00:49,005 --> 00:00:51,085
+with quiet confidence and a little
+
+29
+00:00:51,085 --> 00:00:51,635
+warmth
+
+30
+00:00:52,885 --> 00:00:54,005
+Delivered in six handoffs.
+
+31
+00:00:55,045 --> 00:00:56,125
+Helped zero times.
+
+32
+00:00:57,305 --> 00:00:57,784
+Deleted.
+
+33
+00:00:57,814 --> 00:00:59,834
+Most candidates are rejected.
+
+34
+00:01:00,914 --> 00:01:02,654
+Changing nothing is a correct outcome.
+
+35
+00:01:03,082 --> 00:01:06,242
+The same failure three times becomes
+
+36
+00:01:06,242 --> 00:01:06,792
+knowledge,
+
+37
+00:01:07,322 --> 00:01:08,522
+in every handoff.
+
+38
+00:01:08,746 --> 00:01:11,226
+Five times, and it becomes law.
+
+39
+00:01:11,806 --> 00:01:13,146
+With the dates that earned it.
+
+40
+00:01:13,641 --> 00:01:15,541
+A team that writes down what
+
+41
+00:01:15,541 --> 00:01:16,091
+it learned.
+
+42
+00:01:16,461 --> 00:01:18,181
+Open the sandbox board.
+
+43
+00:01:19,041 --> 00:01:19,661
+Nothing to install.

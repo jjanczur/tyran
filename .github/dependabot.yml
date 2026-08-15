@@ -41,6 +41,14 @@ updates:
       default-days: 7
     commit-message:
       prefix: 'chore(site)'
+    ignore:
+      # TypeScript majors are held back by `@astrojs/check`, whose newest
+      # release (0.9.10) still declares `typescript: ^5.0.0 || ^6.0.0`. The
+      # Pages workflow runs `npm run check` — which is `astro check`, which is
+      # that package — so accepting TS 7 here breaks the deploy, not a test.
+      # Drop this entry the day @astrojs/check widens its peer range.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
     groups:
       # One PR for the doc-site toolchain instead of five. These move together
       # and are validated by one command (`npm run build`), so splitting them
@@ -50,3 +58,18 @@ updates:
           - 'astro'
           - '@astrojs/*'
           - 'sharp'
+      # Everything else in one PR, for the same reason and a sharper one: the
+      # rest of this tree is transitive, so its bumps are lockfile-only lines
+      # nobody can review individually anyway. Four such PRs sat open for ten
+      # days in August 2026 — not because any of them was contentious, but
+      # because four is a queue and one is a chore.
+      site-rest:
+        patterns:
+          - '*'
+      # Security fixes arrive on their own track (no cooldown, ungrouped by
+      # default), and that is where the four came from. Group them too: the
+      # advisories that land together are usually one upstream release.
+      site-security:
+        applies-to: security-updates
+        patterns:
+          - '*'

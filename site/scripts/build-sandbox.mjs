@@ -4,8 +4,15 @@
  *
  * A screenshot cannot be clicked and a GIF cannot be paused, so the docs ship
  * the REAL page — rendered by the same `scripts/board.mjs` an operator runs,
- * from two hand-written journals under `site/sandbox/`. Nothing here reaches
+ * from the hand-written journals under `site/sandbox/`. Nothing here reaches
  * into the plugin to change how it renders: whatever ships, ships here.
+ *
+ * The journals describe TYRAN'S OWN BUILD — the lanes, overnight mode, the
+ * Settings tab — because the page is trying to answer two questions at once
+ * ("what does this dashboard do" and "what is it like to work this way"), and
+ * invented initiatives about someone else's payment system answered only the
+ * first. Every finding, error and open question in them is one that actually
+ * happened while the thing was built.
  *
  * Two things a static copy has to solve.
  *
@@ -184,11 +191,17 @@ try {
 
   const anchor = '<main id="app"></main>';
   if (!html.includes(anchor)) throw new Error('the app mount point moved — the banner has nowhere to go');
+  // The counts are READ from the payload, never typed. This banner said "two
+  // invented initiatives" for one release after a third was added — the one
+  // sentence on the page whose whole job is to say what the page is.
+  const counts = payload.totals;
   html = html.replace(
     anchor,
-    '<div class="sandbox-note">This is a <b>sample board</b> from the Tyran docs, not a live one — ' +
-      'two invented initiatives, rendered by the same code your own board runs. ' +
-      'Click the tabs, filter the lanes, select a card. ' +
+    '<div class="sandbox-note">This is a <b>sample board</b> from the Tyran docs, not a live one. ' +
+      `Its ${counts.initiatives} initiatives are the ones that built the board you are looking at — the lanes, ` +
+      'overnight mode, and the Settings tab — written as journals and rendered by the same code your own ' +
+      `board runs. ${counts.agents} agents running, ${payload.asks.length} questions waiting on the operator, ` +
+      `${counts.merged} of ${counts.tickets} tickets merged. Click the tabs, filter the lanes, select a card. ` +
       '<a href="../board/">How the board works</a> · ' +
       '<a href="../getting-started/">Install Tyran</a></div>\n' + anchor,
   );

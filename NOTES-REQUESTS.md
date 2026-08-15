@@ -157,16 +157,21 @@ this study and both confirmed by reproduction:
   the whole Overnight section of the new Settings tab was dead text on every
   fresh install (0.1.24).
 
+Shipped since (0.1.25): the STOP half of item 1, item 4 (ticketless errors on
+the board) and item 5 (card ages). The machine-local half of item 1 —
+`paused-until.json`, `resume.json`, `usage.json` behind a `/run.json` route —
+is still open, and is what tells a stalled fleet apart from a scheduled pause.
+
 Ranked, still to build:
 
-1. **`/run.json`: is the run supposed to be running?** Three chips reading
+1. **`/run.json`: the machine-local half of "is the run supposed to be running"** Three chips reading
    "6 HOURS since last signal" cover four unrelated situations — an operator
    `STOP`, an overnight pause waiting on a reset, a dead resume watcher, and
    genuinely dead agents — and the board distinguishes none of them. Split by
-   doctrine: `.tyran/STOP` is committed repo state so it belongs in
-   `crossBoard()`'s payload; `paused-until.json` / `resume.json` / `usage.json`
-   are machine-local and gitignored, so they must be SERVED, on the same
-   argument `cost.json` already makes. `scheduleDecision`, `watcherAlive` and
+   doctrine, and the committed half is done: `.tyran/STOP` now travels in
+   `crossBoard()`'s payload. `paused-until.json` / `resume.json` /
+   `usage.json` are machine-local and gitignored, so they must be SERVED, on
+   the same argument `cost.json` already makes. `scheduleDecision`, `watcherAlive` and
    `humanWait` are already exported from `scripts/overnight.mjs`. **M.**
 2. **Blast radius on the waiting-on-you queue.** Asks sort by age alone, so
    the question holding up six tickets sits below the one holding up nothing.
@@ -181,13 +186,13 @@ Ranked, still to build:
    board. Keep a second map fed only by events another party produced
    (`report`, `review`, `merge`, `finding`, `lease.acquired` — not `gate`,
    which is conductor-written), show both ages. **M.**
-4. **A ticketless `error` event is invisible.** `fold()` collects
+4. ~~**A ticketless `error` event is invisible.**~~ SHIPPED 0.1.25. `fold()` collects
    `state.errors`; `crossBoard()` carries neither it nor
    `unknownErrorTickets`, so an agent logging a hard error shows nothing on the
    board that exists to say "not all is well". Needs a NEW key — `errors` in
    the board payload already means "this journal was unreadable", and one key
    with two meanings is the ADR-21 defect by name. **S.**
-5. **Cards say how long they have stood still.** `boardOf()` already puts
+5. ~~**Cards say how long they have stood still.**~~ SHIPPED 0.1.25. `boardOf()` already puts
    `since` on every card and the page never renders it. Client-side only. **S.**
 6. **Escalate the tier on a failed attempt.** A ticket that comes back
    `changes-requested` is re-spawned at the same tier and fails the same way,

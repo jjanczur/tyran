@@ -4,7 +4,7 @@ Written down because they arrived mid-run and would otherwise live only in a
 chat window — the exact failure this project exists to prevent. Newest first.
 Delete an entry when it ships; move it to a ticket when it gets picked up.
 
-## 1. Model fallback when a tier's limit is hit — NOT BUILT
+## 1. Model fallback when a tier's limit is hit — SHIPPED 2026-08-15 (0.1.26)
 
 **Observed live, 2026-08-14:** the `fable` tier hit its limit and subagents
 **failed** instead of dropping to `opus` and respawning. The weekly window was
@@ -25,10 +25,16 @@ Notes before anyone builds this:
 - Overnight mode already handles the SUBSCRIPTION window (pause, checkpoint,
   resume at reset). This is a different case: one tier is exhausted while the
   account still has budget, so the right move is substitution, not a pause.
-- Open question for the operator: should a fallback be allowed to move work
-  UP a tier (cheaper to more expensive) without asking? That spends more money
-  than the routing table promised, which is exactly the property the tier table
-  exists to make legible.
+- The open question — may a fallback move work UP a tier without asking? — is
+  ANSWERED, in the safe direction: it may not. `tiers.mjs --unavailable <alias>`
+  walks DOWN the ladder only, never above a role floor, never lowering the
+  effort, and exits 2 rather than substituting when every tier a role may use
+  is gone. A fallback therefore never spends more than the routing table
+  promised, which was the property that made the question worth asking.
+- What is still NOT built is the DETECTION. The failure surfaces inside a
+  subagent's API call, so the conductor still has to notice a dead agent and
+  decide the cause; `--unavailable` is the substitution it reaches for once it
+  has. Wiring a typed limit signal into that decision is the remaining half.
 
 ## 2. Config editing from the dashboard — SHIPPED 2026-08-15 (0.1.24)
 

@@ -6,10 +6,13 @@ written by `scripts/scan-repo.mjs` · validated by
 All per-repo configuration lives in `.tyran/config.yaml` — committed, human
 reviewable, written by `/tyran:setup` and editable by hand.
 
-**Or from the board.** `npx @jjanczur/tyran board --serve --write` puts every
-key below on a screen with a sentence explaining what it does, and writes your
-change back into this file one line at a time, comments intact — including the
-autonomy policy. See [the Settings tab](board.md#settings) for what it will and
+**Or from the board.** `npx @jjanczur/tyran board --serve --write` puts the
+cost profile, the deployment autonomy, the four model tiers, the validation
+commands, the shared zones and the whole `limits:` block on a screen, each with
+a sentence explaining what it does, and writes your change back into this file
+one line at a time with the comments intact — the autonomy policy too.
+`pricing:` and `main_writable_paths:` stay hand edits. See
+[the Settings tab](board.md#settings) for what it will and
 will not touch, and for why loosening a boundary there takes a second press.
 
 ## `.tyran/config.yaml`

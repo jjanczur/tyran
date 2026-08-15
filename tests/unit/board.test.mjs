@@ -445,6 +445,32 @@ test('board.json carries no absolute path, so two clones of one journal agree', 
   }
 });
 
+test('the page reloads on a timer it can stop, never on a meta refresh', () => {
+  // A real http-equiv refresh is scheduled by the browser when it PARSES the
+  // tag, and removing the node afterwards does not cancel it. The page has a
+  // Settings tab and an answer box now, so a reload it cannot stop destroys a
+  // half-typed value — and the code used to claim, in a comment, that removing
+  // the tag was enough.
+  //
+  // MUTANT: put `http-equiv="refresh"` back. Every other assertion about the
+  // page still passes, and the one thing that breaks is invisible from here:
+  // a value someone was typing.
+  const html = demoHtml();
+  assert.doesNotMatch(html, /http-equiv=["']refresh/i, 'the browser must schedule no navigation of its own');
+  assert.match(html, /<meta name="tyran-refresh" content="30">/, 'the interval is declared as inert markup');
+  assert.match(html, /meta\[name="tyran-refresh"\]/, 'and the client is what reads it');
+  assert.match(html, /clearTimeout\(refreshTimer\)/, 'the timer must be cancellable');
+});
+
+test('the sandbox strips the marker, and stripping it is all it takes', () => {
+  // MUTANT: leave the marker in. The published docs page would then reload
+  // every 30 seconds and snap a reader back to the first tab mid-click, which
+  // is exactly what the generator exists to prevent.
+  const src = readFileSync(fileURLToPath(new URL('../../site/scripts/build-sandbox.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /const refresh = '<meta name="tyran-refresh" content="30">/);
+  assert.match(src, /throw new Error\('the refresh tag moved/, 'a silent no-op here publishes a self-reloading page');
+});
+
 test('the client script actually parses, which nothing else in this suite proves', () => {
   // MUTANT: any stray backtick in CLIENT_JS. The whole client is one template
   // literal in board-html.mjs, so a backtick inside a COMMENT terminates it

@@ -570,7 +570,19 @@ export function applySheet(tyranDir, sheetText, { dryRun = false } = {}) {
 /** One ask's two appends, or the reason nothing was written for it. A lock
  * this run could not take is reported like any other unwritten ask: the run
  * that holds it is writing the same sitting, and a thrown error here would
- * abandon the asks after this one without saying so. */
+ * abandon the asks after this one without saying so.
+ *
+ * Exported because the board answers questions too. A second implementation
+ * there would be a second place that decides what "answering" means — and the
+ * two properties that matter are both in here: the re-check of `askState`
+ * INSIDE the lock, so a question answered in a terminal thirty seconds ago is
+ * not answered twice, and decision-before-gate, so a crash between the two
+ * leaves a visible orphan decision rather than a closed question with no
+ * answer. */
+export function answerOne(ask, verdict) {
+  return sittingOutcome(ask, verdict);
+}
+
 function sittingOutcome(ask, verdict) {
   try {
     return withSittingLock(ask.journal, () => {

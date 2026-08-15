@@ -135,9 +135,13 @@ test('resolveAll covers every role and reports tier, model and effort', () => {
   const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
   const all = resolveAll(doc, 'balanced');
   assert.deepEqual(Object.keys(all).sort(), [...ROLES].sort());
-  assert.deepEqual(all.scout, { tier: 'cheap', model: 'haiku', effort: 'low', floored: false });
-  assert.deepEqual(all['security-review'], { tier: 'top', model: 'fable', effort: 'max', floored: false });
-  assert.deepEqual(all.implementer, { tier: 'work', model: 'sonnet', effort: 'medium', floored: false });
+  // `fell_from` is null on every ordinary resolution and names the tier a
+  // fallback came down FROM. Pinned in the shape rather than tested only
+  // where it fires: a consumer that reads it must be able to rely on it
+  // always being present.
+  assert.deepEqual(all.scout, { tier: 'cheap', model: 'haiku', effort: 'low', floored: false, fell_from: null });
+  assert.deepEqual(all['security-review'], { tier: 'top', model: 'fable', effort: 'max', floored: false, fell_from: null });
+  assert.deepEqual(all.implementer, { tier: 'work', model: 'sonnet', effort: 'medium', floored: false, fell_from: null });
 });
 
 // --- dynamic overrides: the conductor adjusting a single subtask -----------
@@ -209,6 +213,7 @@ test('CLI --field selects what lands on stdout', () => {
     model: 'haiku',
     effort: 'low',
     floored: false,
+    fell_from: null,
   });
 });
 
@@ -285,4 +290,86 @@ test('the shipped template resolves for every role — CI would otherwise ship a
     const all = resolveAll(doc, profile);
     for (const role of ROLES) assert.ok(all[role].model.length > 0, `${role}/${profile}`);
   }
+});
+
+// --- fallback: a tier whose model is unavailable ---------------------------
+
+test('a fallback walks DOWN the ladder, never up', () => {
+  // The direction is the whole answer to the question this was blocked on.
+  // Up would spend more than the routing table promised, silently, at the
+  // moment nobody is watching — and the incident that asked for this was the
+  // strongest tier hitting its limit while the one below it had capacity.
+  // MUTANT: search upward. `acceptance` then resolves to nothing at all,
+  // because `top` is the last tier — the failure is silent in the other
+  // direction, where a role in the middle quietly gets a costlier model.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const fell = resolveModel(doc, 'acceptance', 'balanced', 'normal', { unavailable: ['fable'] });
+  assert.equal(fell.tier, 'deep');
+  assert.equal(fell.model, 'opus');
+  assert.equal(fell.fell_from, 'top');
+  // Effort follows the ORIGINAL tier: "this needs deep reasoning" did not stop
+  // being true because a model ran out of capacity, and dropping both dials is
+  // a second downgrade nobody asked for.
+  assert.equal(fell.effort, 'xhigh');
+});
+
+test('a fallback skips every unavailable tier and stops at the first that is not', () => {
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const fell = resolveModel(doc, 'acceptance', 'balanced', 'normal', { unavailable: ['fable', 'opus'] });
+  assert.equal(fell.tier, 'work');
+  assert.equal(fell.model, 'sonnet');
+  assert.equal(fell.fell_from, 'top');
+});
+
+test('a role floor is not lowered by a fallback', () => {
+  // A security review that ran on the cheapest model is not a security review.
+  // MUTANT: start the walk at index 0 instead of the floor — the most
+  // consequential judgement in the system silently drops three tiers.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  assert.throws(
+    () => resolveModel(doc, 'security-review', 'balanced', 'normal', { unavailable: ['fable'] }),
+    /every tier "security-review" may use is unavailable/,
+  );
+  assert.throws(
+    () => resolveModel(doc, 'security-review', 'balanced', 'normal', { unavailable: ['fable'] }),
+    /floor for this role is "top"/,
+  );
+});
+
+test('exhausting the ladder is a pause, not a substitution', () => {
+  // MUTANT: return the bottom tier anyway. Work then runs on a model the
+  // caller has just been told is unavailable, and fails again for the same
+  // reason, having spent another spawn to find out.
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  assert.throws(
+    () => resolveModel(doc, 'implementer', 'balanced', 'normal', { unavailable: ['sonnet', 'haiku'] }),
+    /nothing to fall back to.*pause, not a substitution/s,
+  );
+});
+
+test('an unavailable model that is not the resolved one changes nothing', () => {
+  const doc = { tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' } };
+  const same = resolveModel(doc, 'implementer', 'balanced', 'normal', { unavailable: ['haiku', 'fable'] });
+  assert.equal(same.tier, 'work');
+  assert.equal(same.fell_from, null, 'a resolution that did not move must not claim it fell');
+});
+
+test('the fallback is announced on stderr, because a weaker model is a fact about the run', () => {
+  // MUTANT: drop the notice. The routing table then quietly means something
+  // other than what it says, which is the one thing this whole file exists to
+  // prevent.
+  const dir = repoWithConfig();
+  const out = execFileSync(process.execPath, [SCRIPT, '--role', 'acceptance', '--unavailable', 'fable', '--field', 'json'],
+    { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.equal(JSON.parse(out.trim()).tier, 'deep');
+});
+
+test('--unavailable is repeatable', () => {
+  const dir = repoWithConfig();
+  const out = execFileSync(
+    process.execPath,
+    [SCRIPT, '--role', 'acceptance', '--unavailable', 'fable', '--unavailable', 'opus', '--field', 'tier'],
+    { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  assert.equal(out.trim(), 'work');
 });

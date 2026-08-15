@@ -1,5 +1,116 @@
 # Changelog
 
+## 0.1.26 — 2026-08-15
+
+### Answer a question from the board
+
+The last context switch in the operator loop is gone. Every question in the
+**Waiting on you** tab now carries a box: type an answer and press **Answer**,
+or press **Take the default** on a question that records one. The three
+`answer render / edit / apply` commands still work and stay printed on the tab —
+the box is a convenience, and a board opened over `file://` or without
+`--write` has to leave you somewhere to go.
+
+The request carries exactly two things: **which** ask, and your words. The
+question, the recorded default, the ticket and the gate id are all read back
+out of the journal by the server — the same guarantee the answer sheet makes,
+for the same reason. The append is `answerOne`, the function `answer apply`
+already calls, unwrapped: both routes produce byte-identical events, the gate
+is re-checked INSIDE the journal's write lock so a question closed in a
+terminal thirty seconds ago cannot be closed twice, and the decision is written
+before the gate.
+
+Each card also says which kind of question it is, and that costs no new event
+type: **decision · a default is recorded** means saying nothing has a safe
+outcome; **blocking · no safe default** means it waits for you. It is the same
+distinction that already makes the answer sheet sort no-default-first.
+
+### A tier that runs out of capacity falls to the next one down
+
+Measured on a real run: the strongest tier hit its limit and the subagents
+**failed** rather than finishing on the tier below, which had capacity the
+whole time.
+
+```bash
+node scripts/tiers.mjs --role acceptance --unavailable fable --field json
+# tiers: FELL BACK top -> deep because the top model is unavailable.
+```
+
+**Down the ladder, never up** — which is the answer to the question this was
+blocked on. Climbing would spend more than the routing table promised,
+silently, at exactly the moment nobody is watching. Three things the fall does
+not do: it does not lower the **effort** (that judgement did not change because
+a model ran out of capacity), it does not cross a **role floor** (a security
+review on the cheapest model is not a security review), and it does not
+**pretend** — the substitution is announced, and `fell_from` records it. When
+every tier a role may use is unavailable, it exits 2 rather than returning the
+bottom of the ladder: that is a pause, not a substitution, and overnight mode
+is what knows how to wait.
+
+### Twelve confirmed findings from an adversarial review of 0.1.24 and 0.1.25
+
+Five lenses attacked the shipped code and each finding was re-attacked
+independently. Two were serious:
+
+- **A config with no `limits:` block killed the whole Settings tab.** That
+  block is optional and every install set up before 0.1.24 has none, so
+  `resolvePath` returned null, `readAt` tried to iterate it, and the tab
+  rendered "the board server did not answer" while the server answered every
+  request. Every write on such a repo was an HTTP 500 in the terminal the docs
+  designate as the audit trail.
+- **The page could reload under a half-typed value.** A `meta http-equiv=refresh`
+  is scheduled by the browser when it parses the tag, and REMOVING THE NODE
+  DOES NOT CANCEL IT — the code sincerely believed otherwise, in a comment. The
+  page now carries an inert marker only its own script reads, so the single
+  reload path is a timer it can actually stop.
+
+And:
+
+- **An unreadable journal wrote an absolute path** — a home directory and a
+  username — into `board.json`, which is committed and compared byte for byte,
+  so it also failed `--check` on every other machine. Now the error code and a
+  repo-relative path.
+- **An initiative whose directory could not be read vanished** from the board
+  with nothing said; the totals just went down by one. `existsSync` cannot tell
+  "there is no journal here" from "I cannot tell whether there is one".
+- **`--dir` pointed at the repo root silently succeeded**, creating a `state/`
+  directory in the wrong place and reporting that all was well about a repo
+  whose real journals sat one level down.
+- **The settings write had no compare-and-swap.** Two boards on one directory,
+  or a board and a terminal, could discard each other's change with both
+  reporting success.
+- Plus a wrong number in the CHANGELOG, an overclaim in `docs/configuration.md`
+  (`pricing:` and `main_writable_paths:` have no knob), a lane emptied by the
+  filter showing no placeholder, a stale "Four tabs" comment, one of ten lanes
+  unaccounted for in the stalled-card prose, and two unverifiable claims about
+  the sandbox.
+
+### yaml-lite: the writer and the reader disagreed about numbers
+
+`formatScalar` required a digit before the decimal point and `parseScalar` did
+not, so the **string** `.5` was written unquoted and read back as the **number**
+0.5. Both now use the reader's two patterns. This was found by `yaml-patch`'s
+round-trip proof — the guard whose comment claimed no input was known to reach
+it. That claim is now corrected rather than repeated.
+
+A leading **BOM** is also handled: `trimStart` counts it as whitespace, so it
+read as one column of indentation and the parser rejected the whole file with a
+complaint about a line the operator could see nothing wrong with.
+
+Three more in the patcher, each of which wrote or refused the wrong thing: a
+key was located with `indexOf(':')` rather than the parser's own rule (so `a`
+landed on the `a:b` line), a path ending in an integer dropped the list item's
+dash, and replacing a list that is the FIRST key of a sequence item deleted the
+item's sibling keys.
+
+### The backtick guard
+
+The whole browser client is one template literal, so a backtick anywhere inside
+it — including in a comment — ends the literal and the page stops loading. It
+happened four times in one sitting. The parse test caught it every time and
+could never say so: it reports whatever identifier followed the stray backtick.
+A new guard reads the source as text, imports nothing, and names the line.
+
 ## 0.1.25 — 2026-08-15
 
 ### The sandbox is now Tyran building Tyran
@@ -17,8 +128,8 @@ browser verbatim; the hook payload does not carry `rate_limits` and a plugin
 cannot install a statusline. Every logged error is one that happened, including
 the backtick in a comment that terminated the client's template literal.
 
-All ten lanes are populated, five agents run at ages from two minutes to three
-hours, two questions wait on the operator, and the banner's counts are read
+All ten lanes are populated, five agents run at ages from about twenty minutes
+to three hours, two questions wait on the operator, and the banner's counts are read
 from the payload rather than typed — it said "two invented initiatives" for a
 release after a third was added.
 
@@ -30,8 +141,9 @@ release after a third was added.
   was wrong on the one page whose job is to show what the product looks like.
 - **The test that was supposed to catch that validated nothing.**
   `validateJournal` takes a file PATH and the test handed it an array of
-  events, so it read an empty journal and returned `ok`. It has been passing
-  against journals carrying thirteen real errors.
+  events, so it read an empty journal and returned `ok` — it was asserting
+  that nothing had no errors. The replacement journals tripped it thirteen
+  times on the first honest run.
 - **An `error` event that named a ticket produced two rows on the board**, one
   from `state.errors` and one from `unknownErrorTickets`. The ticket now
   travels on the error itself, where a consumer that wants both can have both
@@ -87,7 +199,7 @@ the difference the flag exists to make.
 comments were expendable because the screen could carry the explanations. That
 turned out not to be necessary: `scripts/yaml-patch.mjs` rewrites the line
 that owns a value rather than round-tripping the document through a
-serializer, so `templates/config.yaml` keeps all 60 of its comment lines — the
+serializer, so `templates/config.yaml` keeps all 63 of its comment lines — the
 only place anyone is told that bare `off` is the YAML boolean false, which is
 also the value that would have silently changed meaning had this been done the
 obvious way.

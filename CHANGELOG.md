@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.1.28 — 2026-08-15
+
+A maintenance release: the documentation site's dependencies, and three
+numbers in the prose that had gone stale because nothing was watching them.
+
+### Five vulnerabilities, now zero
+
+`npm audit` in `site/` reported five, three of them high, all transitive:
+nanoid's infinite loop on a zero size, js-yaml, fast-uri, dompurify, and
+mermaid's prototype pollution. `npm update` and `npm audit fix` clear all five
+and carry astro 7.1.4 to 7.2.2, starlight 0.41.4 to 0.41.7 and playwright
+1.62.0 to 1.62.1. Lockfile only — no range in `package.json` moved, and the
+plugin itself still has zero runtime dependencies, which is the property that
+keeps this whole section confined to `site/`.
+
+Verified against the built site rather than asserted: `astro check` reports 0
+errors over 27 files, the build produces 18 pages, 488 of 488 root-absolute
+URLs carry the `/tyran` base prefix, the browser pass finds 0 broken links and
+0 console errors across every page, and the worst mermaid contrast is 5.68:1
+against a floor of 3.
+
+**TypeScript stays on 6.** `@astrojs/check` is at its newest release, 0.9.10,
+and still declares `typescript: ^5.0.0 || ^6.0.0` — and `astro check` is what
+the Pages workflow runs, so accepting TS 7 breaks the deploy rather than a
+test. Dependabot now ignores that major with the reason written beside it.
+
+The four Dependabot PRs this closes had been open for ten days. They were
+*security* updates, which arrive ungrouped and without the seven-day cooldown,
+so four one-line lockfile changes became four review cycles nobody ran. Both
+tracks are grouped now: one chore a month instead of a queue.
+
+### Three numbers that were wrong
+
+The house rule is that a number in the prose is a claim, verified against the
+thing it describes. These three were claims nothing verified.
+
+- The README said **1314 unit tests**; the suite has 1405.
+  `docs-claims.test.mjs` pins every such claim on the docs surfaces, but each
+  of those is about ONE test file and is counted by running it. The README's
+  is about the whole suite, which no unit test can count without running the
+  suite from inside itself. CI now compares it against the full run it already
+  performs for the skipped-test check, so the guard costs nothing.
+- The README said the board has **four tabs**. It has had five since 0.1.24,
+  and `docs/board.md` said five throughout. One surface moved, the other did
+  not — the failure the two-surfaces rule exists to prevent, on the one
+  surface that rule does not name.
+- `templates/config.yaml` keeps **63** comment lines out of 90, not 60.
+
+`assets/board-demo.gif` was recorded at 0.1.22 and moves through four tabs, so
+it predates the Settings tab. Its alt text no longer claims to show the whole
+page; the re-record needs a live board and a screen recorder, so it is written
+down as an open item rather than quietly left wrong.
+
+### The browser check had been shrinking
+
+`site/scripts/check-browser.mjs` carried a hand-written list of 14 slugs while
+the site had grown to 17 pages. The three it missed — board, overnight, cost —
+were the three newest, which is to say the likeliest to carry a relative link
+nobody had clicked. It reads the content directory now, so the list cannot
+fall behind again. All 17 pass, 18 internal links, 0 broken. A check whose
+coverage silently shrinks as the thing it checks grows is worse than no check,
+because it still prints OK.
+
+Astro 7's `preview` daemonizes and returns, so the `npm run preview -- &` in
+both check-script headers no longer described what happens: the server
+outlives the shell that started it and needs `astro preview stop`.
+
 ## 0.1.27 — 2026-08-15
 
 The last four items of the munder-difflin plan, and the half of the model

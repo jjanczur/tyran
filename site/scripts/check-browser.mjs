@@ -2,9 +2,13 @@
  * Browser pass over the built site: navigation, console, links, the enforced
  * dark theme, search, and every custom component's rendered markup.
  *
- * Prerequisite: a preview server on port 4399.
- *   npm run build && npm run preview -- --port 4399 &
+ * Prerequisite: a preview server on port 4399. Astro 7's `preview` daemonizes
+ * itself and returns, so there is no `&` and no job to kill — stop it by name
+ * or it outlives the shell that started it.
+ *   npm run build
+ *   npx astro preview --port 4399
  *   npm run check:browser
+ *   npx astro preview stop
  *
  * Not wired into the Pages workflow on purpose: it needs a running server and
  * a browser, and putting a flaky dependency on the DEPLOY path would mean a
@@ -12,24 +16,29 @@
  * non-flaky half of what it proves (the base prefix) IS in CI as
  * `check-base-prefix.mjs`.
  */
+import { readdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
 const BASE = 'http://localhost:4399/tyran';
+
+// Read from the content directory rather than a list kept here. The list was
+// hand-maintained and fell three pages behind — `board`, `overnight` and
+// `cost`, which is to say the three newest pages, the ones most likely to
+// carry a relative link nobody has clicked. A check whose coverage silently
+// shrinks as the thing it checks grows is worse than no check, because it
+// still prints OK.
+const DOCS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'content', 'docs');
 const SLUGS = [
+  // The landing page is `src/pages/index.astro` — not part of the docs
+  // collection, so it is named here and everything else is discovered.
   '',
-  'getting-started',
-  'architecture',
-  'configuration',
-  'skills',
-  'agents',
-  'self-improvement',
-  'hooks',
-  'evidence-gate',
-  'policy-gate',
-  'journal',
-  'projections',
-  'doctor',
-  'faq',
+  ...readdirSync(DOCS_DIR)
+    .filter((f) => /\.mdx?$/.test(f))
+    .map((f) => f.replace(/\.mdx?$/, ''))
+    .sort(),
 ];
 
 const browser = await chromium.launch();

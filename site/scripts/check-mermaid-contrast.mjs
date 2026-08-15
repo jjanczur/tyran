@@ -7,9 +7,13 @@
  * mermaid emitted before the CSS layer existed) scores 1.00 here and cannot be
  * mistaken for a pass.
  *
- * Prerequisite: a preview server on port 4399.
- *   npm run build && npm run preview -- --port 4399 &
+ * Prerequisite: a preview server on port 4399. Astro 7's `preview` daemonizes
+ * itself and returns, so there is no `&` and no job to kill — stop it by name
+ * or it outlives the shell that started it.
+ *   npm run build
+ *   npx astro preview --port 4399
  *   npm run check:contrast
+ *   npx astro preview stop
  */
 import { chromium } from 'playwright';
 

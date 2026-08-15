@@ -59,7 +59,7 @@ before it happens, and a commit carrying a secret is refused. Mechanisms rather
 than instructions — which is the whole argument.
 
 <p align="center">
-  <img src="assets/board-demo.gif" width="100%" alt="The Tyran dashboard, recorded live, moving through its four tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost">
+  <img src="assets/board-demo.gif" width="100%" alt="The Tyran dashboard, recorded live, moving through four of its tabs: Overview with what is waiting on you and the strip of running agents each showing the time since it last signalled; Board, where selecting a ticket opens its initiative, agents and spend; Waiting on you, the open questions above the commands that answer them; and Spend, toggling the same split between tokens and cost">
 </p>
 
 <p align="center">
@@ -204,7 +204,7 @@ open .tyran/state/board.html      # xdg-open on Linux, start on Windows
 — and inside a session you need neither command, because **`/tyran:status`
 regenerates the board and tells you where it is.**
 
-Four tabs, because the page answers four questions:
+Five tabs, because the page answers five questions:
 
 - **Overview** — what is waiting on you, agents running, progress, and what
   needs a human (blocked lanes **and** blocked agents); then the agent strip,
@@ -220,6 +220,8 @@ Four tabs, because the page answers four questions:
 - **Spend** — tokens, the amount under your rate card, the conductor's share, a
   composition bar across input / cache write / cache read / output, and three
   ranked charts (by model, agent type, ticket) with a tokens/cost toggle.
+- **Settings** — what Tyran is configured to do, every knob with the sentence
+  that explains it. Read-only until you pass `--write`, as above.
 
 Spend is served rather than embedded, so it is the one thing missing when you
 open the file directly — [the board](https://jjanczur.github.io/tyran/board/)
@@ -257,7 +259,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1314 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1405 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

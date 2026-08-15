@@ -17,7 +17,31 @@ locks/
 # Playwright MCP scratch output (snapshots, screenshots, console logs)
 .playwright-mcp/
 
-# Marketing video production — Hyperframes projects, generated VO/art, renders.
-# Untracked on purpose: .gitattributes declares no video/audio extension as
-# binary, so a tracked .mp4/.wav/.srt would fail scan-control-chars (ADR-19).
-video/
+# Marketing video production (video/).
+#
+# The SOURCE is tracked — compositions, pipeline, scripts, storyboards — because
+# it is text and it is the only way a cut gets rebuilt. The MEDIA is not:
+# renders, voiceover and page captures come to roughly 430 MB, and this repo is
+# what `/plugin marketplace add jjanczur/tyran` clones, so every byte committed
+# here is a byte downloaded by every single install of the plugin.
+#
+# What viewers actually need lives in assets/video/ (~3.6 MB of posters, the
+# silent loop and one sting). The full cuts are on YouTube. `.gitattributes`
+# declares *.mp4 binary so the tracked ones clear scan-control-chars (ADR-19);
+# no audio extension is declared, so a stray .wav still fails loudly.
+video/assets/
+video/out/
+# Per-project scaffolding `hyperframes init` regenerates. The authored files
+# (index.html, meta.json and the caption data) are tracked; the boilerplate
+# CLAUDE.md/AGENTS.md pair alone is 14 KB duplicated into every project.
+video/projects/*/CLAUDE.md
+video/projects/*/AGENTS.md
+video/projects/*/package.json
+video/projects/*/hyperframes.json
+video/projects/*/assets/
+video/projects/*/renders/
+video/projects/*/snapshots/
+video/projects/*/node_modules/
+video/.agents/
+video/.claude/
+video/skills-lock.json

@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Tyran — it learns you (9:16)</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #141210; }
+
+      :root {
+        --bg: #141210; --bg-raised: #1c1a16; --bg-sunken: #100e0c;
+        --btext: #cec7ba; --bheading: #ece5d7; --bmuted: #8f8779;
+        --hair: #332e27;
+        --brass: #a8863c; --brass-bright: #cfae63; --brass-low: #221c11; --brass-edge: #5d4c22;
+        --steel: #7d9ea9; --steel-bright: #9dbcc6;
+        --clay: #c07a70; --clay-bright: #d9998f;
+        --sage: #88a06a; --sage-bright: #a3ba86;
+        --gold: #d4a017; --gold-bright: #e8bc4d; --glow: #8fd8ea;
+        --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        --cap-cold: #f5efe3; --cap-hot: #e8bc4d;
+      }
+
+      #ground { position: absolute; inset: 0; background: var(--bg); }
+      #wash { position: absolute; inset: 0;
+        background: radial-gradient(56% 24% at 50% 14%, rgba(143,216,234,.10) 0%, rgba(143,216,234,0) 74%); }
+      #grain { position: absolute; inset: 0; opacity: .05;
+        background-image: radial-gradient(rgba(245,239,227,.9) .5px, transparent .6px); background-size: 3px 3px; }
+      .clip { position: absolute; inset: 0; }
+
+      /* the desk's brass rail — present the whole film */
+      #rail { position: absolute; left: 40px; top: 150px; bottom: 700px; width: 3px;
+        background: linear-gradient(180deg, rgba(168,134,60,0), var(--brass) 14%, var(--brass) 86%, rgba(168,134,60,0)); }
+
+      #stage { position: absolute; left: 0; right: 0; top: 170px; height: 1010px; transform-origin: 50% 40%; }
+
+      /* ---- 1..3 · the gate refuses the session close ------------------------- */
+      .term { position: absolute; left: 70px; right: 60px; top: 40px;
+        background: var(--bg-sunken); border: 1px solid #5a2f2c; border-radius: 13px; overflow: hidden; }
+      .term__bar { display: flex; align-items: center; gap: 11px; padding: 16px 22px;
+        border-bottom: 1px solid var(--hair); background: #171410; }
+      .dot { display: block; width: 13px; height: 13px; border-radius: 50%; background: #2f2a24; }
+      .term__t { margin-left: 10px; font: 400 22px var(--mono); color: var(--bmuted); }
+      .term__src { margin-left: auto; font: 400 20px var(--mono); color: var(--bmuted); }
+      .term__b { padding: 26px 26px 30px; font: 400 25px/1.62 var(--mono); color: var(--bmuted); }
+      .term__b .l { display: block; white-space: pre-wrap; }
+      .clayx { color: var(--clay); }
+      #concession { display: block; margin-top: 18px; color: var(--sage-bright); opacity: 0; }
+      #skipped-receipt { display: block; margin-top: 10px; font-size: 22px; color: var(--bmuted); opacity: 0; }
+
+      /* ---- 4..8 · the journal column and what the retro does with it --------- */
+      #jcol { position: absolute; left: 90px; right: 80px; top: 40px;
+        background: var(--bg-sunken); border: 1px solid var(--hair); border-radius: 13px;
+        padding: 24px 24px; overflow: hidden; }
+      #jcol h4 { font: 400 23px var(--mono); color: var(--glow); margin-bottom: 18px; letter-spacing: .04em; }
+      .jl { display: block; font: 400 22px/1.5 var(--mono); color: var(--btext);
+        border: 1px solid transparent; border-radius: 6px; padding: 8px 10px; margin-bottom: 7px; }
+      .jl em { color: var(--bmuted); font-style: normal; }
+      #scanline { position: absolute; left: 0; right: 0; top: 0; height: 150px; pointer-events: none;
+        background: linear-gradient(180deg, rgba(143,216,234,0), rgba(143,216,234,.20) 50%, rgba(143,216,234,0)); }
+      #ask-tally { display: block; margin-top: 14px; text-align: right;
+        font: 700 26px var(--mono); color: var(--brass-bright); opacity: 0; }
+
+      /* the diff — the EDIT, not the addition */
+      #diff { position: absolute; left: 90px; right: 80px; top: 660px;
+        background: var(--bg-sunken); border: 1px solid var(--hair); border-radius: 12px; padding: 22px 24px; }
+      #diff .f { display: block; font: 400 21px var(--mono); color: var(--bmuted); margin-bottom: 14px; }
+      .dl { display: block; position: relative; font: 400 23px/1.5 var(--mono); padding: 6px 8px; }
+      #diff-minus { color: var(--clay); }
+      #diff-minus .strike { position: absolute; left: 8px; top: 50%; height: 2px; width: 92%;
+        background: var(--clay); transform-origin: 0 50%; }
+      #diff-plus { color: var(--sage-bright); }
+
+      /* the skill card that three requests become */
+      #skill-card { position: absolute; left: 150px; right: 140px; top: 700px;
+        background: var(--brass-low); border: 2px solid var(--brass-edge); border-radius: 12px;
+        padding: 22px 26px; opacity: 0; }
+      #skill-card .n { display: block; font: 700 30px var(--mono); color: var(--brass-bright); margin-bottom: 8px; }
+      #skill-card .d { display: block; font: 400 22px/1.4 var(--mono); color: var(--btext); }
+
+      /* ---- 9..10 · the knowledge panel, audited ------------------------------ */
+      #knowledge { position: absolute; left: 80px; right: 70px; top: 60px;
+        background: var(--bg-raised); border: 1px solid var(--hair); border-radius: 13px; padding: 24px 26px; }
+      #knowledge .hd { display: flex; align-items: baseline; margin-bottom: 20px; }
+      #knowledge .hd .t { font: 400 28px var(--mono); color: var(--bheading); }
+      #entry-count { margin-left: auto; font: 400 26px var(--mono); color: var(--brass-bright);
+        border: 1px solid var(--hair); border-radius: 6px; padding: 6px 14px; }
+      .kr { display: flex; align-items: center; gap: 14px; position: relative;
+        font: 400 22px var(--mono); color: var(--btext); padding: 12px 10px;
+        border-bottom: 1px solid #241f19; }
+      .kr .id { display: block; width: 74px; color: var(--bmuted); }
+      .kr .tx { display: block; flex: 1; }
+      .kr .ct { display: block; width: 210px; text-align: right; color: var(--bmuted); font-size: 20px; }
+      #k07 .strike { position: absolute; left: 10px; top: 50%; height: 2px; width: 94%;
+        background: var(--clay); transform-origin: 0 50%; }
+      #opened-at { display: block; margin-top: 16px; font: 400 21px var(--mono); color: var(--bmuted); opacity: 0; }
+
+      /* ---- 11 · the filter, drawn -------------------------------------------- */
+      #filter { position: absolute; left: 150px; right: 140px; top: 120px; }
+      #candidate { display: block; background: var(--bg-raised); border: 1px solid var(--brass-edge);
+        border-radius: 10px; padding: 18px 22px; font: 400 25px var(--mono); color: var(--brass-bright);
+        margin-bottom: 26px; }
+      .gate { display: flex; align-items: center; gap: 16px; border: 1px solid var(--hair);
+        border-radius: 9px; padding: 16px 20px; margin-bottom: 14px;
+        font: 400 24px var(--mono); color: var(--bmuted); }
+      .gate .v { margin-left: auto; font-weight: 700; }
+      #verdict-none { display: block; margin-top: 22px; text-align: center;
+        font: 400 30px var(--display); color: var(--sage-bright); opacity: 0; }
+
+      /* ---- 12..13 · the graduation ladder ------------------------------------ */
+      #ladder { position: absolute; left: 110px; right: 100px; top: 130px; height: 560px; }
+      .shelf { position: absolute; left: 0; right: 0; height: 1px; background: var(--hair); }
+      .shelf span { position: absolute; left: 0; top: -34px; font: 400 22px var(--mono); color: var(--bmuted); }
+      #sh-1 { top: 480px; } #sh-2 { top: 300px; } #sh-3 { top: 120px; }
+      #ladder-card { position: absolute; left: 220px; top: 400px; width: 420px;
+        background: var(--bg-raised); border: 1px solid var(--brass-edge); border-radius: 10px;
+        padding: 16px 18px; font: 400 22px var(--mono); color: var(--brass-bright); }
+      #dots { position: absolute; left: 0; top: 520px; display: flex; gap: 14px; }
+      .dot5 { display: block; width: 22px; height: 22px; border-radius: 50%; background: var(--clay); }
+
+      /* ---- 15 · end card ------------------------------------------------------ */
+      #end { position: absolute; left: 0; right: 0; top: 500px; text-align: center; }
+      #mark { display: inline-block; width: 170px; height: 170px; color: var(--gold);
+        filter: drop-shadow(0 0 30px rgba(212,160,23,.32)); }
+      #wordmark { display: block; margin-top: 22px; font: 400 90px/1 var(--display);
+        letter-spacing: .2em; text-indent: .2em; color: #f5efe3; }
+      #url { display: block; margin-top: 26px; font: 400 36px var(--mono); color: var(--gold-bright); }
+      #url-caret { display: inline-block; width: 13px; height: 28px; vertical-align: -5px;
+        background: var(--glow); margin-left: 5px; }
+      #nothing { display: block; margin-top: 16px; font: 400 27px var(--font); color: var(--bmuted); }
+
+      #captions { position: absolute; left: 74px; right: 74px; top: 1255px; height: 320px; }
+      .hf-cue { position: absolute; left: 0; right: 0; top: 0; text-align: center;
+        font: 800 60px/1.24 var(--font); color: var(--cap-cold);
+        text-shadow: 0 5px 26px rgba(0,0,0,.94), 0 0 2px rgba(0,0,0,.85); }
+      .hf-w { display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="82.08"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div id="bg" class="clip" data-start="0" data-duration="82.08" data-track-index="0">
+        <div id="ground"></div>
+        <div id="wash"></div>
+      </div>
+      <div id="rail-layer" class="clip" data-start="0" data-duration="76.2" data-track-index="1">
+        <div id="rail"></div>
+      </div>
+
+      <!-- 1..3 · the retro gate refuses the close · 0.30–13.49 -->
+      <div id="s1" class="clip" data-start="0" data-duration="14.0" data-track-index="2">
+        <div id="stage"><div class="term">
+          <div class="term__bar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="term__t">Stop → REFUSED</span>
+            <span class="term__src">retro-gate.mjs</span>
+          </div>
+          <div class="term__b">
+            <span class="l" id="refusal-body">tyran: initiative "the-board" has all 7 of its tickets merged and <span class="clayx">no retrospective recorded</span> since the last merge.</span>
+            <span class="l">&nbsp;</span>
+            <span class="l">This is the only loop through which Tyran learns from an initiative instead of repeating it.</span>
+            <span class="l" id="concession">Deciding NOT to run one is a legitimate answer.</span>
+            <span class="l" id="skipped-receipt">journal: retro.entry kind="skipped" · you will not be asked twice</span>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 4..6 · the read, the repeated question, the edit · 14.04–26.97 -->
+      <div id="s2" class="clip" data-start="13.8" data-duration="13.5" data-track-index="3">
+        <div id="stage">
+          <div id="jcol">
+            <h4>.tyran/state/the-board/journal.jsonl</h4>
+            <span class="jl">ticket.merged <em>T-5 · the waiting-on-you queue</em></span>
+            <span class="jl ask">ask.raised <em>“run the full suite or just the changed files?”</em></span>
+            <span class="jl">finding <em>F-12 · cost.mjs dedupes on requestId</em></span>
+            <span class="jl ask">ask.raised <em>“run the full suite or just the changed files?”</em></span>
+            <span class="jl">review <em>APPROVE · T-6</em></span>
+            <span class="jl ask">ask.raised <em>“run the full suite or just the changed files?”</em></span>
+            <span class="jl">ticket.merged <em>T-7 · the spend ledger</em></span>
+            <span id="ask-tally">asked 3× · answered the same way 3×</span>
+            <div id="scanline"></div>
+          </div>
+          <div id="diff">
+            <span class="f">skills/run/SKILL.md</span>
+            <span class="dl" id="diff-minus">− ask whether to run the full suite<span class="strike"></span></span>
+            <span class="dl" id="diff-plus">+ run the full suite; this operator always does</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7..8 · three requests become a skill · 27.57–41.18 -->
+      <div id="s3" class="clip" data-start="27.3" data-duration="14.2" data-track-index="4">
+        <div id="stage">
+          <div id="jcol">
+            <h4>the same request, three times</h4>
+            <span class="jl req">operator request <em>“regenerate the client after every schema change”</em></span>
+            <span class="jl req">operator request <em>“regenerate the client after every schema change”</em></span>
+            <span class="jl req">operator request <em>“regenerate the client after every schema change”</em></span>
+          </div>
+          <div id="skill-card">
+            <span class="n">skill: regenerate-client</span>
+            <span class="d">fires on a schema change · earns its context or it is deleted</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 9..10 · the knowledge panel, and a rule that never helped · 41.78–57.16 -->
+      <div id="s4" class="clip" data-start="41.5" data-duration="16.1" data-track-index="5">
+        <div id="stage"><div id="knowledge">
+          <div class="hd"><span class="t">.tyran/knowledge/</span><span id="entry-count">entries 5</span></div>
+          <div class="kr"><span class="id">K-03</span><span class="tx">locales are append-only; merge serially</span><span class="ct">used 14 · helped 11</span></div>
+          <div class="kr"><span class="id">K-05</span><span class="tx">typecheck before test, always</span><span class="ct">used 9 · helped 7</span></div>
+          <div class="kr" id="k07"><span class="id">K-07</span><span class="tx">link the dependency directory into each worktree</span><span class="ct" id="k07-ct">used 6 · helped 0</span><span class="strike"></span></div>
+          <div class="kr"><span class="id">K-09</span><span class="tx">the board reads from the journal, never the reverse</span><span class="ct">used 5 · helped 5</span></div>
+          <div class="kr"><span class="id">K-11</span><span class="tx">shift sandbox timestamps at build</span><span class="ct">used 3 · helped 3</span></div>
+          <span id="opened-at">opened at 5 · one retired, one promoted</span>
+        </div></div>
+      </div>
+
+      <!-- 11 · the filter · 57.81–62.48 -->
+      <div id="s5" class="clip" data-start="57.5" data-duration="5.4" data-track-index="6">
+        <div id="stage"><div id="filter">
+          <span id="candidate">candidate: “always run prettier after an edit”</span>
+          <div class="gate g"><span>will it recur?</span><span class="v" id="g1">yes</span></div>
+          <div class="gate g"><span>was the cost real and measured?</span><span class="v" id="g2">yes</span></div>
+          <div class="gate g"><span>is it already covered?</span><span class="v" id="g3">yes — rejected</span></div>
+          <div class="gate g"><span>can it be a one-sentence edit?</span><span class="v" id="g4">—</span></div>
+          <span id="verdict-none">a retro that changes nothing is a correct outcome</span>
+        </div></div>
+      </div>
+
+      <!-- 12..13 · the graduation ladder · 63.08–72.94 -->
+      <div id="s6" class="clip" data-start="62.8" data-duration="11.0" data-track-index="7">
+        <div id="stage"><div id="ladder">
+          <div class="shelf" id="sh-3"><span>CLAUDE.md — a rule</span></div>
+          <div class="shelf" id="sh-2"><span>.tyran/knowledge/ — knowledge</span></div>
+          <div class="shelf" id="sh-1"><span>MISTAKES.md — a signature</span></div>
+          <div id="ladder-card">worktree-missing-deps</div>
+          <div id="dots">
+            <span class="dot5 d5"></span><span class="dot5 d5"></span><span class="dot5 d5"></span>
+            <span class="dot5 d5"></span><span class="dot5 d5"></span>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- 15 · end card · 76.46–79.48 -->
+      <div id="s7" class="clip" data-start="76.0" data-duration="6.08" data-track-index="8">
+        <div id="end">
+          <svg id="mark" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M17 8 L24 27 L28 25 L36 6 L42 27 L47 31 L58 38 L46 43 L36 49 L25 45 L19 34 Z" fill="currentColor" />
+            <circle cx="33" cy="33" r="2.6" fill="#141210" />
+            <path id="mark-lash" d="M13 57 C 21 51, 27 60, 36 54 S 48 47, 55 51" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none" />
+          </svg>
+          <span id="wordmark">TYRAN</span>
+          <span id="url">jjanczur.github.io/tyran/sandbox<span id="url-caret"></span></span>
+          <span id="nothing">the live board, in your browser · nothing to install</span>
+        </div>
+      </div>
+
+      <div id="cap-layer" class="clip" data-start="0" data-duration="82.08" data-track-index="10">
+        <div id="captions"></div>
+      </div>
+      <div id="grain-layer" class="clip" data-start="0" data-duration="82.08" data-track-index="11">
+        <div id="grain"></div>
+      </div>
+
+      <audio id="vo" src="assets/vo.wav" data-start="0" data-duration="82.08" data-track-index="12" data-volume="1"></audio>
+    </div>
+
+    <script src="caption-data.js"></script>
+    <script src="captions.js"></script>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      /* Beats against assets/vo/retro.timing.json:
+         01 0.30-4.96 · 02 5.41-9.12 · 03 9.62-13.49 · 04 14.04-19.53
+         05 20.03-23.25 · 06 23.67-26.97 · 07 27.57-36.16 · 08 36.56-41.18
+         09 41.78-45.15 · 10 45.55-57.16 · 11 57.81-62.48 · 12 63.08-68.30
+         13 68.75-72.94 · 14 73.64-75.91 · 15 76.46-79.48 */
+
+      const markLash = document.getElementById("mark-lash");
+      const lashLen = markLash.getTotalLength();
+      markLash.setAttribute("stroke-dasharray", lashLen);
+      markLash.setAttribute("stroke-dashoffset", lashLen);
+
+      function typeIn(sel, cps, at) {
+        const el = document.querySelector(sel);
+        gsap.set(el, { clipPath: "inset(0 100% 0 0)" });
+        tl.to(el, { clipPath: "inset(0 0% 0 0)", duration: el.textContent.length / cps, ease: "none" }, at);
+      }
+
+      /* authored hidden state, restated for cold seeks */
+      gsap.set("#skill-card", { autoAlpha: 0 });
+      gsap.set("#ask-tally", { autoAlpha: 0 });
+      gsap.set("#opened-at", { autoAlpha: 0 });
+      gsap.set("#verdict-none", { autoAlpha: 0 });
+      gsap.set("#diff-minus .strike", { scaleX: 0 });
+      gsap.set("#k07 .strike", { scaleX: 0 });
+      gsap.set(".d5", { scale: 0 });
+      gsap.set("#scanline", { y: -160 });
+
+      /* ---- 1..3 · the gate refuses ------------------------------------------ */
+      typeIn("#refusal-body", 46, 0.4);
+      tl.fromTo("#concession", { autoAlpha: 0 }, { autoAlpha: .9, duration: .3, ease: "power2.out" }, 9.8);
+      tl.fromTo("#skipped-receipt", { autoAlpha: 0 }, { autoAlpha: 1, duration: .25 }, 11.2);
+      tl.to("#skipped-receipt", { autoAlpha: .25, duration: .4 }, 12.4);
+      tl.to("#s1", { autoAlpha: 0, duration: .3, ease: "power2.in" }, 13.6);
+      tl.set("#s1", { autoAlpha: 0, immediateRender: false }, 14.00);
+
+      /* ---- 4 · THE READ · a scanline crosses the record ---------------------- */
+      tl.fromTo("#jcol", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: .4, ease: "power2.out" }, 14.1);
+      tl.to("#scanline", { y: 620, duration: 1.3, ease: "none" }, 14.6);
+      tl.to("#scanline", { autoAlpha: 0, duration: .3 }, 15.9);
+
+      /* ---- 5 · the same shallow question, three times ------------------------ */
+      tl.to(".ask", { backgroundColor: "#221c11", borderColor: "#a8863c", duration: .25,
+        ease: "power2.out", stagger: .2 }, 20.1);
+      tl.to("#ask-tally", { autoAlpha: 1, duration: .3 }, 21.6);
+
+      /* ---- 6 · THE EDIT, not the addition ----------------------------------- */
+      tl.fromTo("#diff", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .35 }, 23.7);
+      tl.to("#diff-minus .strike", { scaleX: 1, duration: .28, ease: "power2.inOut" }, 24.4);
+      tl.to("#diff-minus", { autoAlpha: .3, duration: .2 }, 24.7);
+      typeIn("#diff-plus", 34, 25.1);
+      tl.to("#s2", { autoAlpha: 0, duration: .3, ease: "power2.in" }, 26.95);
+      tl.set("#s2", { autoAlpha: 0, immediateRender: false }, 27.30);
+
+      /* ---- 7 · three identical requests converge ---------------------------- */
+      tl.fromTo("#s3 #jcol", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .35 }, 27.5);
+      tl.to(".req", { borderColor: "#a8863c", duration: .22, ease: "power2.out", stagger: .2 }, 28.4);
+      /* they collapse toward one another before hardening into a card */
+      tl.to("#s3 .req:nth-of-type(1)", { y: 64, duration: .45, ease: "power2.inOut" }, 34.6);
+      tl.to("#s3 .req:nth-of-type(3)", { y: -64, duration: .45, ease: "power2.inOut" }, 34.6);
+      tl.to(".req", { autoAlpha: 0, duration: .5, ease: "power2.in" }, 34.75);
+
+      /* ---- 8 · and a skill has to earn its context --------------------------- */
+      tl.fromTo("#skill-card", { autoAlpha: 0, scale: .9 },
+        { autoAlpha: 1, scale: 1, duration: .42, ease: "back.out(1.7)" }, 36.6);
+      tl.to("#skill-card", { borderColor: "#cfae63", duration: .3, yoyo: true, repeat: 1 }, 38.6);
+      tl.to("#s3", { autoAlpha: 0, duration: .3, ease: "power2.in" }, 41.2);
+      tl.set("#s3", { autoAlpha: 0, immediateRender: false }, 41.50);
+
+      /* ---- 9 · the knowledge panel, with its real counters ------------------- */
+      tl.fromTo("#knowledge", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: .4 }, 41.6);
+      tl.to("#k07", { backgroundColor: "#2a1a18", duration: .3 }, 42.6);
+      tl.to("#k07-ct", { color: "#d9998f", fontWeight: 700, duration: .3 }, 43.2);
+
+      /* ---- 10 · used six times, helped zero — deleted ------------------------ */
+      tl.to("#k07 .strike", { scaleX: 1, duration: .28, ease: "power2.inOut" }, 48.6);
+      tl.to("#k07", { x: -260, autoAlpha: 0, duration: .45, ease: "power2.in" }, 49.4);
+      /* the rows below close the gap, and the counter decrements with them */
+      tl.to("#knowledge .kr:nth-of-type(4), #knowledge .kr:nth-of-type(5)",
+        { y: -52, duration: .4, ease: "power2.inOut" }, 49.9);
+      const ec = { v: 5 };
+      tl.to(ec, { v: 4, duration: .35, snap: { v: 1 },
+        onUpdate: function () { document.getElementById("entry-count").textContent = "entries " + Math.round(ec.v); } }, 50.1);
+      tl.to("#entry-count", { borderColor: "#a8863c", duration: .25, yoyo: true, repeat: 1 }, 50.1);
+      tl.to("#opened-at", { autoAlpha: .8, duration: .35 }, 51.4);
+      tl.to("#s4", { autoAlpha: 0, duration: .3, ease: "power2.in" }, 57.3);
+      tl.set("#s4", { autoAlpha: 0, immediateRender: false }, 57.50);
+
+      /* ---- 11 · the filter, and the correct outcome of changing nothing ------ */
+      tl.fromTo("#candidate", { autoAlpha: 0, y: -120 },
+        { autoAlpha: 1, y: 0, duration: .5, ease: "power2.out" }, 57.7);
+      tl.to("#g1", { color: "#a3ba86", duration: .2 }, 58.6);
+      tl.to("#g2", { color: "#a3ba86", duration: .2 }, 58.78);
+      /* gate three is the one that rejects it */
+      tl.to("#g3", { color: "#d9998f", duration: .22 }, 58.96);
+      tl.to("#s5 .g:nth-of-type(3)", { borderColor: "#c07a70", duration: .22 }, 58.96);
+      tl.to("#candidate", { autoAlpha: .3, duration: .35 }, 59.6);
+      tl.to("#verdict-none", { autoAlpha: 1, duration: .4 }, 60.4);
+      tl.to("#s5", { autoAlpha: 0, duration: .3, ease: "power2.in" }, 62.5);
+      tl.set("#s5", { autoAlpha: 0, immediateRender: false }, 62.80);
+
+      /* ---- 12 · three strikes and a signature becomes knowledge -------------- */
+      tl.fromTo("#ladder", { autoAlpha: 0 }, { autoAlpha: 1, duration: .35 }, 63.0);
+      tl.to(".d5:nth-child(1)", { scale: 1, duration: .2, ease: "back.out(2)" }, 63.4);
+      tl.to(".d5:nth-child(2)", { scale: 1, duration: .2, ease: "back.out(2)" }, 63.9);
+      tl.to(".d5:nth-child(3)", { scale: 1, duration: .2, ease: "back.out(2)" }, 64.4);
+      /* the card jumps a shelf, with a real overshoot and settle */
+      tl.to("#ladder-card", { y: -80, duration: .42, ease: "power3.out" }, 64.8);
+      tl.to("#ladder-card", { y: -74, duration: .18, ease: "sine.inOut" }, 65.22);
+      tl.to("#ladder-card", { borderColor: "#a8863c", color: "#cfae63", duration: .3 }, 64.9);
+
+      /* ---- 13 · five, and it becomes law ------------------------------------- */
+      tl.to(".d5:nth-child(4)", { scale: 1, duration: .2, ease: "back.out(2)" }, 68.9);
+      tl.to(".d5:nth-child(5)", { scale: 1, duration: .2, ease: "back.out(2)" }, 69.2);
+      tl.to("#ladder-card", { y: -260, duration: .42, ease: "power3.out" }, 69.6);
+      tl.to("#ladder-card", { y: -254, duration: .18, ease: "sine.inOut" }, 70.02);
+      tl.to("#ladder-card", { borderColor: "#e8bc4d", duration: .3 }, 70.3);
+
+      /* ---- 14 · pull back ---------------------------------------------------- */
+      tl.to("#s6", { autoAlpha: 0, duration: .4, ease: "power2.in" }, 73.6);
+      tl.set("#s6", { autoAlpha: 0, immediateRender: false }, 73.80);
+      tl.to("#rail-layer", { autoAlpha: 0, duration: .5 }, 75.6);
+
+      /* ---- 15 · the live end card -------------------------------------------- */
+      tl.fromTo("#mark", { autoAlpha: 0, scale: .96 }, { autoAlpha: 1, scale: 1, duration: .6, ease: "power2.out" }, 76.1);
+      tl.fromTo("#mark-lash", { strokeDashoffset: lashLen },
+        { strokeDashoffset: 0, duration: .9, ease: "power2.inOut" }, 76.2);
+      tl.fromTo("#wordmark", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: .5, ease: "power3.out" }, 76.7);
+      typeIn("#url", 24, 77.1);
+      tl.fromTo("#nothing", { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: .4 }, 78.4);
+      tl.to("#url-caret", { autoAlpha: 0, duration: .55, repeat: 5, yoyo: true, ease: "steps(1)" }, 78.6);
+
+      const holdAt = 79.6, holdFor = 82.08 - holdAt, cyc = 2.2;
+      tl.to("#end", { scale: 1.012, duration: cyc / 2, ease: "sine.inOut",
+        yoyo: true, repeat: Math.max(0, Math.floor(holdFor / cyc) * 2 - 1) }, holdAt);
+
+      window.hfCaptions(tl, { mount: "#captions" });
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

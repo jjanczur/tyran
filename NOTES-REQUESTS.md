@@ -139,17 +139,29 @@ merged` for both a fresh initiative and a fully stalled one), and no card for a
 finished ticket names the agents that did it — `state.tickets[].agents` is
 folded and dropped.
 
-## 6. Video with hyperframes + TTS — NOT ASSESSED
+## 6. Video with hyperframes + TTS — SHIPPED 2026-08-16
 
-`https://github.com/heygen-com/hyperframes` plus an OpenAI TTS voiceover, to
-produce short explainer videos and GIFs. I have **not** evaluated the tool and
-should not pretend otherwise.
+`https://github.com/heygen-com/hyperframes` — HTML in, deterministic MP4 out —
+plus a Gemini TTS voiceover. Five cuts: a 3:20 explainer, a 3:53 first-session
+tutorial, and three vertical shorts (the mistake, the board, the retro), each
+with burned-in captions and an `.srt` sidecar. Catalogue and guidance on which
+to send when: [`docs/videos.md`](docs/videos.md).
 
-**The operator is working on this directly (2026-08-15) — hands off.** Do not
-adopt hyperframes, do not add it to the toolchain, and do not generate video
-with it until they say the work has landed. The README GIF
-(`assets/board-demo.gif`) is recorded from the real board and covers the
-immediate need; see §9 for the one thing wrong with it.
+Sources are tracked in `video/`; the renders are **not**. They come to roughly
+430 MB, and this repository is what `/plugin marketplace add jjanczur/tyran`
+clones, so committing them would put marketing video into every install of the
+plugin. The cuts live on YouTube; `assets/video/` carries 1.1 MB of poster
+frames and the caption sidecars, which is everything the README and the docs
+page actually reference.
+
+Tyran's own secrets gate refused the first attempt at this commit: the payload
+was past the 4 MiB it can scan inside its budget, and it refuses rather than
+scanning a prefix. That is the gate behaving exactly as designed, and it is
+what forced the question of which bytes really needed to be in the tree.
+
+Voice findings, the packing rules and the gotchas that cost a cycle are in
+`video/README.md`. The claims the videos make, checked against what actually
+ships, are §10 — including the two that need work.
 
 ## 7. Feature plan from the munder-difflin study, 2026-08-15
 
@@ -301,3 +313,71 @@ beside it, and drops it the day the peer range widens.
 Nothing else surfaced: no TODO/FIXME/HACK markers in any tracked file, no
 orphaned script, every script covered by a test, every doc pair identical in
 heading structure, no broken relative link, and the three version files agree.
+
+## 10. Explainer-video claims audited against the code, 2026-08-16
+
+Every spoken claim in the 3:20 explainer was checked against what ships. Nine
+are exact — several are near-verbatim quotes of the mechanism's own
+documentation — and two need work. Recording the result here because the video
+is now the widest-reach description of Tyran, and a video cannot be patched
+after someone has watched it.
+
+### Confirmed, mechanism matches the words
+
+| claim | where it is true |
+|---|---|
+| "batches of at most four, each with his recommendation" | `skills/run/SKILL.md` — "Batch questions — at most 4 at once, each with your recommendation" |
+| "the reviewer grades the diff and cannot edit it" | `agents/reviewer.md` grants no `Edit`/`Write`, and says why in its own body |
+| "security review always gets the strongest tier — no flag or cost setting can lower it" | `scripts/tiers.mjs` `ROLE_FLOOR`, applied last, after both the risk shift and the override; the CLI announces a floored override rather than correcting it silently |
+| "a commit carrying a secret is refused, even inside a markdown file" | the secrets gate scans blobs and is not evaded by `*.pem binary` or even `* binary` in `.gitattributes` — **stronger** than the video claims |
+| "it blocks silence, not forgery" | `docs/evidence-gate.md` — "the gate raises the cost of an empty report; it does not measure whether the work happened" |
+| "you try to close the session. It refuses. Once." | the retro gate short-circuits on `stop_hook_active`; its own test asserts a session cannot "be blocked twice" |
+| "the same failure three times becomes knowledge. Five times, a rule in your repo" | `mistakes.mjs repeats --threshold 3` → `promote --status knowledge`, then five open-or-promoted → `promote --law` into the `tyran:rules` fence |
+
+### Gap 1 — "cheap tier, read only" is a prompt, not a mechanism
+
+The scout is granted `Bash` (`agents/scout.md`: `tools: Read, Grep, Glob, Bash,
+WebFetch, WebSearch`). "You change nothing" is the first line of its
+instructions — which is exactly the kind of guarantee this project refuses to
+accept anywhere else. The video says it twice, and the onboarding cut says
+"cheap tier, read only, fresh context".
+
+The reviewer shows the pattern that would fix it: withhold the tools and state
+the reason in the file. The scout cannot have `Bash` withheld outright — it
+needs `git log`, `rg`, `wc` — so the mechanism has to be a classifier rather
+than a tool grant.
+
+**Fill:** give the policy gate a read-only agent class, so a scout's `Bash`
+write is refused at `PreToolUse` the way a protected path already is. Until
+that ships, the phrase in any NEW script is "changes nothing", not "read only".
+
+### Gap 2 — "this is not an estimate, it is the bill" is said over sample data
+
+The three spend figures are exactly what the sandbox board shows — 404
+requests, 4.53M tokens, 54.9% conductor — and they are laid out by the real
+rollup (`site/scripts/build-sandbox.mjs` imports `costJson`/`rollup` from
+`scripts/cost.mjs`). But the usage rows feeding it are hand-authored, and the
+board honestly labels the models `sample-large` and `sample-small` on screen.
+
+So the *mechanism* claim is true — Tyran rolls up the tokens the platform
+itself reported — while the *footage* claim is not: that particular bill was
+never paid. The line is the one place the slate asserts something the screen
+contradicts.
+
+**Fill, in order of cost:**
+
+1. Cheapest and honest — the line becomes "not a guess: the tokens the platform
+   itself reported", which is a claim about the mechanism and survives sample
+   data. One VO line, one re-render of the explainer.
+2. Better — publish a real `cost.json` from an actual initiative into the
+   sandbox, so the Spend tab stops saying `sample-large` and the original line
+   becomes literally true. This is the one worth doing: it also makes the
+   sandbox a stronger artefact than any video.
+
+### Not a gap, but worth knowing
+
+"55% of those tokens were the manager's own context" reads as a cost
+*complaint* on first hearing. It is the opposite — it is the argument for
+delegation, since that context is what the subagents never have to carry. The
+video says "the manager gets its own row, so nothing hides inside the total",
+which is the right frame; the shorts drop the second half.

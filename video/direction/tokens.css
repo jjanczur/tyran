@@ -1,0 +1,65 @@
+/*
+ * Tyran video — shared design tokens.
+ *
+ * Read off site/src/styles/landing.css, which reads them off assets/banner.jpg.
+ * The doctrine, verbatim from that file:
+ *
+ *   stone  near-black, warm rather than blue — the hall the scene is set in.
+ *   gold   #d4a017, the lash and the hieroglyphs. The ONE accent.
+ *   glow   the cold light off the agents' screens. A LIGHT SOURCE, not an
+ *          accent: washes and terminal chrome, never a button or a link.
+ *   red is REFUSAL. green is a ledger `+`. Neither is decoration.
+ *
+ * DARK ONLY. No web fonts — an Egyptian display face bought with a network
+ * request would be the wrong trade on a project whose boast is that it is light.
+ *
+ * Hyperframes compositions are standalone HTML, so these values are INLINED
+ * into each index.html rather than linked. This file is the source of truth;
+ * if it changes, the compositions change with it.
+ */
+
+:root {
+  /* ground */
+  --stone: #12100e;
+  --raised: #1c1917;
+  --sunken: #0d0c0a;
+
+  /* text */
+  --text: #d9d2c6;
+  --heading: #f5efe3;
+  --muted: #a29788;
+
+  /* structure */
+  --hairline: #3b342c;
+  --hairline-soft: #29241f;
+
+  /* the one accent */
+  --gold: #d4a017;
+  --gold-bright: #e8bc4d;
+  --gold-dim: #6d5410;
+  --gold-low: #2a2110;
+
+  /* the cold screen glow — a light source, never an accent */
+  --glow: #8fd8ea;
+  --glow-dim: #1e3a44;
+
+  /* signals */
+  --red: #f2665e;
+  --red-low: #35191a;
+  --green: #8fce6a;
+
+  /* board surface tokens (scripts/board-html.mjs) — used unchanged whenever
+     the board is on screen, so captured pixels and drawn pixels match */
+  --brass: #a8863c;
+  --brass-bright: #cfae63;
+  --steel: #7d9ea9;
+  --clay: #c07a70;
+  --sage: #88a06a;
+
+  /* type — system stacks only */
+  --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia,
+    "Times New Roman", serif;
+  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}

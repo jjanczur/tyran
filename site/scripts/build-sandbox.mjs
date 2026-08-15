@@ -18,8 +18,12 @@
  *
  * 2. **It must not pretend to be live.** The 30-second meta refresh is
  *    stripped (it would also snap a reader back to the first tab mid-click)
- *    and a banner says what the page is. Spend is not served here at all,
- *    and the page says so in its own words rather than showing an error.
+ *    and a banner says what the page is.
+ *
+ * Spend ships beside it as a plain `cost.json`, which is exactly the relative
+ * path the client already fetches — so the sandbox exercises the same code a
+ * served board does rather than a special case. Without it the tab was the
+ * one place a reader met an error message instead of a feature.
  *
  * Output: site/public/sandbox/index.html — copied into the built site by
  * Astro, so it must be generated BEFORE `astro build`.
@@ -29,6 +33,64 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderAll, BOARD_HTML_FILE } from '../../scripts/board.mjs';
+import { costJson, rollup } from '../../scripts/cost.mjs';
+
+/**
+ * Spend for the sandbox, built through the REAL rollup.
+ *
+ * Not a hand-written JSON blob. `rollup()` is the function the board server
+ * calls, so the sandbox's Spend tab is laid out by the same code and cannot
+ * drift from the schema the page reads — a fabricated payload would go stale
+ * the first time a field moved, silently, on the page whose only job is to
+ * show what the product looks like.
+ *
+ * The inputs are invented and say so: the tab is the one place a reader would
+ * otherwise see an error instead of a feature, and money on this page is
+ * nobody's real money. The rate card is deliberately a made-up label with
+ * round numbers, because Tyran does not know what anyone pays and the page
+ * should not imply that it does.
+ */
+const SANDBOX_PRICING = {
+  rate_card: 'sample-rates (invented)',
+  models: {
+    'sample-large': { input: 15, cache_write: 18.75, cache_read: 1.5, output: 75 },
+    'sample-small': { input: 1, cache_write: 1.25, cache_read: 0.1, output: 5 },
+  },
+};
+
+/** One transcript's worth of usage: cache reads dominate, as they do in life. */
+const usage = (requests, input, cacheWrite, cacheRead, output) => ({
+  requests, input, cache_write: cacheWrite, cache_read: cacheRead, output,
+});
+
+const SANDBOX_SOURCES = [
+  ['conductor', null, null, 'sample-large', usage(214, 41_000, 96_000, 2_310_000, 38_000)],
+  ['agent', 'implementer', 'T-1', 'sample-large', usage(48, 12_000, 31_000, 486_000, 21_000)],
+  ['agent', 'reviewer', 'T-1', 'sample-large', usage(31, 9_000, 14_000, 302_000, 8_400)],
+  ['agent', 'implementer', 'T-2', 'sample-large', usage(57, 15_500, 28_000, 611_000, 24_800)],
+  ['agent', 'implementer', 'T-3', 'sample-small', usage(22, 7_200, 9_100, 188_000, 6_300)],
+  ['agent', 'scout', 'T-5', 'sample-small', usage(13, 4_100, 5_200, 96_000, 2_900)],
+  ['agent', 'implementer', null, 'sample-small', usage(19, 6_400, 7_800, 141_000, 5_100)],
+].map(([kind, agentType, ticket, model, counters], i) => ({
+  path: `sandbox/transcript-${i}.jsonl`,
+  kind,
+  mtime_ms: 0,
+  size: 0,
+  agent_type: agentType,
+  ticket,
+  last_ts: null,
+  malformed: 0,
+  skipped_lines: 0,
+  by_model: { [model]: counters },
+}));
+
+function sandboxCostJson() {
+  const report = rollup(SANDBOX_SOURCES, SANDBOX_PRICING, {});
+  report.transcripts_found = true;
+  report.session = null;
+  report.sources = SANDBOX_SOURCES;
+  return costJson(report);
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SANDBOX_SRC = join(HERE, '..', 'sandbox');
@@ -107,6 +169,10 @@ try {
 
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(join(OUT_DIR, 'index.html'), html);
+  // Served as a plain file next to the page, which is exactly the relative
+  // path the client already fetches — so the sandbox exercises the same code
+  // path a real board does, rather than a special case for the demo.
+  writeFileSync(join(OUT_DIR, 'cost.json'), sandboxCostJson());
   const t = payload.totals;
   console.log(
     `sandbox: ${t.initiatives} initiative(s), ${t.tickets} ticket(s), ${t.agents} agent(s), ` +

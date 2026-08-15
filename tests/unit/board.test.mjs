@@ -526,3 +526,19 @@ test('the sandbox journals the docs publish are real journals', () => {
     assert.ok(read.events.length > 5, `${name} is too thin to show anything`);
   }
 });
+
+test('the sandbox ships spend built by the real rollup, not a hand-written blob', () => {
+  // MUTANT: hand-write the sandbox's cost.json. It would render today and
+  // drift silently the first time a field in the payload moved — on the one
+  // page whose entire job is to show what the product looks like, where
+  // nobody would notice until a reader did.
+  const src = readFileSync(fileURLToPath(new URL('../../site/scripts/build-sandbox.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /import \{ costJson, rollup \} from '\.\.\/\.\.\/scripts\/cost\.mjs'/);
+  assert.match(src, /rollup\(SANDBOX_SOURCES, SANDBOX_PRICING/);
+  // The rate card must announce itself as invented: Tyran does not know what
+  // anyone pays, and a demo that looks like a price list teaches the opposite.
+  assert.match(src, /rate_card: 'sample-rates \(invented\)'/);
+  // And the model names must stay outside any real tier: CLAUDE.md forbids a
+  // model name anywhere but `tiers:`, and a sandbox is not an exemption.
+  assert.doesNotMatch(src, /\b(haiku|sonnet|opus|fable)\b/i);
+});

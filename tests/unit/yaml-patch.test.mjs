@@ -4,7 +4,25 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parse } from '../../scripts/yaml-lite.mjs';
-import { patch, YamlPatchError } from '../../scripts/yaml-patch.mjs';
+import { patch, sameValue, YamlPatchError } from '../../scripts/yaml-patch.mjs';
+
+/** A config indented four spaces, which yaml-lite and validateConfig both accept. */
+const FOUR_SPACE = [
+  'tiers:',
+  '    cheap: haiku # scout',
+  '    work: sonnet',
+  'limits:',
+  "    mode: 'off'",
+  '    keep_awake: false',
+  'rules:',
+  '    - path: a/**',
+  '      class: AUTO',
+  '    - path: b/**',
+  '      class: GATED',
+  'validation:',
+  '    - npm test',
+  '',
+].join('\n');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const template = (name) => readFileSync(join(ROOT, 'templates', name), 'utf8');
@@ -129,12 +147,95 @@ test('a repeated patch is idempotent', () => {
   assert.equal(patch(once, ['profile'], 'eco'), once);
 });
 
+test('the indent step is read from the file, not assumed to be two', () => {
+  // `yaml-lite.parseBlock` recurses with `next.indent` — whatever the next
+  // line happens to be indented by — so a four-space config is as legal as a
+  // two-space one and `validateConfig` accepts it. MUTANT: go back to
+  // `parentIndent + 2`. Every nested key here then reports "is not in this
+  // file", while a UI reading the PARSED document renders all of them as
+  // present and editable, so the operator gets a false error under a live
+  // control telling them to add a key that is already there.
+  const cases = [
+    [['tiers', 'cheap'], 'newmodel'],
+    [['limits', 'mode'], 'pause'],
+    [['limits', 'keep_awake'], true],
+    [['rules', 1, 'class'], 'KERNEL'],
+    [['rules', 0, 'path'], 'z/**'],
+  ];
+  for (const [path, value] of cases) {
+    const after = patch(FOUR_SPACE, path, value);
+    const walk = (doc, p) => p.reduce((node, key) => node[key], doc);
+    assert.deepEqual(walk(parse(after), path), value, `${path.join('.')} did not take`);
+    const changed = FOUR_SPACE.split('\n').filter((l, i) => l !== after.split('\n')[i]);
+    assert.equal(changed.length, 1, `${path.join('.')} changed ${changed.length} lines`);
+  }
+  // The comment on a four-space line survives too.
+  assert.match(patch(FOUR_SPACE, ['tiers', 'cheap'], 'x'), /^ {4}cheap: x # scout$/m);
+});
+
+test('a list is rewritten at the indent its own items already use', () => {
+  const after = patch(FOUR_SPACE, ['validation'], ['npm run build', 'npm test']);
+  assert.deepEqual(parse(after).validation, ['npm run build', 'npm test']);
+  assert.match(after, /^ {4}- npm run build$/m);
+});
+
+test('an eight-space document works the same way', () => {
+  const wide = 'limits:\n        mode: pause\n        keep_awake: false\n';
+  assert.equal(parse(patch(wide, ['limits', 'keep_awake'], true)).limits.keep_awake, true);
+  assert.match(patch(wide, ['limits', 'mode'], 'warn'), /^ {8}mode: warn$/m);
+});
+
+test('a CRLF file keeps its line endings', () => {
+  // MUTANT: drop `line.eol`. The data is right and every diff of the file
+  // shows one line whose ending no longer matches the other eighty-nine.
+  const crlf = 'profile: balanced\r\nlimits:\r\n  mode: pause\r\n';
+  const after = patch(crlf, ['limits', 'mode'], 'warn');
+  assert.equal(after, 'profile: balanced\r\nlimits:\r\n  mode: warn\r\n');
+  assert.equal(parse(after).limits.mode, 'warn');
+});
+
+test('a value the subset cannot spell is a refusal, not a crash', () => {
+  // `formatScalar` throws YamlLiteError, which is ordinary rejected input —
+  // somebody pasted a model name with a newline in it. Letting it escape made
+  // the caller classify it as a server fault: HTTP 500, plus a line in the
+  // terminal the docs designate as the audit trail. MUTANT: re-throw anything
+  // that is not already a YamlPatchError.
+  for (const bad of ['a\nb', `a${String.fromCodePoint(0x202e)}b`, `a${String.fromCodePoint(0x200b)}b`]) {
+    assert.throws(() => patch(FOUR_SPACE, ['tiers', 'cheap'], bad), YamlPatchError);
+  }
+  assert.throws(() => patch(FOUR_SPACE, ['validation'], ['ok', 'bad\nvalue']), YamlPatchError);
+});
+
+test('sameValue is the proof, and it is strict about every way two documents differ', () => {
+  // The guarantee at the end of `patch()` rests on this comparison, and no
+  // input is known to reach it — every wrong case is refused earlier by the
+  // locator, the comment guard or formatScalar (2772 fuzzed triples, zero
+  // firings). So it is tested directly: a comparison that has quietly become
+  // permissive is the one way the proof stops being one.
+  assert.ok(sameValue({ a: 1, b: 'x' }, { a: 1, b: 'x' }));
+  assert.ok(sameValue([1, [2, 3]], [1, [2, 3]]));
+  assert.ok(sameValue(null, null));
+  assert.ok(!sameValue({ a: 1 }, { a: 1, b: 2 }), 'an extra key is a difference');
+  assert.ok(!sameValue({ a: 1, b: 2 }, { a: 1 }), 'a missing key is a difference');
+  assert.ok(!sameValue({ a: { b: 1 } }, { a: { b: 2 } }), 'a nested change is a difference');
+  assert.ok(!sameValue([1, 2], [1, 2, 3]), 'a longer list is a difference');
+  assert.ok(!sameValue([1, 2], [2, 1]), 'order is a difference');
+  assert.ok(!sameValue(1, '1'), 'a type change is a difference — the whole point of the quoting rules');
+  assert.ok(!sameValue(false, 'false'));
+  assert.ok(!sameValue(null, undefined));
+  assert.ok(!sameValue({ a: 1 }, [1]));
+});
+
 test('refuses a value this subset cannot spell back', () => {
   // yaml-lite.formatScalar throws on a newline and on invisible codepoints;
   // the patcher lets that through rather than writing a file that reads back
   // as different data. The bidi override is BUILT here, never typed: a raw
   // one in a tracked file is what ADR-19 and the write guard exist to stop.
+  //
+  // Named error class, not a bare `assert.throws`: an unqualified throws()
+  // passes on ANY exception, including the wrong class, which is exactly how
+  // a rejected value came to be reported as a server fault.
   const bidi = `a${String.fromCodePoint(0x202e)}b`;
-  assert.throws(() => patch(template('config.yaml'), ['profile'], 'a\nb'));
-  assert.throws(() => patch(template('config.yaml'), ['profile'], bidi));
+  assert.throws(() => patch(template('config.yaml'), ['profile'], 'a\nb'), YamlPatchError);
+  assert.throws(() => patch(template('config.yaml'), ['profile'], bidi), YamlPatchError);
 });

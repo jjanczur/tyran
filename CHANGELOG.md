@@ -73,6 +73,38 @@ Both found by the same study, both reproduced before being believed.
   is the same inert state as omitting it. `doctor`'s `limit-telemetry-missing`
   could never fire before this either, for the same reason.
 
+### Four findings from the independent review, fixed before merge
+
+- **The editor only worked on two-space indentation.** `yaml-lite` recurses
+  with whatever indent the next line has, so a four-space `config.yaml` is
+  entirely legal and `validateConfig` accepts it — but the patcher assumed a
+  step of 2, so on such a file eleven of the fifteen controls rendered
+  **enabled and populated** (the page reads the parsed document) and then
+  failed on click with *"is not in this file"*, which was false, and whose
+  paired advice told the operator to add a key that was already there. The
+  step is now read from the file. The one step that stays fixed is a sequence
+  item's siblings at dash + 2, because `- ` is two characters wide and that is
+  what `yaml-lite` itself does.
+- **A value the subset cannot spell returned 500.** `formatScalar` throws for
+  a newline or an invisible codepoint — ordinary rejected input, someone
+  pasting a model name with a stray newline — and it escaped as a server
+  fault, complete with a `settings write failed` line in the terminal the docs
+  designate as the audit trail. Now a 400, quietly.
+- **The round-trip proof had no test that failed when it was deleted.** The
+  reviewer neutered the comparison and the suite stayed green; 2772 fuzzed
+  triples fired it zero times, because every wrong case is refused earlier by
+  the locator, the comment guard or `formatScalar`. `sameValue` is now
+  exported and tested directly — it is the mutable logic the guarantee rests
+  on — and the module says plainly that the proof is defence in depth with no
+  known reachable input. Two bare `assert.throws` calls gained an error class;
+  the missing one is what let the 500 above through.
+- **A wrong number in three places.** `templates/config.yaml` is 90 lines of
+  which 63 are comments, not 60 of 91.
+
+Also from the review, unprompted: a failure inside the settings renderer was
+being reported as "the board server did not answer", sending the operator to
+restart something that was answering perfectly well.
+
 ### The sandbox has a Settings tab too
 
 `site/scripts/build-sandbox.mjs` runs the real `readSettings` over the shipped

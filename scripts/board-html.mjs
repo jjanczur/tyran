@@ -1089,7 +1089,18 @@ if (data.schema !== 1) {
           (payload.schema || 'absent') + ') \\u2014 regenerate the board with the Tyran that served it.'));
         return;
       }
-      renderSettings(payload);
+      // A failure INSIDE the renderer is not a failure to reach the server,
+      // and reporting it as one sends the operator to restart something that
+      // was answering perfectly well. Caught here so the outer handler keeps
+      // its one meaning: the fetch did not land.
+      try {
+        renderSettings(payload);
+      } catch (err) {
+        clear(stBody);
+        stBody.appendChild(el('div', 'setnote bad',
+          'Settings were served but this page could not draw them: ' + show(String((err && err.message) || err)) +
+          ' \\u2014 the board and the Tyran that served it are probably different versions.'));
+      }
     })
     .catch(function () {
       if (String(location.protocol) === 'file:') return;

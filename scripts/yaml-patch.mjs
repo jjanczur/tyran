@@ -3,8 +3,8 @@
  * yaml-patch — change ONE value in a YAML-subset file and keep the file.
  *
  * `yaml-lite.stringify` can serialize a whole document, and using it here
- * would be the obvious move and the wrong one. `templates/config.yaml` is 91
- * lines of which 60 are comments, and those comments are the only place an
+ * would be the obvious move and the wrong one. `templates/config.yaml` is 90
+ * lines of which 63 are comments, and those comments are the only place an
  * operator is told that bare `off` is the boolean false, or why `autonomy:`
  * being AUTO is a trade rather than an oversight. Round-tripping the document
  * through a serializer deletes all of it, silently, the first time anyone
@@ -41,14 +41,23 @@ import { YamlLiteError, formatScalar, parse, splitInlineComment } from './yaml-l
 
 export class YamlPatchError extends Error {}
 
-/** Lines with their code half, comment half and indentation, once. */
+/**
+ * Lines with their code half, comment half, indentation and line ending.
+ *
+ * The `\r` is carried separately so a rewritten line in a CRLF file keeps the
+ * ending every other line has. Dropping it produced a file with mixed endings
+ * — correct data, and a diff that looks like the whole file moved.
+ */
 function scan(text) {
-  return text.split('\n').map((raw, i) => {
+  return text.split('\n').map((line, i) => {
+    const eol = line.endsWith('\r') ? '\r' : '';
+    const raw = eol === '' ? line : line.slice(0, -1);
     const { code, comment } = splitInlineComment(raw, i + 1);
     const trimmed = code.trim();
     return {
       i,
       raw,
+      eol,
       code,
       comment,
       trimmed,
@@ -60,15 +69,49 @@ function scan(text) {
 
 /**
  * A sequence item carries its first key on the dash line (`- path: x`), so the
- * dash line is presented to the locator as an ordinary key line indented two
- * further. Without this the first key of every rule would be unreachable by
- * the same code that reaches the rest.
+ * dash line is presented to the locator as an ordinary key line at the indent
+ * its siblings use. Without this the first key of every rule would be
+ * unreachable by the same code that reaches the rest.
  */
-function asKeyLine(line, seqIndent) {
-  if (line.indent === seqIndent && line.trimmed.startsWith('- ')) {
-    return { ...line, indent: seqIndent + 2, trimmed: line.trimmed.slice(2).trim(), dash: true };
+function asKeyLine(line, dashIndent, keyIndent) {
+  if (dashIndent >= 0 && line.indent === dashIndent && line.trimmed.startsWith('- ')) {
+    return { ...line, indent: keyIndent, trimmed: line.trimmed.slice(2).trim(), dash: true };
   }
   return line;
+}
+
+/**
+ * How far in the block under `from` is indented, or -1 if there is no block.
+ *
+ * DISCOVERED, never assumed. `yaml-lite` recurses with `parseBlock(next.indent)`
+ * — whatever the next line happens to be indented by, as long as it is deeper
+ * and even — so a config indented four spaces is as legal as one indented two,
+ * and `validateConfig` accepts it. A hardcoded step here made every nested key
+ * in such a file report "is not in this file" while the page, which reads the
+ * PARSED document, rendered all fifteen controls enabled. The operator got a
+ * false error under a live control telling them to add a key that was already
+ * there.
+ *
+ * The one step that genuinely is fixed is a sequence item's siblings, at
+ * exactly dash + 2 — that is `yaml-lite.parseBlock`'s `indent + 2`, and it
+ * follows from `- ` being two characters wide.
+ */
+function childIndentOf(lines, from, to, parentIndent) {
+  for (let i = from; i < to; i += 1) {
+    if (lines[i].blank) continue;
+    return lines[i].indent > parentIndent ? lines[i].indent : -1;
+  }
+  return -1;
+}
+
+/** The indent step this document uses, for a block that has no children yet. */
+function documentStep(lines, topIndent) {
+  let step = -1;
+  for (const line of lines) {
+    if (line.blank || line.indent <= topIndent) continue;
+    if (step === -1 || line.indent < step) step = line.indent;
+  }
+  return step === -1 ? 2 : step - topIndent;
 }
 
 /**
@@ -95,9 +138,12 @@ function blockEnd(lines, from, indent) {
  * `path` segments are keys, or integers for a position in a block sequence.
  */
 function locate(lines, path) {
+  const first = lines.find((line) => !line.blank);
+  const topIndent = first === undefined ? 0 : first.indent;
   let from = 0;
   let to = lines.length;
-  let indent = 0;
+  let indent = topIndent;
+  let dashIndent = -1;
   let found = null;
 
   for (let depth = 0; depth < path.length; depth += 1) {
@@ -117,40 +163,55 @@ function locate(lines, path) {
         }
       }
       if (hit === -1) throw new YamlPatchError(`no item ${segment} in the list at "${path.slice(0, depth).join('.')}"`);
-      found = { line: hit, key: null };
+      dashIndent = lines[hit].indent;
+      found = { line: hit, dash: false, keyIndent: dashIndent + 2 };
       from = hit;
-      to = blockEnd(lines, hit + 1, indent);
-      // The item's keys sit two columns in from the dash, and the FIRST of
-      // them shares the dash line — `- path: x`. Both facts are needed: the
-      // search indent moves to the keys, and the dash line is presented as a
-      // key line at that same indent by `asKeyLine`.
-      indent = lines[hit].indent + 2;
+      to = blockEnd(lines, hit + 1, dashIndent);
+      // A sequence item's sibling keys sit at exactly dash + 2, and the FIRST
+      // of them shares the dash line — `- path: x`. This is the one step that
+      // is not discovered, because it is not a style choice: `- ` is two
+      // characters, and yaml-lite reads siblings at `indent + 2` for that
+      // reason.
+      indent = dashIndent + 2;
       continue;
     }
 
     let hit = -1;
+    let view = null;
     for (let i = from; i < to; i += 1) {
-      const line = asKeyLine(lines[i], indent - 2);
+      const line = asKeyLine(lines[i], dashIndent, indent);
       if (line.blank || line.indent !== indent) continue;
       const colon = line.trimmed.indexOf(':');
       if (colon === -1) continue;
       if (line.trimmed.slice(0, colon).trim().replace(/^['"]|['"]$/g, '') !== segment) continue;
       hit = i;
+      view = line;
       break;
     }
     if (hit === -1) throw new YamlPatchError(`"${where}" is not in this file — yaml-patch edits existing keys, it does not add them`);
-    found = { line: hit, key: segment };
+    found = { line: hit, dash: view.dash === true, keyIndent: indent };
+    const parentIndent = lines[hit].indent;
     from = hit + 1;
-    to = blockEnd(lines, hit + 1, lines[hit].indent);
-    indent = lines[hit].indent + 2;
+    to = blockEnd(lines, from, parentIndent);
+    indent = childIndentOf(lines, from, to, parentIndent);
+    if (indent === -1) indent = parentIndent + documentStep(lines, topIndent);
+    dashIndent = -1;
   }
 
   if (found === null) throw new YamlPatchError('an empty path addresses nothing');
   return found;
 }
 
-/** Deep structural equality over the plain data yaml-lite produces. */
-function sameValue(a, b) {
+/**
+ * Deep structural equality over the plain data yaml-lite produces.
+ *
+ * Exported so the proof at the end of `patch()` can be tested directly. It is
+ * defence in depth with no input known to reach it — every wrong case found so
+ * far is refused earlier, by the locator, by the comment guard, or by
+ * `formatScalar` — so a test that goes through `patch()` cannot make it fire,
+ * and this is the mutable logic the guarantee actually rests on.
+ */
+export function sameValue(a, b) {
   if (a === b) return true;
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
@@ -178,15 +239,13 @@ function writeAt(doc, path, value) {
   node[path.at(-1)] = value;
 }
 
-/** Rewrite the value on a `key: value` line, keeping indent and comment. */
-function scalarLine(line, seqIndent, value) {
-  const view = asKeyLine(line, seqIndent);
-  const colon = view.trimmed.indexOf(':');
-  const head = view.dash
-    ? `${' '.repeat(line.indent)}- ${view.trimmed.slice(0, colon + 1)}`
-    : `${' '.repeat(line.indent)}${view.trimmed.slice(0, colon + 1)}`;
+/** Rewrite the value on a `key: value` line, keeping indent, comment and ending. */
+function scalarLine(line, target, value) {
+  const body = target.dash ? line.trimmed.slice(2).trim() : line.trimmed;
+  const colon = body.indexOf(':');
+  const head = `${' '.repeat(line.indent)}${target.dash ? '- ' : ''}${body.slice(0, colon + 1)}`;
   const tail = line.comment === '' ? '' : ` ${line.comment}`;
-  return `${head} ${formatScalar(value)}${tail}`;
+  return `${head} ${formatScalar(value)}${tail}${line.eol}`;
 }
 
 /**
@@ -208,18 +267,46 @@ export function patch(text, path, value) {
     throw new YamlPatchError(`"${path.join('.')}" is not in this file — yaml-patch edits existing keys, it does not add them`);
   }
 
+  return build(text, path, value, before);
+}
+
+/**
+ * The edit itself, with every refusal this module makes reported as one error
+ * type.
+ *
+ * `formatScalar` throws `YamlLiteError` for a value the subset cannot spell —
+ * a newline, an invisible codepoint — and that is ordinary rejected input, not
+ * a fault. Letting it escape made the caller classify it as a server error:
+ * HTTP 500 and a line in the terminal the docs designate as the audit trail,
+ * for someone pasting a model name with a stray newline in it.
+ */
+function build(text, path, value, before) {
+  try {
+    return edit(text, path, value, before);
+  } catch (err) {
+    if (err instanceof YamlLiteError) throw new YamlPatchError(err.message);
+    throw err;
+  }
+}
+
+function edit(text, path, value, before) {
   const lines = scan(text);
-  const seqIndent = typeof path.at(-2) === 'number' ? lines[locate(lines, path.slice(0, -1)).line].indent : -2;
+  const first = lines.find((l) => !l.blank);
   const target = locate(lines, path);
   const line = lines[target.line];
 
   const out = text.split('\n');
   if (Array.isArray(value)) {
-    const view = asKeyLine(line, seqIndent);
-    const colon = view.trimmed.indexOf(':');
-    const inlineValue = view.trimmed.slice(colon + 1).trim();
-    const childIndent = line.indent + 2;
+    const body = target.dash ? line.trimmed.slice(2).trim() : line.trimmed;
+    const colon = body.indexOf(':');
+    const inlineValue = body.slice(colon + 1).trim();
     const end = inlineValue === '' ? blockEnd(lines, target.line + 1, line.indent) : target.line + 1;
+    // The items' indent is the one they already have; a list with none yet
+    // (`shared_zones: []`) takes the step the rest of the document uses.
+    const discovered = childIndentOf(lines, target.line + 1, end, line.indent);
+    const childIndent = discovered === -1
+      ? line.indent + documentStep(lines, first === undefined ? 0 : first.indent)
+      : discovered;
     // Rewriting the block rewrites its lines, so a comment living among the
     // items would disappear. Refusing keeps the promise this module is for.
     for (let i = target.line + 1; i < end; i += 1) {
@@ -230,14 +317,14 @@ export function patch(text, path, value) {
         );
       }
     }
-    const head = `${' '.repeat(line.indent)}${view.trimmed.slice(0, colon + 1)}`;
+    const head = `${' '.repeat(line.indent)}${target.dash ? '- ' : ''}${body.slice(0, colon + 1)}`;
     const tail = line.comment === '' ? '' : ` ${line.comment}`;
-    const body = value.length === 0
-      ? [`${head} []${tail}`]
-      : [`${head}${tail}`, ...value.map((item) => `${' '.repeat(childIndent)}- ${formatScalar(item)}`)];
-    out.splice(target.line, end - target.line, ...body);
+    const rendered = value.length === 0
+      ? [`${head} []${tail}${line.eol}`]
+      : [`${head}${tail}${line.eol}`, ...value.map((item) => `${' '.repeat(childIndent)}- ${formatScalar(item)}${line.eol}`)];
+    out.splice(target.line, end - target.line, ...rendered);
   } else {
-    out[target.line] = scalarLine(line, seqIndent, value);
+    out[target.line] = scalarLine(line, target, value);
   }
   const next = out.join('\n');
 

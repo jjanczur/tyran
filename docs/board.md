@@ -266,9 +266,9 @@ What it edits, with a sentence of prose on every knob:
 **One line moves.** The file is not round-tripped through a serializer —
 `scripts/yaml-patch.mjs` finds the line that owns the value and rewrites that
 line, keeping its trailing comment, the blank lines, the key order and your
-own spacing. `templates/config.yaml` is 60 lines of comment out of 91, and
-those comments are the only place anyone is told that bare `off` is the YAML
-boolean false; a serializer round-trip would delete all of it silently the
+own spacing. `templates/config.yaml` is 63 comment lines out of 90, and those
+comments are the only place anyone is told that bare `off` is the YAML boolean
+false; a serializer round-trip would delete all of it silently the
 first time someone moved a control.
 
 **The edit is proved, not trusted.** Every patch is applied and then parsed

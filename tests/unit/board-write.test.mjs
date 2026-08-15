@@ -217,10 +217,38 @@ test('a hostile body is refused rather than interpreted', async () => {
   }
 });
 
-test('loosening a boundary over HTTP takes two requests, and the first one says which token', async () => {
+test('a value the YAML subset cannot spell is a 400, not a 500 in the audit trail', async () => {
+  // Ordinary rejected input — somebody pasted a model name with a newline in
+  // it — was being classified as a server fault, which meant HTTP 500 plus a
+  // `board: settings write failed` line in the terminal the docs designate as
+  // the record of what this screen changed. MUTANT: let YamlLiteError escape
+  // `patch()` again.
+  const f = fixture();
+  const s = await serve(f.tyran, ['--write']);
+  try {
+    for (const bad of ['a\nb', `a${String.fromCodePoint(0x202e)}b`]) {
+      const res = await post(s.base, '/settings/config', { id: 'tiers.cheap', value: bad });
+      assert.equal(res.status, 400, `${JSON.stringify(bad)} should be a refusal, not a fault`);
+      assert.equal((await res.json()).ok, false);
+    }
+    assert.doesNotMatch(s.log(), /settings write failed/, 'a rejected value is not a server fault');
+    assert.equal(parse(readFileSync(join(f.tyran, 'config.yaml'), 'utf8')).tiers.cheap, 'haiku');
+  } finally {
+    await s.stop();
+    f.cleanup();
+  }
+});
+
+test('loosening a boundary is refused unless the request names the change', async () => {
   // MUTANT: stop threading `confirm` through handleSettingsWrite. The first
   // request succeeds and `.tyran/STOP` — the brake an operator uses to halt a
   // running initiative — goes to AUTO in one POST.
+  //
+  // What this does NOT claim: that two round trips are required. The token is
+  // the new value, which is deterministic and not a server-issued nonce, so a
+  // caller that already knows the change can send it in one request. That is
+  // the design — this guard is against a click, not against a script, and
+  // `docs/board.md` says which of those it defends.
   const f = fixture();
   const s = await serve(f.tyran, ['--write']);
   try {

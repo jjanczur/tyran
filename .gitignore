@@ -13,3 +13,6 @@ dist/
 
 # Coordination leases held by running agents — machine-local, never shared.
 locks/
+
+# Playwright MCP scratch output (snapshots, screenshots, console logs)
+.playwright-mcp/

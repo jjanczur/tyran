@@ -208,14 +208,72 @@ function clamp(value, min, max) {
 export function resolveModel(config, role, profile, risk = 'normal', override = {}) {
   const tier = resolveTier(role, profile, risk, override);
   const effort = resolveEffort(role, profile, risk, override);
-  const alias = config?.tiers?.[tier];
-  if (typeof alias !== 'string' || alias.length === 0) {
-    throw new Error(`config has no model alias for tier "${tier}" — fix tiers in .tyran/config.yaml`);
-  }
+  const aliasFor = (key) => {
+    const alias = config?.tiers?.[key];
+    if (typeof alias !== 'string' || alias.length === 0) {
+      throw new Error(`config has no model alias for tier "${key}" — fix tiers in .tyran/config.yaml`);
+    }
+    return alias;
+  };
   const floored =
     (ROLE_FLOOR[role] !== undefined && override.tier !== undefined && override.tier !== ROLE_FLOOR[role]) ||
     (ROLE_EFFORT_FLOOR[role] !== undefined && override.effort !== undefined && override.effort !== effort);
-  return { tier, model: alias, effort, floored };
+
+  const unavailable = normalizeUnavailable(override.unavailable);
+  const resolved = { tier, model: aliasFor(tier), effort, floored, fell_from: null };
+  if (unavailable.length === 0 || !unavailable.includes(resolved.model)) return resolved;
+
+  const substitute = fallbackTier(config, role, tier, unavailable);
+  return {
+    tier: substitute,
+    model: aliasFor(substitute),
+    // Effort follows the ORIGINAL tier, not the substitute. The judgement
+    // "this task needs deep reasoning" did not change because a model ran out
+    // of capacity, and dropping both dials at once turns a substitution into a
+    // second, unasked-for downgrade.
+    effort,
+    floored,
+    fell_from: tier,
+  };
+}
+
+function normalizeUnavailable(value) {
+  if (value === undefined || value === null) return [];
+  const list = Array.isArray(value) ? value : [value];
+  return list.filter((v) => typeof v === 'string' && v.length > 0);
+}
+
+/**
+ * The next tier DOWN whose model is still available.
+ *
+ * Down, never up, and that is the answer to the question this feature was
+ * blocked on. A fallback that climbed would spend more than the routing table
+ * promised, silently, at the exact moment nobody is watching — and the whole
+ * point of the table is that what a run costs is legible before it runs. Down
+ * is also the direction the observed incident needed: the strongest tier hit
+ * its limit while the tier below it had capacity, and the work died rather
+ * than finishing on the model one step cheaper.
+ *
+ * The trade is stated rather than hidden: falling produces a WEAKER answer.
+ * That is why it stops at the role floor instead of walking to the bottom —
+ * a security review that ran on the cheapest model is not a security review,
+ * and the floors already say which roles those are.
+ */
+export function fallbackTier(config, role, from, unavailable) {
+  const floorIndex = ROLE_FLOOR[role] === undefined ? 0 : TIER_ORDER.indexOf(ROLE_FLOOR[role]);
+  for (let i = TIER_ORDER.indexOf(from) - 1; i >= floorIndex; i -= 1) {
+    const alias = config?.tiers?.[TIER_ORDER[i]];
+    if (typeof alias === 'string' && alias.length > 0 && !unavailable.includes(alias)) return TIER_ORDER[i];
+  }
+  // Exhausting the ladder is NOT a substitution problem. Every model this role
+  // is allowed to use is unavailable, which means waiting, not routing — and
+  // the thing that already knows how to wait is overnight mode.
+  const reachable = TIER_ORDER.slice(floorIndex, TIER_ORDER.indexOf(from) + 1);
+  throw new Error(
+    `every tier "${escapeInvisible(role)}" may use is unavailable (${reachable.join(' -> ')}), so there is ` +
+      'nothing to fall back to. This is a pause, not a substitution: see docs/overnight.md.' +
+      (ROLE_FLOOR[role] === undefined ? '' : ` The floor for this role is "${ROLE_FLOOR[role]}" and is not lowered by a fallback.`),
+  );
 }
 
 /** The whole routing map for one profile — what the conductor reads once. */
@@ -278,7 +336,9 @@ function main() {
   const risk = flag('risk', 'normal');
   const role = flag('role', null);
   const field = flag('field', 'model');
-  const override = { tier: flag('tier', undefined), effort: flag('effort', undefined) };
+  // Repeatable: an overnight run can exhaust more than one tier.
+  const unavailable = args.reduce((acc, arg, i) => (arg === '--unavailable' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
+  const override = { tier: flag('tier', undefined), effort: flag('effort', undefined), unavailable };
 
   try {
     if (role === null) {
@@ -301,6 +361,14 @@ function main() {
       console.error(
         'tiers: `conductor` is ADVISORY. The conductor is your own session and no plugin can ' +
           'change its model mid-flight — this is the tier your config says it should be running.',
+      );
+    }
+    // A substitution that said nothing would be the routing table quietly
+    // meaning something else than it says.
+    if (resolved.fell_from !== null) {
+      console.error(
+        `tiers: FELL BACK ${resolved.fell_from} -> ${resolved.tier} because the ${resolved.fell_from} model is ` +
+          'unavailable. This is a WEAKER model than the routing table asked for; effort is unchanged.',
       );
     }
     console.error(`tiers: ${role} @ ${profile}/${risk} -> ${resolved.tier} · effort ${resolved.effort}`);

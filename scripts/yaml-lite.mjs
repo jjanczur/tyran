@@ -174,7 +174,11 @@ function stripComment(line, lineNo) {
 
 /** Parse a YAML-subset document into a plain JS object. */
 export function parse(text) {
-  const rawLines = text.split('\n');
+  // A leading BOM is an encoding marker, not content. Left in place it becomes
+  // one column of "indentation" on line 1, and the parser rejected the whole
+  // file with "indentation must be a multiple of 2 spaces" — pointing at a
+  // line the operator can see nothing wrong with.
+  const rawLines = (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text).split('\n');
   const lines = [];
   let sawDocStart = false;
   rawLines.forEach((raw, i) => {
@@ -272,7 +276,16 @@ export function parse(text) {
   return result;
 }
 
-function keyColonIndex(text) {
+/**
+ * Where a mapping key ends, by this subset's own rule: the colon must be
+ * followed by whitespace or end-of-line.
+ *
+ * Exported for the same reason as `splitInlineComment` and `formatScalar` — an
+ * editor that locates a key must locate it by the rule the PARSER uses. A bare
+ * `indexOf(':')` finds the colon inside `a:b: 1` and lands the edit on a
+ * different key's line, which is a wrong write, not a failed one.
+ */
+export function keyColonIndex(text) {
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < text.length; i++) {
@@ -286,7 +299,8 @@ function keyColonIndex(text) {
   return -1;
 }
 
-function unquoteKey(raw, lineNo) {
+/** A key as the parser reads it, quotes and all. Exported alongside `keyColonIndex`. */
+export function unquoteKey(raw, lineNo) {
   const key = raw.trim();
   if (key === '') throw new YamlLiteError('empty key', lineNo);
   if ((key[0] === '"' && key.at(-1) === '"' && key.length > 1) ||
@@ -422,6 +436,12 @@ export function formatScalar(value) {
     Object.hasOwn(BOOL, s.toLowerCase()) ||
     s === 'null' ||
     s === '~' ||
-    /^-?\d+(\.\d+)?$/.test(s);
+    // The READER's two number tests, not an approximation of them. They
+    // disagreed on a leading-dot decimal: `parseScalar` reads `.5` as the
+    // number 0.5, while this rule required a digit before the dot and so
+    // wrote the STRING ".5" unquoted — a value that came back as a different
+    // type. Found by yaml-patch's round-trip proof, which is what it is for.
+    /^-?\d+$/.test(s) ||
+    /^-?\d*\.\d+$/.test(s);
   return needsQuotes ? `'${s.replace(/'/g, "''")}'` : s;
 }

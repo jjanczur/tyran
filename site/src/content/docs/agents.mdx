@@ -158,6 +158,44 @@ plugin's shipped template so a repo that has not run setup still works, but it
 says so **loudly on stderr**. A silent fallback would let a repo believe it had
 adopted a policy it never wrote.
 
+### When a tier's model is out of capacity
+
+A tier resolves to a model, and a model can be temporarily unavailable —
+usually because it has hit a rate limit while the account still has budget on
+everything else. Measured on a real run: the strongest tier hit its limit and
+the subagents **failed** rather than finishing on the tier below, which had
+capacity the whole time.
+
+```bash
+node scripts/tiers.mjs --role acceptance --unavailable fable --field json
+# tiers: FELL BACK top -> deep because the top model is unavailable.
+# {"tier":"deep","model":"opus","effort":"xhigh","floored":false,"fell_from":"top"}
+```
+
+**It falls DOWN the ladder, never up**, and that is the answer to the question
+this feature was blocked on for a while. Climbing would spend more than the
+routing table promised, silently, at exactly the moment nobody is watching —
+and the whole point of the table is that what a run costs is legible before it
+runs. Down is also the direction the incident needed.
+
+Three things the fall does not do:
+
+- **It does not lower the effort.** "This task needs deep reasoning" did not
+  stop being true because a model ran out of capacity, and dropping both dials
+  at once is a second downgrade nobody asked for. `fell_from` records the tier
+  it came from so the substitution is visible in the ledger.
+- **It does not cross a role floor.** A security review that ran on the
+  cheapest model is not a security review. The floors in
+  [the routing table](#the-routing-table) bound the fall.
+- **It does not pretend.** The substitution is announced on stderr in the same
+  breath as the resolution, saying plainly that this is a weaker model than the
+  table asked for.
+
+When every tier a role may use is unavailable, `tiers.mjs` exits 2 rather than
+returning the bottom of the ladder. That case is not a routing problem — there
+is nothing left to substitute — and the thing that already knows how to wait
+for capacity is [overnight mode](../overnight/).
+
 ## The brake
 
 An operator can halt a running initiative without killing the session:

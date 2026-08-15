@@ -37,7 +37,7 @@
  *   refused instead, with the line number, because the alternative is the
  *   silent loss this whole module exists to prevent.
  */
-import { YamlLiteError, formatScalar, parse, splitInlineComment } from './yaml-lite.mjs';
+import { YamlLiteError, formatScalar, keyColonIndex, parse, splitInlineComment, unquoteKey } from './yaml-lite.mjs';
 
 export class YamlPatchError extends Error {}
 
@@ -181,9 +181,18 @@ function locate(lines, path) {
     for (let i = from; i < to; i += 1) {
       const line = asKeyLine(lines[i], dashIndent, indent);
       if (line.blank || line.indent !== indent) continue;
-      const colon = line.trimmed.indexOf(':');
+      // The PARSER's key rule, not a bare indexOf: a colon inside a key name
+      // (`a:b: 1`) otherwise ends the key early, and the edit lands on a
+      // different key's line — a wrong write rather than a failed one.
+      const colon = keyColonIndex(line.trimmed);
       if (colon === -1) continue;
-      if (line.trimmed.slice(0, colon).trim().replace(/^['"]|['"]$/g, '') !== segment) continue;
+      let key;
+      try {
+        key = unquoteKey(line.trimmed.slice(0, colon), line.i + 1);
+      } catch {
+        continue;
+      }
+      if (key !== segment) continue;
       hit = i;
       view = line;
       break;
@@ -205,11 +214,15 @@ function locate(lines, path) {
 /**
  * Deep structural equality over the plain data yaml-lite produces.
  *
- * Exported so the proof at the end of `patch()` can be tested directly. It is
- * defence in depth with no input known to reach it — every wrong case found so
- * far is refused earlier, by the locator, by the comment guard, or by
- * `formatScalar` — so a test that goes through `patch()` cannot make it fire,
- * and this is the mutable logic the guarantee actually rests on.
+ * Exported so the proof at the end of `patch()` can be tested directly, and
+ * because it is the mutable logic the guarantee rests on.
+ *
+ * It is NOT unreachable, and an earlier version of this comment said it was.
+ * A review found the case: `formatScalar` used a stricter number pattern than
+ * `parseScalar`, so the string ".5" was written unquoted and read back as the
+ * number 0.5 — a changed type, caught here and nowhere else. That specific
+ * disagreement is fixed in yaml-lite, which is the right place for it; this
+ * check is what noticed.
  */
 export function sameValue(a, b) {
   if (a === b) return true;
@@ -242,9 +255,16 @@ function writeAt(doc, path, value) {
 /** Rewrite the value on a `key: value` line, keeping indent, comment and ending. */
 function scalarLine(line, target, value) {
   const body = target.dash ? line.trimmed.slice(2).trim() : line.trimmed;
-  const colon = body.indexOf(':');
-  const head = `${' '.repeat(line.indent)}${target.dash ? '- ' : ''}${body.slice(0, colon + 1)}`;
+  const colon = keyColonIndex(body);
   const tail = line.comment === '' ? '' : ` ${line.comment}`;
+  // A plain sequence item (`- npm test`) is a value with no key at all, which
+  // an address ending in an integer reaches. Treating it like a mapping line
+  // dropped the dash and shifted the indent by one, and the round-trip proof
+  // then blamed a NEIGHBOURING line for the indentation it had broken.
+  if (colon === -1) {
+    return `${' '.repeat(line.indent)}- ${formatScalar(value)}${tail}${line.eol}`;
+  }
+  const head = `${' '.repeat(line.indent)}${target.dash ? '- ' : ''}${body.slice(0, colon + 1)}`;
   return `${head} ${formatScalar(value)}${tail}${line.eol}`;
 }
 
@@ -256,6 +276,14 @@ function scalarLine(line, target, value) {
  * parse back to exactly the document intended.
  */
 export function patch(text, path, value) {
+  // A BOM is an encoding marker, not content — and `trimStart` counts it as
+  // whitespace, so it read as one column of indentation and the rebuilt line
+  // replaced it with a SPACE, producing an odd indent the parser then refused.
+  // Split it off here and put it back on the result, so the file keeps the
+  // marker it came with and nothing downstream has to know about it.
+  const bom = text.charCodeAt(0) === 0xfeff ? text.slice(0, 1) : '';
+  if (bom !== '') return bom + patch(text.slice(1), path, value);
+
   let before;
   try {
     before = parse(text);
@@ -300,12 +328,17 @@ function edit(text, path, value, before) {
     const body = target.dash ? line.trimmed.slice(2).trim() : line.trimmed;
     const colon = body.indexOf(':');
     const inlineValue = body.slice(colon + 1).trim();
-    const end = inlineValue === '' ? blockEnd(lines, target.line + 1, line.indent) : target.line + 1;
+    // The block boundary is the KEY's indent, not the line's. On the first key
+    // of a sequence item (`- tags:`) the line is indented at the DASH, so
+    // using it ran the block to the end of the whole item and the splice took
+    // the item's sibling keys out with the list.
+    const ownIndent = target.dash ? target.keyIndent : line.indent;
+    const end = inlineValue === '' ? blockEnd(lines, target.line + 1, ownIndent) : target.line + 1;
     // The items' indent is the one they already have; a list with none yet
     // (`shared_zones: []`) takes the step the rest of the document uses.
-    const discovered = childIndentOf(lines, target.line + 1, end, line.indent);
+    const discovered = childIndentOf(lines, target.line + 1, end, ownIndent);
     const childIndent = discovered === -1
-      ? line.indent + documentStep(lines, first === undefined ? 0 : first.indent)
+      ? ownIndent + documentStep(lines, first === undefined ? 0 : first.indent)
       : discovered;
     // Rewriting the block rewrites its lines, so a comment living among the
     // items would disappear. Refusing keeps the promise this module is for.

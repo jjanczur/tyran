@@ -372,3 +372,47 @@ test('list edits keep the comments around them', () => {
     f.cleanup();
   }
 });
+
+test('a config with no limits: block is editable, not fatal', () => {
+  // `limits:` is OPTIONAL in a valid config — every install set up before it
+  // existed has none — and resolvePath returned null for an absent parent,
+  // which readAt then tried to iterate. The whole Settings tab died with
+  // "path is not iterable" and every write became an HTTP 500.
+  // MUTANT: return null from resolvePath again.
+  const f = fixture();
+  try {
+    const file = join(f.tyran, 'config.yaml');
+    writeFileSync(file, [
+      'profile: balanced', 'autonomy: P1',
+      'tiers:', '  cheap: haiku', '  work: sonnet', '  deep: opus', '  top: fable',
+      'validation:', '  - npm test', 'shared_zones: []', '',
+    ].join('\n'));
+    assert.deepEqual(validateConfig(parse(readFileSync(file, 'utf8'))), [], 'the fixture must be a VALID config');
+
+    const s = readSettings(f.tyran);
+    const overnight = s.groups.find((g) => g.id === 'overnight');
+    assert.ok(overnight.settings.every((x) => x.present === false), 'absent, and rendered as absent');
+    assert.ok(s.groups.flatMap((g) => g.settings).some((x) => x.present === true), 'the rest still reads');
+
+    // And the two writes behave: the absent one refuses by NAME, the present
+    // one still lands.
+    assert.throws(() => applySetting(f.tyran, 'limits.mode', 'pause'), SettingsError);
+    write(f.tyran, applySetting(f.tyran, 'profile', 'eco'));
+    assert.equal(parse(readFileSync(file, 'utf8')).profile, 'eco');
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('an apply hands back the text it read, so a caller can compare and swap', () => {
+  // MUTANT: drop before_text. The board then writes a whole-file replacement
+  // over whatever arrived in the meantime, and both writers report success.
+  const f = fixture();
+  try {
+    const applied = applySetting(f.tyran, 'profile', 'eco');
+    assert.equal(applied.before_text, readFileSync(join(f.tyran, 'config.yaml'), 'utf8'));
+    assert.notEqual(applied.text, applied.before_text);
+  } finally {
+    f.cleanup();
+  }
+});

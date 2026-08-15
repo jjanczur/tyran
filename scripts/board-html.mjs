@@ -9,7 +9,7 @@ import { FORBIDDEN } from './invisible.mjs';
  * is blocked over file:// in Chromium, so meta-refresh is the one reliable
  * primitive; under `board.mjs --serve` the same refresh hits the server.
  *
- * ## Four tabs, because the page answers four questions
+ * ## Five tabs, because the page answers five questions
  *
  * Overview (what is the state), Board (where is every ticket), Waiting on you
  * (what is blocked on a decision, and how to answer it), Spend (what it
@@ -157,6 +157,15 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .ask .q{color:var(--brass-bright);font-size:1rem;font-weight:600}
 .ask .row{margin-top:.22rem;font-size:.86rem}
 .ask .label{color:var(--muted);text-transform:uppercase;font-size:.66rem;letter-spacing:.07em;margin-right:.4rem;font-family:var(--mono)}
+.ask .kindtag{display:inline-block;font-family:var(--mono);font-size:.63rem;letter-spacing:.06em;text-transform:uppercase;border-radius:.25rem;padding:.1rem .4rem;margin-bottom:.35rem}
+.ask .kindtag.blocking{background:var(--clay-low);color:var(--clay-bright);border:1px solid var(--clay-edge)}
+.ask .kindtag.decision{background:var(--steel-low);color:var(--steel-bright);border:1px solid var(--steel-edge)}
+.reply{margin-top:.6rem;border-top:1px solid var(--brass-edge);padding-top:.55rem}
+.reply textarea{display:block;width:100%;font-family:var(--font);font-size:.86rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.35rem;padding:.4rem .55rem;min-height:3.4rem;resize:vertical}
+.reply textarea:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
+.reply textarea:disabled{opacity:.55;cursor:not-allowed}
+.reply .acts{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
+.reply .hint{font-size:.75rem;color:var(--muted);margin-top:.3rem}
 pre.how{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;padding:.7rem .85rem;font-family:var(--mono);font-size:.76rem;color:var(--text);overflow-x:auto;margin:.4rem 0 .7rem}
 pre.how .c{color:var(--muted)}
 
@@ -637,8 +646,14 @@ if (data.schema !== 1) {
     var count = el('span', 'count', ' (' + cards.length + ')');
     h.appendChild(count);
     box.appendChild(h);
+    // Appended ALWAYS, hidden when it is not wanted. It used to be appended
+    // only for a lane that was empty at build time, so a lane emptied by the
+    // filter showed a heading, a count of "0 of 4", and then nothing — and the
+    // display toggle below was setting a style on a node that was not in the
+    // document.
     var emptyMark = el('div', 'empty', '—');
-    if (cards.length === 0) box.appendChild(emptyMark);
+    box.appendChild(emptyMark);
+    emptyMark.style.display = cards.length === 0 ? '' : 'none';
     var buttons = [];
     cards.forEach(function (c) {
       var button = el('button', 'card');
@@ -702,8 +717,84 @@ if (data.schema !== 1) {
     'npx @jjanczur/tyran answer apply --dir .tyran    # closes what you answered';
   qs.appendChild(how);
   if (asks.length === 0) qs.appendChild(el('div', 'empty', 'nothing — the agents have what they need'));
+
+  // Answering from the page. The three commands above still work and stay
+  // printed: this box is a convenience, not a replacement, and a board opened
+  // over file:// or without --write has to leave the operator somewhere to go.
+  //
+  // The request carries only WHICH ask and the operator's own words. The
+  // question, the recorded default, the ticket and the gate id are all read
+  // back out of the journal by the server — the same guarantee the answer
+  // sheet makes, for the same reason.
+  var replyBox = function (a, hasDefault) {
+    var box = el('div', 'reply');
+    var input = el('textarea');
+    input.placeholder = hasDefault
+      ? 'Your answer, in your own words \\u2014 or use the default button.'
+      : 'Your answer, in your own words. There is no recorded default for this one.';
+    var acts = el('div', 'acts');
+    var send = el('button', 'sbtn', 'Answer');
+    send.setAttribute('type', 'button');
+    var useDefault = hasDefault ? el('button', 'sbtn', 'Take the default') : null;
+    if (useDefault) useDefault.setAttribute('type', 'button');
+    var status = el('div', 'sstat');
+
+    var submit = function (text) {
+      [send, useDefault].forEach(function (b) { if (b) b.disabled = true; });
+      post('/answer', { init: a.init, kind: a.kind, answer: text }, status, function (ok) {
+        if (!ok) {
+          [send, useDefault].forEach(function (b) { if (b) b.disabled = false; });
+          return;
+        }
+        // The board re-rendered on the server before it replied, so the next
+        // load is already correct — and leaving an answered question on screen
+        // with a live box invites answering it twice.
+        input.disabled = true;
+      }, function (p) {
+        return (p.mode === 'default' ? 'answered with the recorded default' : 'answered')
+          + ': ' + p.recorded + ' \\u00b7 decision ' + p.decision + ' \\u2014 reload to refresh the board';
+      });
+    };
+    send.addEventListener('click', function () {
+      if (input.value.trim() === '') {
+        status.className = 'sstat bad';
+        status.textContent = hasDefault
+          ? 'type an answer, or press "Take the default"'
+          : 'type an answer \\u2014 this question has no default to fall back on';
+        return;
+      }
+      submit(input.value);
+    });
+    if (useDefault) useDefault.addEventListener('click', function () { submit(''); });
+
+    // Typing here must survive the 30-second reload, exactly like a settings
+    // field. Same mechanism, same reason.
+    //
+    // Wrapped, not passed: the hold-refresh helper is defined further down and
+    // is still undefined while these cards are built, and addEventListener with
+    // undefined is a silent no-op rather than an error — the listener would
+    // simply never exist and a half-typed answer would vanish on the next
+    // reload with nothing to show for it.
+    input.addEventListener('input', function () { holdRefresh(); });
+
+    box.appendChild(input);
+    acts.appendChild(send);
+    if (useDefault) acts.appendChild(useDefault);
+    box.appendChild(acts);
+    box.appendChild(status);
+    box.appendChild(el('div', 'hint', 'Answering writes a decision and closes the gate in ' + a.init + '\\u2019s journal. Needs the board started with --write.'));
+    return box;
+  };
   asks.forEach(function (a) {
     var card = el('div', 'ask');
+    // The one distinction that changes what an operator does about it, and it
+    // costs no new event type to say: an ask WITH a recorded default is a
+    // decision you may leave to the recommendation, and an ask without one is
+    // blocking, because there saying nothing has no safe outcome. That is
+    // already why the answer sheet sorts no-default first.
+    var hasDefault = a.default !== null && a.default !== undefined;
+    card.appendChild(el('span', 'kindtag ' + (hasDefault ? 'decision' : 'blocking'),
+      hasDefault ? 'decision \\u00b7 a default is recorded' : 'blocking \\u00b7 no safe default'));
     card.appendChild(el('div', 'q', a.question || '(no question recorded — gate ' + a.kind + ')'));
     [['answer with', a.kind], ['recommendation', a.recommendation], ['default', a.default],
      ['ticket', a.ticket], ['initiative', a.init], ['since', a.since]].forEach(function (pair) {
@@ -713,6 +804,7 @@ if (data.schema !== 1) {
       row.appendChild(el('span', null, pair[1]));
       card.appendChild(row);
     });
+    card.appendChild(replyBox(a, hasDefault));
     qs.appendChild(card);
   });
 
@@ -905,27 +997,35 @@ if (data.schema !== 1) {
   st.appendChild(stBody);
   stBody.appendChild(el('div', 'setnote', 'Settings are read from .tyran/config.yaml and .tyran/policies/autonomy.yaml, and they are served rather than embedded — open this board with "board.mjs --serve" to see them.'));
 
-  // A meta refresh and a form are incompatible: half a typed model name would
-  // vanish every thirty seconds. The tag stays in the HTML (a page whose JS
-  // never runs still refreshes, and the docs sandbox strips the tag to stop
-  // itself reloading), but at boot it is swapped for a timer that can be
-  // paused — and the Settings tab pauses it. Present tag, same 30 seconds;
-  // absent tag, no timer at all, which is what the sandbox wants.
-  var refreshTag = document.querySelector('meta[http-equiv="refresh"]');
+  // Auto-refresh, and the reason it is a timer rather than a meta tag.
+  //
+  // A real http-equiv refresh is scheduled by the browser when it PARSES the
+  // tag, and removing the node afterwards does not cancel it — measured, in a
+  // browser, after this page reloaded under a half-typed value that the code
+  // sincerely believed it had protected. So the page carries an inert
+  // tyran-refresh marker instead, and the only thing that reloads it is this
+  // timer, which can be stopped while an operator is typing.
+  //
+  // Absent marker, no timer at all: that is what the docs sandbox wants, and
+  // it gets it by stripping the marker rather than by special-casing anything.
+  var refreshTag = document.querySelector('meta[name="tyran-refresh"]');
+  var refreshSeconds = refreshTag === null ? 0 : Number(refreshTag.getAttribute('content'));
   var refreshTimer = null;
   var armRefresh = function () {
-    if (refreshTag === null || refreshTimer !== null) return;
-    refreshTimer = setTimeout(function () { location.reload(); }, 30000);
+    if (!(refreshSeconds > 0) || refreshTimer !== null) return;
+    refreshTimer = setTimeout(function () { location.reload(); }, refreshSeconds * 1000);
   };
   var holdRefresh = function () {
     if (refreshTimer !== null) { clearTimeout(refreshTimer); refreshTimer = null; }
   };
-  if (refreshTag !== null && refreshTag.parentNode) {
-    refreshTag.parentNode.removeChild(refreshTag);
-    armRefresh();
-  }
+  armRefresh();
 
-  var post = function (route, body, status, onDone) {
+  // The describe callback turns a successful payload into the sentence the
+  // operator reads. Settings and answers succeed differently — one reports a
+  // value that moved, the other what was recorded and under which decision id —
+  // and a single hard-coded message rendered "undefined -> undefined" for the
+  // route it was not written for.
+  var post = function (route, body, status, onDone, describe) {
     status.className = 'sstat';
     status.textContent = 'saving\\u2026';
     fetch(route, {
@@ -959,7 +1059,9 @@ if (data.schema !== 1) {
         return;
       }
       status.className = 'sstat ok';
-      status.textContent = show('saved \\u2014 ' + JSON.stringify(payload.before) + ' \\u2192 ' + JSON.stringify(payload.after));
+      status.textContent = show(describe
+        ? describe(payload)
+        : 'saved \\u2014 ' + JSON.stringify(payload.before) + ' \\u2192 ' + JSON.stringify(payload.after));
       if (onDone) onDone(true);
     }).catch(function () {
       status.className = 'sstat bad';
@@ -1187,7 +1289,7 @@ if (data.schema !== 1) {
   select('overview');
 
   var foot = el('footer');
-  foot.appendChild(el('div', null, 'GENERATED by tyran scripts/board.mjs — do not edit. Refreshes every 30 s; ages are computed in this browser.'));
+  foot.appendChild(el('div', null, 'GENERATED by tyran scripts/board.mjs — do not edit. Reloads itself every 30 s unless you are editing; ages are computed in this browser.'));
   app.appendChild(foot);
 }
 `;
@@ -1237,7 +1339,15 @@ export function renderBoardHtml(payloadJsonText) {
     '<!-- GENERATED by tyran scripts/board.mjs - DO NOT EDIT. Source of truth: the journals under .tyran/state/ -->\n' +
     '<html lang="en"><head><meta charset="utf-8">\n' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
-    '<meta http-equiv="refresh" content="30">\n' +
+    // NOT `http-equiv="refresh"`. A real meta refresh is scheduled by the
+    // browser the moment it parses the tag, and REMOVING THE NODE DOES NOT
+    // CANCEL IT — measured, after this page reloaded under a half-typed model
+    // name that the code sincerely believed it had protected. The tag is now
+    // inert markup that only this page's own script reads, so the timer it
+    // arms is one the page can actually stop while you are typing into it.
+    // The page is built entirely by that script anyway, so nothing is lost:
+    // a browser that cannot run it has no board to refresh.
+    '<meta name="tyran-refresh" content="30">\n' +
     '<title>Tyran board</title>\n' +
     `<style>${CSS}</style>\n` +
     '</head><body><main id="app"></main>\n' +

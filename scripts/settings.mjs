@@ -290,7 +290,13 @@ export function allSettings() {
 function resolvePath(doc, path) {
   let node = doc;
   for (const segment of path) {
-    if (node === null || typeof node !== 'object') return null;
+    // The REQUESTED path, never null. `limits:` is optional in a valid config
+    // — every install set up before it existed has none — and returning null
+    // here fed `readAt`'s `for (const segment of path)` an unusable value, so
+    // the whole Settings tab died with "path is not iterable" and every write
+    // became an HTTP 500. Handing the path back lets the absent-key branch do
+    // its job: `present: false`, and a control that says so.
+    if (node === null || typeof node !== 'object') return path;
     node = node[segment];
   }
   if (node !== null && typeof node === 'object' && !Array.isArray(node) && 'value' in node) {
@@ -473,7 +479,7 @@ export function applySetting(tyranDir, id, value, confirm = null) {
   if (errors.length > 0) {
     throw new SettingsError(`that change makes the config invalid, so nothing was written:\n  ${errors.join('\n  ')}`);
   }
-  return { file, path, before, after: next, text };
+  return { file, path, before, after: next, text, before_text: loaded.text };
 }
 
 /**
@@ -538,5 +544,5 @@ export function applyPolicyClass(tyranDir, rulePath, klass, confirm = null) {
   if (errors.length > 0) {
     throw new SettingsError(`that change makes the policy invalid, so nothing was written:\n  ${errors.join('\n  ')}`);
   }
-  return { file, path, before, after: klass, text };
+  return { file, path, before, after: klass, text, before_text: loaded.text };
 }

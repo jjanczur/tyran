@@ -239,3 +239,34 @@ test('refuses a value this subset cannot spell back', () => {
   assert.throws(() => patch(template('config.yaml'), ['profile'], 'a\nb'), YamlPatchError);
   assert.throws(() => patch(template('config.yaml'), ['profile'], bidi), YamlPatchError);
 });
+
+test('a key is located by the parser rule, not by the first colon on the line', () => {
+  // `a:b` is a legal key in this subset, and `indexOf(':')` finds the colon
+  // INSIDE it — so a request for `a` landed on the `a:b` line and rewrote the
+  // wrong key. A wrong write, not a failed one; the round-trip proof caught it
+  // only because the result happened to contain a duplicate key.
+  // MUTANT: go back to line.trimmed.indexOf(':').
+  const after = patch('a:b: 1\na: 2\n', ['a'], 5);
+  assert.deepEqual(parse(after), { 'a:b': 1, a: 5 });
+  assert.match(after, /^a:b: 1$/m, 'the neighbouring key is untouched');
+});
+
+test('a path ending in an integer edits that list item', () => {
+  // The module documents integer segments and the locator has a whole branch
+  // for them, but `scalarLine` assumed every target was a `key: value` line:
+  // it dropped the dash and shifted the indent by one, and the proof then
+  // blamed a NEIGHBOURING line for the indentation it had just broken.
+  // MUTANT: remove the colon === -1 branch in scalarLine.
+  const after = patch('validation:\n  - npm test\n  - npm run build\n', ['validation', 1], 'npm run lint');
+  assert.deepEqual(parse(after).validation, ['npm test', 'npm run lint']);
+  assert.match(after, /^ {2}- npm run lint$/m);
+});
+
+test('replacing a list that is the FIRST key of a sequence item keeps the item', () => {
+  // On a dash line the line's indent is the DASH's, not the key's, so the
+  // block ran to the end of the whole item and the splice took the sibling
+  // keys with it. MUTANT: pass line.indent instead of the key indent.
+  const after = patch('rules:\n  - tags:\n      - a\n    class: AUTO\n', ['rules', 0, 'tags'], ['z']);
+  assert.deepEqual(parse(after), { rules: [{ tags: ['z'], class: 'AUTO' }] });
+  assert.match(after, /^ {4}class: AUTO$/m, 'the sibling key survived');
+});

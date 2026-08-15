@@ -46,6 +46,7 @@ import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
 import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
 import { checkStopAt } from './stop-check.mjs';
+import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender } from './answer.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
 
@@ -66,8 +67,15 @@ export function readInitiativeBoards(tyranDir) {
   let names;
   try {
     names = readdirSync(stateDir).sort();
-  } catch {
-    return { initiatives: [], errors: [] };
+  } catch (err) {
+    // ENOENT is the legitimate fresh-repo case: setup has run, no initiative
+    // exists yet, and an empty board is the right answer. Anything else —
+    // EACCES, ENOTDIR, EIO — means we cannot TELL whether there is work here,
+    // and returning "no initiatives" for that is the board saying all is well
+    // about a directory it could not open. It is also what `--dir` pointed at
+    // the repo root instead of at `.tyran` looks like.
+    if (err?.code === 'ENOENT') return { initiatives: [], errors: [] };
+    return { initiatives: [], errors: [{ name: 'state', error: `${err?.code ?? 'unreadable'} reading ${join(basename(resolve(tyranDir)), 'state')}` }] };
   }
   const dirs = names.filter((name) => {
     try {
@@ -87,7 +95,17 @@ export function readInitiativeBoards(tyranDir) {
   const warned = [];
   for (const name of dirs) {
     const journal = join(stateDir, name, 'journal.jsonl');
-    if (!existsSync(journal)) continue;
+    // "there is no journal here" and "I cannot tell whether there is a journal
+    // here" are different facts, and `existsSync` returns false for both. An
+    // initiative in an unreadable directory used to vanish from the board with
+    // nothing said — the totals simply went down by one.
+    try {
+      statSync(journal);
+    } catch (err) {
+      if (err?.code === 'ENOENT') continue;
+      errors.push({ name, error: `${err?.code ?? 'unreadable'} reading ${join('state', name, 'journal.jsonl')}` });
+      continue;
+    }
     try {
       const state = fold(readJournal(journal));
       // PARTIAL damage, which the guard below cannot see. That guard fires only
@@ -118,7 +136,17 @@ export function readInitiativeBoards(tyranDir) {
       // where an initiative's journal lives (ADR-21).
       initiatives.push({ name, journal, state, board: boardOf(state), files: initiativeFiles(tyranDir, name) });
     } catch (err) {
-      errors.push({ name, error: String(err?.message ?? err) });
+      // The CODE and a repo-relative path, never the raw message. A Node fs
+      // error carries the absolute path, which means a home directory and a
+      // username — and this string is written into `board.json`, a committed
+      // artefact compared byte for byte, so it also made `--check` fail on any
+      // other machine.
+      errors.push({
+        name,
+        error: err?.code
+          ? `${err.code} reading ${join('state', name, 'journal.jsonl')}`
+          : String(err?.message ?? err),
+      });
     }
   }
   return { initiatives, errors, warned };
@@ -383,8 +411,13 @@ function readJsonBody(req) {
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new SettingsError('request body is too large'));
-        req.destroy();
+        // Reject, but do NOT destroy the socket: the route's 400 is written on
+        // the next tick, and tearing the connection down first meant the
+        // client saw a network error instead of the sentence explaining what
+        // was wrong. Pausing stops us reading the rest without discarding the
+        // channel the answer goes out on.
+        req.pause();
+        reject(new SettingsError(`request body is larger than ${MAX_BODY_BYTES} bytes`));
         return;
       }
       chunks.push(chunk);
@@ -435,6 +468,47 @@ const sendJson = (res, status, body) => {
 };
 
 /**
+ * Answer one open question, from the page instead of from a terminal.
+ *
+ * The request supplies exactly two things: WHICH ask, and the operator's own
+ * words. Everything else — the question, the recorded default, the ticket, the
+ * gate id — is read back out of the journal, which is the same guarantee
+ * `answer apply` makes about its sheet: nothing you type can change what was
+ * asked. The append itself is `answerOne`, unchanged and unwrapped, so the
+ * lock, the re-check and the decision-before-gate ordering are the ones the
+ * CLI already uses.
+ */
+function handleAnswer(dir, body) {
+  const kind = String(body.kind ?? '');
+  const init = String(body.init ?? '');
+  const text = typeof body.answer === 'string' ? body.answer : '';
+
+  const { asks } = openAsks(dir);
+  const { answerable } = partitionAsks(asks);
+  const ask = answerable.find((a) => a.kind === kind && a.init === init);
+  if (ask === undefined) {
+    throw new SettingsError(
+      `no open question "${kind}" in "${init}" — it may have been answered in a terminal since this page loaded. Reload.`,
+    );
+  }
+  const trimmed = text.trim();
+  const problem = answerProblem(trimmed);
+  if (problem !== null) throw new SettingsError(`that answer ${problem}`);
+
+  const verdict = classify(trimmed, ask);
+  if (verdict.mode === 'open') throw new SettingsError(verdict.why ?? 'nothing to record');
+  const outcome = answerOne(ask, verdict);
+  if (outcome.skipped !== undefined) throw new SettingsError(outcome.skipped);
+
+  // A board still showing an answered question is worse than one that never
+  // showed it. Re-render before replying, so the reload the page does next is
+  // already correct.
+  reRender(dir, new Map([[ask.init, ask.journal]]));
+  console.log(`board: answered ${ask.init}/${ask.kind} (${verdict.mode}) -> decision ${outcome.decision}`);
+  return { ok: true, kind: ask.kind, init: ask.init, mode: verdict.mode, decision: outcome.decision, recorded: verdict.text };
+}
+
+/**
  * Apply one edit and write it, or change nothing and say why.
  *
  * The write itself is `writeAtomic` — the same rename-into-place the
@@ -450,6 +524,16 @@ function handleSettingsWrite(dir, route, body) {
     route === 'config'
       ? applySetting(dir, String(body.id ?? ''), body.value, confirm)
       : applyPolicyClass(dir, body.path === null || body.path === undefined ? null : String(body.path), String(body.class ?? ''), confirm);
+  // Compare-and-swap. `applySetting` reads the whole file and computes a whole
+  // replacement, so a second writer between the read and the write would have
+  // its change silently discarded — and both writers would report success.
+  // In-process that cannot interleave (this handler is one synchronous block),
+  // but two boards on one directory, or a board and a terminal, are ordinary.
+  if (readFileSync(applied.file, 'utf8') !== applied.before_text) {
+    throw new SettingsError(
+      `${applied.file} changed underneath this edit — something else wrote it while the page was open. Nothing was written; reload and try again.`,
+    );
+  }
   writeAtomic(applied.file, applied.text);
   // The operator's terminal is the audit trail. A change made from a web page
   // that left no trace anywhere a person looks is how a settings screen turns
@@ -502,6 +586,21 @@ function main() {
     console.error(`board: no such directory ${dir}`);
     process.exit(2);
   }
+  // `--dir` wants the `.tyran` directory, and pointing it at the repo root
+  // instead is the obvious typo. Since the renderer creates `state/` where it
+  // is told to, that typo used to succeed silently: a `state/` directory
+  // appearing in the project root, and an empty board reporting that all is
+  // well about a repo whose real journals sit one level down. Any ONE of these
+  // three is enough to recognise a Tyran directory, including a freshly set up
+  // one that has no initiative yet.
+  const looksLikeTyran = ['state', 'config.yaml', 'policies'].some((name) => existsSync(join(dir, name)));
+  if (!looksLikeTyran) {
+    console.error(
+      `board: ${dir} does not look like a .tyran directory — it has no state/, config.yaml or policies/. ` +
+        'Point --dir at .tyran itself (run /tyran:setup first if this repo has not adopted Tyran).',
+    );
+    process.exit(2);
+  }
   const outDir = join(dir, 'state');
 
   if (flags.serve) {
@@ -538,8 +637,8 @@ function main() {
           sendJson(res, 200, { ...readSettings(dir), writable: flags.write });
           return;
         }
-        if (req.url === '/settings/config' || req.url === '/settings/policy') {
-          const route = req.url.slice('/settings/'.length);
+        if (req.url === '/settings/config' || req.url === '/settings/policy' || req.url === '/answer') {
+          const route = req.url === '/answer' ? 'answer' : req.url.slice('/settings/'.length);
           if (req.method !== 'POST') {
             sendJson(res, 405, { ok: false, error: 'this route takes POST' });
             return;
@@ -550,6 +649,10 @@ function main() {
           // that and editing the autonomy policy through it is the difference
           // this flag exists to make. The refusal names the flag, because a
           // 403 an operator cannot act on is just a bug report.
+          // One flag for every route that writes. Answering a question and
+          // editing the autonomy policy are different acts, but they are the
+          // same decision for the operator: whether this board may change the
+          // repository at all.
           if (!flags.write) {
             sendJson(res, 403, {
               ok: false,
@@ -562,7 +665,7 @@ function main() {
             return;
           }
           readJsonBody(req)
-            .then((body) => sendJson(res, 200, handleSettingsWrite(dir, route, body)))
+            .then((body) => sendJson(res, 200, route === 'answer' ? handleAnswer(dir, body) : handleSettingsWrite(dir, route, body)))
             .catch((err) => {
               const known = err instanceof SettingsError;
               if (!known) console.error(`board: settings write failed: ${String(err?.message ?? err)}`);

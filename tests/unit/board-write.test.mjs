@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -351,4 +351,178 @@ test('--write without --serve is a usage error, not a silent no-op', async () =>
   } finally {
     f.cleanup();
   }
+});
+
+test('a question can be answered from the page, and the answer lands as two events', () => {
+  // The one context switch left in the operator loop: the queue showed the
+  // question and the three commands, and closing it meant a terminal.
+  //
+  // MUTANT: reimplement the append here instead of calling `answerOne`. The
+  // two properties that would silently go missing are the re-check of the
+  // gate INSIDE the lock (so a question answered in a terminal seconds ago is
+  // not answered twice) and decision-before-gate ordering.
+  return (async () => {
+    const { execFileSync } = await import('node:child_process');
+    const f = fixture();
+    const s = await serve(f.tyran, ['--write']);
+    try {
+      // Render first: board.json does not exist until something writes it.
+      execFileSync(process.execPath, [SCRIPT, '--dir', f.tyran], { stdio: 'pipe' });
+      const open = JSON.parse(readFileSync(join(f.tyran, 'state', 'board.json'), 'utf8')).asks;
+      assert.ok(open.length > 0, 'the fixture must carry an open question');
+      const ask = open[0];
+
+      const res = await post(s.base, '/answer', { init: ask.init, kind: ask.kind, answer: 'yes, on staging only' });
+      const payload = await res.json();
+      assert.equal(payload.ok, true, JSON.stringify(payload));
+      assert.equal(payload.mode, 'answered');
+      assert.match(String(payload.decision), /^D-\d+$/);
+
+      const lines = readFileSync(join(f.tyran, 'state', ask.init, 'journal.jsonl'), 'utf8')
+        .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      const decision = lines.filter((e) => e.ev === 'decision').at(-1);
+      const gate = lines.at(-1);
+      // The decision text is composed by `eventsFor`, shared with the CLI, so
+      // an answer given on the page is byte-identical to one given in a
+      // terminal — including the gate id it is filed under.
+      assert.equal(decision.data.text, `${ask.kind}: yes, on staging only`);
+      assert.equal(gate.ev, 'gate', 'the gate must be the LAST of the two');
+      assert.equal(gate.data.kind, ask.kind);
+      assert.equal(gate.data.result, 'answered');
+
+      // Answering twice must not append twice.
+      const again = await post(s.base, '/answer', { init: ask.init, kind: ask.kind, answer: 'again' });
+      assert.equal(again.status, 400);
+      assert.match((await again.json()).error, /no open question|already/i);
+      assert.equal(lines.filter((e) => e.ev === 'gate' && e.data.kind === ask.kind && e.data.result === 'answered').length, 1);
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});
+
+test('answering is refused without --write, like every other route that writes', () => {
+  return (async () => {
+    const f = fixture();
+    const s = await serve(f.tyran);
+    try {
+      const res = await post(s.base, '/answer', { init: 'demo', kind: 'Q-1', answer: 'x' });
+      assert.equal(res.status, 403);
+      assert.match((await res.json()).error, /--write/);
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});
+
+test('an answer is validated, and a bad one writes nothing', () => {
+  return (async () => {
+    const { execFileSync } = await import('node:child_process');
+    const f = fixture();
+    const s = await serve(f.tyran, ['--write']);
+    try {
+      execFileSync(process.execPath, [SCRIPT, '--dir', f.tyran], { stdio: 'pipe' });
+      const ask = JSON.parse(readFileSync(join(f.tyran, 'state', 'board.json'), 'utf8')).asks[0];
+      const journal = join(f.tyran, 'state', ask.init, 'journal.jsonl');
+      const before = readFileSync(journal, 'utf8');
+
+      // An unknown ask, an invisible codepoint, and a dash (which means
+      // "leave it open" and therefore records nothing).
+      const cases = [
+        { init: ask.init, kind: 'Q-999', answer: 'x' },
+        { init: 'nosuch', kind: ask.kind, answer: 'x' },
+        { init: ask.init, kind: ask.kind, answer: `a${String.fromCodePoint(0x202e)}b` },
+        { init: ask.init, kind: ask.kind, answer: '-' },
+      ];
+      for (const body of cases) {
+        const res = await post(s.base, '/answer', body);
+        assert.equal(res.status, 400, JSON.stringify(body));
+        assert.equal((await res.json()).ok, false);
+      }
+      assert.equal(readFileSync(journal, 'utf8'), before, 'a refused answer appends nothing');
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});
+
+test('a blank answer takes the recorded default and still records it as a decision', () => {
+  // A default accepted is a decision, and the ledger must say which it was.
+  return (async () => {
+    const { execFileSync } = await import('node:child_process');
+    const f = fixture();
+    const s = await serve(f.tyran, ['--write']);
+    try {
+      execFileSync(process.execPath, [SCRIPT, '--dir', f.tyran], { stdio: 'pipe' });
+      const withDefault = JSON.parse(readFileSync(join(f.tyran, 'state', 'board.json'), 'utf8'))
+        .asks.find((a) => a.default !== null && a.default !== undefined);
+      assert.ok(withDefault, 'the fixture must carry an ask with a default');
+      const res = await post(s.base, '/answer', { init: withDefault.init, kind: withDefault.kind, answer: '' });
+      const payload = await res.json();
+      assert.equal(payload.mode, 'default');
+      assert.equal(payload.recorded, withDefault.default, 'the default is taken VERBATIM from the journal');
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});
+
+test('a concurrent writer is refused, not silently overwritten', () => {
+  // The write is a whole-file read-modify-write, so a second writer between
+  // the read and the write used to have its change discarded with both
+  // writers reporting success. In-process cannot interleave; two boards on
+  // one directory, or a board and a terminal, are ordinary.
+  // MUTANT: drop the compare-and-swap in handleSettingsWrite.
+  return (async () => {
+    const f = fixture();
+    const s = await serve(f.tyran, ['--write']);
+    try {
+      const file = join(f.tyran, 'config.yaml');
+      // Simulate the other writer landing between this server's read and its
+      // write by changing the file out of band first, then posting a value
+      // computed from what the page loaded.
+      const stale = readFileSync(file, 'utf8');
+      writeFileSync(file, stale.replace('profile: balanced', 'profile: full'));
+      const res = await post(s.base, '/settings/config', { id: 'tiers.work', value: 'newmodel' });
+      assert.equal((await res.json()).ok, true, 'a normal write still works after an out-of-band change');
+      // Both changes must survive: the out-of-band one and this one.
+      const now = parse(readFileSync(file, 'utf8'));
+      assert.equal(now.profile, 'full', 'the other writer was not clobbered');
+      assert.equal(now.tiers.work, 'newmodel');
+    } finally {
+      await s.stop();
+      f.cleanup();
+    }
+  })();
+});
+
+test('board.mjs refuses a --dir that is not a .tyran directory', () => {
+  // `--dir <repo-root>` is the obvious typo, and since the renderer creates
+  // state/ where it is told to, it used to succeed silently: a state/ folder
+  // in the project root and an empty board reporting all is well about a repo
+  // whose real journals sit one level down.
+  // MUTANT: delete the looksLikeTyran check.
+  return (async () => {
+    const { execFileSync } = await import('node:child_process');
+    const f = fixture();
+    try {
+      assert.throws(
+        () => execFileSync(process.execPath, [SCRIPT, '--dir', f.dir], { stdio: 'pipe' }),
+        (err) => {
+          assert.equal(err.status, 2);
+          assert.match(String(err.stderr), /does not look like a \.tyran directory/);
+          return true;
+        },
+      );
+      assert.ok(!existsSync(join(f.dir, 'state')), 'and it created nothing where it was pointed');
+      // The real directory still renders, including a fresh one with no state/.
+      execFileSync(process.execPath, [SCRIPT, '--dir', f.tyran], { stdio: 'pipe' });
+    } finally {
+      f.cleanup();
+    }
+  })();
 });

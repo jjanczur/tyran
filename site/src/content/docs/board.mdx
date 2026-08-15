@@ -101,6 +101,34 @@ into can have. Re-render it at the start of each sitting rather than reusing
 the last one — every block in an applied sheet names an ask that is now
 closed, and `apply` refuses the whole file rather than appending a duplicate.
 
+### Or answer it on the page
+
+With the board served `--write`, every question in the **Waiting on you** tab
+carries a box. Type an answer and press **Answer**; on a question that has a
+recorded default, press **Take the default** instead. The three commands above
+still work and stay printed on the tab — the box is a convenience, and a board
+opened over `file://` or without `--write` has to leave you somewhere to go.
+
+The request carries exactly two things: **which** ask, and your words.
+Everything else — the question, the recorded default, the ticket, the gate id —
+is read back out of the journal by the server, which is the same guarantee the
+sheet makes and for the same reason. The append itself is the function
+`answer apply` calls, unwrapped, so both routes produce byte-identical events:
+the gate is re-checked INSIDE the journal's write lock (a question you closed
+in a terminal thirty seconds ago cannot be closed twice) and the decision is
+written before the gate.
+
+Each card also says which KIND of question it is, and that costs no new event
+type to know:
+
+| | |
+|---|---|
+| **decision · a default is recorded** | saying nothing has a safe outcome. You may take the recommendation and move on. |
+| **blocking · no safe default** | nobody recorded a fallback, so this one waits for you. |
+
+It is the same distinction that already makes the answer sheet sort
+no-default-first.
+
 ## Opening it
 
 **[Try the sandbox board](../sandbox/)** — the
@@ -151,7 +179,12 @@ quick look, `BOARD.md` for reading in the terminal or in a diff.
 The page an operator leaves open overnight: self-contained (inline CSS/JS,
 zero external hosts and zero CDNs, complete over `file://`; the one
 same-origin request to loopback is amended in [Spend](#spend) below) and
-refreshing itself every 30 seconds. The artefact itself never reads a clock —
+reloading itself every 30 seconds — on a timer the page can stop, not a
+`meta http-equiv="refresh"`, because a browser schedules that the moment it
+parses the tag and removing the tag afterwards does not cancel it. A reload
+nothing can stop would destroy a half-typed answer or model name, so the
+timer is held while you are editing and re-armed when you leave.
+The artefact itself never reads a clock —
 "as of" is the newest event timestamp, which keeps `--check` valid for the
 HTML too; the only clock is the viewer's own browser, which ages the agent
 strip.
@@ -163,7 +196,7 @@ and the page opens on Overview:
 |---|---|
 | **Overview** | is anything on fire — four tiles (waiting on you · agents running · progress · needs a human), any STOPPED or PAUSED banner, the agent strip with its signal-freshness colours, a spend headline once spend has loaded, the errors agents logged, and the UNREADABLE list |
 | **Board** | where every ticket is — the lanes, and the detail of whichever card you select |
-| **Waiting on you** | what is blocked on a decision, and the commands that unblock it |
+| **Waiting on you** | what is blocked on a decision, whether it has a safe default, and — with `--write` — a box to answer it in |
 | **Spend** | what the work has cost |
 | **Settings** | what Tyran is configured to do, and — with `--write` — how to change it |
 
@@ -319,7 +352,13 @@ rule (a boundary's written `reason` is load-bearing, and a one-line reason
 typed into a form is how a policy turns into a list of unexplained globs), or
 edit `pricing:` (a rate card is a table copied from a vendor's price list).
 
-**What guards the route, stated exactly.** The `Host` pin that covers the whole
+**Three routes write, and one flag turns all of them on.**
+`POST /settings/config`, `POST /settings/policy` and `POST /answer` — answering
+a question and editing the autonomy policy are different acts, but they are the
+same decision for the operator: whether this board may change the repository at
+all.
+
+**What guards the routes, stated exactly.** The `Host` pin that covers the whole
 server, plus an `Origin` check and a required `application/json` content type —
 together those close the browser paths: a page on another origin cannot read
 the board, and its POST is preflighted and refused. What they do **not** do is
@@ -349,9 +388,11 @@ for four days — the timestamp was in `board.json` all along and nothing render
 it. Now every card in a lane where standing still IS the defect (`blocked`,
 `changes-requested`, `in-review`, `waiting-operator`, `in-progress`,
 `paused-limit`) carries its age, in the same four colours the agent strip uses.
-`backlog`, `ready` and `done` do not: an unstarted ticket is waiting its turn,
-not stalling, and marking every one of them stale makes the mark worthless
-where it means something.
+The other four do not, for the same reason in four forms: `backlog` and `ready`
+hold tickets waiting their turn rather than stalling, `parked` holds one you
+deliberately set aside, and `done` holds one that is supposed to have stopped
+moving. Marking all of those stale makes the mark worthless where it means
+something.
 
 Both are worded as observations rather than verdicts. The board reports the
 last event on a ticket; only you know whether that is a stall or a long test

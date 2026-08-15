@@ -23,9 +23,11 @@
  *    before the build. The journals keep their real spacing — an agent that
  *    was quiet for 40 minutes still is.
  *
- * 2. **It must not pretend to be live.** The 30-second meta refresh is
- *    stripped (it would also snap a reader back to the first tab mid-click)
- *    and a banner says what the page is.
+ * 2. **It must not pretend to be live.** The 30-second refresh marker is
+ *    stripped, which is all it takes: the page arms its reload timer only if
+ *    that marker is present, so a stripped marker means no timer and no
+ *    reader snapped back to the first tab mid-click. A banner says what the
+ *    page is.
  *
  * Spend ships beside it as a plain `cost.json`, which is exactly the relative
  * path the client already fetches — so the sandbox exercises the same code a
@@ -185,7 +187,7 @@ try {
   // Both replacements are asserted rather than assumed: a silent no-op here
   // would publish a page that reloads itself every 30 seconds and claims to
   // be someone's live board.
-  const refresh = '<meta http-equiv="refresh" content="30">\n';
+  const refresh = '<meta name="tyran-refresh" content="30">\n';
   if (!html.includes(refresh)) throw new Error('the refresh tag moved — the sandbox would publish a self-reloading page');
   html = html.replace(refresh, '');
 

@@ -44,6 +44,30 @@ jobs:
             grep -E '^# skipped|SKIP' /tmp/test-output.txt || true
             exit 1
           }
+      - name: The README's test count is the real one
+        # `tests/unit/docs-claims.test.mjs` verifies every "N unit tests" claim
+        # on the docs surfaces, because each of those is about ONE test file and
+        # can be counted by running it. The README's number is about the WHOLE
+        # suite, so no unit test can check it without running the suite from
+        # inside the suite. It went stale by 91 tests before anyone noticed.
+        #
+        # The measurement already exists: the step above wrote a full run to
+        # /tmp/test-output.txt. Comparing against it costs nothing.
+        run: |
+          set -euo pipefail
+          # Reporter-agnostic on purpose: node prints "# tests N" under tap and
+          # "<glyph> tests N" under spec, and which one you get depends on
+          # whether stdout is a terminal. Match the tail of the summary line so
+          # this reads the same locally as it does here.
+          actual=$(grep -oE 'tests [0-9]+$' /tmp/test-output.txt | tail -1 | awk '{print $2}')
+          claimed=$(grep -oE '[0-9]+ unit tests' README.md | awk '{print $1}')
+          test -n "$actual" || { echo "no test count in the run output"; exit 1; }
+          test -n "$claimed" || { echo "README no longer claims a test count"; exit 1; }
+          test "$actual" = "$claimed" || {
+            echo "README claims $claimed unit tests; the suite has $actual."
+            exit 1
+          }
+          echo "README: $claimed unit tests, and so does the suite."
       - name: Validate shipped templates against their schemas
         run: |
           node scripts/schema.mjs validate config templates/config.yaml

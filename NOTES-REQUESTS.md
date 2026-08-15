@@ -48,7 +48,7 @@ and the difference is worth keeping:
 - **Comments are preserved after all.** The operator accepted losing them; it
   turned out not to be necessary. `scripts/yaml-patch.mjs` edits the LINE, not
   the document, and proves the result by re-parsing and comparing. So the file
-  keeps the 60 comment lines that are the only place anyone is told that bare
+  keeps the 63 comment lines that are the only place anyone is told that bare
   `off` is the YAML boolean false — and the screen carries the prose too.
 - **`.tyran/policies/**` is editable, and its own protection is not.** Keeping
   the policy file out entirely would have removed the most useful thing on the
@@ -86,12 +86,25 @@ Standing instruction from the operator: merge to `main` over PRs proactively;
 work parked in an open PR is wasted work. Check open PRs before finishing a
 session.
 
-## 5. Board defects found by audit, 2026-08-14 — NOT FIXED
+## 5. Board defects found by audit, 2026-08-14 — ALL SIX FIXED
 
 Six findings from an audit of `board.mjs` / `board-html.mjs` / `project.mjs`,
 each verified against the code rather than the page. Ordered by how badly they
 break the page's own promise, which is that it never shows "all is well" when
 it is not.
+
+**All six were closed across 0.1.24–0.1.27**, and re-verified against the code
+on 2026-08-15 rather than trusted: `warnings(state)` is called and rendered
+(`board.mjs`, the `warned` list); the "needs a human" tile is counted
+server-side from the lanes *and* the blocked agents; the strip is sorted
+stalest-first on evidence and the agent's `next` is rendered; the drill-down
+lists `INITIATIVE_FILES` that `existsSync` confirms; a cost failure shows the
+server's own sentence via `costError`; and the over-cap `UsageError` is caught
+by the request handler, which answers 200 with a readable page — the meta
+refresh that turned a 500 into a re-fetch loop is gone as well.
+
+This header said NOT FIXED for a day after the last of them shipped. Prose in
+this repo is checkable on purpose and this line was not checkable by anything.
 
 1. **A partially corrupt journal renders as healthy.** `board.mjs` guards only
    total loss (`total === 0`); three readable tickets plus one unparseable line
@@ -130,8 +143,13 @@ folded and dropped.
 
 `https://github.com/heygen-com/hyperframes` plus an OpenAI TTS voiceover, to
 produce short explainer videos and GIFs. I have **not** evaluated the tool and
-should not pretend otherwise. The README GIF (`assets/board-demo.gif`) is
-recorded from the real board and covers the immediate need.
+should not pretend otherwise.
+
+**The operator is working on this directly (2026-08-15) — hands off.** Do not
+adopt hyperframes, do not add it to the toolchain, and do not generate video
+with it until they say the work has landed. The README GIF
+(`assets/board-demo.gif`) is recorded from the real board and covers the
+immediate need; see §9 for the one thing wrong with it.
 
 ## 7. Feature plan from the munder-difflin study, 2026-08-15
 
@@ -239,3 +257,47 @@ Removing a key from `known` turns any config that carries it INVALID, and an
 invalid config makes the policy gate refuse every write in that repo. So the
 cost of the tidy-up lands on whoever set the key, and the benefit is a shorter
 array. It stays accepted and inert until there is a reason to migrate.
+
+## 9. Dependency and staleness sweep, 2026-08-15
+
+Requested: update the libraries, fix Dependabot, refresh the docs and the
+README, clean up technical debt. What it found, and what it left.
+
+**Fixed.** `npm audit` in `site/` reported five vulnerabilities, three of them
+high, all transitive — nanoid, js-yaml, fast-uri, dompurify, mermaid. Now
+zero, with astro at 7.2.2, starlight at 0.41.7 and playwright at 1.62.1, and
+no range in `package.json` moved. Verified on the built site rather than
+asserted: `astro check` clean, 18 pages built, 488/488 root-absolute URLs
+carrying the base prefix, 0 broken links, worst mermaid contrast 5.68:1.
+
+Three claims had gone stale, and the pattern in all three is the same — a
+number or a count that no gate was watching:
+
+- the README said **1314 unit tests**; the suite had 1405. The docs surfaces
+  are pinned by `docs-claims.test.mjs`, but its `CLAIM` regex only scans
+  `docs/` and `site/`, and each claim it checks is about one test file. The
+  README's is about the whole suite, which no unit test can count without
+  running the suite from inside itself. CI now compares it against the run it
+  already performs, so the check costs nothing.
+- the README said the board has **four tabs**; it has had five since 0.1.24,
+  and `docs/board.md` said five the whole time. One surface moved, the other
+  did not — the exact failure the two-surfaces rule exists to prevent, on the
+  one surface that rule does not name.
+- `check-browser.mjs` carried a hand-written list of 14 slugs against a site
+  of 17 pages. It now reads the content directory.
+
+**Still open, and small.** `assets/board-demo.gif` was recorded at 0.1.22 and
+moves through four tabs, so it predates Settings. The alt text no longer
+claims it shows the whole page, but a re-record against the current board is
+the honest fix — it needs a live board with data and a screen recorder, which
+is an operator job, not a scripted one. **Not** with hyperframes: see §6.
+
+**Deliberately not done.** TypeScript stays on 6. `@astrojs/check` is at its
+newest release, 0.9.10, and still declares `typescript: ^5.0.0 || ^6.0.0` —
+and `astro check` is what the Pages workflow runs, so TS 7 breaks the deploy
+rather than a test. Dependabot now ignores that major with the reason written
+beside it, and drops it the day the peer range widens.
+
+Nothing else surfaced: no TODO/FIXME/HACK markers in any tracked file, no
+orphaned script, every script covered by a test, every doc pair identical in
+heading structure, no broken relative link, and the three version files agree.

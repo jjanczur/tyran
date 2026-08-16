@@ -384,15 +384,18 @@ function loadConfigDoc(tyranDir) {
 }
 
 /**
- * `spend.transcript_dirs` from config.yaml — the middle tier of the
- * transcript-dir precedence (CLI `--transcripts` > this > the derived-slug /
- * cwd-probe fallback above). Operator-written, never scanner-inferred,
- * exactly like `pricing:` and `limits:`: a config that will not parse or
- * carries nothing here simply falls through to the fallback, same as an
- * absent block.
+ * `spend.transcript_dirs` out of an ALREADY-PARSED config doc — the middle
+ * tier of the transcript-dir precedence (CLI `--transcripts` > this > the
+ * derived-slug / cwd-probe fallback above). Operator-written, never
+ * scanner-inferred, exactly like `pricing:` and `limits:`: a doc that carries
+ * nothing here simply falls through to the fallback, same as an absent block.
+ *
+ * Takes the parsed doc rather than `tyranDir` so `costReport` can read
+ * `config.yaml` once and hand the same doc to this and to `pricingOf` —
+ * two readers opening and parsing the same file on every call was the
+ * reviewed nit this signature exists to close.
  */
-function loadSpendTranscriptDirs(tyranDir) {
-  const doc = loadConfigDoc(tyranDir);
+function spendTranscriptDirsOf(doc) {
   const spend = doc !== null && typeof doc === 'object' ? doc.spend : undefined;
   const list =
     spend !== null && typeof spend === 'object' && Array.isArray(spend.transcript_dirs)
@@ -714,12 +717,16 @@ export function costJson(report) {
 
 /* ---------------------------------- CLI ---------------------------------- */
 
-function loadPricing(tyranDir) {
-  // A config that will not parse is doctor's problem to report, not this
-  // reader's problem to refuse over: tokens are still worth counting.
-  // `pricingOf(null)` already reads as "no pricing block" (see schema.mjs),
-  // so an absent/unparseable file needs no separate branch here.
-  return pricingOf(loadConfigDoc(tyranDir) ?? {});
+/**
+ * The rate card out of an ALREADY-PARSED config doc — see `spendTranscriptDirsOf`
+ * for why this takes a doc instead of `tyranDir` and reading the file itself.
+ * A config that will not parse is doctor's problem to report, not this
+ * reader's problem to refuse over: tokens are still worth counting.
+ * `pricingOf(null)` already reads as "no pricing block" (see schema.mjs), so
+ * an absent/unparseable doc needs no separate branch here.
+ */
+function pricingOfDoc(doc) {
+  return pricingOf(doc ?? {});
 }
 
 function readCache(path) {
@@ -817,9 +824,14 @@ function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed,
  */
 export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = null, transcriptDirs = [] } = {}) {
   const root = repoRoot ?? resolve(tyranDir, '..');
-  const pricing = loadPricing(tyranDir);
+  // Read ONCE and handed to both readers below: `pricingOfDoc` and
+  // `spendTranscriptDirsOf` used to each open and parse config.yaml
+  // themselves, which meant every `costReport` call — including the ones
+  // `board.mjs --serve` makes per request — read the same file twice.
+  const configDoc = loadConfigDoc(tyranDir);
+  const pricing = pricingOfDoc(configDoc);
 
-  const given = transcriptDirs.length > 0 ? transcriptDirs : loadSpendTranscriptDirs(tyranDir);
+  const given = transcriptDirs.length > 0 ? transcriptDirs : spendTranscriptDirsOf(configDoc);
   // De-duplicated: two spellings of the same directory (a repeated flag, or a
   // flag that repeats what the config already says) must not double-count
   // every transcript under it.

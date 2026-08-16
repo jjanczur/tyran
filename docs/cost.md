@@ -109,7 +109,10 @@ node scripts/cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] [--tr
   default is `~/.claude/projects`.
 - `--transcripts <dir>` names a transcript directory explicitly — the per-project
   directory holding `<session>.jsonl` and `<session>/subagents/`. Repeatable;
-  sources are the union over every directory given. See
+  sources are the union over every directory given. A leading `~` expands to
+  the home directory; anything else resolves against the process's current
+  working directory, so a relative path is only as reliable as the directory
+  the command happens to be run from — prefer absolute or `~`. See
   [When resolution fails](#when-resolution-fails) below.
 - `--json` writes `.tyran/state/cost.json` atomically and prints its path
   instead of the table.

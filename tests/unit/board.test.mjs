@@ -315,6 +315,28 @@ test('spend reaches three places from the one fetch, and explains itself when th
   assert.match(html, /Over file:\/\/ there is no server, so this tab stays empty\./);
 });
 
+test('the missing-transcript-dir hint renders even when nothing was found at all', () => {
+  // MUTANT: revert the fetch handler's `if (!payload.transcripts_found)` back
+  // to a bare `return;`. The pure function's own tests (board-client-literal
+  // .test.mjs) would stay green — they never touch this call site — while the
+  // Spend tab silently keeps its pre-fetch "open with --serve" hint on the
+  // exact payload review reproduced live: every `spend.transcript_dirs` entry
+  // present but every one of them a typo. This test pins the WIRING, not just
+  // the function it wires in.
+  const html = demoHtml();
+  const handler = html.slice(
+    html.indexOf('if (!payload.transcripts_found) {'),
+    html.indexOf('cost = payload;'),
+  );
+  assert.notEqual(handler.indexOf('if (!payload.transcripts_found) {'), -1, 'the guard itself must survive');
+  assert.match(handler, /clear\(spBody\)/, 'the stale pre-fetch hint must be cleared, not left standing');
+  assert.match(
+    handler,
+    /spendResolutionHints\(payload\)\.forEach\(function \(h\) \{ spBody\.appendChild\(el\('div', 'hint', h\)\); \}\)/,
+    'the branch that never reaches renderSpend must still call the shared hint function',
+  );
+});
+
 // --- the half that did not render -----------------------------------------
 //
 // The damage guard above fires only when NOTHING was readable. Everything

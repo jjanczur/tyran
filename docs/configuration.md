@@ -154,9 +154,16 @@ working directory, not the repo's.
 |---|---|---|
 | `transcript_dirs` | no | a list of non-empty directory paths, each the per-project directory holding `<session>.jsonl` and `<session>/subagents/` |
 
-A leading `~` expands to the home directory. Given a non-empty list, `cost.mjs`
-scans the union of those directories instead of running either heuristic; a
-directory that does not exist is reported in the report's
+A leading `~` expands to the home directory. **A path without `~` or a leading
+`/` resolves against the process's current working directory** — the shell
+`cost.mjs` (or `board.mjs --serve`) happens to have been launched from, not
+`.tyran/`'s location and not the repo root. Write an absolute path or a `~`
+path; a bare relative entry works only by accident of where the command was
+run, which is the exact kind of assumption this block exists to replace.
+
+Given a non-empty list, `cost.mjs` scans the union of those directories
+instead of running either heuristic; a directory that does not exist is
+reported in the report's
 `transcript_dirs_missing` rather than silently skipped. `--transcripts <dir>`
 on the command line is the same override and outranks this block when both are
 given. Full account of the failure this exists for, and what the board shows

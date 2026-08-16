@@ -35,6 +35,7 @@
  *
  * CLI:
  *   node cost.mjs [--dir <.tyran>] [--session <id>] [--json] [--projects <dir>]
+ *                 [--transcripts <dir>]...
  * Exit: 0 ok · 2 usage/IO
  */
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -345,6 +346,61 @@ function findTranscriptDir(want, projectsRoot) {
   return null;
 }
 
+/**
+ * Where BOTH `transcriptDirFor` heuristics fail: a conductor session started
+ * from a working directory OTHER than the repo it operates on — Claude Code
+ * Desktop opened in a sibling folder, working the repo through absolute paths
+ * and worktrees. The computed slug does not match (it is derived from the
+ * conductor's own cwd, not the repo path), and the cwd probe does not match
+ * either (every record in that transcript carries the CONDUCTOR's cwd, never
+ * the repo's). Measured: a `claude` run once started inside the repo for the
+ * trust dialog left a directory the direct lookup matched and stopped at,
+ * while ~66 agent transcripts and 2 300 requests sat under the conductor's
+ * real project dir with nothing on the board pointing at them.
+ *
+ * A leading `~` expanded to the home directory — the same narrow rule
+ * `main_writable_paths` uses in `config.yaml`, so a transcript dir is written
+ * the way an operator already writes every other out-of-repo path in this
+ * file.
+ */
+function expandHome(p) {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/**
+ * The parsed `.tyran/config.yaml`, or null when it is absent or will not
+ * parse. Shared by every config-driven reader below (pricing, the transcript
+ * override) so there is one place that opens and parses the file, not two
+ * loaders that quietly drift apart.
+ */
+function loadConfigDoc(tyranDir) {
+  try {
+    return parse(readFileSync(join(tyranDir, 'config.yaml'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `spend.transcript_dirs` from config.yaml — the middle tier of the
+ * transcript-dir precedence (CLI `--transcripts` > this > the derived-slug /
+ * cwd-probe fallback above). Operator-written, never scanner-inferred,
+ * exactly like `pricing:` and `limits:`: a config that will not parse or
+ * carries nothing here simply falls through to the fallback, same as an
+ * absent block.
+ */
+function loadSpendTranscriptDirs(tyranDir) {
+  const doc = loadConfigDoc(tyranDir);
+  const spend = doc !== null && typeof doc === 'object' ? doc.spend : undefined;
+  const list =
+    spend !== null && typeof spend === 'object' && Array.isArray(spend.transcript_dirs)
+      ? spend.transcript_dirs
+      : [];
+  return list.filter((d) => typeof d === 'string' && d.trim() !== '');
+}
+
 /** Every transcript belonging to this repo: the sessions and their agents. */
 export function listSources(transcriptDir, sessionFilter) {
   const out = [];
@@ -644,6 +700,10 @@ export function renderReport(report) {
   if (report.unpriced.length > 0) {
     out.push(`Unpriced models (counted in tokens, absent from every amount): ${report.unpriced.join(', ')}`);
   }
+  if ((report.transcript_dirs_missing ?? []).length > 0) {
+    const noun = report.transcript_dirs_missing.length === 1 ? 'directory' : 'directories';
+    out.push(`Given transcript ${noun} not found: ${report.transcript_dirs_missing.join(', ')}`);
+  }
   return out.join('\n') + '\n';
 }
 
@@ -655,13 +715,11 @@ export function costJson(report) {
 /* ---------------------------------- CLI ---------------------------------- */
 
 function loadPricing(tyranDir) {
-  try {
-    return pricingOf(parse(readFileSync(join(tyranDir, 'config.yaml'), 'utf8')));
-  } catch {
-    // A config that will not parse is doctor's problem to report, not this
-    // reader's problem to refuse over: tokens are still worth counting.
-    return { rate_card: null, models: Object.create(null) };
-  }
+  // A config that will not parse is doctor's problem to report, not this
+  // reader's problem to refuse over: tokens are still worth counting.
+  // `pricingOf(null)` already reads as "no pricing block" (see schema.mjs),
+  // so an absent/unparseable file needs no separate branch here.
+  return pricingOf(loadConfigDoc(tyranDir) ?? {});
 }
 
 function readCache(path) {
@@ -683,20 +741,21 @@ function writeAtomic(path, text) {
   renameSync(tmp, path);
 }
 
-/** Build the report for a repo. Exported so the board server reuses it. */
-export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = null } = {}) {
-  const root = repoRoot ?? resolve(tyranDir, '..');
-  const dir = transcriptDirFor(root, projectsRoot ?? join(homedir(), '.claude', 'projects'));
-  const pricing = loadPricing(tyranDir);
-  if (dir === null) {
-    const empty = rollup([], pricing, {});
-    empty.transcripts_found = false;
-    return empty;
-  }
+/**
+ * The scan-and-persist tail shared by every path through `costReport`: fold
+ * `sources` against the on-disk cache, roll it up, attach the fields callers
+ * read straight off the report, and write the sidecar. One function so the
+ * caching contract — persisted here, not only in the `--json` branch, so the
+ * served board benefits too — cannot drift between the derived-dir path and
+ * the explicit-dirs path below.
+ */
+function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed, transcriptDirsMissing }) {
   const cachePath = join(tyranDir, 'state', COST_FILE);
-  const { scanned, unreadable, reused } = scanAll(listSources(dir, session), readCache(cachePath));
+  const { scanned, unreadable, reused } = scanAll(sources, readCache(cachePath));
   const report = rollup(scanned, pricing, { unreadable, reused });
   report.transcripts_found = true;
+  report.transcript_dirs = transcriptDirsUsed;
+  report.transcript_dirs_missing = transcriptDirsMissing;
   report.session = session;
   report.sources = scanned.map((s) => ({
     path: s.path,
@@ -738,12 +797,85 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
   return report;
 }
 
+/**
+ * Build the report for a repo. Exported so the board server reuses it.
+ *
+ * `transcriptDirs` is the explicit override — the fix for a conductor that
+ * ran from a working directory other than the repo it operates on (see the
+ * comment above `expandHome`). Precedence, highest first: the `transcriptDirs`
+ * this caller passed in (the CLI's repeatable `--transcripts`) · `.tyran/
+ * config.yaml`'s `spend.transcript_dirs` · the derived-slug / cwd-probe
+ * fallback `transcriptDirFor` already does. Reading the config tier HERE
+ * rather than in every caller is what lets `board.mjs --serve` honour
+ * `spend:` with no `--transcripts` flag at all — one precedence order, read
+ * once, for both the CLI and the served page.
+ *
+ * A dir that does not exist is never silently dropped: it is reported in
+ * `transcript_dirs_missing` on the returned report, and if EVERY given dir is
+ * missing the report reads exactly like "no transcripts found" — gaps are
+ * reported, never zeroed (property 3 above).
+ */
+export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = null, transcriptDirs = [] } = {}) {
+  const root = repoRoot ?? resolve(tyranDir, '..');
+  const pricing = loadPricing(tyranDir);
+
+  const given = transcriptDirs.length > 0 ? transcriptDirs : loadSpendTranscriptDirs(tyranDir);
+  // De-duplicated: two spellings of the same directory (a repeated flag, or a
+  // flag that repeats what the config already says) must not double-count
+  // every transcript under it.
+  const explicit = [...new Set(given.map((d) => resolve(expandHome(d))))];
+
+  if (explicit.length > 0) {
+    const present = explicit.filter((d) => existsSync(d));
+    const missing = explicit.filter((d) => !existsSync(d));
+    if (present.length === 0) {
+      const empty = rollup([], pricing, {});
+      empty.transcripts_found = false;
+      empty.transcript_dirs = [];
+      empty.transcript_dirs_missing = missing;
+      return empty;
+    }
+    const sources = present.flatMap((dir) => listSources(dir, session));
+    return finishReport({
+      sources,
+      pricing,
+      tyranDir,
+      session,
+      transcriptDirsUsed: present,
+      transcriptDirsMissing: missing,
+    });
+  }
+
+  const dir = transcriptDirFor(root, projectsRoot ?? join(homedir(), '.claude', 'projects'));
+  if (dir === null) {
+    const empty = rollup([], pricing, {});
+    empty.transcripts_found = false;
+    empty.transcript_dirs = [];
+    empty.transcript_dirs_missing = [];
+    return empty;
+  }
+  return finishReport({
+    sources: listSources(dir, session),
+    pricing,
+    tyranDir,
+    session,
+    transcriptDirsUsed: [dir],
+    transcriptDirsMissing: [],
+  });
+}
+
 function parseArgs(argv) {
-  const flags = { dir: '.tyran', session: null, projects: null, json: false };
+  const flags = { dir: '.tyran', session: null, projects: null, json: false, transcripts: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
-    else if (arg === '--dir' || arg === '--session' || arg === '--projects') {
+    else if (arg === '--transcripts') {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('--')) throw new UsageError(`${arg} needs a value`);
+      // Repeatable: sources are the union over every directory given.
+      flags.transcripts.push(value);
+      i += 1;
+    } else if (arg === '--dir' || arg === '--session' || arg === '--projects') {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('--')) throw new UsageError(`${arg} needs a value`);
       flags[arg.slice(2)] = value;
@@ -759,7 +891,10 @@ function main(argv) {
     flags = parseArgs(argv);
   } catch (err) {
     console.error(String(err.message ?? err));
-    console.error('usage: cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] [--json]');
+    console.error(
+      'usage: cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] ' +
+        '[--transcripts <dir>]... [--json]'
+    );
     return 2;
   }
   const tyranDir = resolve(flags.dir);
@@ -767,12 +902,27 @@ function main(argv) {
     console.error(`cost: no such directory: ${tyranDir}`);
     return 2;
   }
-  const report = costReport({ tyranDir, projectsRoot: flags.projects, session: flags.session });
+  const report = costReport({
+    tyranDir,
+    projectsRoot: flags.projects,
+    session: flags.session,
+    transcriptDirs: flags.transcripts,
+  });
   if (report.transcripts_found === false) {
-    console.error(
-      'cost: no transcripts found for this repo under the Claude Code projects directory.\n' +
-        'Spend is read from the transcripts the platform writes; nothing here estimates it.'
-    );
+    // Two different gaps, two different sentences: a `--transcripts` (or
+    // `spend.transcript_dirs`) dir that does not exist is an operator typo,
+    // not the same "nothing to find" as the derived directory being absent.
+    if ((report.transcript_dirs_missing ?? []).length > 0) {
+      console.error(
+        'cost: none of the given transcript directories exist:\n' +
+          report.transcript_dirs_missing.map((d) => `  - ${d}`).join('\n')
+      );
+    } else {
+      console.error(
+        'cost: no transcripts found for this repo under the Claude Code projects directory.\n' +
+          'Spend is read from the transcripts the platform writes; nothing here estimates it.'
+      );
+    }
     return 2;
   }
   if (flags.json) {

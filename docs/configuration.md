@@ -66,6 +66,16 @@ pricing:                   # OPTIONAL. The spend ledger (docs/cost.md).
       cache_write: 18.75
       cache_read: 1.5
       output: 75
+
+spend:                     # OPTIONAL. Where cost.mjs looks for THIS repo's
+  transcript_dirs:         # transcripts, when the derived-slug / cwd-probe
+    - '~/.claude/projects/-Users-me-work-a-different-checkout'
+                           # fallback lands on the wrong session (docs/cost.md
+                           # #when-resolution-fails) — a conductor that ran
+                           # from a working directory other than the repo it
+                           # operates on. `--transcripts` on the command line
+                           # outranks this block; both replace the fallback
+                           # resolution entirely rather than adding to it.
 ```
 
 Setup also seeds `MISTAKES.md` at the repository root, create-only. There is no
@@ -126,6 +136,31 @@ every amount.
 `rate_card` is a label, not a lookup — nothing fetches anything. It exists so
 that every amount can say which card produced it, because two people quoting
 different cards get different money from one set of tokens.
+
+## Explicit transcript directories
+
+`spend:` is the other optional, operator-written block the spend ledger reads
+— no provenance wrapper, exactly like `pricing:` and `limits:`. `cost.mjs`
+normally locates a repo's transcripts itself: first by the directory name the
+platform derives from the repo path, then, if that is absent, by opening
+every project directory and matching on the `cwd` its records carry. Both
+assume the conductor session ran **from the repo it operates on**, and when it
+did not — Claude Code Desktop opened in a sibling folder, working the repo
+through absolute paths and worktrees — neither heuristic can find it: the
+transcript lives under a project directory named after the conductor's own
+working directory, not the repo's.
+
+| key | required | accepted |
+|---|---|---|
+| `transcript_dirs` | no | a list of non-empty directory paths, each the per-project directory holding `<session>.jsonl` and `<session>/subagents/` |
+
+A leading `~` expands to the home directory. Given a non-empty list, `cost.mjs`
+scans the union of those directories instead of running either heuristic; a
+directory that does not exist is reported in the report's
+`transcript_dirs_missing` rather than silently skipped. `--transcripts <dir>`
+on the command line is the same override and outranks this block when both are
+given. Full account of the failure this exists for, and what the board shows
+when it fires, is in [the spend ledger](cost.md#when-resolution-fails).
 
 ## Autonomy classes
 

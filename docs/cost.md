@@ -98,7 +98,7 @@ Two refinements that stop the warnings becoming noise or becoming lies:
 ## CLI
 
 ```bash
-node scripts/cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] [--json]
+node scripts/cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] [--transcripts <dir>]... [--json]
 ```
 
 - `--dir` is the `.tyran` directory (default `.tyran`); the repository it
@@ -107,6 +107,10 @@ node scripts/cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] [--js
 - `--session <id>` narrows the report to one session and its agents.
 - `--projects <dir>` overrides where the transcripts are looked for; the
   default is `~/.claude/projects`.
+- `--transcripts <dir>` names a transcript directory explicitly — the per-project
+  directory holding `<session>.jsonl` and `<session>/subagents/`. Repeatable;
+  sources are the union over every directory given. See
+  [When resolution fails](#when-resolution-fails) below.
 - `--json` writes `.tyran/state/cost.json` atomically and prints its path
   instead of the table.
 - Exit `0` ok · `2` usage or I/O error, including *no transcripts found for
@@ -125,6 +129,36 @@ documentation, so it is verified rather than trusted: if the computed directory
 is absent, every project directory is opened and matched on the `cwd` its
 records carry.
 
+## When resolution fails
+
+Both heuristics above assume the conductor session ran **from the repo it is
+working on**. When it did not — a Claude Code Desktop session opened in a
+sibling folder, operating on the repo through absolute paths and worktrees —
+neither one finds it: the computed slug is derived from the conductor's own
+working directory, not the repo path, and every record in that transcript
+carries the conductor's cwd too, never the repo's.
+
+Measured: a `claude` run once started inside the repo (for the trust dialog)
+left a directory the direct lookup matched and stopped at, while ~66 agent
+transcripts and 2 300 requests sat under the conductor's real project
+directory with nothing on the report pointing at them — the ledger showed one
+session, one model, `unattributed` agents, and a conductor overhead reading
+100%, as if that were the whole initiative.
+
+Two overrides, highest priority first, both resolved by `cost.mjs` itself so
+`board.mjs --serve` gets them too with no extra plumbing:
+
+1. `--transcripts <dir>` on the command line, repeatable — sources are the
+   union over every directory given.
+2. `spend.transcript_dirs` in `.tyran/config.yaml` — see
+   [the configuration reference](configuration.md#explicit-transcript-directories).
+
+Either one replaces the derived-slug / cwd-probe resolution entirely rather
+than adding to it. A given directory that does not exist is reported in
+`transcript_dirs_missing` on the report, never silently dropped — the same
+"gaps are reported, never zeroed" rule that governs every other hole in this
+file.
+
 ## What the dashboard shows
 
 `board.html` renders a **Spend** section: total tokens and requests, the amount
@@ -133,6 +167,12 @@ a composition bar across input / cache write / cache read / output, and three
 ranked charts — by model, by agent type, by ticket — with a tokens/cost toggle.
 A row whose models have no rate draws no bar at all, because "not priced" and
 "cost nothing" must not look the same.
+
+Zero agent transcripts while the board itself lists running agents is a sign
+worth surfacing rather than a quiet empty table: the tab shows a hint pointing
+at [the two overrides above](#when-resolution-fails) whenever that shape
+appears, and lists any `--transcripts` / `spend.transcript_dirs` entry that
+was given but not found.
 
 The section is **fetched, not embedded**, which is a deliberate amendment to
 the board's "self-contained, no network" description — see
@@ -145,6 +185,11 @@ more than the report: a `sources[]` entry per transcript, keyed on path, mtime
 and size. Consumers check `schema === 1`; the dashboard renders nothing rather
 than garbage on a mismatch. Invisible characters are escaped as `\uXXXX` and
 never removed, exactly as in `board.json`.
+
+`transcript_dirs` names the directory (or directories) the report actually
+scanned, and `transcript_dirs_missing` names any `--transcripts` /
+`spend.transcript_dirs` entry that was given but does not exist on this
+machine — both present whichever resolution path produced the report.
 
 That cache is what makes a page refreshing every 30 seconds affordable.
 Transcripts reach tens of megabytes, so the reader streams them in chunks

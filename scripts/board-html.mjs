@@ -932,6 +932,26 @@ if (data.schema !== 1) {
         ' oversized record(s) were skipped; their tokens are missing from every figure here.');
     }
     into.appendChild(el('div', 'caveat', notes.join(' ')));
+
+    // Zero agent transcripts while the board itself lists agents is not "no
+    // agents ran" — it is the resolved directory being the WRONG one. A
+    // conductor session started from a working directory other than the repo
+    // it operates on files its transcript under a project directory no
+    // derivation from the repo path reaches, and this is the one place an
+    // operator would otherwise have no reason to suspect it: the tab renders,
+    // the totals are honest numbers, and they are honest numbers about the
+    // wrong session.
+    if ((cov.agent_transcripts || 0) === 0 && agents.length > 0) {
+      into.appendChild(el('div', 'hint',
+        'No agent transcripts found where this repo\\u2019s transcripts are expected. If the conductor ' +
+        'ran from another working directory, point the board at that session: board.mjs --serve ' +
+        '--transcripts <dir> or set spend.transcript_dirs in .tyran/config.yaml.'));
+    }
+    if ((cost.transcript_dirs_missing || []).length > 0) {
+      var missingNoun = cost.transcript_dirs_missing.length === 1 ? 'directory' : 'directories';
+      into.appendChild(el('div', 'hint',
+        'Given transcript ' + missingNoun + ' not found: ' + cost.transcript_dirs_missing.join(', ') + '.'));
+    }
   };
 
   // Spend is FETCHED, never embedded: it is derived from transcripts under

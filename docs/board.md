@@ -233,12 +233,16 @@ node scripts/board.mjs --dir .tyran            # render all three artefacts
 node scripts/board.mjs --dir .tyran --check    # byte-exact drift check, exit 1
 node scripts/board.mjs --dir .tyran --serve    # localhost viewer, always fresh
 node scripts/board.mjs --dir .tyran --serve --write   # ... and Settings can edit
+node scripts/board.mjs --dir .tyran --serve --transcripts <dir>   # ... and Spend reads THAT dir
 ```
 
 `--serve` binds `127.0.0.1` only, re-renders per request, and never derives a
 filesystem path from a URL; `--write` adds the [Settings](#settings) routes and
 nothing else, and refuses on its own (`--write` without `--serve` is a usage
-error, not a silent no-op). The initiative ceiling is 64, refused loudly —
+error, not a silent no-op). `--transcripts <dir>` is the same refusal, for the
+same reason: it means something only to `/cost.json`, which only exists under
+`--serve`. Repeatable, and it overrides `spend.transcript_dirs` in
+`.tyran/config.yaml` — see [Spend](#spend). The initiative ceiling is 64, refused loudly —
 archive closed initiatives rather than boarding them. An unreadable journal
 renders as a visible **UNREADABLE** entry: a board that omits a broken
 initiative would read as "all is well" exactly when it is not.
@@ -272,6 +276,17 @@ one same-origin request to loopback, and the same defences cover it: the
 `--serve` (a foreign `Host` gets 403, verified), and a cost read that fails
 returns 503 rather than taking the board down — the board answers "what is
 going on", and that answer does not depend on knowing what it cost.
+
+**When the resolved directory is the wrong one.** Both of `cost.mjs`'s
+heuristics for finding a repo's transcripts assume the conductor session ran
+from the repo it operates on. A conductor started from another working
+directory — Desktop opened in a sibling folder, working the repo through
+absolute paths and worktrees — breaks that assumption, and the tab still
+renders: honest numbers, about the wrong session. The tell is zero agent
+transcripts while the board itself lists running agents, and the tab shows a
+hint for it, naming the two overrides: start this server with `--serve
+--transcripts <dir>`, or set `spend.transcript_dirs` in `.tyran/config.yaml`.
+Details and the measured failure are in [the spend ledger](cost.md#when-resolution-fails).
 
 ## Settings
 

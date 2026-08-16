@@ -549,6 +549,31 @@ test('pricing accepts a full rate card and rejects every partial shape', () => {
   assert.deepEqual(validateConfig(unlabelled), ['pricing.rate_card: must be a non-empty label']);
 });
 
+// --- spend ---------------------------------------------------------------
+//
+// Where cost.mjs should look for a repo's transcripts when the derived-slug /
+// cwd-probe fallback lands on the wrong session. Operator-written, never
+// scanner-inferred, exactly like `pricing:` above.
+
+test('spend.transcript_dirs accepts a list of non-empty strings and rejects every other shape', () => {
+  const full = { ...minimalConfig(), spend: { transcript_dirs: ['/abs/path', '~/.claude/projects/x-y'] } };
+  assert.deepEqual(validateConfig(full), []);
+
+  // MUTANT: accept a bare string instead of requiring a list — a single dir
+  // typed without brackets would silently scan its own characters as paths.
+  const notList = { ...minimalConfig(), spend: { transcript_dirs: '/abs/path' } };
+  assert.deepEqual(validateConfig(notList), ['spend.transcript_dirs: must be a list of directory paths']);
+
+  const emptyEntry = { ...minimalConfig(), spend: { transcript_dirs: ['/abs/path', ''] } };
+  assert.deepEqual(validateConfig(emptyEntry), ['spend.transcript_dirs[1]: must be a non-empty path']);
+
+  const notMapping = { ...minimalConfig(), spend: 'nope' };
+  assert.deepEqual(validateConfig(notMapping), ['spend: must be a mapping']);
+
+  const stray = { ...minimalConfig(), spend: { transcript_dirs: [], currency: 'USD' } };
+  assert.deepEqual(validateConfig(stray), ['spend.currency: unknown key']);
+});
+
 test('pricingOf drops a model the validator would reject rather than half-pricing it', () => {
   const doc = {
     pricing: {

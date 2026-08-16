@@ -149,6 +149,16 @@ test('the initiative ceiling refuses loudly instead of quietly truncating', () =
   assert.match(cli.stderr, /ceiling/);
 });
 
+test('--transcripts only means anything with --serve, exactly like --write', () => {
+  const dir = tree({ demo: demo() });
+  // MUTANT: let --transcripts through without --serve — it would silently do
+  // nothing (the one-shot renderer never calls costReport at all), which is
+  // the same kind of invisible no-op --write's own guard already refuses.
+  const r = run(['--dir', dir, '--transcripts', '/tmp/somewhere']);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--transcripts only means anything with --serve/);
+});
+
 test('the CLI writes three files, --check is clean after and drifts after a hand edit', () => {
   const dir = tree({ demo: demo() });
   assert.equal(run(['--dir', dir]).code, 0);

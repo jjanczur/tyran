@@ -68,7 +68,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits', 'pricing'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits', 'pricing', 'spend'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -225,6 +225,32 @@ export function validateConfig(doc) {
       const knownPricing = ['rate_card', 'models'];
       for (const key of Object.keys(pricing)) {
         if (!knownPricing.includes(key)) errors.push(`pricing.${key}: unknown key`);
+      }
+    }
+  }
+
+  // Where cost.mjs should look for THIS repo's transcripts, when the
+  // derived-slug / cwd-probe fallback lands on the wrong session — a
+  // conductor that ran from a working directory other than the repo it
+  // operates on. Operator-written, never scanner-inferred, exactly like
+  // `pricing:` and `limits:` above, and optional for the same reason: absence
+  // means the existing fallback resolution applies, unchanged.
+  if ('spend' in doc) {
+    if (!isPlainObject(doc.spend)) errors.push('spend: must be a mapping');
+    else {
+      const spend = doc.spend;
+      if ('transcript_dirs' in spend) {
+        if (!Array.isArray(spend.transcript_dirs)) {
+          errors.push('spend.transcript_dirs: must be a list of directory paths');
+        } else {
+          spend.transcript_dirs.forEach((d, i) => {
+            if (!isNonEmptyString(d)) errors.push(`spend.transcript_dirs[${i}]: must be a non-empty path`);
+          });
+        }
+      }
+      const knownSpend = ['transcript_dirs'];
+      for (const key of Object.keys(spend)) {
+        if (!knownSpend.includes(key)) errors.push(`spend.${key}: unknown key`);
       }
     }
   }

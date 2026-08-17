@@ -47,6 +47,7 @@ import { parse } from './yaml-lite.mjs';
 import { pricingOf, PRICING_RATE_KEYS } from './schema.mjs';
 import { defaultRateCard, RATE_CARD_ID, planOfTier, PLAN_LABELS, SUBSCRIPTION_USD, periodStart } from './pricing.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 export const COST_FILE = 'cost.json';
 
@@ -1265,16 +1266,26 @@ function parseArgs(argv) {
   return flags;
 }
 
+export const COST_USAGE =
+  'usage: cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] ' +
+  '[--transcripts <dir>]... [--window 30d|period|all] [--json]';
+
 function main(argv) {
+  // `argv` reaches here ALREADY sliced — `main(process.argv.slice(2))` at the
+  // bottom of this file — unlike migrate.mjs next door, which is handed the
+  // whole of process.argv. Slicing again here silently dropped the first two
+  // arguments, so `cost --help` fell through to the parser and was reported as
+  // an unknown argument.
+  if (wantsHelp(argv)) {
+    console.log(COST_USAGE);
+    return 0;
+  }
   let flags;
   try {
     flags = parseArgs(argv);
   } catch (err) {
     console.error(String(err.message ?? err));
-    console.error(
-      'usage: cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] ' +
-        '[--transcripts <dir>]... [--window 30d|period|all] [--json]'
-    );
+    console.error(COST_USAGE);
     return 2;
   }
   const tyranDir = resolve(flags.dir);

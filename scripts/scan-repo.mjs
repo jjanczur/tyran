@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { parse, stringify } from './yaml-lite.mjs';
 import { validatePolicy } from './schema.mjs';
 import { escapeInvisible } from './invisible.mjs';
+import { handleArgs } from './cli-args.mjs';
 
 /** Lockfile -> package manager. Order matters only for reporting stability. */
 export const LOCKFILES = Object.freeze({
@@ -820,8 +821,18 @@ export function ensureStateGitignore(repoRoot) {
   return { path, status: 'created' };
 }
 
+export const SCAN_REPO_USAGE =
+  'usage: scan-repo.mjs [--dir <repo-root>] [--write <.tyran/config.yaml>]\n' +
+  '                     [--ensure-policy]\n' +
+  'With no --write, prints the scan as JSON and changes nothing.\n' +
+  '--write also installs .tyran/policies/autonomy.yaml first, create-only.\n' +
+  '--ensure-policy is the repair path: seed the policy and do nothing else.';
+
 function main() {
   const args = process.argv.slice(2);
+  // `--wrte .tyran/config.yaml` used to scan, print JSON and exit 0 — a typo
+  // in the one flag that decides whether this command WRITES, swallowed.
+  if (!handleArgs(args, { name: 'scan-repo', usage: SCAN_REPO_USAGE, known: ['dir', 'write', 'ensure-policy'] })) return;
   const flag = (name, fallback) => {
     const i = args.indexOf(`--${name}`);
     return i === -1 ? fallback : args[i + 1];

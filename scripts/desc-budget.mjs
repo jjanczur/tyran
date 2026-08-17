@@ -14,6 +14,7 @@ import { readFileSync, readdirSync, statSync, existsSync, realpathSync } from 'n
 import { escapeInvisible } from './invisible.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { handleArgs } from './cli-args.mjs';
 
 /**
  * The ceiling, and the ONLY place it is written.
@@ -68,8 +69,13 @@ export function collectSkillDescriptions(pluginRoot) {
   return out.sort((a, b) => b.length - a.length);
 }
 
+export const DESC_BUDGET_USAGE =
+  'usage: desc-budget.mjs [--budget <chars>] [pluginRoot]\n' +
+  'Exit: 0 within budget · 1 over budget · 2 usage/IO error';
+
 function main() {
   const args = process.argv.slice(2);
+  if (!handleArgs(args, { name: 'desc-budget', usage: DESC_BUDGET_USAGE, known: ['budget'] })) return;
   let budget = DEFAULT_BUDGET;
   const bi = args.indexOf('--budget');
   if (bi !== -1) {

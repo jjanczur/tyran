@@ -67,6 +67,7 @@ import { readPlatformUsage } from './usage-source.mjs';
 import { gitRunner } from './scan-repo.mjs';
 import { SERVER_RECORD_FILE } from './board-daemon.mjs';
 import { parseMistakes, countSignatures, fenceState, KNOWLEDGE_THRESHOLD, MISTAKES_FILE, CLAUDE_MD_FILE } from './mistakes.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 /** Severity order is also the report order. `info` never fails the check. */
 export const SEVERITIES = Object.freeze(['error', 'warning', 'info']);
@@ -2099,7 +2100,21 @@ export function parseArgs(argv) {
   };
 }
 
+export const DOCTOR_USAGE =
+  'usage: doctor.mjs --state [--dir <.tyran>] [--json] [--now <iso>] [--stale-hours <n>]\n' +
+  '       doctor.mjs --hooks [--plugin-root <dir>] [--json]\n' +
+  '\n' +
+  '       A mode is REQUIRED: `--state` asks whether the record of the work is\n' +
+  '       consistent, `--hooks` whether the gates can fire at all. They answer\n' +
+  '       different questions, and a bare invocation would have to pick one\n' +
+  '       silently. This text said `--state is the only mode today` long after\n' +
+  '       `--hooks` shipped, which sent readers looking for a flag they had.';
+
 function main() {
+  if (wantsHelp(process.argv.slice(2))) {
+    console.log(DOCTOR_USAGE);
+    return;
+  }
   try {
     const args = parseArgs(process.argv.slice(2));
     const { dir, json, now, staleHours, dirGiven } = args;
@@ -2126,16 +2141,7 @@ function main() {
     if (!allOk) process.exit(1);
   } catch (err) {
     if (err instanceof UsageError) {
-      console.error(
-        'usage: doctor.mjs --state [--dir <.tyran>] [--json] [--now <iso>] [--stale-hours <n>]\n' +
-          '       doctor.mjs --hooks [--plugin-root <dir>] [--json]\n' +
-          '\n' +
-          '       A mode is REQUIRED: `--state` asks whether the record of the work is\n' +
-          '       consistent, `--hooks` whether the gates can fire at all. They answer\n' +
-          '       different questions, and a bare invocation would have to pick one\n' +
-          '       silently. This text said `--state is the only mode today` long after\n' +
-          '       `--hooks` shipped, which sent readers looking for a flag they had.',
-      );
+      console.error(DOCTOR_USAGE);
       process.exit(2);
     }
     console.error(`doctor: ${err.message}`);

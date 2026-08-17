@@ -26,6 +26,7 @@ import { readFileSync, existsSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { escapeInvisible } from './invisible.mjs';
+import { handleArgs } from './cli-args.mjs';
 
 export const STOP_PATH = join('.tyran', 'STOP');
 
@@ -66,8 +67,13 @@ export function checkStopAt(path) {
   }
 }
 
+export const STOP_CHECK_USAGE =
+  'usage: stop-check.mjs [--dir <repo-root>]\n' +
+  'Exit: 0 clear · 1 stopped by .tyran/STOP · 2 usage';
+
 function main() {
   const args = process.argv.slice(2);
+  if (!handleArgs(args, { name: 'stop-check', usage: STOP_CHECK_USAGE, known: ['dir'] })) return;
   const di = args.indexOf('--dir');
   const dir = resolve(di === -1 ? process.cwd() : (args[di + 1] ?? process.cwd()));
 

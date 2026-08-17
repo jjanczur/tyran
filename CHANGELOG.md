@@ -71,6 +71,37 @@ another party writes; a blockage is the exception, because nothing else says an
 agent is stuck or why. Deleting `progress` outright was rejected for that
 reason — `spawn-blocked` and the `blocked` lane stay.
 
+### Four commands silently ignored a flag they did not understand
+
+Swept every command `bin/tyran.mjs` dispatches, against a repo where setup had
+just run:
+
+| | |
+|---|---:|
+| `--help` answered as help | **0 of 14** |
+| silently ignored an unknown flag | **4** |
+
+`tiers`, `scan-repo`, `stop-check` and `desc-budget` parse by looking up the
+flags they know, so a flag they do not know is never rejected — it is never
+seen. `tiers --rol reviewer` exited **0** and printed the entire routing table:
+a different answer to a different question, given without a word about the
+typo. One character later, `tiers --role revieweer` was refused by name with
+the list of valid roles — the value was checked and the flag was not. Worse,
+`scan-repo --wrte .tyran/config.yaml` scanned, printed JSON and exited 0, a
+swallowed typo in the one flag that decides whether the command writes.
+
+`scripts/cli-args.mjs` is now the single implementation of both rules, and it
+is not a new convention: `board`, `doctor`, `answer`, `cost` and `migrate`
+already refused unknown flags, so this is the majority one made importable so
+the count of spellings stops rising (ADR-21).
+
+**`--help` is now answered, on stdout, exit 0, by all nine flag-taking
+commands.** `cost` needed a second fix on the way: its `main` is handed an
+already-sliced argv, so an added `argv.slice(2)` dropped the first two
+arguments and `--help` fell through to the parser. The four subcommand-style
+commands (`journal`, `schema`, `knowledge`, `mistakes`) still print usage with
+exit 2; recorded in `NOTES-REQUESTS.md` rather than fixed here.
+
 ### Exercise cloud access, and never ask for a secret's value
 
 Both from `NOTES-REQUESTS` §12.4. STEP 0 already spawns a throwaway teammate

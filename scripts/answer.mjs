@@ -54,6 +54,7 @@ import { append, ASK_KIND_RE, CAPPED_DATA_KEYS, readJournal } from './journal.mj
 import { formatCodePoint, invisibleProblem } from './invisible.mjs';
 import { resumeArgv, SESSION_ID_RE } from './overnight.mjs';
 import { inlinePlain, naturalCompare, projectFile, WAITING_RE, writeAllAtomic, writeAtomic } from './project.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 /** The sheet, and the session record `apply --resume` reads. Both under
  * `state/`, which is already the AUTO policy class on every install. */
@@ -871,6 +872,10 @@ function doApply(tyranDir, sheetPath, flags) {
 }
 
 function main() {
+  if (wantsHelp(process.argv.slice(2))) {
+    console.log(USAGE);
+    return;
+  }
   let parsed;
   try {
     parsed = parseArgs(process.argv.slice(2));

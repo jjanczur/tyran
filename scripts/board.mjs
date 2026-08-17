@@ -55,6 +55,7 @@ import { SettingsError, applyPolicyClass, applySetting, readSettings } from './s
 import { checkStopAt } from './stop-check.mjs';
 import { runState } from './overnight.mjs';
 import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender, sortAsks } from './answer.mjs';
+import { wantsHelp } from './cli-args.mjs';
 import {
   HEALTH_ROUTE,
   PORT_SEARCH_SPAN,
@@ -698,18 +699,25 @@ function parseArgs(argv) {
   return flags;
 }
 
+export const BOARD_USAGE =
+  'usage: board.mjs [--dir <.tyran>] [--check]\n' +
+  '                 [--serve|--detach [--port <n>] [--write] [--open] [--transcripts <dir>]...]\n' +
+  '                 [--status] [--stop]';
+
 function main() {
+  // Answered before parsing, because the parser's job is to refuse what it
+  // does not know and `--help` is exactly that to every parser here.
+  if (wantsHelp(process.argv.slice(2))) {
+    console.log(BOARD_USAGE);
+    return;
+  }
   let flags;
   try {
     flags = parseArgs(process.argv.slice(2));
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
     console.error(`board: ${err.message}`);
-    console.error(
-      'usage: board.mjs [--dir <.tyran>] [--check]\n' +
-        '                 [--serve|--detach [--port <n>] [--write] [--open] [--transcripts <dir>]...]\n' +
-        '                 [--status] [--stop]'
-    );
+    console.error(BOARD_USAGE);
     process.exit(2);
   }
   // `--detach` is `--serve` that returns. Every flag describing HOW to serve

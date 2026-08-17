@@ -105,6 +105,12 @@ test('CLI: invoked through a symlinked path, the budget is still enforced (ADR-1
     join(real, 'scripts', 'invisible.mjs'),
     readFileSync(new URL('../../scripts/invisible.mjs', import.meta.url)),
   );
+  // Second sibling, for the same reason: desc-budget refuses an unknown flag
+  // through the shared command-line rule rather than ignoring it.
+  writeFileSync(
+    join(real, 'scripts', 'cli-args.mjs'),
+    readFileSync(new URL('../../scripts/cli-args.mjs', import.meta.url)),
+  );
   mkdirSync(join(real, 'skills', 'huge'), { recursive: true });
   writeFileSync(join(real, 'skills', 'huge', 'SKILL.md'), '---\ndescription: ' + 'a'.repeat(80) + '\n---\n');
   const linked = join(base, 'linked-root');

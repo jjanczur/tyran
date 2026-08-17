@@ -41,6 +41,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, statSync } f
 import { join, resolve } from 'node:path';
 
 import { escapeInvisible } from './invisible.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 /** The pre-0.1.9 home of the initiative directories. */
 export const LEGACY_DIR = 'initiatives';
@@ -154,6 +155,10 @@ function usage(message) {
 
 function main(argv) {
   const args = argv.slice(2);
+  if (wantsHelp(args)) {
+    console.log('usage: node scripts/migrate.mjs [--dir <.tyran>] [--apply]');
+    return;
+  }
   for (const arg of args) {
     if (!['--dir', '--apply'].includes(arg) && arg.startsWith('--')) usage(`unknown flag ${arg}`);
   }

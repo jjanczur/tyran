@@ -38,6 +38,7 @@ import { validateConfig, PROFILES, TIER_KEYS } from './schema.mjs';
 import { escapeInvisible } from './invisible.mjs';
 import { APPROVING_RE } from './project.mjs';
 import { readJournal } from './journal.mjs';
+import { handleArgs } from './cli-args.mjs';
 
 /** Capability tiers, cheapest first. Index order is the escalation ladder. */
 export const TIER_ORDER = TIER_KEYS;
@@ -412,8 +413,28 @@ export function readProfile(doc) {
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw.value : raw;
 }
 
+/**
+ * Every flag `main` reads. It is a LIST rather than a comment because the
+ * parser below cannot derive it: `flag()` looks up the names it wants, so a
+ * name it does not want is not rejected, it is unseen. `--rol reviewer` used
+ * to print the entire routing table and exit 0 — a different answer to a
+ * different question, with nothing said about the typo — while `--role
+ * revieweer` one character later was refused by name. The value was checked
+ * and the flag was not.
+ */
+export const TIERS_FLAGS = Object.freeze([
+  'config', 'profile', 'risk', 'role', 'field', 'tier', 'effort', 'unavailable', 'journal', 'ticket',
+]);
+
+export const TIERS_USAGE =
+  'usage: tiers.mjs [--config <config.yaml>] [--profile <p>] [--risk <normal|high>]\n' +
+  '                 [--role <role>] [--field <model|effort|tier>] [--tier <t>] [--effort <e>]\n' +
+  '                 [--unavailable <model>]... [--journal <path> --ticket <T-n>]\n' +
+  'With no --role, prints the whole resolved routing table as JSON.';
+
 function main() {
   const args = process.argv.slice(2);
+  if (!handleArgs(args, { name: 'tiers', usage: TIERS_USAGE, known: TIERS_FLAGS })) return;
   const flag = (name, fallback) => {
     const i = args.indexOf(`--${name}`);
     return i === -1 ? fallback : args[i + 1];

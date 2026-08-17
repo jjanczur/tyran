@@ -88,8 +88,13 @@ fires only where git can answer AND has never seen the file. Where there is no
 repository, or no git, it says nothing rather than guessing — a guess there
 nags precisely the operator who already opted out.
 
-Both are `info`-adjacent by design: nothing is broken in either case. The
-first is a repair that was previously unavailable; the second is an offer.
+Neither is an alarm, but for different reasons.
+`state-legacy-initiatives-dir` stays a `warning` — a legacy layout genuinely
+hides initiative files from every mechanical consumer — and what changed is
+that it finally has a remedy rather than a paragraph of advice.
+`mistakes-file-missing` is `info` because nothing is broken at all: it is an
+offer, and the only absence it will ever break silence about is the one
+nobody chose.
 
 ### Accept-then-ignore, ended without nagging
 

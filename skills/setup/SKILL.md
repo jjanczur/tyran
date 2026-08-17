@@ -106,6 +106,56 @@ still lives in the plugin and updates keep reaching it. Mention that it lands
 in their repo and will show up in their next commit — a file appearing in
 someone's working tree unannounced is a bad way to meet a tool.
 
+## 4b. Make the secrets gate satisfiable, and say what it found
+
+The gate refuses every commit and push until `gitleaks` exists. Install it
+before anything needs it, rather than letting the first commit fail with a
+prerequisite the operator may not be able to meet:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-gitleaks.mjs"
+```
+
+Pinned and checksummed, into `~/.tyran/bin/`; it is a no-op when the machine
+already has one, and PATH still wins.
+
+**Then look, before they hit it.** A repository whose history already contains
+a secret is common and the gate handles it badly by surprise: nothing is
+scanned until someone EDITS the file that holds it, and then every commit
+touching that file is refused, permanently, with no hint that the cause is
+years old. Run a scan and say plainly what is there.
+
+If there are pre-existing findings, explain the choice in the operator's
+words, and do not make it for them:
+
+- a tracked `.gitleaks-baseline.json` tells the gate "these exact findings are
+  known" — new secrets are still caught, and because it is tracked the
+  suppression appears in a diff instead of being an invisible local file;
+- **but a baseline makes the tool quiet, it does not make the key safe.** If
+  the repository is public, that key is already burned and the real fix is
+  rotating it. Say this once, here, rather than letting them discover it after
+  they have relied on the baseline.
+
+## 4c. Turn the dashboard on
+
+Setup is not finished until they have SEEN something. Everything above is
+files on disk; the board is where any of it becomes legible, and it was the
+one thing installation never actually reached.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/board.mjs" --dir .tyran --serve --write --open
+```
+
+`--open` launches their browser; `--write` is what makes the **Settings** tab
+able to edit `config.yaml` and the autonomy policy from the page. Tell them
+that tab exists and what it covers — profile, autonomy class, tiers,
+validation commands, shared zones, overnight limits — because for someone who
+would rather not hand-edit YAML in their own repository, that tab is the
+entire configuration story and they will not guess it is there.
+
+It holds the terminal while it serves. Say so, and say that Ctrl-C stops it
+and the board is still there next time.
+
 ## 5. Validate and report
 
 ```bash

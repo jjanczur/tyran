@@ -56,6 +56,14 @@ export const COMMANDS = {
     'scan-repo.mjs',
     'Deterministic repo scan for /tyran:setup — establishes what it can, marks what needs confirmation, never guesses.',
   ],
+  'ensure-gitleaks': [
+    'ensure-gitleaks.mjs',
+    'Install the pinned, checksummed gitleaks the secrets gate needs, for a machine that has none.',
+  ],
+  migrate: [
+    'migrate.mjs',
+    'Move a pre-0.1.9 .tyran/initiatives/ directory under state/. Previews by default; never overwrites.',
+  ],
   tiers: [
     'tiers.mjs',
     'Resolve a Tyran role to a model alias via .tyran/config.yaml, the one place model names are allowed to live.',

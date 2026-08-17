@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Installation reaches the dashboard now
+
+Install was four steps, a restart, and then a board nobody opened. Every one
+of those is a place to stop, and the last one mattered most: `--serve` printed
+a URL to a terminal and **nothing ever launched a browser**, so the screen
+where Tyran becomes legible was the one thing installation never reached.
+
+`install.sh` does everything a machine can:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjanczur/tyran/main/install.sh | sh
+```
+
+Node version check first, because every hook shells out to `node` and an old
+one does not fail at install time — it fails later as a gate that cannot run,
+which is the hardest thing for a non-technical operator to read. Then the
+plugin, then the pinned scanner, then the prompt to paste after the restart.
+
+The restart is the one step that stays manual and it is not a shortcut not
+taken: Claude Code loads plugins at startup and nothing inside a session can
+make the app reload itself. So it is stated plainly and put last.
+
+`board.mjs --serve --open` launches the browser, best-effort and never fatal —
+a headless machine or an SSH session leaves the server running and the URL
+printed, exactly where things were before. `--open` without `--serve` is a
+usage error, like `--write`.
+
+Setup gained two steps: install the scanner before anything needs it, and
+**look for pre-existing secrets before the operator hits them**. A repository
+whose history already holds a key is common, and the gate handles it badly by
+surprise — nothing is scanned until someone edits that file, and then every
+commit touching it is refused, permanently, for a reason years old. Setup now
+says what is there and explains the choice, including the part that is easy to
+leave out: a tracked baseline makes the tool quiet, it does not make the key
+safe, and if the repo is public that key is already burned.
+
 ### The knowledge store was write-only, and nothing said so
 
 Measured on a real install: `knowledge.mjs brief '**'` returned **1 of 31

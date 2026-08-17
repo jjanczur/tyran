@@ -21,11 +21,12 @@
  *
  * CLI:
  *   node board.mjs [--dir <.tyran>] [--check]
- *                  [--serve [--port <n>] [--write] [--transcripts <dir>]...]
+ *                  [--serve [--port <n>] [--write] [--open] [--transcripts <dir>]...]
  * Exit: 0 ok · 1 drift (--check) · 2 usage/IO
  */
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { spawn as spawnProcess } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +52,42 @@ import { runState } from './overnight.mjs';
 import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender, sortAsks } from './answer.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
+
+/**
+ * Open the served board in the operator's browser.
+ *
+ * The board was a URL printed to a terminal that nothing ever opened, and for
+ * the people this matters most to that is several steps — keep this window
+ * running, now type that address somewhere else — each one a place to stop.
+ * The dashboard is where Tyran becomes legible, and it was the one thing
+ * installation never actually reached.
+ *
+ * Best-effort and never fatal: a failure here leaves the server running and
+ * the URL printed, which is exactly where things were before. Headless
+ * machines, SSH sessions and locked-down desktops all land in that branch and
+ * none of them is an error worth taking a working server down for.
+ *
+ * The argument vector is fixed and the URL is the only variable — it is built
+ * from a port this process is already listening on, never from user text —
+ * and `shell: false` (the default) means nothing here reaches a shell.
+ */
+export function openInBrowser(url, { platform = process.platform, spawn = spawnProcess } = {}) {
+  const [command, args] =
+    platform === 'darwin' ? ['open', [url]]
+      : platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]];
+  try {
+    const child = spawn(command, args, { stdio: 'ignore', detached: true });
+    // A missing `open`/`xdg-open` arrives as an async error event, not a
+    // throw, so the catch below would never see it — and an unhandled one
+    // would take the server down, which is the opposite of best-effort.
+    child.on?.('error', () => { /* no browser here; the printed URL still works */ });
+    child.unref?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Same ceiling as the evidence gate's journal locator — a deliberate
  * duplicate: scripts must not import from hook files (direction is
@@ -570,14 +607,14 @@ function handleSettingsWrite(dir, route, body) {
 
 // ------------------------------------------------------------------- CLI
 
-const BOOLEAN_FLAGS = ['check', 'serve', 'write'];
+const BOOLEAN_FLAGS = ['check', 'serve', 'write', 'open'];
 const VALUE_FLAGS = ['dir', 'port'];
 // Repeatable, unlike VALUE_FLAGS: sources are the union over every directory
 // given, exactly like cost.mjs's own `--transcripts`.
 const REPEATABLE_FLAGS = ['transcripts'];
 
 function parseArgs(argv) {
-  const flags = { dir: '.tyran', port: 4173, check: false, serve: false, write: false, transcripts: [] };
+  const flags = { dir: '.tyran', port: 4173, check: false, serve: false, write: false, open: false, transcripts: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith('--')) throw new UsageError(`unexpected argument "${arg}"`);
@@ -616,6 +653,13 @@ function main() {
   }
   if (flags.write && !flags.serve) {
     console.error('board: --write only means anything with --serve (it is what the served page may edit)');
+    process.exit(2);
+  }
+  if (flags.open && !flags.serve) {
+    // Same refusal as --write and --transcripts, for the same reason: there is
+    // no URL to open without a server, and a flag that silently does nothing
+    // reads as configuration.
+    console.error('board: --open only means anything with --serve (there is no URL to open without it)');
     process.exit(2);
   }
   if (flags.transcripts.length > 0 && !flags.serve) {
@@ -796,10 +840,12 @@ function main() {
       process.exitCode = 2;
     });
     server.listen(flags.port, '127.0.0.1', () => {
+      const url = `http://127.0.0.1:${flags.port}/`;
       console.log(
-        `board: serving http://127.0.0.1:${flags.port}/ ` +
+        `board: serving ${url} ` +
           `(${flags.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'}; Ctrl-C to stop)`,
       );
+      if (flags.open) openInBrowser(url);
     });
     return;
   }

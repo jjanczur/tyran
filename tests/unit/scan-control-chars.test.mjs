@@ -898,6 +898,7 @@ test('THIS repository scans clean end to end', () => {
     "hooks/scripts/session-start.mjs",
     "hooks/scripts/usage-gate.mjs",
     "hooks/scripts/write-guard.mjs",
+    "install.sh",
     "package.json",
     "scripts/answer.mjs",
     "scripts/board-html.mjs",

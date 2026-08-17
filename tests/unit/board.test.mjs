@@ -30,6 +30,7 @@ import {
   readInitiativeBoards,
   renderAll,
   renderCrossMd,
+  openInBrowser,
 } from '../../scripts/board.mjs';
 import { renderBoardError, renderBoardHtml } from '../../scripts/board-html.mjs';
 import { BOARD_FILE, BOARD_JSON_FILE, LANES } from '../../scripts/project.mjs';
@@ -826,4 +827,52 @@ test('the stale mark is a SERVER verdict, kept apart from the wall-clock colours
   assert.match(html, /journal time/, 'the chip says which clock it used');
   assert.match(html, /\.agent\.stale\{/, 'and it is styled as its own thing');
   assert.doesNotMatch(html, /ageClass\(\s*a\.open_hours/, 'never coloured by the wall-clock scale');
+});
+
+// --- opening the board, which nothing used to do ------------------------
+
+test('--open launches the platform opener with the served URL', () => {
+  // The board was a URL printed to a terminal and nothing ever opened it: for
+  // a non-technical operator that is "keep this window running, now type that
+  // address somewhere else", and each step is a place to stop. MUTANT: drop
+  // the call — installation then never reaches the one screen that makes
+  // Tyran legible.
+  const calls = [];
+  const fake = (command, args, options) => {
+    calls.push({ command, args, options });
+    return { on() {}, unref() {} };
+  };
+  openInBrowser('http://127.0.0.1:4173/', { platform: 'darwin', spawn: fake });
+  assert.deepEqual(calls[0].command, 'open');
+  assert.deepEqual(calls[0].args, ['http://127.0.0.1:4173/']);
+  openInBrowser('http://127.0.0.1:4173/', { platform: 'linux', spawn: fake });
+  assert.equal(calls[1].command, 'xdg-open');
+  openInBrowser('http://127.0.0.1:4173/', { platform: 'win32', spawn: fake });
+  assert.equal(calls[2].command, 'cmd');
+  assert.deepEqual(calls[2].args, ['/c', 'start', '', 'http://127.0.0.1:4173/']);
+  // Never through a shell: the URL is the only variable and it must not be
+  // able to become a command.
+  for (const call of calls) assert.notEqual(call.options.shell, true);
+});
+
+test('a machine with no browser does not take the server down', () => {
+  // Headless boxes, SSH sessions and locked-down desktops all land here. The
+  // server is already listening and the URL is already printed, so a failure
+  // to open one leaves things exactly where they were. MUTANT: let the throw
+  // escape, or leave the async error unhandled — either kills a working board.
+  const thrower = () => { throw new Error('ENOENT'); };
+  assert.equal(openInBrowser('http://127.0.0.1:4173/', { platform: 'linux', spawn: thrower }), false);
+  // An absent opener reports asynchronously rather than throwing, so the
+  // handler has to be attached, not merely the call wrapped.
+  let handled = false;
+  const asyncFail = () => ({ on(event) { if (event === 'error') handled = true; }, unref() {} });
+  assert.equal(openInBrowser('http://127.0.0.1:4173/', { platform: 'linux', spawn: asyncFail }), true);
+  assert.equal(handled, true, 'the error event must be handled or it takes the process down');
+});
+
+test('--open without --serve is a usage error, like --write', () => {
+  // A flag that silently does nothing reads as configuration.
+  const r = run(['--open']);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--open only means anything with --serve/);
 });

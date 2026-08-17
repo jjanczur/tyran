@@ -176,7 +176,17 @@ count, not the price of a model.
 
 ## Install
 
-Inside Claude Code:
+One command, then one restart, then one paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjanczur/tyran/main/install.sh | sh
+```
+
+It checks Node, installs the plugin, installs the secrets scanner the write
+gate needs, and prints the prompt to paste after you restart — which runs
+setup and opens the dashboard in your browser.
+
+Or do it by hand, inside Claude Code:
 
 ```text
 /plugin marketplace add jjanczur/tyran
@@ -297,7 +307,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1464 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1467 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

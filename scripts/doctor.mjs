@@ -63,6 +63,7 @@ import {
 } from './project.mjs';
 import { classifyPath, normalizePath, validateFile, knowledgeWarnings, MANDATORY_KERNEL_PATHS } from './schema.mjs';
 import { auditEntries, loadEntries as loadKnowledgeEntries } from './knowledge.mjs';
+import { readPlatformUsage } from './usage-source.mjs';
 import { gitRunner } from './scan-repo.mjs';
 import { parseMistakes, countSignatures, fenceState, KNOWLEDGE_THRESHOLD, MISTAKES_FILE, CLAUDE_MD_FILE } from './mistakes.mjs';
 
@@ -1639,7 +1640,7 @@ export const ASK_QUEUE_FILES = Object.freeze(['ANSWERS.md', 'conductor.json']);
  * one); without it a marker is reported as present, never as stale — doctor
  * never reads the wall clock.
  */
-export function overnightFindings(dir, { now = null, configDoc = null } = {}) {
+export function overnightFindings(dir, { now = null, configDoc = null, usageFallback = () => readPlatformUsage() } = {}) {
   const findings = [];
   const referenceMs = now !== null ? Date.parse(now) : null;
   const markerPath = join(dir, 'state', 'paused-until.json');
@@ -1699,20 +1700,31 @@ export function overnightFindings(dir, { now = null, configDoc = null } = {}) {
   }
 
   // A configured control that cannot see is the silent-absence class.
+  //
+  // The sidecar is no longer the only channel: the gate falls back to the
+  // platform's own usage cache in `~/.claude.json`, which is why this finding
+  // now asks whether ANY telemetry is reachable rather than whether the
+  // statusline was installed. It used to fire on every install that had not
+  // pasted a statusLine command — which, since the statusline was the only
+  // writer and its payload is not always populated, was most of them, while
+  // the real fault was usually that the platform was sending nothing.
   const limits = knowsLimits(configDoc);
   if (limits !== null && limits.mode !== 'off') {
     const sidecar = readJsonIfSmall(sidecarPath);
     const writtenMs = sidecar !== null ? Date.parse(typeof sidecar.written_at === 'string' ? sidecar.written_at : '') : NaN;
     const ancient = referenceMs !== null && Number.isFinite(writtenMs) && referenceMs - writtenMs > 24 * 3600 * 1000;
-    if (sidecar === null || ancient) {
+    const platform = usageFallback();
+    if ((sidecar === null || ancient) && platform === null) {
       findings.push(
         finding(
           'limit-telemetry-missing',
           show(sidecarPath),
-          `limits.mode is "${show(limits.mode)}" but the usage telemetry sidecar is ${sidecar === null ? 'absent' : 'over a day old'} — ` +
-            'the gate fails open without it, so the configured pause protects nothing. The statusline ' +
-            'helper is operator-installed; see https://jjanczur.github.io/tyran/overnight/',
-          `node scripts/statusline.mjs --sidecar-only   # wired into the user-settings statusLine command`,
+          `limits.mode is "${show(limits.mode)}" and NO usage telemetry is reachable — the sidecar is ` +
+            `${sidecar === null ? 'absent' : 'over a day old'} and the platform's own cache in ~/.claude.json ` +
+            'carries no window that is still running. The gate fails open without one, so the configured ' +
+            'pause protects nothing. Usually this means the account is signed out, or the platform has not ' +
+            'reported usage yet; see https://jjanczur.github.io/tyran/overnight/',
+          `node scripts/statusline.mjs --sidecar-only   # optional: a statusline is fresher, but no longer required`,
         ),
       );
     }
@@ -1747,7 +1759,13 @@ function knowsLimits(configDoc) {
   return typeof limits.mode === 'string' ? limits : null;
 }
 
-export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAULT_STALE_HOURS, run = null } = {}) {
+export function runStateChecks({
+  dir = '.tyran',
+  now = null,
+  staleHours = DEFAULT_STALE_HOURS,
+  run = null,
+  usageFallback = () => readPlatformUsage(),
+} = {}) {
   const root = resolve(dir);
   if (!existsSync(root)) {
     return summarize(dir, [finding('no-state-dir', show(dir), 'no Tyran state directory here — nothing to check')], [
@@ -1926,7 +1944,7 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
   findings.push(...worktrees.findings);
   checked.push(worktrees.checked);
 
-  findings.push(...overnightFindings(dir, { now, configDoc }));
+  findings.push(...overnightFindings(dir, { now, configDoc, usageFallback }));
   checked.push('overnight: checked');
 
   const trackedLeases = trackedLeaseFiles(gitRun, basename(root));

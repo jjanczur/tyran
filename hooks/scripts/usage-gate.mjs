@@ -65,6 +65,7 @@ import { forJournal, locateJournal } from './evidence-gate.mjs';
 import { resolveRepoRoot } from './session-start.mjs';
 import { isUnsupervised, actorOf, stripMessageArguments, MESSAGE_ARGUMENT_RE } from './policy-gate.mjs';
 import { splitSegments, tokensOf } from './secrets-gate.mjs';
+import { readPlatformUsage, SIDECAR_RELPATH, SIDECAR_FRESH_MS } from '../../scripts/usage-source.mjs';
 import { PASS, field, main, runGate } from './hook-io.mjs';
 
 /** Own budget, below the 8 s hooks.json timeout. All I/O here is small local
@@ -72,10 +73,12 @@ import { PASS, field, main, runGate } from './hook-io.mjs';
 export const DEADLINE_MS = 4000;
 
 export const MARKER_RELPATH = join('.tyran', 'state', 'paused-until.json');
-export const SIDECAR_RELPATH = join('.tyran', 'state', 'usage.json');
 
-/** Telemetry older than this is unknown, and unknown fails open. */
-export const SIDECAR_FRESH_MS = 10 * 60 * 1000;
+// Re-exported rather than re-declared. These had three spellings of the path
+// and two of the window across the writer, the scheduler and this gate —
+// nothing fails while they agree, and when they stop agreeing the symptom is
+// a configured pause that silently never fires. `usage-source.mjs` owns them.
+export { SIDECAR_RELPATH, SIDECAR_FRESH_MS } from '../../scripts/usage-source.mjs';
 
 const MAX_SMALL_FILE_BYTES = 64 * 1024;
 const MAX_CONFIG_BYTES = 256 * 1024;
@@ -123,13 +126,36 @@ export function readLimits(repoRoot) {
   }
 }
 
-/** The sidecar, or null when absent/stale/garbage. `nowMs` injected. */
-export function readSidecar(repoRoot, nowMs, freshMs = SIDECAR_FRESH_MS) {
+/**
+ * The sidecar, or null when absent/stale/garbage. `nowMs` injected.
+ *
+ * FALLS BACK to the platform's own usage cache in `~/.claude.json` when the
+ * sidecar is absent or stale, because on a real machine it is ALWAYS absent:
+ * only the statusline writes it, the statusline writes only when the platform
+ * payload carries `rate_limits`, and that block is not always sent. Measured
+ * on an install running `mode: 'pause'` — no sidecar had ever been written,
+ * and the pause had never once been able to fire. The gate fails open, so
+ * nothing said so.
+ *
+ * The statusline stays FIRST when it works: it is session-scoped and refreshed
+ * every few seconds, where the platform cache is refreshed on its own schedule
+ * and was measured 83 minutes old under continuous use. `platform-usage.mjs`
+ * explains why an old reading is still safe to pause on and never safe to
+ * resume on; `lower_bound` on the returned document is how that reaches here.
+ */
+export function readSidecar(repoRoot, nowMs, freshMs = SIDECAR_FRESH_MS, readPlatform = readPlatformUsage) {
   const doc = readSmallJson(join(repoRoot, SIDECAR_RELPATH));
-  if (doc === null) return null;
-  const writtenAt = Date.parse(typeof doc.written_at === 'string' ? doc.written_at : '');
-  if (!Number.isFinite(writtenAt) || nowMs - writtenAt > freshMs) return null;
-  return doc;
+  if (doc !== null) {
+    const writtenAt = Date.parse(typeof doc.written_at === 'string' ? doc.written_at : '');
+    if (Number.isFinite(writtenAt) && nowMs - writtenAt <= freshMs) return doc;
+  }
+  try {
+    return readPlatform({ nowMs });
+  } catch {
+    // Telemetry is consulted, never depended on. A gate that throws here
+    // stops the repository's work over a file it was only reading.
+    return null;
+  }
 }
 
 function windowOf(doc, key) {
@@ -146,13 +172,17 @@ function windowOf(doc, key) {
  * refill just hits the weekly wall again.
  */
 export function trippedWindow(sidecar, limits) {
+  // Carried onto the verdict so the marker can record which channel produced
+  // it. A reading from the platform cache is a LOWER BOUND on current usage:
+  // enough to stop on, never enough to start on.
+  const bound = sidecar?.lower_bound === true;
   const weekly = windowOf(sidecar, 'seven_day');
   if (weekly !== null && weekly.used_percentage >= limits.weekly_pause_at_percent) {
-    return { window: 'seven_day', ...weekly };
+    return { window: 'seven_day', lower_bound: bound, ...weekly };
   }
   const fiveHour = windowOf(sidecar, 'five_hour');
   if (fiveHour !== null && fiveHour.used_percentage >= limits.pause_at_percent) {
-    return { window: 'five_hour', ...fiveHour };
+    return { window: 'five_hour', lower_bound: bound, ...fiveHour };
   }
   return null;
 }
@@ -182,7 +212,11 @@ export function markerOf(tripped, limits, nowMs, sessionId, init) {
     long_wait_policy: limits.long_wait,
     session_id: typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId) ? sessionId : null,
     init: init ?? null,
-    source: 'sidecar',
+    // WHICH channel said so, and whether the figure was a lower bound. The
+    // scheduler must not treat a bound as a measurement when deciding to
+    // RESUME: "at least 97%" is a reason to stop and never a reason to start.
+    source: tripped.lower_bound === true ? 'claude.json' : 'sidecar',
+    lower_bound: tripped.lower_bound === true,
   };
 }
 

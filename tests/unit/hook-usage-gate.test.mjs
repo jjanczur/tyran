@@ -70,8 +70,27 @@ const MAIN_SUPERVISED = { permission_mode: 'default', tool_name: 'Task', tool_in
 const MAIN_AUTONOMOUS = { permission_mode: 'acceptEdits', tool_name: 'Task', tool_input: {}, session_id: 'f9271c9c-e951-47be-af1f-a5742c6df046' };
 const SUBAGENT = { agent_id: 'a1b2c3d4', agent_type: 'implementer', tool_name: 'Task', tool_input: {} };
 
+/**
+ * HERMETIC BY DEFAULT. `readSidecar` now falls back to the platform's usage
+ * cache in the real `~/.claude.json`, so without this every test here reads
+ * whoever ran it. It would pass on a machine below the pause threshold and
+ * fail on one above it, and CI — which has no such file — would stay green
+ * either way. That is a latent flake, not a visible one.
+ *
+ * The stub keeps the ON-DISK sidecar working, because many tests below write
+ * one and assert on it; only the environment is removed.
+ */
+const hermetic = (root, nowMs, fresh) => readSidecar(root, nowMs, fresh, () => null);
+
+/** The same isolation for a SPAWNED gate, which cannot be handed a stub: a
+ * HOME with no `.claude.json` in it. */
+const noHome = () => ({ ...process.env, HOME: mkdtempSync(join(tmpdir(), 'tyran-nohome-')) });
+
 function verdict(dir, input, over = {}) {
-  return decide({ cwd: dir, ...input }, { now: () => NOW, locate: () => ({ file: null, init: 'demo' }), ...over });
+  return decide(
+    { cwd: dir, ...input },
+    { now: () => NOW, locate: () => ({ file: null, init: 'demo' }), readSidecarFn: hermetic, ...over },
+  );
 }
 
 // ------------------------------------------------------------- fails open
@@ -334,7 +353,11 @@ test('on the wire: a denial is hookSpecificOutput.permissionDecision deny', () =
     tool_name: 'Task',
     tool_input: {},
   });
-  const raw = execFileSync(process.execPath, [SCRIPT], { input, encoding: 'utf8' });
+  // A HOME with no `.claude.json`: this asserts the no-telemetry path, and a
+  // spawned process cannot be handed a stub.
+  const raw = execFileSync(process.execPath, [SCRIPT], {
+    input, encoding: 'utf8', env: noHome(),
+  });
   const parsed = JSON.parse(raw);
   assert.equal(parsed.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.equal(parsed.hookSpecificOutput.permissionDecision, 'deny');
@@ -344,7 +367,7 @@ test('on the wire: a denial is hookSpecificOutput.permissionDecision deny', () =
 test('on the wire: a pass is SILENCE (empty output), and exit 0', () => {
   const dir = repo(); // no telemetry
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', cwd: dir, permission_mode: 'acceptEdits', tool_name: 'Task', tool_input: {} });
-  const raw = execFileSync(process.execPath, [SCRIPT], { input, encoding: 'utf8' });
+  const raw = execFileSync(process.execPath, [SCRIPT], { input, encoding: 'utf8', env: noHome() });
   assert.equal(raw.trim() === '' || raw.trim() === '{}', true, `unexpected output: ${raw}`);
 });
 
@@ -386,10 +409,61 @@ test('the refusal never leaks free sidecar strings — only numbers and the vali
   assert.doesNotMatch(text, /undefined/);
 });
 
+/** No platform fallback, so a test asserting the sidecar path stays hermetic
+ * — otherwise it reads the developer's own ~/.claude.json and passes or fails
+ * by accident of who ran it. */
+const noPlatform = () => null;
+
 test('readSidecar and readMarker tolerate hostile shapes', () => {
   const dir = repo();
   writeFileSync(join(dir, SIDECAR_RELPATH), JSON.stringify({ written_at: 42, five_hour: 'lots' }));
-  assert.equal(readSidecar(dir, NOW), null);
+  assert.equal(readSidecar(dir, NOW, undefined, noPlatform), null);
   writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify([1, 2, 3]));
   assert.equal(readMarker(dir, NOW), null);
+});
+
+test('the platform cache answers when the statusline never wrote a sidecar', () => {
+  // The measured reality this exists for: only the statusline writes the
+  // sidecar, it writes only when the payload carries `rate_limits`, and that
+  // block is not always sent — so on a real install running `mode: 'pause'`
+  // no sidecar had EVER been written and the pause could never fire.
+  const dir = repo();
+  const platform = () => ({ written_at: new Date(NOW).toISOString(), lower_bound: true, five_hour: { used_percentage: 98, resets_at: NOW / 1000 + 3600 } });
+  const got = readSidecar(dir, NOW, undefined, platform);
+  assert.equal(got.five_hour.used_percentage, 98);
+  assert.equal(got.lower_bound, true);
+});
+
+test('a FRESH sidecar still wins over the platform cache', () => {
+  // The statusline is session-scoped and refreshed every few seconds; the
+  // platform cache was measured 83 minutes old under continuous use. The
+  // fallback is a fallback.
+  const dir = repo();
+  writeFileSync(join(dir, SIDECAR_RELPATH), JSON.stringify({
+    written_at: new Date(NOW).toISOString(),
+    five_hour: { used_percentage: 10, resets_at: NOW / 1000 + 3600 },
+  }));
+  const platform = () => ({ written_at: new Date(NOW).toISOString(), lower_bound: true, five_hour: { used_percentage: 99, resets_at: NOW / 1000 + 3600 } });
+  assert.equal(readSidecar(dir, NOW, undefined, platform).five_hour.used_percentage, 10);
+});
+
+test('a platform reader that throws never takes the gate down with it', () => {
+  const dir = repo();
+  const platform = () => { throw new Error('unreadable'); };
+  assert.equal(readSidecar(dir, NOW, undefined, platform), null);
+});
+
+test('a pause from the platform cache records that it was a LOWER BOUND', () => {
+  // "at least 97%" is a reason to stop and never a reason to start. The
+  // marker has to carry that distinction, or a resume decision made later
+  // reads a bound as a measurement.
+  const limits = { pause_at_percent: 97, weekly_pause_at_percent: 97, wait_max_hours: 5, long_wait: 'hold', resume_margin_minutes: 5 };
+  const bound = trippedWindow({ lower_bound: true, five_hour: { used_percentage: 98, resets_at: NOW / 1000 + 3600 } }, limits);
+  assert.equal(bound.lower_bound, true);
+  assert.equal(markerOf(bound, limits, NOW, null, null).source, 'claude.json');
+  assert.equal(markerOf(bound, limits, NOW, null, null).lower_bound, true);
+
+  const measured = trippedWindow({ five_hour: { used_percentage: 98, resets_at: NOW / 1000 + 3600 } }, limits);
+  assert.equal(measured.lower_bound, false);
+  assert.equal(markerOf(measured, limits, NOW, null, null).source, 'sidecar');
 });

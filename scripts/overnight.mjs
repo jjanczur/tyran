@@ -60,6 +60,7 @@ import { checkStop } from './stop-check.mjs';
 import { readJournal } from './journal.mjs';
 import { GATE_PASS } from './project.mjs';
 import { withKeepAwake } from './keepawake.mjs';
+import { SIDECAR_RELPATH, SIDECAR_FRESH_MS } from './usage-source.mjs';
 import { limitsOf } from './schema.mjs';
 import { parse } from './yaml-lite.mjs';
 import { escapeInvisible } from './invisible.mjs';
@@ -67,13 +68,12 @@ import { escapeInvisible } from './invisible.mjs';
 export const MARKER_RELPATH = join('.tyran', 'state', 'paused-until.json');
 export const RESUME_STATE_RELPATH = join('.tyran', 'state', 'resume.json');
 export const RESUME_LOG_RELPATH = join('.tyran', 'state', 'resume.log');
-export const SIDECAR_RELPATH = join('.tyran', 'state', 'usage.json');
+export { SIDECAR_RELPATH, SIDECAR_FRESH_MS } from './usage-source.mjs';
 
 export const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 /** Short enough that an overslept machine fires soon after waking. */
 export const MAX_SLEEP_CHUNK_MS = 15 * 60 * 1000;
 /** Telemetry older than this is unknown; unknown means proceed. */
-export const SIDECAR_FRESH_MS = 10 * 60 * 1000;
 /** Babysitting ladder after a resume that visibly did not take. */
 export const RESUME_BACKOFFS_MS = Object.freeze([5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]);
 /** Hard ceiling on a single `claude -p` attempt before the babysitter reclaims it. */

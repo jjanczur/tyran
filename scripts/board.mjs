@@ -805,12 +805,27 @@ function main() {
         // "Already running" is a SUCCESS, and saying which one it is matters:
         // this command is meant to be safe to run on every session start, so
         // its ordinary outcome is that there was nothing to do.
+        if (result.reused) {
+          console.log(`board: already serving ${result.url} (pid ${result.pid ?? '?'})`);
+          // Start-time flags do not reach a server that is already up. Saying
+          // so is the whole fix: the command reported success, the operator
+          // reloaded the tab, and nothing had changed — with `--transcripts`
+          // that is the remedy the Spend tab itself recommends.
+          const inert = [];
+          if (flags.transcripts.length > 0) inert.push('--transcripts');
+          if (flags.write && !result.write) inert.push('--write');
+          if (inert.length > 0) {
+            console.log(
+              `board: ${inert.join(' and ')} had NO effect — that server was started separately. ` +
+                `To change how it runs: node scripts/board.mjs --dir ${dir} --stop, then start it again.`,
+            );
+          }
+          return;
+        }
         console.log(
-          result.reused
-            ? `board: already serving ${result.url} (pid ${result.pid ?? '?'})`
-            : `board: serving ${result.url} (pid ${result.pid ?? '?'}; ` +
-              `${flags.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'}; ` +
-              `stop it with: node scripts/board.mjs --dir ${dir} --stop)`,
+          `board: serving ${result.url} (pid ${result.pid ?? '?'}; ` +
+            `${flags.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'}; ` +
+            `stop it with: node scripts/board.mjs --dir ${dir} --stop)`,
         );
       });
     return;

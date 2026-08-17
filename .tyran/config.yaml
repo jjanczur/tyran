@@ -1,0 +1,49 @@
+# Tyran configuration for this repository.
+#
+# Written by /tyran:setup. Inferred values carry provenance so you can
+# audit where each one came from. Edit freely — your edits win.
+#
+# EDITING BY HAND: Tyran parses a small YAML subset. Block scalars (>- and
+# |-) are REJECTED, and a file this parser cannot read makes the policy
+# gate refuse every write in this repository. Keep each `source:` on ONE
+# line, single-quoted, however long it gets.
+#
+# COMMIT THIS DIRECTORY. `.tyran/` is your repo's data, and an untracked
+# one does not reach `git worktree add` — agents then run there with no
+# autonomy class at all, which is the boundary silently missing exactly
+# where the most agents run.
+#
+# Validate:  node scripts/schema.mjs validate config .tyran/config.yaml
+# Resolve a role to a model:  node scripts/tiers.mjs --role reviewer
+
+profile: balanced
+autonomy:
+  value: P1
+  source: 'git log: 2/50 merges, no staging branch found — defaulting to the safest class'
+  confidence: 0.5
+  needs_confirmation: true
+tiers:
+  cheap: haiku
+  work: sonnet
+  deep: opus
+  top: fable
+validation:
+  value:
+    - npm run test
+  source: 'package.json scripts: 1 of the usual names'
+  confidence: 0.9
+  needs_confirmation: false
+shared_zones: []
+limits:
+  mode: 'off'
+  pause_at_percent: 97
+  weekly_pause_at_percent: 97
+  wait_max_hours: 5
+  long_wait: hold
+  resume_margin_minutes: 5
+  keep_awake: false
+board:
+  autostart: true
+  port: 4173
+  write: true
+  open: false

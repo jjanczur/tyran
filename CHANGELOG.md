@@ -1,5 +1,87 @@
 # Changelog
 
+## 0.1.34 — 2026-08-17
+
+### The dashboard starts itself
+
+The board was reachable only by a human typing a command that never returns.
+On every install where nobody typed it, each projection Tyran writes was
+generated and read by no one.
+
+`board.mjs --serve` blocks forever, which is right for an operator at a prompt
+and fatal for everything else. Setup's "turn the dashboard on" step handed an
+**agent** that command: measured, still listening three seconds after spawn
+with nothing to return — so the tool call sat until the platform's timeout and
+setup's remaining steps (validate, report, ask for the `.tyran/` commit)
+silently never ran.
+
+```bash
+node scripts/board.mjs --dir .tyran --detach --write   # returns; prints the URL
+node scripts/board.mjs --dir .tyran --status           # where is it?
+node scripts/board.mjs --dir .tyran --stop
+```
+
+`--detach` is the same server, waited on only until it answers. A new `board:`
+block in `.tyran/config.yaml` defaults `autostart: true`, so every session
+brings the board up if it is not already running and prints the URL in its
+opening summary. `limits:` defaults off because off is *inert*; a board that
+never starts is not.
+
+**Liveness is an HTTP question, never a recorded pid.** `/health.json` names
+the `.tyran` directory it serves, and a caller believes it only if that
+directory is its own. Both halves are load-bearing: a pid written by one
+process and read by another is dead before it is read and, once the OS
+recycles the number, names a stranger — while probing only the *port* finds a
+**different repository's** board (same program, same route) and concludes this
+one is already up, so it never starts. Ports walk 4173–4182, so several repos
+each get their own.
+
+`TYRAN_NO_BOARD=1` turns it off machine-wide, for CI: an automated run clones a
+repository whose committed config says `autostart: true`, has no browser and no
+operator, and a detached server started by a build outlives the build.
+
+### The commit, the reviewer and the model reach the card
+
+Measured across **387 real journals and 1799 lane cards**: 1243 carried a merge
+sha and 1074 a review verdict that no surface displayed.
+
+Nothing looked broken because the **lane encoded them** — `done` means merged,
+`changes-requested` means a non-approving review. The board was right, and
+could not show its work. Selecting a card now shows the commit, the reviewer
+and when, plus an **Execution** table: agent, model, start, verdict. That last
+column is the half of "what did this cost me" the Spend tab cannot answer —
+Spend gives dollars per ticket, this gives what was spawned to earn them.
+
+The worst real `board.json` grows 57 KiB → 84 KiB. `BOARD.md` is byte-unchanged.
+
+**Upgrading: one expected `--check` drift**, the same shape as 0.1.33's. Cards
+gain `review`, `merge` and `execution`, so a `board.json` committed by an
+earlier version no longer matches. Clear it with one regenerate:
+
+```bash
+node scripts/board.mjs --dir .tyran   # then commit the three artefacts
+```
+
+`doctor --state` is silent about it; the only surface is an explicit `--check`.
+
+### A feature deliberately not shipped, and the measurement that killed it
+
+While specifying a `spawn-silent` doctor finding — an open agent that has
+never said anything — the count came first. Across 388 real journals the
+`progress` event appears **once**, against an instruction in
+`agents/implementer.md` asking for four per story (roughly 6000 expected
+against 1532 spawns).
+
+So `spawn-silent` would fire on 100% of open spawns: the always-on warning
+`SEVERITY_BY_CODE` already refuses by name. It is not shipped.
+
+Agents are not ignoring the journal — 5302 gates and 4585 decisions — and not
+ignoring that file: the `lease.acquired` instruction one bullet above produced
+434 events. Four shipped features rest on the dead event and are inert on every
+real install: `spawn-blocked`, the `blocked` lane, the agent chip's state, and
+the signal half of "signal is not evidence". `NOTES-REQUESTS.md` §11 records
+three options and the measurement that would decide between them.
+
 ## 0.1.33 — 2026-08-17
 
 ### The board was hiding what its own journal already knew

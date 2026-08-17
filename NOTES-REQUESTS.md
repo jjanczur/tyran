@@ -495,14 +495,19 @@ Recorded because the list has only ever lived in a conversation.
    never ask for a secret's VALUE, because `journal.mjs ask` writes the
    question and `answer.mjs apply` folds the reply back as a `decision`, both
    into a committed file.
-5. **`--help` on `journal`.** Three of the four subcommand-style commands
-   (`schema`, `knowledge`, `mistakes`) were fixed in 0.1.37. `journal` is
-   left because its usage text is BUILT inside the `UsageError` handler —
-   a multi-line expression ending in `.join('\n')` that also lists every
-   event and its required `--data` keys. Hoisting it to a constant is the
-   fix and it needs care: an attempt to do it mechanically produced a
-   syntax error, which is why this is a separate item rather than a
-   footnote. **S.**
+5. ~~**`--help` on `journal`.**~~ FIXED on `main`; ships with the next
+   release. The usage text is now the module constant `JOURNAL_USAGE`, an
+   array joined once — which turns the event table into a spread rather
+   than the tail of a `+` chain, the shape that broke the mechanical
+   extraction. `--help` prints it on stdout under exit 0, the `UsageError`
+   handler prints the SAME string on stderr under exit 2, and a test
+   compares the two so they cannot drift. One thing did NOT copy from
+   `schema`/`knowledge`/`mistakes`: they pass every argument to
+   `wantsHelp`, and `HELP_FLAGS` contains the bare word `help`, which in
+   this command is a legal VALUE — `next-id <file> help` issues ids under
+   that prefix and `--question help` is a question. So help is honoured in
+   the verb position, plus the flag spellings wherever a flag may appear,
+   before any bare `--`.
 6. **The third policy-gate false positive** — a word ending `.key`/`.pem`
    refused as a file. Deliberately unfixed: the safe direction is refusing,
    and the obvious fix kills the whole credential family.

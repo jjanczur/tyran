@@ -110,9 +110,10 @@ test('--help is answered by every command that takes flags rather than subcomman
     'doctor', 'board', 'cost', 'answer', 'migrate', 'tiers', 'scan-repo', 'stop-check', 'desc-budget',
     // Subcommand-style. These reached their usage text through the
     // unknown-VERB path and exited 2, so `--help` was reported as a
-    // mistake rather than answered. `journal` is not here yet: its usage
-    // string is still built inside the error handler (NOTES-REQUESTS).
-    'schema', 'knowledge', 'mistakes',
+    // mistake rather than answered. `journal` was the last of them: its
+    // usage string is now the module constant JOURNAL_USAGE, printed to
+    // stdout here and to stderr on the refusal path.
+    'schema', 'knowledge', 'mistakes', 'journal',
   ]) {
     const r = run([command, '--help']);
     assert.equal(r.code, 0, `${command} --help exited ${r.code}`);

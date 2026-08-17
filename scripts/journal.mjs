@@ -35,6 +35,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { escapeInvisible, invisibleProblem, jsonEscapeInvisible, whitespaceProblem } from './invisible.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 /** Closed set of event types. Extending it is a reviewed core change. */
 export const EVENT_TYPES = Object.freeze([
@@ -1033,6 +1034,56 @@ const CMD_FLAGS = {
 };
 
 /**
+ * The usage text, in one place, for BOTH the answer to `--help` and the refusal
+ * of a bad invocation.
+ *
+ * It lived inside the `UsageError` handler until 0.1.38, which meant `--help`
+ * could only reach it by being a mistake: stderr, exit 2. An array joined once
+ * is the shape `mistakes.mjs` already uses, and the reason it is worth copying
+ * here is the table below — appended as a spread rather than as the tail of a
+ * `+` chain, which is where a mechanical extraction of the old form broke.
+ */
+export const JOURNAL_USAGE = [
+  'usage: journal.mjs append <file> <ev> <init> [--actor A] [--data JSON]',
+  '       journal.mjs query <file> [--ev E] [--init I] [--ticket T] [--limit N]',
+  '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>',
+  '       journal.mjs open-spawns <file>',
+  '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]',
+  '       journal.mjs ask <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A]',
+  '',
+  // The `--data` contract varies per event and lived only in a table no
+  // command printed. A field run discovered it by rejection, one failed
+  // invocation at a time.
+  'events, and the `--data` keys each one requires:',
+  ...EVENT_TYPES.map((ev) => {
+    const required = DATA_REQUIRED[ev];
+    const issued = ID_ISSUED_FOR[ev] !== undefined ? '  (id is issued if omitted)' : '';
+    return `  ${ev.padEnd(16)}${required === undefined ? '—' : required.join(', ')}${issued}`;
+  }),
+].join('\n');
+
+/**
+ * Whether this invocation is asking to be TOLD rather than obeyed.
+ *
+ * Deliberately narrower than `wantsHelp(process.argv.slice(2))`, which is what
+ * the other subcommand-style commands pass. `HELP_FLAGS` includes the bare word
+ * `help`, and here `help` is a legal VALUE: `next-id <file> help` issues ids
+ * under the prefix "help", `--question help` is a question, `--actor help` is
+ * an actor. Scanning every argument would turn each of those into a usage dump
+ * under exit 0 — a command that prints something reasonable and does nothing,
+ * which is the failure the symlink guard above already cost this file once.
+ *
+ * So: every spelling in the VERB position, and the flag spellings anywhere a
+ * flag can appear — flag-shaped tokens only, and only before a bare `--`, the
+ * end-of-options marker `parseFlags` already honours.
+ */
+function helpRequested(cmd, args) {
+  const end = args.indexOf('--');
+  const flagsOnly = (end === -1 ? args : args.slice(0, end)).filter((arg) => arg.startsWith('-'));
+  return wantsHelp([cmd ?? '']) || wantsHelp(flagsOnly);
+}
+
+/**
  * The ONE way this CLI writes a value to a terminal.
  *
  * `JSON.stringify` escapes C0 controls and stops there: bidi overrides, TAG
@@ -1060,6 +1111,13 @@ function emit(value, indent) {
 
 function main() {
   const [cmd, ...args] = process.argv.slice(2);
+  // Before the dispatch: `--help` is not a key of CMD_FLAGS, so answering it
+  // below would mean answering it as an unknown VERB — usage on stderr under
+  // exit 2, help reported as a mistake.
+  if (helpRequested(cmd, args)) {
+    console.log(JOURNAL_USAGE);
+    return;
+  }
   try {
     if (!(cmd in CMD_FLAGS)) throw new UsageError();
     const { flags, rest } = parseFlags(args, CMD_FLAGS[cmd]);
@@ -1145,24 +1203,7 @@ function main() {
     }
   } catch (err) {
     if (err instanceof UsageError) {
-      console.error(
-        'usage: journal.mjs append <file> <ev> <init> [--actor A] [--data JSON]\n' +
-          '       journal.mjs query <file> [--ev E] [--init I] [--ticket T] [--limit N]\n' +
-          '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>\n' +
-          '       journal.mjs open-spawns <file>\n' +
-          '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]\n' +
-          '       journal.mjs ask <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A]\n' +
-          '\n' +
-          // The `--data` contract varies per event and lived only in a table no
-          // command printed. A field run discovered it by rejection, one failed
-          // invocation at a time.
-          'events, and the `--data` keys each one requires:\n' +
-          EVENT_TYPES.map((ev) => {
-            const required = DATA_REQUIRED[ev];
-            const issued = ID_ISSUED_FOR[ev] !== undefined ? '  (id is issued if omitted)' : '';
-            return `  ${ev.padEnd(16)}${required === undefined ? '—' : required.join(', ')}${issued}`;
-          }).join('\n'),
-      );
+      console.error(JOURNAL_USAGE);
       process.exit(2);
     }
     console.error(`journal: ${err.message}`);

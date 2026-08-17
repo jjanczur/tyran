@@ -1077,8 +1077,9 @@ test('CLI: invoked through a symlinked path, the projector still writes files', 
   const base = mkdtempSync(join(tmpdir(), 'tyran-symlink-'));
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
-  // project.mjs imports journal.mjs — the copy has to carry both.
-  for (const name of ['project.mjs', 'journal.mjs', 'invisible.mjs']) {
+  // project.mjs imports journal.mjs, which imports two shared rules of its own
+  // — the copy has to carry all of them.
+  for (const name of ['project.mjs', 'journal.mjs', 'invisible.mjs', 'cli-args.mjs']) {
     writeFileSync(join(realScripts, name), readFileSync(new URL(`../../scripts/${name}`, import.meta.url)));
   }
   const linked = join(base, 'linked-scripts');

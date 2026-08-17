@@ -38,6 +38,7 @@ import {
   ASK_KIND_RE,
   nextAskKind,
   raiseAsk,
+  JOURNAL_USAGE,
 } from '../../scripts/journal.mjs';
 import { eventsFor } from '../../scripts/answer.mjs';
 import { fold } from '../../scripts/project.mjs';
@@ -587,6 +588,50 @@ test('CLI: validate exits 1 on a broken journal; bad usage exits 2', () => {
   assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'append']), /status 2|Command failed/);
 });
 
+test('CLI: --help is answered on stdout under exit 0, with the same text the refusal prints', () => {
+  // MUTANT: delete the helpRequested guard in main(). `--help` is not a key of
+  // CMD_FLAGS, so it falls through to the unknown-VERB path and this exact text
+  // arrives on STDERR under exit 2 — help reported as a mistake, which is what
+  // journal did until the constant existed.
+  for (const args of [['--help'], ['-h'], ['help'], ['append', '--help']]) {
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `${args.join(' ')} exited ${r.status}`);
+    assert.equal(r.stdout.trimEnd(), JOURNAL_USAGE, `${args.join(' ')} printed something else`);
+    assert.equal(r.stderr, '', 'help is not an error');
+  }
+  // The table is why the text was worth hoisting rather than summarising: the
+  // `--data` contract per event was documented nowhere a command printed.
+  for (const type of EVENT_TYPES) assert.match(JOURNAL_USAGE, new RegExp(`\\n  ${type}\\b`), `${type} is undocumented`);
+  assert.match(JOURNAL_USAGE, /\n {2}lease\.acquired {2}resource, holder\n/);
+  assert.match(JOURNAL_USAGE, /\n {2}decision {8}id, text {2}\(id is issued if omitted\)\n/);
+
+  const bad = spawnSync(process.execPath, [SCRIPT, 'bogus-verb'], { encoding: 'utf8' });
+  assert.equal(bad.status, 2, 'an unknown subcommand is still a usage error');
+  assert.equal(bad.stderr.trimEnd(), JOURNAL_USAGE, 'the two paths have drifted');
+  assert.equal(bad.stdout, '', 'a refusal wrote to stdout');
+});
+
+test('CLI: a help word in a VALUE position is a value, not a request for help', () => {
+  // MUTANT: widen helpRequested to wantsHelp(process.argv.slice(2)), the
+  // spelling the other subcommand-style commands use. HELP_FLAGS carries the
+  // bare word `help`, so each of these then prints usage and exits 0 — a
+  // command that says something reasonable and does nothing.
+  const f = tmp();
+  execFileSync(process.execPath, [SCRIPT, 'append', f, 'init.created', 'demo']);
+  const id = execFileSync(process.execPath, [SCRIPT, 'next-id', f, 'help'], { encoding: 'utf8' }).trim();
+  assert.equal(id, 'help-1', 'the prefix was read as a request for help');
+  const asked = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, 'ask', f, 'demo', '--question', 'help'], { encoding: 'utf8' }),
+  );
+  assert.equal(asked.data.question, 'help', 'the question was read as a request for help');
+  // Past a bare `--` even the flag spellings are positionals, which is the rule
+  // parseFlags already keeps: this is an agent named `--help`, so it fails on
+  // the missing --reason rather than printing usage.
+  const closed = spawnSync(process.execPath, [SCRIPT, 'close-spawn', f, 'demo', '--', '--help'], { encoding: 'utf8' });
+  assert.notEqual(closed.status, 0);
+  assert.match(closed.stderr, /requires a non-empty --reason/, 'the agent name was read as a request for help');
+});
+
 test('CLI: invoked through a symlinked path, the script still does its work', () => {
   // The self-run guard compared resolve(argv[1]) — which keeps symlinks — with
   // import.meta.url, which Node has already canonicalized. Reaching the script
@@ -598,10 +643,11 @@ test('CLI: invoked through a symlinked path, the script still does its work', ()
   const base = mkdtempSync(join(tmpdir(), 'tyran-symlink-'));
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
-  // journal.mjs now imports the shared invisibility rule (ADR-21), so the
-  // sibling has to travel with it — a copy that omits it fails at module
-  // resolution and would report the guard as broken when it is not.
-  for (const name of ['journal.mjs', 'invisible.mjs']) {
+  // journal.mjs now imports the shared invisibility rule and the shared
+  // help/flag rule (ADR-21), so the siblings have to travel with it — a copy
+  // that omits one fails at module resolution and would report the guard as
+  // broken when it is not.
+  for (const name of ['journal.mjs', 'invisible.mjs', 'cli-args.mjs']) {
     writeFileSync(join(realScripts, name), readFileSync(new URL(`../../scripts/${name}`, import.meta.url)));
   }
   const linked = join(base, 'linked-scripts');

@@ -229,20 +229,29 @@ echo "wrong branch — hold everything" > .tyran/STOP
 
 ## The dashboard
 
+**It is already running.** `/tyran:setup` writes `board: autostart: true`, so
+every session after it starts the dashboard if it is not up and prints the URL —
+**open that.** The board is bound to loopback, re-rendered on every request, and
+it reloads itself every 30 seconds.
+
+The **Settings** tab is an editor for `.tyran/config.yaml` and the autonomy
+policy — every knob with a sentence explaining it, your comments kept, and
+loosening a boundary behind a second deliberate press. Setup turns it on;
+`board: write: false` makes the board read-only, `autostart: false` stops it
+starting at all.
+
+From a plain shell — outside Claude Code, or in a script:
+
 ```bash
-npx @jjanczur/tyran board --dir .tyran --serve
+npx @jjanczur/tyran board --dir .tyran --detach   # starts it, prints the URL, returns
+npx @jjanczur/tyran board --dir .tyran --status   # where is it, if anywhere
+npx @jjanczur/tyran board --dir .tyran --stop     # ends it
 ```
 
-It prints `board: serving http://127.0.0.1:4173/` — **open that URL.** The
-board is bound to loopback, re-rendered on every request, and it reloads itself
-every 30 seconds; `--port <n>` if 4173 is taken, `Ctrl-C` to stop. That command
-is the one place a Node version matters, because `npx` runs the scripts outside
-Claude Code and they need **Node ≥ 22**.
-
-Add `--write` and the **Settings** tab becomes an editor for `.tyran/config.yaml`
-and the autonomy policy — every knob with a sentence explaining it, your
-comments kept, and loosening a boundary behind a second deliberate press. It is
-read-only without that flag.
+`--serve` instead of `--detach` holds the terminal until `Ctrl-C`, which is what
+you want only if you are a person at a prompt. `--port <n>` if 4173 is taken.
+These are the one place a Node version matters, because `npx` runs the scripts
+outside Claude Code and they need **Node ≥ 22**.
 
 No terminal, no server: the same page is written to **`.tyran/state/board.html`**
 after every agent, so you can just open the file —
@@ -309,7 +318,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1571 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1575 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

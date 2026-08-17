@@ -453,7 +453,8 @@ export function renderCrossMd(payload) {
     parts.push(
       `- \`${inline(a.agent)}\` (${inline(a.role)}) — ${inline(a.init)}` +
         `${a.ticket != null ? ` · \`${inline(a.ticket)}\`` : ''} · ${inline(a.state)}` +
-        `${a.detail != null ? ` — ${inline(a.detail)}` : ''} · last signal ${inline(a.last_signal)}` +
+        `${a.detail != null ? ` — ${inline(a.detail)}` : ''} · started ${inline(a.since)}` +
+        `${a.last_signal != null ? ` · last signal ${inline(a.last_signal)}` : ''}` +
         `${a.next != null ? ` · next: ${inline(a.next)}` : ''}\n`,
     );
   }

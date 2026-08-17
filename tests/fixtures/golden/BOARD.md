@@ -13,9 +13,9 @@
 
 ## Agents
 
-| Agent | Role | Ticket | State | Detail | Last signal |
-|---|---|---|---|---|---|
-| impl-2 | implementer | T-2 | blocked | waiting on the worktree lease | 2026-07-26T09:41:40.000Z |
+| Agent | Role | Ticket | State | Detail | Started | Last signal |
+|---|---|---|---|---|---|---|
+| impl-2 | implementer | T-2 | blocked | waiting on the worktree lease | 2026-07-26T09:36:01.000Z | 2026-07-26T09:41:40.000Z |
 
 ## waiting-operator (1)
 

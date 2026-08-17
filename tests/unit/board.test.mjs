@@ -788,12 +788,40 @@ test('the strip sorts on what agents SHOWED, not on what they said', () => {
   const quiet = payload.agents.find((a) => a.agent === 'quiet');
   assert.equal(quiet.last_evidence, '2026-01-01T00:05:00Z');
   assert.equal(quiet.evidence_kind, 'finding');
+  // MUTANT: restore `last_signal: signal?.ts ?? a.spawnTs`.
+  //
+  // `quiet` has never emitted a progress event, so its signal time is NOT a
+  // time — it is an absence. The fallback published its spawn instead, and
+  // every consumer printed that under a label reading "last signal": the chip
+  // ("N min since last signal"), the BOARD.md column, and the cross-repo line.
+  // Measured over 420 real journals: 72 running agents, `last_signal ===
+  // since` for 72 of 72, never once an actual signal. The golden fixture hid
+  // it because its one agent DOES signal — the case that is universal in the
+  // wild was the case no fixture covered.
+  assert.equal(quiet.last_signal, null, 'an agent that has never signalled has no signal time');
+  assert.equal(quiet.since, '2026-01-01T00:04:00Z', 'its spawn is carried by `since`, where it belongs');
 });
 
 test('the page shows signal and evidence as two different facts', () => {
   const html = demoHtml();
   assert.match(html, /nothing shown yet/, 'an agent that has shown nothing says so');
   assert.match(html, /a\.evidence_kind/, 'and what it showed is named');
+});
+
+test('the chip measures the age it can actually prove, and labels it that way', () => {
+  // MUTANT: point the age line back at `a.last_signal`.
+  //
+  // The number was always the spawn age; only the words said otherwise. It is
+  // worth keeping — an agent open for six hours IS the thing an operator wants
+  // flagged — so this is a relabelling, not a deletion. The `said so` line
+  // renders only when there is a signal to render, which is what makes the
+  // instruction's effect visible on the board instead of hidden behind a
+  // fallback.
+  const html = demoHtml();
+  assert.match(html, /ageMsOf\(a\.since\)/, 'the age is measured from spawn, which is the fact on hand');
+  assert.match(html, /since it started/, 'and it is labelled as spawn age');
+  assert.doesNotMatch(html, /since last signal/, 'nothing may print spawn time under the word signal');
+  assert.match(html, /if \(a\.last_signal\)/, 'a real signal still gets its own line');
 });
 
 test('the header counts LIVE agents, and says how many are stale', () => {

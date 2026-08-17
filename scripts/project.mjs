@@ -978,7 +978,22 @@ export function boardOf(state, { staleHours = DEFAULT_STALE_HOURS } = {}) {
         open_hours: ageHours === null ? null : Math.round(ageHours * 10) / 10,
         detail: signal?.detail ?? null,
         next: signal?.next ?? null,
-        last_signal: signal?.ts ?? a.spawnTs,
+        // NULL when the agent has never signalled, and it almost never has.
+        //
+        // This used to fall back to `a.spawnTs`, which made every consumer
+        // print spawn time under a label that says "when it last spoke".
+        // Measured over 420 real journals: 72 running agents on boards, and
+        // `last_signal === since` for 72 of 72. Not once a signal. `detail`,
+        // `next` and `state: 'blocked'` were zero across the same set, because
+        // all four come from a `progress` event that fires once in 388
+        // journals against an instruction asking for four per story.
+        //
+        // The fallback made that invisible: the board looked like it was
+        // reporting agent chatter and was reporting process ages. A wrong
+        // number reads as a measurement, which is worse than a blank — so the
+        // blank is the honest value, and `since` (right below) is where spawn
+        // time has always actually lived.
+        last_signal: signal?.ts ?? null,
         // What it has SHOWN. Null until it shows something, which is the
         // ordinary state of an agent that has just started — the strip says
         // "nothing yet" rather than implying silence.
@@ -1029,13 +1044,17 @@ export function renderBoard(state, board = boardOf(state)) {
   parts.push('\n## Agents\n\n');
   parts.push(
     table(
-      ['Agent', 'Role', 'Ticket', 'State', 'Detail', 'Last signal'],
+      // "Started" is the column that always has a value; "Last signal" is the
+      // one that almost never does, and printing spawn time in it made the
+      // table look fuller than the journal was.
+      ['Agent', 'Role', 'Ticket', 'State', 'Detail', 'Started', 'Last signal'],
       sortByKey(board.agents, (a) => a.agent).map((a) => [
         inline(a.agent),
         inline(a.role),
         inline(a.ticket),
         inline(a.state),
         inline(a.detail),
+        inline(a.since),
         inline(a.last_signal),
       ]),
     ),

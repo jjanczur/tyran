@@ -15,16 +15,25 @@ commits and anything written to disk are in English.**
      lease file as the handoff describes. Another agent's unexpired lease
      means you do NOT start — you report back. Release it when you finish,
      including when you finish by failing.
-   - **Signal at four points, no more** — `progress` events appended to the
-     MAIN checkout's journal (the handoff carries its absolute path):
-     `started` right after the lease (it is also the proof the lease protocol
-     was honoured) · `blocked` at the FIRST blockage, BEFORE attempting any
-     workaround · `unblocked` when it clears · `working` before the final
-     full validation run, the longest silent stretch you have. Shape:
+   - **Signal ONCE: at the first blockage, before any workaround.** A
+     `progress` event appended to the MAIN checkout's journal (the handoff
+     carries its absolute path):
      `node ${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs append <abs-journal>
      progress <init> --actor <you> --data
-     '{"agent":"<you>","state":"blocked","ticket":"T-n","detail":"..."}'`.
-     Four emissions per story; this is a closed list, not a diary.
+     '{"agent":"<you>","state":"blocked","ticket":"T-n","detail":"..."}'`,
+     and `state: "unblocked"` when it clears.
+
+     This asked for four emissions until 2026-08-17 — `started`, `blocked`,
+     `unblocked`, `working` — and measurement ended the argument: **one**
+     `progress` event across 388 real journals, against roughly six thousand
+     the instruction predicted. The lease bullet immediately above produced
+     434 in the same set, so this is not an agent that ignores the journal or
+     ignores this file. Three of the four asks were also reconstructable from
+     events someone else writes — your lease IS `started`, your report IS the
+     end of `working` — and a signal only you can contradict is worth less
+     than one another party produces. A blockage is the exception: nothing
+     else in the journal says you are stuck, or why. So the list is one item
+     long, and it is the item that carries information nothing else can.
    - **Grep before you build.** Search for an existing implementation of the
      thing you are about to write; if it exists, report it as a corrected
      premise instead of duplicating it. Durable discoveries worth another

@@ -56,6 +56,16 @@ commits and anything written to disk are in English.**
      follow `root-cause`**. Reproduce it, change one variable at a time with
      the prediction written down first, and name the mechanism. A fix for a
      failure you never reproduced cannot be shown to have worked.
+   - **Two refuted hypotheses is the timebox.** When two named root-cause
+     hypotheses have both been disproven and you do not have a third, stop:
+     signal `blocked`, write what you RULED OUT into the journal as a
+     `finding` — each dead hypothesis with the command output that killed it —
+     and report back. The ruled-out list IS the deliverable: the conductor
+     re-routes the story with more reasoning or a stronger tier, and that
+     agent starts where you stopped instead of at the wall. Handing back
+     early with evidence is not failing the story — it is how a team spends
+     its seniors only where a wall has been proven, and it beats burning the
+     rest of your budget to prove nothing twice.
    - When the PR comes back with comments, follow `pr-feedback`.
 3. **Decide technical questions yourself.** "Shall I continue?" is forbidden.
    A product or visual decision, or one that would cross a boundary the handoff

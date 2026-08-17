@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.1.38 — 2026-08-17
+
+### The conductor is a project manager, and the prompts now argue it
+
+A full review of all five prompts against one standard: one coordinator
+talking to the stakeholder, everything else delegated, agents collaborating
+like an engineering team. Seven changes, each at a measured gap; nothing
+tuned to any one repo.
+
+- **The conductor's header** opens "a project manager, not a pair of hands"
+  and states the reason: its context is the one place the whole plan lives —
+  measured once on Tyran's own development, 55% of every token spent was the
+  conductor's context — and what the operator buys is knowing what is done,
+  running and stuck. A conductor buried in a diff knows none of it.
+- **M-sized work defaults to one implementer.** "Yourself or one implementer"
+  was a coin flip; now doing it yourself requires the diff to be plainly
+  smaller than the handoff that would describe it, recorded as a `decision`.
+  S stays do-it-yourself: spawning an agent for a two-line fix is the cost
+  the "principal engineer on a grep" line argues against.
+- **Escalation has a rule on both sides.** Implementer: two refuted
+  root-cause hypotheses is the timebox — signal `blocked`, journal the
+  ruled-out list as a `finding` with the output that killed each hypothesis,
+  hand back; handing back early with evidence is not failing the story.
+  Conductor: BLOCKED after a real root-cause attempt, or `changes-requested`
+  twice, re-routes UP (effort first, tier when the ladder allows —
+  `tiers.mjs --journal --ticket` has counted attempts since 0.1.27; no
+  prompt ever said when to use it) with the ruled-out list in the new
+  handoff, so the stronger agent starts past the wall.
+- **The reviewer can now load the skills it is ordered to follow.** Its
+  allowlist had no `Skill` tool, so "follow the code-review skill" meant
+  reconstructing it from memory. A skill recalled from memory is not
+  followed.
+- **The reviewer's signal instruction matches the 0.1.36 measurement.** It
+  still demanded a `started` emission; the implementer's list was cut to
+  blocked-only on one progress event across 388 journals, and the same
+  argument governs both — the lease IS started, the review event IS
+  completion.
+- **Teams mode gets a peer protocol.** When Agent Teams are available,
+  teammates coordinate directly — implementer asks the scout for a map,
+  adjacent stories settle a shared seam — but anything worth keeping still
+  goes through the journal: a teammate message dies with the session, and
+  the board shows only what the journal holds.
+- **Three surfaces lied about the reviewer.** README and both FAQ pages still
+  said "no editing tools — it cannot patch what it is grading"; that stopped
+  being true when `Edit` was granted behind the forfeit rule (touch the diff
+  and APPROVE is unavailable). docs/skills was updated then; README and FAQ
+  were missed. The §10 audit row records that the code moved past the video,
+  and that the video's sentence stays true of the APPROVE path: what it
+  approves, it did not edit.
+
+Deliberately NOT added: new agent types (a new agent needs a different MODE;
+security-review and arbitration are already roles routing to stronger tiers),
+new skills (the description budget is CI-enforced and the graduation path is
+evidence, not speculation), and any peer-to-peer evidence channel (journals
+stay the medium of record even in teams mode — that is the thesis, not a
+limitation).
+
 ## 0.1.37 — 2026-08-17
 
 ### `--help` reaches the subcommand-style commands too

@@ -111,8 +111,11 @@ counting files is not counting value, and the distinction is between a budget
 that was *exceeded* and one CI enforces on every push. ⁵ Their issues #73/#74:
 worktree hook broke isolated spawns. ⁶ "MIT" badge links to a LICENSE file
 that does not exist in the repo; the GitHub API reports no license for it.
-⁷ The reviewer agent is granted no editing tools, so it cannot patch what it
-is grading — but it keeps `Bash` in order to run the tests, and `Bash` can
+⁷ The reviewer agent may edit — describing a one-line fix in prose for the
+author to re-derive was slower than writing it — but the grant is fenced:
+touching the diff forfeits `APPROVE` (the verdict becomes `REVISED` and a
+second reader is owed), `Write`/`NotebookEdit` stay withheld, and a test pins
+both rules. It also keeps `Bash` in order to run the tests, and `Bash` can
 write. This raises the price of self-approval; it does not make it impossible.
 ⁸ Worktrees, leases and sequential merge are specified in the conductor skill,
 and lease events are recorded in the journal, so `STATE.md` surfaces a lease

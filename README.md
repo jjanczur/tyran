@@ -310,8 +310,8 @@ repo, initiative or not — and the other eight are standalone protocols.
 | `skill-writing` | what a skill has to earn before it ships, and the test that proves it fires |
 
 Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story, own
-branch), `tyran:reviewer` (no editing tools — it cannot patch what it is
-grading), `tyran:retro`. A skill is admitted only when something already asks
+branch), `tyran:reviewer` (may fix what it finds, but editing forfeits
+`APPROVE` — it can never bless its own patch), `tyran:retro`. A skill is admitted only when something already asks
 for the protocol by name, and every description is loaded into every session
 whether the skill fires or not — so the combined length is capped and CI
 enforces the cap (4352 of 5000 characters). What each one assumes, when it

@@ -334,7 +334,7 @@ after someone has watched it.
 | claim | where it is true |
 |---|---|
 | "batches of at most four, each with his recommendation" | `skills/run/SKILL.md` — "Batch questions — at most 4 at once, each with your recommendation" |
-| "the reviewer grades the diff and cannot edit it" | `agents/reviewer.md` grants no `Edit`/`Write`, and says why in its own body |
+| "the reviewer grades the diff and cannot edit it" | TRUE when audited; the code has since moved past the video. `agents/reviewer.md` now grants `Edit` behind the forfeit rule — touching the diff makes `APPROVE` unavailable (verdict `REVISED`), `Write`/`NotebookEdit` stay withheld, `tests/unit/agents.test.mjs` pins both. The video's sentence remains true of the APPROVE path: what it approves, it did not edit. README + both FAQ surfaces corrected 2026-08-17 (0.1.38) |
 | "security review always gets the strongest tier — no flag or cost setting can lower it" | `scripts/tiers.mjs` `ROLE_FLOOR`, applied last, after both the risk shift and the override; the CLI announces a floored override rather than correcting it silently |
 | "a commit carrying a secret is refused, even inside a markdown file" | the secrets gate scans blobs and is not evaded by `*.pem binary` or even `* binary` in `.gitattributes` — **stronger** than the video claims |
 | "it blocks silence, not forgery" | `docs/evidence-gate.md` — "the gate raises the cost of an empty report; it does not measure whether the work happened" |

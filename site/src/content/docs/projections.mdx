@@ -5,7 +5,7 @@ description: 'How STATE.md and PROGRESS.md are generated from the journal, the d
 import Provenance from '../../components/Provenance.astro';
 
 <Provenance>
-`scripts/project.mjs` · 69 unit tests, including byte-exact golden files
+`scripts/project.mjs` · 79 unit tests, including byte-exact golden files
 </Provenance>
 
 The journal stays the only source of truth; everything on this page is a
@@ -119,14 +119,69 @@ catch.
 | Section | Built from |
 |---|---|
 | Checkpoint | the last `checkpoint` event (+ `plan.accepted`, and the last event of any type) |
-| Agents | `spawn`, closed by the next `report` for the same agent name; the Last signal column is the agent's latest `progress` event, shown on running rows only |
+| Agents | `spawn`, closed by the next `report` for the same agent name — or by a `checkpoint` whose `phase` is `closed`; the Last signal column is the agent's latest `progress` event, shown on running rows only |
 | Open blockages | `progress` with `state: blocked` — cleared by the same agent's next movement signal and by `report`/`review`/`merge` |
 | Findings | `finding` events, in journal order |
 | Ledger | `ticket.created`, `ticket.status` (a lane override that never moves the percent, and never invents a ticket — one naming an id no other event created is ignored, loudly), `spawn`, `report`, `review`, `merge` |
-| Gates | `gate` — the latest event per `kind` |
+| Gates | `gate` — the latest event per `kind`, plus the last REFUSAL that kind ever recorded |
 | Leases | `lease.acquired` / `lease.released` |
 | Decisions · Retro · Errors | `decision` · `retro.entry` · `error` |
 | Resume steps | `checkpoint.data.next_steps` |
+
+## What the fold no longer throws away
+
+Four things the journal recorded and the projection dropped. Each was a
+question an operator asked the board, got a confident answer to, and the
+answer was wrong in the same direction: everything looked fine.
+
+**An agent the initiative moved on without is `stale`, not `running`.**
+Nothing here ever downgraded a spawn, so an agent that never reported stayed
+`running` in every artefact for as long as the journal survived — and the
+board's header counted week-old ghosts as live work. Doctor had been calling
+them abandoned the whole time, from the same events, which is two answers to
+one question. There is now one predicate, `journal.spawnStaleness`, and both
+call it.
+
+The threshold is measured in **journal time** — against the initiative's own
+latest event, not the wall clock. That is what `spawn-stale` has always meant
+("the initiative moved on without it") and it is the only version that keeps
+`board.json` byte-exact under `--check`: a wall-clock verdict would make two
+clones of one journal disagree, and would call every agent in a finished
+initiative stale the moment you walked away from it. An agent carries
+`stale` and `open_hours` alongside its state; `blocked` still outranks
+`stale`, because that is the agent's own account of why it stopped.
+
+The `age-fresh/warm/cold/dead` colours on `board.html` are a **different
+question** and keep their own vocabulary — see
+[the board](../board/#signal-is-not-evidence).
+
+**A closing checkpoint closes the spawns it leaves open.** No event type
+closes an initiative, so one could be explicitly wound up with three agents
+that never reported still running forever. A `checkpoint` whose `phase` is
+`closed` — the one reserved value in an otherwise free-text field, compared
+trimmed and case-insensitively — now closes that initiative's still-open
+spawns at fold time. Only the ones folded before it: an agent spawned after
+the checkpoint is a new incarnation and keeps its own lifecycle. They are
+closed, never reported: no verdict is invented for an agent that never filed
+one, and each is named in the warnings rather than tidied away.
+
+**A gate that passes after refusing does not erase the refusal.** Gate results
+are keyed by `kind`, so a re-run won the slot — and *"security denied this,
+then someone re-ran it green"* rendered identically to *"security has only ever
+passed"*. The event count always survived, so the volume was never lost, only
+the verdict. The last refusal is now kept beside the current result and shown
+in its own column. A refusal is a named set of results (`deny`, `fail`,
+`rejected`, …), not "anything that is not a pass" — `open` and
+`WAITING_ON_OPERATOR` are gates that have not answered yet, and a mark that
+fires on every pending gate says nothing at all.
+
+**A report carries what the agent said, not only its verdict.** `decision`
+folds its `text` and `gate` folds its `evidence`; a `report` was the one
+carrier of description that wrote to nowhere, so a `changes-needed` card
+reached the board with the reason it came back silently discarded. One field
+reads `text`, then `note`, then `evidence` — agents improvise the key, and
+three near-synonyms rendered as three rows would be the same answer in three
+places.
 
 Two details worth knowing:
 

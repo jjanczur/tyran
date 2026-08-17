@@ -37,6 +37,8 @@
       "role": "implementer",
       "ticket": "T-2",
       "state": "blocked",
+      "stale": false,
+      "open_hours": 0.1,
       "detail": "waiting on the worktree lease",
       "next": null,
       "last_signal": "2026-07-26T09:41:40.000Z",
@@ -53,6 +55,7 @@
         "agents": [],
         "worked_by": [],
         "since": "2026-07-26T09:02:02.000Z",
+        "report_text": null,
         "annotation": null
       }
     ],
@@ -74,6 +77,7 @@
           "impl-2"
         ],
         "since": "2026-07-26T09:41:50.000Z",
+        "report_text": null,
         "annotation": "worktree lease held by another window"
       }
     ],
@@ -86,6 +90,7 @@
           "impl-1"
         ],
         "since": "2026-07-26T09:32:00.000Z",
+        "report_text": null,
         "annotation": null
       }
     ]

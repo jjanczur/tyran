@@ -1,5 +1,65 @@
 # Changelog
 
+## Unreleased
+
+### Four things the fold recorded and threw away
+
+Each of these was a question an operator asked the board, got a confident
+answer to, and the answer was wrong in the same direction: everything looked
+fine.
+
+**An agent the initiative moved on without now reads `stale`, not `running`.**
+Nothing in the projection ever downgraded a spawn, so an agent that never
+reported stayed `running` in every artefact for as long as the journal
+survived, and the board's header counted week-old ghosts as live work. Doctor
+had been calling those same spawns abandoned the whole time, from the same
+events — two answers to one question, which is the defect ADR-21 is named
+after and which `pairSpawns` had already been through once for the adjacent
+question of who is still working.
+
+There is now one predicate, `journal.spawnStaleness`, and both consumers call
+it; doctor's copy is gone rather than kept in sync. It could not live in
+doctor, which imports the projection, so it sits in `journal.mjs` beside
+`pairSpawns` where both already reach.
+
+The threshold is journal time — measured against the initiative's own latest
+event, never the wall clock. That is what `spawn-stale` has always meant, and
+it is the only version that keeps `board.json` byte-exact under `--check`.
+`blocked` still outranks `stale`, because that is the agent's own account of
+why it stopped. The `age-fresh/warm/cold/dead` colours on the page are a
+different question and keep their own vocabulary: an agent can be quiet for
+hours without being stale, and stale while chattering every minute.
+
+**A closing checkpoint closes the spawns it leaves open.** No event type
+closed an initiative, so one could be explicitly wound up with three agents
+that never reported still running forever. `checkpoint` with `phase: closed`
+— the one reserved value in an otherwise free-text field — now closes that
+initiative's still-open spawns at fold time, and only the ones folded before
+it, so an agent spawned afterwards keeps its own lifecycle. They are closed,
+never reported: no verdict is invented for an agent that never filed one, and
+each is named in the warnings rather than tidied away.
+
+**A gate that passes after refusing no longer erases the refusal.** Results
+are keyed by `kind`, so a re-run won the slot, and *"security denied this,
+then someone re-ran it green"* rendered identically to *"security has only
+ever passed"*. The event count always survived, so the volume was never lost
+— only the verdict. The last refusal is kept beside the current result and
+gets its own column in `STATE.md`. A refusal is a named set (`deny`, `fail`,
+`rejected`, …) rather than "anything that is not a pass": the first draft was
+the latter, and the demo fixture caught it at once, marking every `open` gate
+as carrying a permanent objection it had never raised.
+
+**A report carries what the agent said, not only its verdict.** `decision`
+folds its `text` and `gate` folds its `evidence`; `report` was the one carrier
+of description that wrote to nowhere, so a `changes-needed` card reached the
+board with the reason it came back discarded at fold time. One field reads
+`text`, then `note`, then `evidence`, because agents improvise the key.
+
+The board header now says *open* rather than *running* and names the stale
+count beside it — the agents are still counted and still in the strip, but an
+open spawn and live work are not the same fact and the tile was asserting the
+second from the first.
+
 ## 0.1.30 — 2026-08-17
 
 The first release built on an outside contribution. It fixes a spend ledger

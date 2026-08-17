@@ -449,6 +449,24 @@ The agent strip aged on `progress` events, which an agent emits at will. An
 agent looping without achieving anything therefore had the freshest chip on the
 board, and — because the strip is sorted stalest-first — sorted to the bottom.
 
+**Stale is a third thing, and it does not share their vocabulary.** The four
+colours above are wall-clock: "how long since it spoke, right now, where you
+are sitting", computed in the reader's own browser because the artefact may
+not read a clock. **Stale** is journal time, decided on the server by the same
+predicate `doctor` uses — "the initiative moved on without it" — and it reads
+the same tomorrow, and in six months, for every reader of that journal. An
+agent can be quiet for hours without being stale, and stale while chattering
+every minute. So it marks the whole chip in brass rather than joining the age
+scale: two questions sharing one vocabulary is how an operator ends up with
+two contradictory answers on one strip.
+
+The header tile counts the **live** ones and names the rest. It used to read
+"N agents running" for every open spawn, which made a fleet that died before
+you went to bed indistinguishable from one working through the night. The
+stale agents are still counted, still in the strip, and now said out loud. The
+same correction reaches `BOARD.md`, whose headline says *open* rather than
+*running*, with the stale count beside it.
+
 Every agent now carries two times. **`last_signal`** is what it SAID, from its
 own `progress` events. **`last_evidence`** is what it SHOWED: a `report` with
 its `evidence[]`, a `finding` with its proof, a `review` verdict. The strip
@@ -465,7 +483,8 @@ healthy agents is a warning people learn to scroll past.
 ## board.json, schema 1
 
 Fixed key order (`schema`, `as_of`, `totals`, `stop`, `paused`, `asks`,
-`agents` (each with `last_signal`, `last_evidence` and `since`), `files`,
+`agents` (each with `last_signal`, `last_evidence`, `since`, and `stale` /
+`open_hours` in journal time), `files`,
 `lanes`, `errors_logged`, `errors_logged_total`, `errors`,
 `warned`); timestamps copied verbatim from events; invisibles escaped as
 `\uXXXX`, never removed; byte-identical reruns. Consumers check `schema === 1`
@@ -474,6 +493,11 @@ rendering garbage.
 
 Two of those keys are easy to confuse, so they are named apart on purpose.
 **`errors`** is the list of initiatives whose journal could not be read at all.
+**`totals.agents`** counts OPEN SPAWNS, and **`totals.agents_stale`** says how
+many of those the journal has moved on without. The page shows the difference
+as its headline and names the remainder; adding the two back together is the
+reading the split exists to prevent.
+
 **`errors_logged`** is what agents recorded as failures with an `error` event —
 newest first, capped at 20 with the true count in `errors_logged_total`,
 because this artefact is committed and compared byte for byte. One key with two

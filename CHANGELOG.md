@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.1.36 — 2026-08-17
+
+Four fixes, three of them found by installing Tyran into a clean repo and
+walking through what a new user actually gets, rather than by reading the code.
+
+### The first sentence a new install reads was wrong
+
+A brand-new user's opening message ended *"Run `/tyran` to resume, or read
+`.tyran/state/<init>/STATE.md` in full."* There is nothing to resume, and
+`.tyran/state/<init>/` is not a directory — at that point `.tyran/state/` holds
+only `board-server.json`.
+
+A regression from 0.1.34. `renderContext` returned `''` when there was no
+initiative and no pause, so that line was unreachable from an empty repo;
+autostart added `board` to the guard, `board` is non-null in every adopted
+repo, and the whole scaffold began rendering for repos with no state at all.
+Checked: a repo that never adopted Tyran still injects `{}`.
+
+The closing line now branches, and names the initiative when there is exactly
+one instead of sending the reader to look up `<init>`. The README's dashboard
+section was stale the same way — it opened with `--serve`, a command setup made
+unnecessary, and taught `--write` as an opt-in flag that setup now writes by
+default.
+
+### A board that failed to start deleted the record of the one running
+
+With a board already up, a second `--serve` loses the bind, prints *"port 4173
+is already in use"*, and exits — running the `clear` handler `board.mjs`
+registers on `process.exit` unconditionally. That deleted the RUNNING board's
+record. Measured after: `curl` still answering on 4173, `.tyran/state/` empty,
+`--stop` reporting *"no board server is recorded"*. A server serving with
+nothing naming it — invisible to `--status`, unreachable by `--stop`, killable
+only with `lsof`.
+
+`removeServerRecord` now refuses to unlink a record naming another pid. The
+guard is in the module, not at the call site: ownership enforced by whoever
+remembers to check is caller discipline, which `journal.mjs` and `doctor.mjs`
+both reject by name. `stopServer` passes `owner: null` and has earned it.
+
+Same session, same cause: `--detach --write --transcripts <dir>` against a
+running board printed *"already serving"*, exit 0, and applied nothing.
+`--transcripts` is the remedy the Spend tab itself prints, so the product
+recommended a command that reported success and fixed nothing. The inert flags
+are now named, with how to apply them. A plain re-run stays silent — autostart
+runs it every session.
+
+### The chip printed spawn time under the words "last signal"
+
+`NOTES-REQUESTS` §11 recorded that four shipped features rest on a `progress`
+event that fires once in 388 journals, and that the measurement to decide what
+to do had not been made. It has now. Folding **420 real journals**: 72 running
+agents on boards, `last_signal === since` for **72 of 72**, never once an actual
+signal, with `detail`, `next` and `state: "blocked"` at zero.
+
+`last_signal` fell back to the spawn time, so this was not an empty field — it
+was spawn time published under a label saying *"when it last spoke"*, in the
+chip, the `BOARD.md` column and the cross-repo line. A blank reads as an
+absence; a number reads as a measurement.
+
+The age was worth keeping, so this is a relabelling: the chip measures from
+`since` and says *"since it started"*, `BOARD.md` gains a **Started** column,
+and a real signal gets its own line when there is one. The golden fixture
+missed it because its one agent does signal — the case that is universal in the
+wild was the one no fixture covered.
+
+`agents/implementer.md` now asks for **one** `progress` emission, at the first
+blockage, instead of four. Three of the four were reconstructable from events
+another party writes; a blockage is the exception, because nothing else says an
+agent is stuck or why. Deleting `progress` outright was rejected for that
+reason — `spawn-blocked` and the `blocked` lane stay.
+
+### Exercise cloud access, and never ask for a secret's value
+
+Both from `NOTES-REQUESTS` §12.4. STEP 0 already spawns a throwaway teammate
+rather than infer that Agent Teams work; cloud access had no such rule, and a
+missing permission surfaces at deploy — after the work. It is now exercised
+with a read-only call per service the plan names.
+
+And a gate must never ask for a credential's VALUE: `journal.mjs ask` writes
+the question into the journal and `answer.mjs apply` folds the reply back as a
+`decision`, both into a committed file. Ask where it lives — the SSM parameter
+name, the secrets-manager key, the vault path.
+
 ## 0.1.35 — 2026-08-17
 
 ### Three surfaces promised a consolidation step that nobody implements

@@ -1,6 +1,147 @@
 # Changelog
 
-## Unreleased
+## 0.1.32 — 2026-08-17
+
+### Overnight mode could never fire, on any install
+
+The pause depended on `.tyran/state/usage.json`; only the statusline writes
+it; the statusline writes only when the platform payload carries
+`rate_limits`; and that block is not always sent. Measured on an install
+running `limits: mode: 'pause'` — **no sidecar had ever been written anywhere
+on the machine**, so the configured pause had never once been able to fire.
+The gate fails open, which is why nothing ever said so.
+
+The gate now falls back to the platform's own cache in `~/.claude.json`, which
+also removes the one onboarding step no script can perform: registering a
+statusline means writing the operator's settings file, and the plugin is
+refused there by design.
+
+**A stale reading is acted on, deliberately.** That cache is refreshed on the
+platform's schedule — measured 83 minutes old during continuous heavy use — so
+under the gate's ten-minute freshness rule it would be discarded every time.
+It is sound because usage inside a window only ever goes UP: a reading taken
+inside the window that is still running is a LOWER BOUND on usage now. If it
+already says 97%, the truth is at least that and pausing is correct; if it
+says less, the gate may fail to pause, which is exactly today's behaviour and
+the safe direction. A reading whose own `resets_at` has passed is discarded —
+that check is what makes the rest safe. Pauses derived this way record
+`lower_bound: true`, because "at least 97%" is a reason to stop and never a
+reason to start.
+
+Verified against live telemetry: at the shipped 97% nothing trips (the account
+was at 32%/68%); at a 30% test threshold the weekly window trips with the
+correct resume time.
+
+`SIDECAR_RELPATH` had three spellings and `SIDECAR_FRESH_MS` two, across the
+writer, the scheduler and the gate. Nothing fails while they agree, and when
+they stop agreeing the symptom is a pause that silently never fires — the bug
+above. They collapse into `scripts/usage-source.mjs`.
+
+Only the two usage windows are read from that file. It also holds the account
+uuid and the email address; a test asserts neither reaches the output.
+
+### Three lifecycle leaks, each measured on real journals first
+
+- **`lease-expired` was dead code that looked alive.** It read
+  `expires`/`expires_at`/`until`; across every journal on a real machine agents
+  wrote **`expiry` 33 times against `expires` 3**, so 33 of 36 recorded
+  expiries were invisible.
+- **The schema flagged the field that would have made it work.** No expiry
+  spelling was in `DATA_KNOWN`, so recording one tripped `journal-key-unread`
+  — the ledger reporting an agent's own diligence back as an anomaly. Same for
+  the descriptions agents attach: `purpose` 28, `story` 21, `text` 21.
+- **Worktrees accumulate and nothing had ever looked.** No removal path exists
+  in any skill, agent or script, and the journal has no event that can
+  represent one being destroyed. Measured: **26 worktrees in one repository,
+  33 GB under another's `.worktrees/`**. New `worktree-accumulating` warning
+  above a ceiling of 8 — a handful is the parallel model working as designed.
+
+  It **reports and does not remove**. Most of those worktrees hold work that
+  never CONCLUDED rather than work that finished, so removing the merged ones
+  would clear almost nothing while being able to delete something wanted.
+
+### Spend answers "how much", with no configuration
+
+The Spend tab could say how many tokens and never how much: `pricing:` was
+hand-authored, the scanner never writes one, so absent was every install.
+
+The published list prices now ship as `list-2026-08`. Cache rates are
+published as fixed multiples of base input (1.25x, 2x, 0.1x), so only input
+and output are written down and a test checks all fifteen rows against an
+independently transcribed table. Overriding is per MODEL, not all-or-nothing.
+
+This reverses an earlier rule — "Tyran does not know what anyone pays" — which
+conflated two quantities. A subscriber's marginal cost is zero and unknowable;
+what the tokens would list-price at on the API is published and fixed. The
+reversal is conditional on the figure never claiming to be the other, so
+`rate_card` still travels with every amount.
+
+**Cache writes are billed at two rates and were counted as one.** A 1-hour
+write costs 2x base input against a 5-minute write's 1.25x, and the transcripts
+carry the split. Reading both the aggregate and the split would double-count,
+so exactly one is read — verified across 1168 consecutive live records where
+the two summed to the aggregate every time. Measured on 1.8 B real tokens: the
+1-hour line is $175 against the 5-minute line's $70.
+
+**A window you choose, because a plan is billed monthly.** `--window
+30d|period|all`, and three buttons on the tab. `30d` is the default since it
+needs nothing from the account; `period` runs from the subscription
+anniversary and is offered only when that date is readable. The anniversary
+arithmetic clamps short months — a subscription created on the 31st has no
+31st in February, and naive maths yields a period that has not begun.
+
+The plan price sits beside the API figure, and the multiple is shown only
+under a month-shaped window: measured, an all-time total read as "6.9x what
+you pay" where the honest monthly figure was about 11x.
+
+**A per-day series**, which this page never had — every other view is a
+snapshot, so nothing could answer "am I getting cheaper". It shows the full
+history whatever window is selected, since a chart that shrank with the window
+could not show you that last month was worse.
+
+### The reviewer can fix what it finds
+
+The property worth protecting was never "a reviewer cannot type" — it is that
+nobody approves their own code, and those come apart. The reviewer holds
+`Edit`, and the verdict is three-valued: a diff it touched can only come back
+`REVISED`, which still owes a second read, and that read is cheap because the
+fix is already written. No `Write` or `NotebookEdit`: authoring files is
+designing, not reviewing.
+
+An open operator ask now goes in the verdict LINE. Field-measured: a reviewer
+raised a gate inside the body of an APPROVE, the conductor read the first
+word, merged, and the question sat unanswered for thirty minutes.
+
+**Subagents could not reach MCP at all.** `tools:` is an exhaustive allowlist,
+so naming six built-ins silently stripped every `mcp__*` tool from the scout
+and the reviewer — the scout's own description promises reconnaissance over
+"its data", which was unreachable. Grants stay gated: write-guard's matcher
+already carries `mcp__.*`.
+
+### Two gate refusals that were wrong
+
+- A backslash-escaped separator started a new segment, so `grep -nE 'A\|B' f`
+  split in two and an ordinary read was refused. `\<sep>` is never an operator
+  in any shell quoting context — verified against `/bin/sh` with a side-effect
+  oracle over 34 join constructions, zero divergences. The lexer stays
+  quote-BLIND on purpose: a naive quote tracker is broken by one apostrophe,
+  which swallows a `;` and makes a `git push` invisible to the deployment
+  check.
+- `^id_[a-z0-9]+$` was really "any identifier starting with id_", and these
+  rules run over every literal WORD of a command — so `ID_ISSUED` and
+  `ID_TOKEN` were refused as ssh private keys. Now anchored on OpenSSH's own
+  key-type names, keeping hardware keys and per-host suffixes. Declared cost: a
+  key with an invented stem is no longer matched by name, though `.ssh/` still
+  catches it and so does gitleaks at push.
+
+### Setup asks one question, in words a non-engineer can answer
+
+Sales and marketing people run this now, and four entries shaped
+`field: source` is where they stop. The scan carries a `plain` object: one
+question, its evidence restated without jargon, at most two options, and a
+list of what the repository already answered. P3 is not offered — a menu makes
+every item look like a normal choice, and it stays something a person says in
+their own words.
 
 ### Installation reaches the dashboard now
 

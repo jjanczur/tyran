@@ -1004,7 +1004,7 @@ if (data.schema !== 1) {
   var sp = panels.spend;
   var spBody = el('div');
   sp.appendChild(spBody);
-  spBody.appendChild(el('div', 'hint', 'Spend is read from the transcripts Claude Code already writes, and it is served rather than embedded — open this board with "board.mjs --serve" to see it. Over file:// there is no server, so this tab stays empty.'));
+  spBody.appendChild(el('div', 'hint', 'Spend is read from the transcripts Claude Code already writes, and it is served rather than embedded. You are reading the file on disk, so this tab stays empty. Setup starts a dashboard with every session — open the URL it printed, or run "board.mjs --dir .tyran --detach" to start one and print it.'));
 
   // Mirrors compositionLabel in cost.mjs. Restated rather than imported
   // because this file is a browser bundle with no module graph — the two are
@@ -1073,8 +1073,9 @@ if (data.schema !== 1) {
     if (payload && payload.transcripts_found === false) {
       hints.push(
         'No transcripts found for this repo. If the conductor ran from another working directory, ' +
-        'point the board at that session: board.mjs --serve --transcripts <dir> or set ' +
-        'spend.transcript_dirs in .tyran/config.yaml.'
+        'set spend.transcript_dirs in .tyran/config.yaml \\u2014 that survives a restart and is read ' +
+        'on the next request. The --transcripts <dir> flag does the same, but only as a server STARTS: ' +
+        'against a board that is already up it has no effect, so stop that one first.'
       );
     }
     return hints;
@@ -1242,8 +1243,9 @@ if (data.schema !== 1) {
     if ((cov.agent_transcripts || 0) === 0 && agents.length > 0) {
       into.appendChild(el('div', 'hint',
         'No agent transcripts found where this repo\\u2019s transcripts are expected. If the conductor ' +
-        'ran from another working directory, point the board at that session: board.mjs --serve ' +
-        '--transcripts <dir> or set spend.transcript_dirs in .tyran/config.yaml.'));
+        'ran from another working directory, set spend.transcript_dirs in .tyran/config.yaml. The ' +
+        '--transcripts <dir> flag does the same, but only as a server STARTS: against a board that is ' +
+        'already up it has no effect, so stop that one first.'));
     }
     // cost.transcripts_found is true whenever this function runs at all, so
     // spendResolutionHints only ever contributes the missing-dirs line here
@@ -1351,7 +1353,7 @@ if (data.schema !== 1) {
   var st = panels.settings;
   var stBody = el('div');
   st.appendChild(stBody);
-  stBody.appendChild(el('div', 'setnote', 'Settings are read from .tyran/config.yaml and .tyran/policies/autonomy.yaml, and they are served rather than embedded — open this board with "board.mjs --serve" to see them.'));
+  stBody.appendChild(el('div', 'setnote', 'Settings are read from .tyran/config.yaml and .tyran/policies/autonomy.yaml, and they are served rather than embedded. You are reading the file on disk. Setup starts a dashboard with every session — open the URL it printed, or run "board.mjs --dir .tyran --detach" to start one and print it.'));
 
   // Auto-refresh, and the reason it is a timer rather than a meta tag.
   //

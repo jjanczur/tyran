@@ -319,14 +319,18 @@ test('spend reaches three places from the one fetch, and explains itself when th
   assert.match(html, /ovSpend\.appendChild/, 'the overview must carry a spend headline once the fetch lands');
   assert.match(html, /if \(cost\) \{/, 'a selected card must be able to show its own spend');
   assert.match(html, /row\('spend', fmtTokens\(hit\.tokens\) \+ ' tokens [^']*' \+ fmtUsd\(hit\.usd\)\);/);
-  assert.match(html, /Over file:\/\/ there is no server, so this tab stays empty\./);
+  assert.match(html, /You are reading the file on disk, so this tab stays empty\./);
+  // And it points at the form that returns the shell. `--serve` holds the
+  // terminal, which is what a person at a prompt may want and what an operator
+  // following a hint off a web page does not.
+  assert.match(html, /--detach" to start one and print it\./);
 });
 
 test('the missing-transcript-dir hint renders even when nothing was found at all', () => {
   // MUTANT: revert the fetch handler's `if (!payload.transcripts_found)` back
   // to a bare `return;`. The pure function's own tests (board-client-literal
   // .test.mjs) would stay green — they never touch this call site — while the
-  // Spend tab silently keeps its pre-fetch "open with --serve" hint on the
+  // Spend tab silently keeps its pre-fetch "you are reading the file" hint on the
   // exact payload review reproduced live: every `spend.transcript_dirs` entry
   // present but every one of them a typo. This test pins the WIRING, not just
   // the function it wires in.

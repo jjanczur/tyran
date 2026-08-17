@@ -69,10 +69,15 @@ that has adopted Tyran. Two consequences that look like tool failures:
   and names only the directory.
 - `Read` is not refused for those paths. Reach for it instead of `cat`.
 
-**This repository has no `.tyran/` directory**, so the path classes do not
-apply to Tyran's own source — the shell rule above still does, since it needs
-no policy. Do not conclude from an allowed `Edit hooks/…` here that the same
-edit is allowed in a user's repo.
+**This repository adopted Tyran on 2026-08-17 (0.1.41)**, so the path classes
+now DO apply to Tyran's own source, exactly as they do in a user's repo. The
+consequence to plan around: **`hooks/**` is KERNEL, so an agent session cannot
+edit the gates here.** A change to `hooks/scripts/*.mjs` is a human edit made
+outside a session — which is what the class has always meant everywhere else,
+and Tyran's own repo was the last place still exempt from its own rule.
+
+Before that, the directory was absent and the gate was silent here; treat any
+instruction that assumes an allowed `Edit hooks/…` as pre-0.1.41.
 
 ## The YAML subset is small, and it bites
 

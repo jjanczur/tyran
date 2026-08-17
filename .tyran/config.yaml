@@ -18,7 +18,7 @@
 
 profile: balanced
 autonomy:
-  value: P1
+  value: P3
   source: 'git log: 2/50 merges, no staging branch found — defaulting to the safest class'
   confidence: 0.5
   needs_confirmation: true

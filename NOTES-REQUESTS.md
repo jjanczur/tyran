@@ -495,13 +495,14 @@ Recorded because the list has only ever lived in a conversation.
    never ask for a secret's VALUE, because `journal.mjs ask` writes the
    question and `answer.mjs apply` folds the reply back as a `decision`, both
    into a committed file.
-5. **`--help` on the four subcommand-style commands.** `journal`, `schema`,
-   `knowledge` and `mistakes` print their usage but exit **2**, because they
-   reach it through the unknown-subcommand path rather than answering the
-   question. The nine flag-taking commands were fixed in 0.1.36 via
-   `scripts/cli-args.mjs`; these four need a verb-level guard instead of a
-   flag-level one, and `mistakes --help` currently reports `unknown subcommand
-   "--help"` before the usage. **S.**
+5. **`--help` on `journal`.** Three of the four subcommand-style commands
+   (`schema`, `knowledge`, `mistakes`) were fixed in 0.1.37. `journal` is
+   left because its usage text is BUILT inside the `UsageError` handler —
+   a multi-line expression ending in `.join('\n')` that also lists every
+   event and its required `--data` keys. Hoisting it to a constant is the
+   fix and it needs care: an attempt to do it mechanically produced a
+   syntax error, which is why this is a separate item rather than a
+   footnote. **S.**
 6. **The third policy-gate false positive** — a word ending `.key`/`.pem`
    refused as a file. Deliberately unfixed: the safe direction is refusing,
    and the obvious fix kills the whole credential family.

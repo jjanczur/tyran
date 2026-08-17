@@ -393,10 +393,11 @@ test('CLI: invoked through a symlinked path, validation still runs (ADR-19 debt)
   const realScripts = join(base, 'real-scripts');
   mkdirSync(realScripts);
   writeFileSync(join(realScripts, 'schema.mjs'), readFileSync(SCRIPT));
-  // Both siblings travel with it: yaml-lite, and the shared invisibility rule
-  // that schema and yaml-lite now both import (ADR-21). A copy missing one
-  // fails at module resolution and would report this guard as broken.
-  for (const name of ['yaml-lite.mjs', 'invisible.mjs']) {
+  // Every sibling travels with it: yaml-lite, the shared invisibility rule
+  // that schema and yaml-lite both import, and the shared command-line rule
+  // that answers `--help` (all ADR-21). A copy missing one fails at module
+  // resolution and would report this guard as broken.
+  for (const name of ['yaml-lite.mjs', 'invisible.mjs', 'cli-args.mjs']) {
     writeFileSync(
       join(realScripts, name),
       readFileSync(fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url))),

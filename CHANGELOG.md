@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.37 — 2026-08-17
+
+### `--help` reaches the subcommand-style commands too
+
+0.1.36 gave the nine flag-taking commands a `--help` that answers on stdout
+with exit 0. The four that dispatch on a VERB rather than a flag still reached
+their usage text through the unknown-subcommand path, so `--help` was reported
+as a mistake instead of answered — `mistakes --help` opened with *"unknown
+subcommand"* before printing anything useful.
+
+`schema`, `knowledge` and `mistakes` now answer it properly. **`journal` does
+not yet**, and the reason is worth recording: its usage text is built inside
+the error handler as a multi-line expression that also documents every event
+and its required `--data` keys. Extracting it mechanically produced a syntax
+error, so it is `NOTES-REQUESTS.md` §12.5 rather than a rushed edit here.
+
+One thing this did NOT change, having measured it first. `doctor --state`
+exiting 1 and `answer render` exiting 1 on a healthy fresh repo look like
+success reported as failure, and they are neither. `answer.mjs`'s header
+documents *"Exit: 0 ok · 1 nothing is waiting on you"*, and doctor's codes are
+pinned by a test named for them. Both are deliberate `grep`-style "no results"
+codes, and no caller in the repo reads them as failure.
+
 ## 0.1.36 — 2026-08-17
 
 Four fixes, three of them found by installing Tyran into a clean repo and

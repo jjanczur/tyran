@@ -55,6 +55,7 @@ import { fileURLToPath } from 'node:url';
 import { escapeInvisible } from './invisible.mjs';
 import { writeAtomic } from './project.mjs';
 import { append as appendEvent, nextId } from './journal.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 /** The ledger's home. Repo ROOT, not `.tyran/`: a human, a reviewer on
  * GitHub and a session that has never heard of Tyran all have to find it. */
@@ -961,6 +962,10 @@ function journalDecision(flags, { signature, count, line, claudePath }) {
 
 function main() {
   const [command, ...rest] = process.argv.slice(2);
+  if (wantsHelp(process.argv.slice(2))) {
+    console.log(USAGE);
+    return 0;
+  }
   let code;
   try {
     const flags = parseArgs(rest);

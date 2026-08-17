@@ -18,6 +18,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, YamlLiteError } from './yaml-lite.mjs';
 import { escapeInvisible } from './invisible.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 export const PROFILES = Object.freeze(['eco', 'balanced', 'full']);
 export const AUTONOMY_CLASSES = Object.freeze(['P1', 'P2', 'P3']);
@@ -711,10 +712,16 @@ export function validateFile(kind, file) {
 
 // ---------------------------------------------------------------- CLI
 
+export const SCHEMA_USAGE = 'usage: schema.mjs validate <config|knowledge|policy> <file...>';
+
 function main() {
   const [cmd, kind, ...files] = process.argv.slice(2);
+  if (wantsHelp(process.argv.slice(2))) {
+    console.log(SCHEMA_USAGE);
+    return;
+  }
   if (cmd !== 'validate' || !kind || files.length === 0) {
-    console.error('usage: schema.mjs validate <config|knowledge|policy> <file...>');
+    console.error(SCHEMA_USAGE);
     process.exit(2);
   }
   let failed = false;

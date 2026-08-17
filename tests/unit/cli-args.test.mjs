@@ -106,7 +106,14 @@ test('--help is answered by every command that takes flags rather than subcomman
   // as help by NONE of them: five refused it as an unknown flag and four ran
   // their normal work with it silently ignored, which is the worse half —
   // `stop-check --help` performed a check and reported a verdict.
-  for (const command of ['doctor', 'board', 'cost', 'answer', 'migrate', 'tiers', 'scan-repo', 'stop-check', 'desc-budget']) {
+  for (const command of [
+    'doctor', 'board', 'cost', 'answer', 'migrate', 'tiers', 'scan-repo', 'stop-check', 'desc-budget',
+    // Subcommand-style. These reached their usage text through the
+    // unknown-VERB path and exited 2, so `--help` was reported as a
+    // mistake rather than answered. `journal` is not here yet: its usage
+    // string is still built inside the error handler (NOTES-REQUESTS).
+    'schema', 'knowledge', 'mistakes',
+  ]) {
     const r = run([command, '--help']);
     assert.equal(r.code, 0, `${command} --help exited ${r.code}`);
     assert.match(r.stdout, /usage:/, `${command} --help printed no usage`);

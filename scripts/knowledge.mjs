@@ -37,6 +37,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateFile, globMatches, normalizePath, KNOWLEDGE_KINDS } from './schema.mjs';
 import { escapeInvisible, jsonEscapeInvisible } from './invisible.mjs';
+import { wantsHelp } from './cli-args.mjs';
 
 export const DEFAULT_DIR = join('.tyran', 'knowledge');
 export const DEFAULT_BUDGET = 4000;
@@ -247,6 +248,10 @@ function main() {
   const usage =
     'usage: knowledge.mjs brief [<path>...] [--dir <knowledge-dir>] [--kinds k,k] [--limit N] [--budget CHARS] [--json]\n' +
     '       knowledge.mjs audit [--dir <knowledge-dir>] [--budget CHARS] [--json]';
+  if (wantsHelp(process.argv.slice(2))) {
+    console.log(usage);
+    return;
+  }
   if (command !== 'brief' && command !== 'audit') {
     console.error(usage);
     process.exit(2);

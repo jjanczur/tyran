@@ -53,8 +53,8 @@ function hasBareColon(value) {
 
 const agentFiles = existsSync(AGENTS_DIR) ? readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md')) : [];
 
-test('the roster is not empty — the README claims four agents ship', () => {
-  assert.deepEqual(agentFiles.sort(), ['implementer.md', 'retro.md', 'reviewer.md', 'scout.md']);
+test('the roster is not empty — the README claims five agents ship', () => {
+  assert.deepEqual(agentFiles.sort(), ['implementer.md', 'retro.md', 'reviewer.md', 'scout.md', 'verifier.md']);
 });
 
 test('every agent has frontmatter that parses, with a name and a description', () => {
@@ -128,6 +128,29 @@ test('the scout is granted no editing tools either', () => {
   for (const tool of EDIT_TOOLS) {
     assert.ok(!granted.includes(tool), `scout must not be granted ${tool}`);
   }
+});
+
+test('the verifier is granted no editing tools, and its prompt says the absence is the design', () => {
+  // MUTANT: hand the verifier Edit "so it can fix the obvious one-liner".
+  // The moment a verifier can fix what it finds, it stops being a
+  // measurement: its report becomes "green after I helped", which is the
+  // exact claim the evidence contract exists to refuse. The reviewer's Edit
+  // grant is fenced by the forfeit rule; the verifier has no verdict to
+  // forfeit, so the only safe grant is none.
+  const text = readFileSync(join(AGENTS_DIR, 'verifier.md'), 'utf8');
+  const fm = frontmatter(text);
+  assert.ok(fm.tools, 'verifier must declare an explicit tool list');
+  const granted = fm.tools.split(',').map((t) => t.trim());
+  for (const tool of EDIT_TOOLS) {
+    assert.ok(!granted.includes(tool), `verifier must not be granted ${tool}`);
+  }
+  assert.match(
+    // Whitespace-flexible, like the forfeit-rule check above: the sentence
+    // wraps at 79 columns and a literal-space regex breaks on the next reflow.
+    text.replace(/\s+/g, ' '),
+    /the absence is the design/,
+    'the prompt must own the missing tools, or a future edit "fixes" it',
+  );
 });
 
 test('both read-only agents can still reach the operator MCP servers', () => {

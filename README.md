@@ -36,8 +36,8 @@ questions, each with his recommendation — turns the plan into tickets on a
 board, and hands each piece to a **dedicated subagent with fresh context and a
 model tier matched to how hard that piece actually is.** A good manager doesn't
 put a principal engineer on a grep: a scout reads the repo on the cheap tier,
-implementers take one story each on their own branch, the reviewer has no
-editing tools at all, and security review always gets the strongest tier — a
+implementers take one story each on their own branch, the reviewer can never
+bless a patch it wrote, and security review always gets the strongest tier — a
 floor no cost profile or flag can lower.
 
 That is a cost lever and a quality lever at the same time. The conductor holds
@@ -288,7 +288,7 @@ says why, and covers the lanes, the drill-down and answering a question.
 
 ## What ships
 
-Fourteen skills and four agents. Six of the skills are the conductor's own
+Fourteen skills and five agents. Six of the skills are the conductor's own
 machinery, though commands rather than internals — `/tyran:doctor` runs on any
 repo, initiative or not — and the other eight are standalone protocols.
 
@@ -311,14 +311,15 @@ repo, initiative or not — and the other eight are standalone protocols.
 
 Agents: `tyran:scout` (recon, read-only), `tyran:implementer` (one story, own
 branch), `tyran:reviewer` (may fix what it finds, but editing forfeits
-`APPROVE` — it can never bless its own patch), `tyran:retro`. A skill is admitted only when something already asks
+`APPROVE` — it can never bless its own patch), `tyran:verifier` (runs the
+suite on the cheapest tier, reports raw counts, never fixes), `tyran:retro`. A skill is admitted only when something already asks
 for the protocol by name, and every description is loaded into every session
 whether the skill fires or not — so the combined length is capped and CI
 enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1586 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1590 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

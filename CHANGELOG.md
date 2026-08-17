@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.1.39 — 2026-08-17
+
+### A fifth agent, and the conductor plans from the board it shows you
+
+The operator challenged all three of 0.1.38's "deliberately NOT added" calls.
+Two survived the challenge with their reasons intact; one did not, and the
+verifier is the result.
+
+**`tyran:verifier`** — mechanical validation on the cheapest tier. It runs
+exactly the commands it is handed, reports exit codes and counts verbatim,
+compares them against the last green baseline, and never edits, fixes or
+theorizes. A red suite is its product, not its failure. The routing table
+already priced this mode (`bookkeeping` at cheap in every profile); nothing
+ran on it. Now the conductor's merge-time validation is delegated like
+everything else — a full suite bills the same tokens whoever runs it, and
+running it in the conductor's context spends the plan's own memory on
+watching a progress bar. The evidence gate binds it hardest of all
+(`enforce`): a verifier report without raw output is a verifier that
+verified nothing. A guard test pins the empty tool grant, and the prompt
+owns the absence in a sentence a future "helpful" edit would have to delete.
+
+**The conductor now plans FROM the kanban, moves tickets on it, and knows
+the operator is watching the same one.** It wrote the board and never read
+it: the `ready` lane IS the schedulable set (a ticket lands there only when
+every dependency is merged), `blocked` and `changes-requested` are the
+re-route queue, and distributing work from memory is how two agents get one
+story. Moving a ticket is appending an event — the lifecycle moves the
+working lanes on its own, `ticket.status` (with a reason) parks, blocks or
+hands to the operator, a newer override replaces an older one, and the next
+lifecycle event clears it. And there is only ONE board: the dashboard the
+session autostarts runs the same fold over the same journals, so a moved
+ticket is on the operator's screen within one refresh — narrating board
+state in chat that the journal does not hold reads as either a stale
+conductor or a broken board.
+
+**Cards say who is on them RIGHT NOW.** The card face showed the historical
+name list — "who ever touched this" — while the operator's question on a
+large ticket is "who is doing what". Live agents join onto cards by
+initiative AND ticket (two initiatives' T-3s never claim each other's
+workers), state-coloured, with BLOCKED said out loud; the historical list
+survives only when nobody is on it now, and the run-by-run record stays in
+the detail panel's execution table.
+
+The other two challenges, answered rather than deflected: no new skill —
+the CI cap can indeed be raised, but the barrier was never the cap, it is
+that no repeated need has graduated yet (the verifier is an agent precisely
+because its protocol is its prompt); and no peer-to-peer evidence channel —
+teams mode already gives peer NOTIFICATION, and evidence stays in the
+journal because a teammate message dies with the session while the journal
+survives compaction.
+
+Surfaces corrected on the way: README's pitch and both agents-page tables
+still carried the pre-forfeit reviewer ("no editing tools"), wrapped across
+a line break where the earlier grep missed it.
+
 ## 0.1.38 — 2026-08-17
 
 ### The conductor is a project manager, and the prompts now argue it

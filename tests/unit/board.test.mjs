@@ -808,6 +808,21 @@ test('the page shows signal and evidence as two different facts', () => {
   assert.match(html, /a\.evidence_kind/, 'and what it showed is named');
 });
 
+test('a card says who is on it RIGHT NOW, joined by initiative and ticket', () => {
+  // MUTANT 1: drop the live join and keep only the historical `agents:` list.
+  // On a large ticket that list answers "who ever touched this" — the
+  // operator asked the kanban "who is doing what", and the strip knew while
+  // the card did not.
+  // MUTANT 2: join on ticket alone. Two initiatives both have a T-3; the
+  // card in one then claims the worker of the other, which is worse than no
+  // name because it reads as a measurement.
+  const html = demoHtml();
+  assert.match(html, /ag\.ticket === c\.id && \(ag\.init \|\| ''\) === \(c\.init \|\| ''\)/, 'the join must match initiative AND ticket');
+  assert.match(html, /'now: ' \+ ag\.agent/, 'the live agent is named on the card face');
+  assert.match(html, /— BLOCKED'/, 'a blocked worker is said out loud on the card');
+  assert.match(html, /!live\.length && c\.agents && c\.agents\.length/, 'the historical list survives only when nobody is on it now');
+});
+
 test('the chip measures the age it can actually prove, and labels it that way', () => {
   // MUTANT: point the age line back at `a.last_signal`.
   //

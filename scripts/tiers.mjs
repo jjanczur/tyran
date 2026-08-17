@@ -114,6 +114,13 @@ export const ROLE_TIERS = Object.freeze({
   // cost surfaces later as work done slightly wrong, everywhere, quietly.
   authoring: { eco: 'top', balanced: 'top', full: 'top' },
   bookkeeping: { eco: 'cheap', balanced: 'cheap', full: 'cheap' },
+  // Mechanical validation: run the named commands, report counts and exit
+  // codes, compare against a baseline. Cheap at EVERY profile because model
+  // strength does not change what `node --test` prints — the same claim the
+  // scout row makes about reading files. There is deliberately no floor and
+  // no escalation: a red suite is the verifier SUCCEEDING, so `--journal
+  // --ticket` attempt-counting must never be pointed at this role.
+  verifier: { eco: 'cheap', balanced: 'cheap', full: 'cheap' },
   // ADVISORY. The conductor is the operator's own session, and no plugin can
   // change a running session's model — so this row records the choice in the
   // one file where model names may live and the CLI says out loud, on stderr,

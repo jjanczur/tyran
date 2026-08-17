@@ -861,6 +861,7 @@ test('THIS repository scans clean end to end', () => {
     "agents/retro.md",
     "agents/reviewer.md",
     "agents/scout.md",
+    "agents/verifier.md",
     "assets/video/board.srt",
     "assets/video/explainer.srt",
     "assets/video/mistake.srt",

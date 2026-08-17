@@ -1,9 +1,9 @@
-# What Tyran ships: fourteen skills and four agents
+# What Tyran ships: fourteen skills and five agents
 
 `skills/` · `agents/`
 
 Tyran is usually described as a conductor, which undersells it. Installing the
-plugin also installs **fourteen skills** and **four agents** — and the skills are
+plugin also installs **fourteen skills** and **five agents** — and the skills are
 not the conductor's private plumbing. Most of them are things *you* type. There
 is no orchestration involved in `/tyran:doctor`; it is a diagnostic you run
 because you want to know whether your gates can fire.
@@ -48,7 +48,8 @@ flowchart TB
     A1["tyran:scout"]
     A2["tyran:implementer"]
     A3["tyran:reviewer"]
-    A4["tyran:retro"]
+    A4["tyran:verifier"]
+    A5["tyran:retro"]
   end
 
   subgraph GATES["Hooks that refuse"]
@@ -118,7 +119,7 @@ a gate plus a targeted regeneration. Kept as a bare principle, it survived and
 everything it was distilled from did not, which is why the measured costs are
 still attached to each rule here.
 
-## The four agents
+## The five agents
 
 Each is spawned as `tyran:<name>`. The conductor spawns them on L/XL work; you
 can also address one directly when you want exactly that mode of work. The
@@ -129,6 +130,7 @@ can also address one directly when you want exactly that mode of work. The
 | [`scout`](../agents/scout.md) | Fast, cheap reconnaissance over a repo, its data or external sources. Changes nothing. | That a finding is a claim **plus its proof** — every line comes back as `finding -> path:line` or a URL. "I did not find it" is a valid answer; a guess is not. | Conductor, and you |
 | [`implementer`](../agents/implementer.md) | Take one self-contained story from plan to commit or PR on its own branch, with tests and a self-review. | A story that is genuinely self-contained, a directory it owns (a worktree when the team runs in parallel), and that the handoff's premises may be **wrong** — it verifies them in the code and reports corrections. | Conductor |
 | [`reviewer`](../agents/reviewer.md) | Independent quality control on **another** agent's diff: its own verification run, not the author's report. Returns APPROVE, REVISED or CHANGES-REQUESTED with executable counterexamples. | That it never reviews its own code — and that fixing forfeits approving. It holds `Edit`, because re-deriving a one-line fix from a paragraph is slow, but **a diff it touched can only come back REVISED**, which still owes a second read. No `Write` or `NotebookEdit`: authoring files is designing, not reviewing. | Conductor |
+| [`verifier`](../agents/verifier.md) | Mechanical validation on the cheapest tier: runs exactly the commands it is handed, reports exit codes and counts verbatim, compares against the last green baseline. | That it never edits, fixes or theorizes — a red suite is its product, not its failure. Model strength does not change what `node --test` prints, which is why it is cheap at every profile and has no escalation. | Conductor |
 | [`retro`](../agents/retro.md) | After an initiative closes, improve **Tyran itself** — the conductor skill, the roster, new skills, scripts, docs. Never product code. | A closed initiative with a ledger and reports, and an anti-bloat filter whose **default answer is to change nothing**. A retro that changes nothing is a correct outcome. | Conductor |
 
 ## Where the source is

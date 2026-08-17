@@ -850,7 +850,21 @@ if (data.schema !== 1) {
       // The badge is the whole point of the baseline: it puts what moved in
       // front of you instead of asking you to compare ten lanes by eye.
       if (moved[(c.init || '') + '/' + c.id]) button.appendChild(el('span', 'movedtag', 'moved'));
-      if (c.agents && c.agents.length) button.appendChild(el('span', 'note', 'agents: ' + c.agents.join(', ')));
+      // WHO is on it RIGHT NOW — the join the operator reads a kanban for.
+      // On a large ticket the historical name list answers "who ever touched
+      // this", not "who is doing what": live agents come from the same strip
+      // the Overview renders, matched by initiative AND ticket so two
+      // initiatives' T-3s never claim each other's workers. The historical
+      // list stays only when nobody is on it now; the full run-by-run record
+      // is the detail panel's execution table.
+      var live = (data.agents || []).filter(function (ag) { return ag.ticket === c.id && (ag.init || '') === (c.init || ''); });
+      live.forEach(function (ag) {
+        var liveCls = ag.state === 'blocked' ? 'note age-dead' : ag.stale ? 'note age-warm' : 'note';
+        button.appendChild(el('span', liveCls,
+          'now: ' + ag.agent + ' (' + (ag.role || 'no role') + ')' +
+          (ag.state === 'blocked' ? ' — BLOCKED' : ag.stale ? ' — stale' : '')));
+      });
+      if (!live.length && c.agents && c.agents.length) button.appendChild(el('span', 'note', 'agents: ' + c.agents.join(', ')));
       if (c.annotation) button.appendChild(el('span', 'note', c.annotation));
       // How long this card has stood still, on the lanes where standing still
       // IS the defect. The board would tell you an agent had been quiet for

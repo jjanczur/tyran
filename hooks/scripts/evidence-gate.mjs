@@ -216,6 +216,10 @@ export const ROLE_BY_NAME = Object.freeze(
     reviewer: 'enforce',
     scout: 'exempt',
     retro: 'exempt',
+    // The verifier's entire product IS raw command output, so the evidence
+    // contract binds it hardest of all: a verifier report without output is
+    // a verifier that verified nothing.
+    verifier: 'enforce',
   }),
 );
 

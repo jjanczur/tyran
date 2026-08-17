@@ -11,7 +11,8 @@ them, see [what Tyran ships](./skills.md).
 |---|---|---|---|
 | scout | `tyran:scout` | read-only plus `Bash` | reconnaissance: what the repo does, what the data actually contains, what the docs claim |
 | implementer | `tyran:implementer` | all | one story, from plan to commit or PR on its own branch |
-| reviewer | `tyran:reviewer` | everything **except editing tools** | independent quality control on somebody else's diff |
+| reviewer | `tyran:reviewer` | `Edit` behind a forfeit — a diff it touched can only come back `REVISED` — never `Write` | independent quality control on somebody else's diff |
+| verifier | `tyran:verifier` | read-only plus `Bash` | mechanical validation: runs the named commands, reports counts and exit codes, never fixes |
 | retro | `tyran:retro` | all | after an initiative closes, improves Tyran itself and nothing else |
 
 Two of these grants are deliberate rather than incidental:

@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.30 — 2026-08-17
+
+The first release built on an outside contribution. It fixes a spend ledger
+that was confidently reporting the wrong session, and it is also the release
+where the "change both surfaces" rule caught itself being broken.
 
 ### Spend, when the conductor ran from somewhere else
 
@@ -25,6 +29,27 @@ rather than dropped. The Spend tab now shows a hint — pointing at both
 overrides — whenever it finds zero agent transcripts while the board itself
 lists running agents, which is the shape this failure actually has: a tab that
 renders, with honest numbers about the wrong session.
+
+Contributed by [@FreddyFormosa](https://github.com/FreddyFormosa) in
+[#66](https://github.com/jjanczur/tyran/pull/66), found on a 14-ticket
+production run — the failure above is his measurement, not a constructed one.
+
+### The half of "change both, always" that got left out
+
+That contribution updated `docs/board.md`, `docs/configuration.md` and
+`docs/cost.md` and left `board.mdx`, `configuration.mdx` and `cost.mdx`
+untouched, which is precisely the divergence `CLAUDE.md` names — "docs/*.md
+and site/src/content/docs/*.mdx publish the same claims. Change both, always."
+All three pages are now mirrored, cross-links rewritten relative
+(`../cost/#when-resolution-fails`) so the Pages build keeps its `/tyran` base
+prefix.
+
+Worth naming because of *how* it was caught: not by review, but by CI going
+red on a different claim entirely. The README said 1405 unit tests and the
+suite had 1417, and that check lives in the workflow rather than in the suite
+— no test inside the suite can run the suite — so `node --test` reported green
+locally right up to the point the pull request was opened. The number is now
+1417, measured rather than typed. The .mdx gap was found while fixing it.
 
 ## 0.1.29 — 2026-08-16
 

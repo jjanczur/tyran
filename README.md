@@ -297,7 +297,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1417 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1432 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

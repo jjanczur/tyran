@@ -98,6 +98,12 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .agent .age-fresh{color:var(--sage)}
 .agent .age-warm{color:var(--brass-bright)}
 .agent .age-cold{color:var(--clay)}
+/* Stale is a SERVER verdict in journal time, so it marks the whole chip rather
+   than joining the wall-clock age colours below — two different questions must
+   not share one vocabulary. Muted border, not red: an abandoned agent is a
+   bookkeeping fact, while the red below is "this died mid-flight". */
+.agent.stale{border-left-color:var(--brass);opacity:.82}
+.agent .stale-mark{color:var(--brass-bright);font-weight:600}
 /* A dead agent gets the only bold red on the page: three hours of silence is
    a different event from thirty minutes, and it used to share a colour. */
 .agent .age-dead{color:var(--clay-bright);font-weight:700}
@@ -423,9 +429,20 @@ if (data.schema !== 1) {
     var strip = el('div', 'agents');
     if (agents.length === 0) strip.appendChild(el('div', 'empty', 'none running'));
     agents.forEach(function (a) {
-      var chip = el('div', 'agent');
+      var chip = el('div', 'agent' + (a.stale ? ' stale' : ''));
       chip.appendChild(el('div', 'name', a.agent + (a.role ? ' · ' + a.role : '')));
       chip.appendChild(el('div', null, (a.init ? a.init + ' · ' : '') + (a.ticket || 'no ticket') + ' · ' + a.state));
+      // NOT the same statement as the age lines below, and the wording keeps
+      // them apart on purpose. Those are wall-clock: "how long since it spoke,
+      // right now, where you are sitting". This one is journal time and comes
+      // from the server, where doctor's own threshold computed it — "the
+      // initiative moved on without it", which is still true tomorrow and is
+      // the same for every reader of this journal. An agent can be quiet for
+      // hours without being stale, and stale while chattering every minute.
+      if (a.stale) {
+        chip.appendChild(el('div', 'stale-mark',
+          'STALE — open ' + (a.open_hours === null ? '?' : a.open_hours) + ' h of journal time'));
+      }
       if (a.detail) chip.appendChild(el('div', 'note', a.detail));
       // What the agent said it would do next. It has been in board.json since
       // the fold learned to read progress events, and the strip has never
@@ -473,7 +490,16 @@ if (data.schema !== 1) {
   var ovTiles = el('div', 'tiles');
   ovTiles.appendChild(tile('waiting on you', String(asks.length),
     asks.length === 0 ? 'nothing blocked on a decision' : 'answer them on the next tab', asks.length > 0 ? 'lead' : null));
-  ovTiles.appendChild(tile('agents running', String(agents.length), 'across ' + (totals.initiatives || 0) + ' initiative(s)'));
+  // The headline number is the LIVE one. "Agents running" counted every open
+  // spawn, so an initiative abandoned a week ago reported a busy fleet; the
+  // stale ones are still counted, still listed in the strip, and now said out
+  // loud rather than folded into a figure that reads as live work.
+  var staleCount = totals.agents_stale || 0;
+  ovTiles.appendChild(tile('agents running', String(agents.length - staleCount),
+    staleCount > 0
+      ? staleCount + ' more stale · across ' + (totals.initiatives || 0) + ' initiative(s)'
+      : 'across ' + (totals.initiatives || 0) + ' initiative(s)',
+    staleCount > 0 ? 'lead' : null));
   // An initiative with no tickets used to read "0% · 0 of 0 merged", which is
   // exactly what a fully stalled one reads. Nothing-started and
   // nothing-finished are different situations and deserve different words.
@@ -605,6 +631,10 @@ if (data.schema !== 1) {
     // is already done — precisely when the running-agents list is empty.
     row('worked by', card.worked_by && card.worked_by.length ? card.worked_by.join(', ') : null);
     row('note', card.annotation);
+    // What the agent SAID when it handed this back. The verdict alone told you
+    // a ticket had come back and never why, which is the one thing the card is
+    // opened for.
+    row('reported', card.report_text);
     row('last event', card.since ? ago(card.since) + ' (' + card.since + ')' : null);
     if (cost) {
       var hit = (cost.by_ticket || []).filter(function (r) { return r.ticket === card.id; })[0];

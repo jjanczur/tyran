@@ -1299,3 +1299,179 @@ test('writeAllAtomic leaves no orphaned .tmp when a RENAME fails', () => {
   const leftovers = readdirSync(out).filter((f) => f.endsWith('.tmp'));
   assert.deepEqual(leftovers, [], `orphaned temp files: ${leftovers}`);
 });
+
+// --- staleness, closure, refusals and report prose ----------------------
+
+/** A spawn/checkpoint pair at chosen times, for the staleness rules below. */
+const spawnAt = (ts, agent = 'impl-1', over = {}) =>
+  ev({ ev: 'spawn', ts, data: { agent, role: 'implementer', ticket: 'T-1', ...over } });
+
+test('an agent the initiative moved on without is stale, not running', () => {
+  // MUTANT: drop the `stale` term from the state expression in boardOf. The
+  // strip goes back to reporting `running` for an agent that never reported,
+  // which is what let a week-old ghost be counted as live work — while doctor,
+  // reading the same journal, had been calling it abandoned the whole time.
+  const { events } = { events: [
+    T('T-1'),
+    spawnAt('2026-07-26T09:00:00.000Z'),
+    // The journal moves on five hours without that agent: past the 4 h default.
+    ev({ ev: 'checkpoint', ts: '2026-07-26T14:00:00.000Z' }),
+  ] };
+  const board = boardOf(fold({ events }));
+  assert.equal(board.agents.length, 1, 'still listed — stale is not hidden');
+  assert.equal(board.agents[0].state, 'stale');
+  assert.equal(board.agents[0].stale, true);
+  assert.equal(board.agents[0].open_hours, 5);
+});
+
+test('staleness is JOURNAL time, so the same journal reads the same forever', () => {
+  // MUTANT: measure against Date.now() instead of state.lastTs. The fixture
+  // below is years old in wall-clock terms and would be stale under any
+  // real-time rule — but its own journal moved only one hour, so it is not.
+  // This is also what keeps board.json byte-exact under `--check`.
+  const board = boardOf(fold({ events: [
+    T('T-1'),
+    spawnAt('2026-07-26T09:00:00.000Z'),
+    ev({ ev: 'checkpoint', ts: '2026-07-26T10:00:00.000Z' }),
+  ] }));
+  assert.equal(board.agents[0].stale, false, 'one hour of journal movement is not stale');
+  assert.equal(board.agents[0].state, 'running');
+});
+
+test('a blocked agent keeps saying blocked even once it is stale', () => {
+  // MUTANT: reorder the state expression so `stale` wins. `blocked` is the
+  // agent's own account of why it stopped and it is what the needs-a-human
+  // tile counts, so a staleness verdict must not swallow it.
+  const board = boardOf(fold({ events: [
+    T('T-1'),
+    spawnAt('2026-07-26T09:00:00.000Z'),
+    ev({ ev: 'progress', ts: '2026-07-26T09:05:00.000Z', data: { agent: 'impl-1', state: 'blocked', detail: 'needs the lease' } }),
+    ev({ ev: 'checkpoint', ts: '2026-07-26T18:00:00.000Z' }),
+  ] }));
+  assert.equal(board.agents[0].state, 'blocked', 'the agent said why it stopped');
+  assert.equal(board.agents[0].stale, true, 'and it is ALSO stale — both are true, both are carried');
+});
+
+test('the board and doctor answer staleness with the same predicate', () => {
+  // ADR-21, enforced rather than asserted in prose: the two consumers must not
+  // drift. Reading the threshold through boardOf's own option proves the board
+  // is calling the shared rule and not a copy that happens to agree today.
+  const events = [T('T-1'), spawnAt('2026-07-26T09:00:00.000Z'), ev({ ev: 'checkpoint', ts: '2026-07-26T12:00:00.000Z' })];
+  assert.equal(boardOf(fold({ events })).agents[0].stale, false, '3 h is under the 4 h default');
+  assert.equal(boardOf(fold({ events }), { staleHours: 2 }).agents[0].stale, true, 'and over a 2 h threshold');
+});
+
+test('a closing checkpoint closes the spawns it leaves open', () => {
+  // MUTANT: delete the isClosingPhase branch in the checkpoint fold. An
+  // initiative could then be explicitly wound up with three agents that never
+  // reported still `running` in every artefact, forever — nothing else in
+  // EVENT_TYPES closes an initiative, so nothing would ever correct it.
+  const state = fold({ events: [
+    T('T-1'),
+    spawnAt('2026-07-26T09:00:00.000Z', 'impl-1'),
+    spawnAt('2026-07-26T09:01:00.000Z', 'impl-2'),
+    ev({ ev: 'report', ts: '2026-07-26T09:30:00.000Z', data: { agent: 'impl-2', verdict: 'done', ticket: 'T-1' } }),
+    ev({ ev: 'checkpoint', ts: '2026-07-26T09:40:00.000Z', data: { phase: 'closed', next_steps: [] } }),
+  ] });
+  assert.equal(boardOf(state).agents.length, 0, 'nothing is still running after the close');
+  const closed = state.agents.find((a) => a.agent === 'impl-1');
+  assert.match(closed.status, /closed with the initiative/);
+  assert.equal(closed.verdict, null, 'a close is not a report — no verdict it never earned');
+  assert.equal(state.agents.find((a) => a.agent === 'impl-2').status, 'reported', 'its own report stands');
+  // Counted and named, never tidied away (ADR-19 correction 1).
+  assert.equal(state.closedBySpawn.length, 1);
+  assert.match(warnings(state).join('\n'), /impl-1.*still open when the initiative closed/);
+});
+
+test('a spawn AFTER the close keeps its own lifecycle', () => {
+  // MUTANT: close open spawns from the whole journal rather than the ones
+  // folded so far. The pass runs in event order for a reason — an agent
+  // spawned after the checkpoint is a new incarnation, not a ghost.
+  const state = fold({ events: [
+    T('T-1'),
+    ev({ ev: 'checkpoint', ts: '2026-07-26T09:00:00.000Z', data: { phase: 'closed', next_steps: [] } }),
+    spawnAt('2026-07-26T09:10:00.000Z', 'impl-late'),
+  ] });
+  assert.equal(state.agents.find((a) => a.agent === 'impl-late').status, 'running');
+  assert.equal(state.closedBySpawn.length, 0);
+});
+
+test('only the reserved phase closes anything', () => {
+  // `phase` is free text and carries epic labels (`E2`), `resumed` and
+  // `usage-limit-pause`. Exactly one value may mean "this is over".
+  for (const phase of ['E2', 'resumed', 'usage-limit-pause', 'closing', '']) {
+    const state = fold({ events: [
+      T('T-1'),
+      spawnAt('2026-07-26T09:00:00.000Z'),
+      ev({ ev: 'checkpoint', ts: '2026-07-26T09:40:00.000Z', data: { phase, next_steps: [] } }),
+    ] });
+    assert.equal(state.agents[0].status, 'running', `phase ${JSON.stringify(phase)} must not close a spawn`);
+  }
+  // Written by hand, so compared trimmed and case-insensitively.
+  for (const phase of ['closed', 'CLOSED', '  Closed  ']) {
+    const state = fold({ events: [
+      T('T-1'),
+      spawnAt('2026-07-26T09:00:00.000Z'),
+      ev({ ev: 'checkpoint', ts: '2026-07-26T09:40:00.000Z', data: { phase, next_steps: [] } }),
+    ] });
+    assert.match(state.agents[0].status, /closed with the initiative/, `phase ${JSON.stringify(phase)}`);
+  }
+});
+
+test('a gate that passes after denying does not erase the denial', () => {
+  // MUTANT: drop `lastRefusal` from the gate fold. Gate results are keyed by
+  // kind, so the re-run wins the slot — and "security denied this, then someone
+  // re-ran it green" then renders identically to "security has only ever
+  // passed". The second reading is the one an operator takes away.
+  const state = fold({ events: [
+    ev({ ev: 'gate', ts: '2026-07-26T09:00:00.000Z', data: { kind: 'security', result: 'deny', evidence: 'CVE-1' } }),
+    ev({ ev: 'gate', ts: '2026-07-26T09:30:00.000Z', data: { kind: 'security', result: 'pass' } }),
+  ] });
+  const gate = state.gates.get('security');
+  assert.equal(gate.result, 'pass', 'the latest result is still the latest result');
+  assert.equal(gate.count, 2, 'the counter is untouched — volume was never the thing that was lost');
+  assert.equal(gate.lastRefusal.result, 'deny');
+  assert.equal(gate.lastRefusal.ts, '2026-07-26T09:00:00.000Z');
+  assert.equal(gate.lastRefusal.evidence, 'CVE-1', 'the evidence for the refusal survives with it');
+  assert.match(renderProjections({ events: [
+    ev({ ev: 'gate', ts: '2026-07-26T09:00:00.000Z', data: { kind: 'security', result: 'deny' } }),
+    ev({ ev: 'gate', ts: '2026-07-26T09:30:00.000Z', data: { kind: 'security', result: 'pass' } }),
+  ] }).files[STATE_FILE], /Last refusal/, 'and it reaches the document');
+});
+
+test('a gate that has not answered yet has refused nothing', () => {
+  // MUTANT: define a refusal as "not a pass". `open` and `WAITING_ON_OPERATOR`
+  // are gates that have not run and gates awaiting a human — neither has
+  // objected to anything, and a mark that fires on every pending gate says
+  // nothing at all.
+  const state = fold({ events: [
+    ev({ ev: 'gate', ts: '2026-07-26T09:00:00.000Z', data: { kind: 'plan-approval', result: 'open' } }),
+    ev({ ev: 'gate', ts: '2026-07-26T09:01:00.000Z', data: { kind: 'Q-1', result: 'WAITING_ON_OPERATOR' } }),
+    ev({ ev: 'gate', ts: '2026-07-26T09:02:00.000Z', data: { kind: 'tests', result: 'pass' } }),
+  ] });
+  for (const kind of ['plan-approval', 'Q-1', 'tests']) {
+    assert.equal(state.gates.get(kind).lastRefusal, null, `${kind} has refused nothing`);
+  }
+});
+
+test('a report carries WHAT the agent said, not only its verdict', () => {
+  // MUTANT: drop `text` from the report fold. `decision` folds data.text and
+  // `gate` folds evidence_ref ?? evidence; a report was the one carrier of
+  // description that wrote to nowhere, so a `changes-needed` card arrived with
+  // the reason it came back silently discarded.
+  const card = (data) => {
+    const board = boardOf(fold({ events: [
+      T('T-1'),
+      ev({ ev: 'report', ts: '2026-07-26T09:30:00.000Z', data: { agent: 'impl-1', verdict: 'changes-needed', ticket: 'T-1', ...data } }),
+    ] }));
+    return [...board.lanes.values()].flat().find((c) => c.id === 'T-1');
+  };
+  assert.equal(card({ text: 'the migration is not reversible' }).report_text, 'the migration is not reversible');
+  // Agents improvise the key; one field reads all three rather than three rows
+  // saying the same thing in three places (ADR-21).
+  assert.equal(card({ note: 'from note' }).report_text, 'from note');
+  assert.equal(card({ evidence: ['tests green', 'lint clean'] }).report_text, 'tests green · lint clean');
+  assert.equal(card({ text: 'wins', note: 'loses' }).report_text, 'wins', 'text outranks note');
+  assert.equal(card({ text: '   ', note: 'used' }).report_text, 'used', 'blank is not text');
+  assert.equal(card({}).report_text, null, 'and a report with no prose says nothing rather than empty');
+});

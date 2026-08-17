@@ -331,6 +331,74 @@ export function pairSpawns(events) {
   return { open, orphanReports, badNames, pairs, unusable, ambiguous };
 }
 
+/**
+ * The one `checkpoint.phase` value that MEANS something to a reader.
+ *
+ * `phase` is otherwise free text — the field carries epic labels (`E2`),
+ * lifecycle notes (`resumed`, `usage-limit-pause`) and whatever else a
+ * conductor finds useful, and it stays that way. This single value is
+ * reserved: it says the initiative is over, which is the one thing a
+ * projection cannot infer from any other event. Nothing in `EVENT_TYPES`
+ * closes an initiative, so before this an initiative could be wound up with
+ * its spawns still open, and every consumer went on calling those agents
+ * live for as long as the journal survived.
+ *
+ * Compared case-insensitively and trimmed, because it is written by hand.
+ */
+export const CLOSED_PHASE = 'closed';
+
+/** Does this checkpoint's phase declare the initiative over? */
+export function isClosingPhase(phase) {
+  return typeof phase === 'string' && phase.trim().toLowerCase() === CLOSED_PHASE;
+}
+
+/**
+ * How long an open spawn may stand, in JOURNAL time, before it is stale.
+ *
+ * Lives here rather than in either consumer because both `doctor.mjs` and
+ * `project.mjs` have to answer the same question and neither may own it:
+ * doctor imports the projection, so the projection cannot import doctor back.
+ * It is the same reasoning `pairSpawns` above records — the projection used to
+ * compute "who is still working" with a rule of its own, and the operator got
+ * two contradictory pictures. Staleness was the half of that answer still
+ * written twice: doctor said an agent had been abandoned while the board went
+ * on calling it `running` forever.
+ */
+export const DEFAULT_STALE_HOURS = 4;
+
+/** Hours between two ISO timestamps, or null if either is unparseable. */
+export function hoursBetween(fromTs, toTs) {
+  const from = Date.parse(fromTs);
+  const to = Date.parse(toTs);
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return (to - from) / 3_600_000;
+}
+
+/**
+ * Is this open spawn stale, measured against the initiative's own movement?
+ *
+ * `reference` is the journal's latest timestamp, NOT the wall clock, and that
+ * is the whole point: staleness here means "the initiative moved on without
+ * it", which is a property of the recorded history and reads the same in six
+ * months as it does now. A wall-clock rule would instead call every agent in
+ * a finished initiative stale the moment you walked away from it.
+ *
+ * That also keeps `board.json` byte-exact under `--check`: the answer is
+ * derived from event timestamps, so two clones of one journal agree. The
+ * `age-fresh/warm/cold/dead` colours on the HTML page are a DIFFERENT
+ * question — "how long since it last spoke, right now, in the reader's own
+ * timezone" — computed client-side precisely because the artefact may not
+ * read a clock. An agent can be `age-dead` (quiet for hours) without being
+ * stale, and stale without being `age-dead`.
+ *
+ * Returns the age alongside the verdict so a caller that reports the number
+ * does not recompute it — the same additive shape `pairSpawns` returns.
+ */
+export function spawnStaleness(spawnTs, reference, staleHours = DEFAULT_STALE_HOURS) {
+  const ageHours = reference === null || reference === undefined ? null : hoursBetween(spawnTs, reference);
+  return { ageHours, stale: ageHours !== null && ageHours >= staleHours, staleHours };
+}
+
 /** Agents whose `spawn` has no matching `report` or `review` yet — the "still working" set. */
 export function openSpawns(file) {
   const { open } = pairSpawns(readJournal(file).events);

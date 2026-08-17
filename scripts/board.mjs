@@ -263,6 +263,12 @@ export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
     totals: {
       initiatives: initiatives.length,
       agents: agents.length,
+      // Of those, how many the journal has moved on without. `agents` counts
+      // OPEN spawns, which is what it has always counted and what the strip
+      // lists — but presenting that number as "running" made a week-old ghost
+      // indistinguishable from an agent working right now, and an overnight
+      // operator reads this tile before anything else on the page.
+      agents_stale: agents.filter((a) => a.stale === true).length,
       merged,
       tickets,
       percent: tickets === 0 ? 0 : Math.round((merged / tickets) * 100),
@@ -306,8 +312,12 @@ export function crossJson(payload) {
 export function renderCrossMd(payload) {
   const parts = [GENERATED_MD_HEADER, '# BOARD — all initiatives\n\n'];
   const t = payload.totals;
+  // "open", not "running": the headline used to assert that every open spawn
+  // was live work, and the stale ones are named right after it rather than
+  // being quietly dropped from the count (ADR-19 correction 1).
   parts.push(
-    `**${t.agents} agent(s) running across ${t.initiatives} initiative(s) · ` +
+    `**${t.agents} agent(s) open across ${t.initiatives} initiative(s)` +
+      `${t.agents_stale > 0 ? `, ${t.agents_stale} stale` : ''} · ` +
       `${t.merged}/${t.tickets} tickets merged (${t.percent}%) · as of ${inline(payload.as_of)}**\n`,
   );
   // First, and above the pause: a STOP outranks everything. It is the one

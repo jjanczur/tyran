@@ -39,7 +39,15 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHooks, DEFAULT_PLUGIN_ROOT } from './hooks-check.mjs';
-import { readJournal, validateJournal, pairSpawns, tail } from './journal.mjs';
+import {
+  readJournal,
+  validateJournal,
+  pairSpawns,
+  tail,
+  hoursBetween,
+  spawnStaleness,
+  DEFAULT_STALE_HOURS,
+} from './journal.mjs';
 import {
   boardOf,
   checkFile,
@@ -59,8 +67,14 @@ import { parseMistakes, countSignatures, fenceState, KNOWLEDGE_THRESHOLD, MISTAK
 /** Severity order is also the report order. `info` never fails the check. */
 export const SEVERITIES = Object.freeze(['error', 'warning', 'info']);
 
-/** Default: an agent open this long without the journal moving on is stuck. */
-export const DEFAULT_STALE_HOURS = 4;
+/**
+ * Default: an agent open this long without the journal moving on is stuck.
+ *
+ * Re-exported, not redefined. The threshold and the comparison both live in
+ * `journal.mjs` so the board renders doctor's answer instead of computing a
+ * second one — `--stale-hours` still moves it for this report alone.
+ */
+export { DEFAULT_STALE_HOURS };
 
 const JOURNAL_FILE = 'journal.jsonl';
 
@@ -300,12 +314,8 @@ function isDirectory(path) {
   }
 }
 
-function hoursBetween(fromTs, toTs) {
-  const from = Date.parse(fromTs);
-  const to = Date.parse(toTs);
-  if (Number.isNaN(from) || Number.isNaN(to)) return null;
-  return (to - from) / 3_600_000;
-}
+// `hoursBetween` is imported from journal.mjs, next to the staleness rule it
+// serves — see the note on `spawnStaleness` for why that rule cannot live here.
 
 // -------------------------------------------------------- policy analysis
 
@@ -722,7 +732,10 @@ function spawnFindings(journalPath, at, dirName, events, reference, staleHours) 
   const signals = lastSignals(events);
   for (const agent of sortedNames(open.keys())) {
     for (const spawn of open.get(agent)) {
-      const age = reference === null ? null : hoursBetween(spawn.ts, reference);
+      // The shared rule, not a local one: the board reads the same predicate,
+      // so an agent doctor calls abandoned can never still read `running`
+      // there. `--stale-hours` moves the threshold for this report alone.
+      const { ageHours: age, stale } = spawnStaleness(spawn.ts, reference, staleHours);
       const where = `${show(spawn.data.ticket ?? 'no ticket')}, role ${show(spawn.data.role)}`;
       // `lastSignals` is keyed by agent NAME, and ADR-18 permits a name to be
       // re-spawned once its previous spawn is closed — so the latest signal
@@ -745,7 +758,7 @@ function spawnFindings(journalPath, at, dirName, events, reference, staleHours) 
             closeSpawnHint(journalPath, spawn.init ?? dirName, agent),
           ),
         );
-      } else if (age !== null && age >= staleHours) {
+      } else if (stale) {
         findings.push(
           finding(
             'spawn-stale',

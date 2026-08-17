@@ -88,7 +88,10 @@ test('two initiatives merge into one payload with per-card provenance and honest
   assert.ok(payload.asks.every((a) => a.init === 'alpha' || a.init === 'beta'));
   assert.deepEqual(Object.keys(payload.lanes), [...LANES]);
   const md = renderCrossMd(payload);
-  assert.match(md, /2 agent\(s\) running across 2 initiative\(s\)/);
+  // "open", not "running": the headline counts OPEN SPAWNS, and calling every
+  // one of those running is what let a week-old ghost read as live work.
+  assert.match(md, /2 agent\(s\) open across 2 initiative\(s\)/);
+  assert.doesNotMatch(md, /stale/, 'neither agent is stale, so the headline says nothing about staleness');
   assert.match(md, /## Waiting on you/);
 });
 
@@ -193,7 +196,7 @@ test('an empty state directory renders an honest empty board, exit 0', () => {
   const r = run(['--dir', dir]);
   assert.equal(r.code, 0);
   const md = readFileSync(join(dir, 'state', BOARD_FILE), 'utf8');
-  assert.match(md, /0 agent\(s\) running across 0 initiative\(s\)/);
+  assert.match(md, /0 agent\(s\) open across 0 initiative\(s\)/);
 });
 
 test('the page fetches spend rather than embedding it, so the artefacts stay byte-exact', () => {
@@ -783,4 +786,44 @@ test('the page shows signal and evidence as two different facts', () => {
   const html = demoHtml();
   assert.match(html, /nothing shown yet/, 'an agent that has shown nothing says so');
   assert.match(html, /a\.evidence_kind/, 'and what it showed is named');
+});
+
+test('the header counts LIVE agents, and says how many are stale', () => {
+  // MUTANT: drop agents_stale, or count every open spawn as running. The tile
+  // an overnight operator reads first said "3 agents running" for a fleet that
+  // died before they went to bed — an open spawn and live work are not the
+  // same fact, and the header was asserting the second from the first.
+  const agents = [
+    { agent: 'a', state: 'running', stale: false, last_evidence: null, since: '2026-07-26T09:00:00.000Z' },
+    { agent: 'b', state: 'stale', stale: true, last_evidence: null, since: '2026-07-26T01:00:00.000Z' },
+  ];
+  const payload = crossBoard({
+    initiatives: [{
+      name: 'demo',
+      state: { merged: 0, ticketList: [], lastTs: '2026-07-26T10:00:00.000Z', errors: [] },
+      board: { asks: [], agents, paused: null, lanes: new Map(LANES.map((l) => [l, []])) },
+    }],
+    errors: [],
+  });
+  assert.equal(payload.totals.agents, 2, 'both are still counted — a stale agent is not deleted');
+  assert.equal(payload.totals.agents_stale, 1);
+  const md = renderCrossMd(payload);
+  assert.match(md, /2 agent\(s\) open across 1 initiative\(s\), 1 stale/);
+  // And the page separates the two numbers rather than adding them together.
+  const html = renderBoardHtml(crossJson(payload));
+  assert.match(html, /agents_stale/, 'the client reads the stale count');
+  assert.match(html, /STALE — open/, 'and marks the chip in journal time, not wall-clock');
+});
+
+test('the stale mark is a SERVER verdict, kept apart from the wall-clock colours', () => {
+  // MUTANT: render staleness with ageClass, or compute it from Date.now() in
+  // the client. The page already has an age vocabulary — fresh/warm/cold/dead —
+  // and it answers a different question: "how long since it spoke, right now,
+  // where you are sitting". Staleness is journal time and is the same for every
+  // reader of the journal, forever. One vocabulary for two questions is how an
+  // operator ends up with two contradictory answers on one strip.
+  const html = renderBoardHtml(crossJson(crossBoard({ initiatives: [], errors: [] })));
+  assert.match(html, /journal time/, 'the chip says which clock it used');
+  assert.match(html, /\.agent\.stale\{/, 'and it is styled as its own thing');
+  assert.doesNotMatch(html, /ageClass\(\s*a\.open_hours/, 'never coloured by the wall-clock scale');
 });

@@ -23,6 +23,9 @@ import {
   nextId,
   tail,
   openSpawns,
+  spawnStaleness,
+  isClosingPhase,
+  DEFAULT_STALE_HOURS,
   closeSpawn,
   pairSpawns,
   agentNameProblem,
@@ -1245,4 +1248,41 @@ test('a review cannot close a colliding non-reviewer spawn', () => {
   assert.equal(pairSpawns(readJournal(f).events).pairs.length, 0);
   // and ADR-18 still refuses a second live spawn of the same name
   assert.throws(() => append(f, spawnEv('worker-1')), /already has an open spawn/);
+});
+
+// --- the one staleness rule, and the one closing phase -------------------
+
+test('spawnStaleness is measured in JOURNAL time and owns the threshold', () => {
+  // This predicate exists so doctor and the board cannot disagree. It lived in
+  // doctor alone, and the projection had no notion of staleness at all — so an
+  // agent doctor called abandoned went on reading `running` on the board for as
+  // long as the journal survived. MUTANT: compare against Date.now().
+  const spawn = '2026-07-26T09:00:00.000Z';
+  assert.equal(spawnStaleness(spawn, '2026-07-26T12:59:00.000Z').stale, false, 'under 4 h');
+  assert.equal(spawnStaleness(spawn, '2026-07-26T13:00:00.000Z').stale, true, 'AT the threshold is stale');
+  assert.equal(spawnStaleness(spawn, '2026-07-26T13:00:00.000Z').ageHours, 4);
+  assert.equal(spawnStaleness(spawn, '2026-07-26T11:00:00.000Z', 2).stale, true, 'the threshold is a parameter');
+  assert.equal(DEFAULT_STALE_HOURS, 4);
+});
+
+test('an unreadable or absent reference is not a staleness verdict', () => {
+  // MUTANT: default ageHours to 0, or treat null as stale. A journal whose
+  // last timestamp cannot be parsed knows nothing about how long anything has
+  // been open, and guessing either way is worse than saying so.
+  for (const reference of [null, undefined, 'not-a-timestamp']) {
+    const r = spawnStaleness('2026-07-26T09:00:00.000Z', reference);
+    assert.equal(r.ageHours, null, `reference ${JSON.stringify(reference)}`);
+    assert.equal(r.stale, false, 'no reference is "unknown", never "stale"');
+  }
+  assert.equal(spawnStaleness('nonsense', '2026-07-26T09:00:00.000Z').stale, false);
+});
+
+test('exactly one checkpoint phase closes an initiative', () => {
+  // `phase` is free text — it carries epic labels and lifecycle notes — so the
+  // one value that MEANS something is compared trimmed and case-insensitively,
+  // and everything else is left alone.
+  for (const yes of ['closed', 'CLOSED', 'Closed', '  closed  ']) assert.equal(isClosingPhase(yes), true, yes);
+  for (const no of ['closing', 'close', 'E2', 'resumed', 'usage-limit-pause', '', null, undefined, 3]) {
+    assert.equal(isClosingPhase(no), false, JSON.stringify(no));
+  }
 });

@@ -48,12 +48,12 @@
 
 ## All gates
 
-| Gate | Latest result | Events | At |
-|---|---|---|---|
-| Q-1 | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:55.000Z |
-| Q-2 | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:57.000Z |
-| plan-approval | open | 1 | 2026-07-26T09:35:00.000Z |
-| tests | pass | 1 | 2026-07-26T09:34:00.000Z |
+| Gate | Latest result | Events | At | Last refusal |
+|---|---|---|---|---|
+| Q-1 | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:55.000Z | &mdash; |
+| Q-2 | WAITING_ON_OPERATOR | 1 | 2026-07-26T09:41:57.000Z | &mdash; |
+| plan-approval | open | 1 | 2026-07-26T09:35:00.000Z | &mdash; |
+| tests | pass | 1 | 2026-07-26T09:34:00.000Z | &mdash; |
 
 ## Open leases
 

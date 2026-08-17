@@ -28,7 +28,7 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readJournal, pairSpawns } from './journal.mjs';
+import { readJournal, pairSpawns, spawnStaleness, isClosingPhase, DEFAULT_STALE_HOURS } from './journal.mjs';
 import { escapeInvisible, jsonEscapeInvisible } from './invisible.mjs';
 
 /** Projection file names. Both are fully generated — never hand-edited. */
@@ -50,6 +50,26 @@ const GENERATED_HEADER =
  * a session whose gate this module already considers closed.
  */
 export const GATE_PASS = new Set(['pass', 'passed', 'ok', 'green', 'approved', 'closed', 'answered']);
+
+/**
+ * Gate results that mean the gate SAID NO — as opposed to not having answered.
+ *
+ * Enumerated rather than derived as "anything that is not a pass", which was
+ * the first shape of this and was wrong in a way the demo fixture caught at
+ * once: it classified `open` — a gate that has not run yet — as a refusal, so
+ * every pending gate carried a permanent objection it had never raised. A mark
+ * that fires on everything says nothing, which is the same argument the board
+ * makes for only ageing the lanes where standing still IS the defect.
+ *
+ * A refusal spelled some way this set has never seen is therefore missed
+ * rather than invented. That is the safer direction: a missing mark leaves the
+ * reader where they already were, while a false one sends them to re-open a
+ * decision nobody ever objected to.
+ */
+export const GATE_REFUSAL = new Set([
+  'deny', 'denied', 'fail', 'failed', 'red', 'refuse', 'refused',
+  'reject', 'rejected', 'changes-requested', 'changes_requested', 'changes-needed', 'blocked',
+]);
 
 /** A gate result that means "a human owes an answer" — the board's queue. */
 export const WAITING_RE = /^waiting[_-]?on[_-]?(operator|owner|human)$/i;
@@ -185,6 +205,31 @@ function sortByKey(items, keyOf) {
     .map(([item]) => item);
 }
 
+/**
+ * The first of several near-synonymous descriptive keys that actually carries
+ * text, or null when none does.
+ *
+ * `data` may always carry extra keys (journal.mjs), and agents improvise: the
+ * same sentence arrives as `text` from one and `note` from another. Reading
+ * one and ignoring the rest is how prose gets written and never read.
+ *
+ * `evidence` may be a LIST — docs/journal.md's `evidence[]` — so a list of
+ * strings is joined rather than stringified into `[object Object]`. An empty
+ * string and a whitespace-only string are not text; falling through to the
+ * next candidate is better than rendering a blank cell that looks like a
+ * missing feature.
+ */
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim() !== '') return value;
+    if (Array.isArray(value)) {
+      const parts = value.filter((v) => typeof v === 'string' && v.trim() !== '');
+      if (parts.length > 0) return parts.join(' · ');
+    }
+  }
+  return null;
+}
+
 /** A Markdown table, or an explicitly empty marker — never a hidden section. */
 function table(headers, rows) {
   if (rows.length === 0) return '_none_\n';
@@ -304,6 +349,11 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
     // `ticket.status` events naming a ticket no other event mentions
     unknownOverrides: [],
     unknownErrorTickets: [],
+    // Spawns a closing checkpoint closed without a report of their own.
+    // Counted and named rather than silently flipped (ADR-19 correction 1):
+    // an agent that never reported is a hole in the record, and a close is
+    // the moment to say so, not to tidy it away.
+    closedBySpawn: [],
   };
 
   /**
@@ -409,6 +459,8 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           status: 'running',
           verdict: null,
           reportTs: null,
+          // Set only by a closing checkpoint — see the `checkpoint` fold.
+          closedTs: null,
         };
         // An unusable name is NOT a correlator, so pairSpawns excludes it — and
         // this row must say so. The two answers that were available were
@@ -455,7 +507,24 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         }
         if (data.ticket != null) {
           const t = ticketOf(data.ticket, ts);
-          t.report = { verdict: data.verdict ?? null, ts, by: data.agent ?? actor };
+          t.report = {
+            verdict: data.verdict ?? null,
+            ts,
+            by: data.agent ?? actor,
+            // WHAT the agent said, not just whether it passed.
+            //
+            // Agents write prose on a report — `text`, `note`, `evidence` —
+            // and this fold read none of it, so a verdict of `changes-needed`
+            // arrived on the board with the reason it was written next to it
+            // silently discarded. `decision` already folds `data.text` and
+            // `gate` already folds `evidence_ref ?? evidence`; a report was
+            // the one carrier of description that wrote to nowhere.
+            //
+            // One field, coalesced in the order agents actually use, because
+            // three near-synonyms rendered as three separate rows is how the
+            // same answer ends up in three places (ADR-21).
+            text: firstText(data.text, data.note, data.evidence),
+          };
           t.override = null; // a lifecycle event outranks a hand-set lane
           t.error = null;
         }
@@ -514,9 +583,13 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
       case 'gate': {
         const kind = String(data.kind ?? '(no kind)');
         const prev = state.gates.get(kind);
+        const result = data.result ?? null;
+        // A refusal is a gate that SAID NO, not one that has yet to answer —
+        // see GATE_REFUSAL for why this is a named set rather than "not a pass".
+        const refused = GATE_REFUSAL.has(String(result ?? '').trim().toLowerCase());
         state.gates.set(kind, {
           kind,
-          result: data.result ?? null,
+          result,
           ts,
           evidence: data.evidence_ref ?? data.evidence ?? null,
           // extra data keys are legal on append; the ask fields ride along so
@@ -527,6 +600,20 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           recommendation: data.recommendation ?? null,
           default: data.default ?? null,
           count: (prev?.count ?? 0) + 1,
+          // Gate results are keyed by `kind`, so the latest one wins the slot —
+          // and a re-run that passes therefore ERASED the refusal that came
+          // before it. That is precisely the signal a gate exists to raise:
+          // "the security gate denied this, then someone re-ran it green" and
+          // "the security gate has only ever passed" rendered identically, and
+          // the second reading is the one an operator took away.
+          //
+          // `count` already survived, so the VOLUME was never lost — only the
+          // verdict. So this is additive and narrow: the last refusal is kept
+          // beside the current result, never instead of it, and the counter is
+          // left exactly as it was.
+          lastRefusal: refused
+            ? { result, ts, evidence: data.evidence_ref ?? data.evidence ?? null, ticket: data.ticket ?? null }
+            : prev?.lastRefusal ?? null,
         });
         break;
       }
@@ -572,9 +659,34 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         else state.mismatchedReleases.push({ resource: key, by: data.holder ?? null, holder: held?.holder ?? null, ts });
         break;
       }
-      case 'checkpoint':
+      case 'checkpoint': {
         state.checkpoint = { phase: data.phase ?? null, nextSteps: data.next_steps, ts, actor };
+        // A closing checkpoint closes the initiative's still-open spawns.
+        //
+        // This fold used to record the checkpoint and nothing else, so an
+        // initiative could be explicitly wound up while three agents that
+        // never reported stayed `running` in every artefact forever. No other
+        // event closes an initiative, which is why the meaning has to hang on
+        // this one reserved phase value.
+        //
+        // Only spawns folded BEFORE this point: the pass runs in event order,
+        // so an agent spawned after the checkpoint is a new incarnation and
+        // keeps its own lifecycle. And only `running` ones — a spawn already
+        // paired with a report, or excluded for an unusable name, has an
+        // answer of its own that this must not overwrite.
+        if (isClosingPhase(data.phase)) {
+          for (const a of state.agents) {
+            if (a.status !== 'running') continue;
+            a.status = 'closed with the initiative (no report)';
+            // Not a report: the agent never filed one, and pretending it did
+            // would put a verdict on the row that nobody earned. The time is
+            // when the initiative ended, which is what "since" means here.
+            a.closedTs = ts;
+            state.closedBySpawn.push({ agent: a.agent, ticket: a.ticket ?? null, spawnTs: a.spawnTs, ts });
+          }
+        }
         break;
+      }
       case 'retro.entry':
         state.retro.push({ kind: data.kind ?? null, target: data.target ?? null, confidence: data.confidence ?? null, ts });
         break;
@@ -678,7 +790,7 @@ export const APPROVING_RE = /^approv|^lgtm$|^pass/i;
  *   in-progress > ready (all deps merged; an UNKNOWN dep counts unmet — a
  *   typo must refuse to schedule, not schedule) > backlog.
  */
-export function boardOf(state) {
+export function boardOf(state, { staleHours = DEFAULT_STALE_HOURS } = {}) {
   const lanes = new Map(LANES.map((lane) => [lane, []]));
   const runningByTicket = new Map();
   for (const a of state.agents) {
@@ -792,6 +904,11 @@ export function boardOf(state) {
       // board dropped it.
       worked_by: sortedUnique(t.agents),
       since: t.lastTs,
+      // What the agent SAID when it handed the ticket back, not only whether
+      // it passed. A `changes-needed` card used to arrive with its reason
+      // discarded at fold time, so the board could say a ticket had come back
+      // and never why — the one thing the reader opens the card for.
+      report_text: t.report?.text ?? null,
       annotation: annotations.length > 0 ? annotations.join(' · ') : null,
     });
   }
@@ -801,11 +918,30 @@ export function boardOf(state) {
     .map((a) => {
       const signal = state.progressByAgent.get(a.agent) ?? null;
       const evidence = state.evidenceByAgent.get(a.agent) ?? null;
+      // Doctor's rule, imported rather than restated (ADR-21). Nothing here
+      // ever downgraded a spawn, so an agent that never reported stayed
+      // `running` forever and the header counted week-old ghosts as live —
+      // while doctor, reading the same journal, had been calling them
+      // abandoned the whole time. Two answers, one question.
+      //
+      // Measured against `state.lastTs`, the journal's own latest event, so
+      // this stays clock-free like the rest of `boardOf`: `board.json` is
+      // byte-compared by `--check`, and a wall-clock verdict would make two
+      // clones of one journal disagree. It is also the more useful meaning —
+      // stale is "the initiative moved on without it", not "you looked late".
+      const { ageHours, stale } = spawnStaleness(a.spawnTs, state.lastTs, staleHours);
       return {
         agent: a.agent,
         role: a.role,
         ticket: a.ticket,
-        state: signal?.state ?? 'running',
+        // `blocked` outranks `stale`: it is the agent's own account of why it
+        // stopped, and it is what the waiting-operator tile counts. Staleness
+        // is what we infer when there is no such account.
+        state: signal?.state === 'blocked' ? 'blocked' : stale ? 'stale' : signal?.state ?? 'running',
+        // Carried separately as well, because `state` is one slot and a
+        // consumer may want the verdict without losing what the agent said.
+        stale,
+        open_hours: ageHours === null ? null : Math.round(ageHours * 10) / 10,
         detail: signal?.detail ?? null,
         next: signal?.next ?? null,
         last_signal: signal?.ts ?? a.spawnTs,
@@ -970,6 +1106,17 @@ export function warnings(state) {
   for (const { raw, problem } of state.unusableAgentNames) {
     out.push(`unusable data.agent ${inlinePlain(raw)}: ${problem} — excluded from spawn/report pairing`);
   }
+  // A close that closed something is a fact about the record, not bookkeeping:
+  // these agents never said how their work ended, and the checkpoint decided
+  // for them. Naming them is what makes the difference between "finished" and
+  // "stopped being tracked" visible after the fact.
+  for (const { agent, ticket } of state.closedBySpawn) {
+    out.push(
+      `agent ${inlinePlain(agent)} was still open when the initiative closed${
+        ticket == null ? '' : ` (ticket ${inlinePlain(ticket)})`
+      } — closed by the checkpoint, with no report of its own`,
+    );
+  }
   // The state ADR-18 makes unrepresentable through `append`, and which the
   // projection no longer silently guesses at now that ticket-first is gone.
   for (const { agent, count } of state.ambiguousAgents) {
@@ -1094,14 +1241,19 @@ function renderState(state) {
   );
 
   parts.push('\n## All gates\n\n');
+  // "Last refusal" is the column that makes a re-run visible. The latest
+  // result wins the row, so a gate that denied and was then re-run green read
+  // exactly like a gate that had never objected to anything — the one reading
+  // an operator must not be given by accident.
   parts.push(
     table(
-      ['Gate', 'Latest result', 'Events', 'At'],
+      ['Gate', 'Latest result', 'Events', 'At', 'Last refusal'],
       sortByKey([...state.gates.values()], (g) => g.kind).map((g) => [
         inline(g.kind),
         inline(g.result),
         String(g.count),
         inline(g.ts),
+        g.lastRefusal == null ? inline(null) : `${inline(g.lastRefusal.result)} at ${inline(g.lastRefusal.ts)}`,
       ]),
     ),
   );

@@ -1,6 +1,6 @@
 # Journal reference
 
-`scripts/journal.mjs` · 66 unit tests
+`scripts/journal.mjs` · 69 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.
@@ -47,7 +47,7 @@ contents are moved, one initiative directory at a time, under `state/`.
 | `finding` | `area`, `claim` | a claim about one `area`, with its proof, queryable by other agents (+ `proof`, `ticket`, `confidence`; `append` issues `F-<n>` ids) |
 | `lease.acquired` | `resource`, `holder` | worktree / heavy-slot lease taken |
 | `lease.released` | `resource`, `holder` | lease returned |
-| `checkpoint` | `phase`, `next_steps` | resume surface (re-injected after compaction) |
+| `checkpoint` | `phase`, `next_steps` | resume surface (re-injected after compaction); `phase: closed` also closes the initiative's open spawns |
 | `retro.entry` | `kind`, `target` | self-improvement ledger (+ `confidence`) |
 | `error` | `class` | failure record (+ `detail`) |
 

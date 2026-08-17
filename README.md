@@ -123,8 +123,10 @@ Mechanisms rather than instructions — which is the whole argument.
   profile or risk flag can cross.
 - **A spend ledger.** `npx @jjanczur/tyran cost` reports what the work cost, in
   the tokens the platform itself reported, per model, per agent type and per
-  ticket — read out of the transcripts Claude Code already writes. Money
-  appears only under a rate card you write: Tyran does not know what you pay.
+  ticket — read out of the transcripts Claude Code already writes. Dollars
+  need no setup: the published list prices ship, so a fresh install shows what
+  the run would have cost through the API, next to what your plan costs a
+  month. Write a rate card only to override them.
 - **It can run overnight, because the usage limit is a wind-down and not a
   crash.** The platform's own behaviour at the limit is a cliff: calls start
   failing mid-flight and agents die between a write and its commit. Near the
@@ -307,7 +309,7 @@ enforces the cap (4352 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1483 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1504 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

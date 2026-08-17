@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { RATE_CARD_ID } from '../../scripts/pricing.mjs';
 import {
   COST_SCHEMA,
   TICKET_IN_DESCRIPTION_RE,
@@ -19,6 +20,7 @@ import {
   rollup,
   scanAll,
   scanTranscript,
+  spanOf,
   tokensOf,
   transcriptDirFor,
 } from '../../scripts/cost.mjs';
@@ -226,15 +228,81 @@ test('the rate card label travels with the report', () => {
   // MUTANT: keep the amounts and drop the label — two people quoting
   // different cards produce different money from one set of tokens, and a
   // figure that cannot say which card produced it is not a measurement.
-  assert.equal(report(makeTree({ pricing: false })).rate_card, null);
+  //
+  // With no `pricing:` block the label is the SHIPPED card rather than null.
+  // That is what makes the reversal below safe: an amount can still always
+  // name the prices it came from.
+  assert.equal(report(makeTree({ pricing: false })).rate_card, RATE_CARD_ID);
 });
 
-test('with no rate card the tokens still count and the money stays absent', () => {
+test('with no rate card the shipped list prices apply, and say so', () => {
+  // THIS TEST REVERSES AN EARLIER DECISION, deliberately. It used to assert
+  // `usd === null` here, guarding the rule "Tyran does not know what anyone
+  // pays; inventing a number is worse than showing none."
+  //
+  // That rule conflated two different quantities. What a SUBSCRIBER pays at
+  // the margin is zero and Tyran indeed cannot know it. What these tokens
+  // would list-price at on the API is published, fixed, and exactly the
+  // number an operator means by "what is this costing me" — and computing it
+  // is not inventing anything.
+  //
+  // The reversal is conditional on the figure never claiming to be the other
+  // quantity. `rate_card` travels with every amount for that reason, and the
+  // board labels the tile "cost through the API". Break that labelling and
+  // the original objection becomes correct again.
+  //
+  // What it bought: before this, an install with no hand-written `pricing:`
+  // block — which is every install, since the scanner never writes one —
+  // showed an em dash in place of every amount on the Spend tab.
+  const scanned = [
+    {
+      kind: 'session',
+      agent_type: 'conductor',
+      ticket: null,
+      // A REAL model id. The `makeTree` fixture deliberately uses invented
+      // names (`m-expensive`), which must stay unpriced — see the next test.
+      by_model: { 'claude-opus-5': { ...emptyCounters(), requests: 1, input: 1_000_000 } },
+      last_ts: null,
+    },
+  ];
+  const out = rollup(scanned, { rate_card: null, models: Object.create(null) }, {});
+  assert.equal(out.totals.usd, 5, 'one million input tokens of Opus 5 is $5 at list');
+  assert.equal(out.rate_card, RATE_CARD_ID, 'and the amount names the card it came from');
+  assert.deepEqual(out.unpriced, []);
+});
+
+test('a model nobody publishes a price for stays unpriced, even with the shipped card', () => {
+  // The half of the old rule that still holds, and the reason `usd` is null
+  // rather than 0: a gap must read as a gap. Shipping a default card must not
+  // turn "we have no rate for this" into "this was free". The fixture's
+  // invented model names are exactly that case.
   const out = report(makeTree({ pricing: false }));
-  assert.ok(out.totals.tokens > 0);
-  // MUTANT: fall back to a built-in price list. Tyran does not know what
-  // anyone pays; inventing a number is worse than showing none.
-  assert.equal(out.totals.usd, null);
+  assert.ok(out.totals.tokens > 0, 'tokens are counted whether or not they are priced');
+  assert.equal(out.totals.usd, null, 'no real model here, so no amount — never a zero');
+  assert.ok(out.unpriced.length > 0, 'and the unpriced models are named');
+});
+
+test('a configured rate overrides the shipped one for THAT model only', () => {
+  // Per-model precedence, not all-or-nothing: an operator on a negotiated
+  // rate for one model must not lose the list price for every other.
+  const scanned = [
+    {
+      kind: 'session',
+      agent_type: 'conductor',
+      ticket: null,
+      by_model: {
+        'claude-opus-5': { ...emptyCounters(), requests: 1, input: 1_000_000 },
+        'claude-haiku-4-5': { ...emptyCounters(), requests: 1, input: 1_000_000 },
+      },
+      last_ts: null,
+    },
+  ];
+  const models = Object.create(null);
+  models['claude-opus-5'] = { input: 1, cache_write: 1, cache_read: 1, output: 1 };
+  const out = rollup(scanned, { rate_card: null, models }, {});
+  // $1 for the overridden Opus, $1 for Haiku at its untouched list price.
+  assert.equal(out.totals.usd, 2);
+  assert.match(out.rate_card, /\+config$/, 'a mixed card must not claim to be pure list price');
 });
 
 test('the transcript directory is found by cwd when the slug does not match', () => {
@@ -800,4 +868,123 @@ test('the resync flag survives every shape an over-long record can take', () => 
   assert.deepEqual(f.seen, [real], 'resync survives a split character in the discarded region');
   assert.equal(f.scan.skippedLines, 1);
   assert.deepEqual(Object.keys(f.scan.byModel), ['m-cheap']);
+});
+
+// --- the two cache-write rates, and the double-count they could cause -------
+
+test('cache writes are split by TTL, and the split never double-counts', () => {
+  // The API reports `cache_creation_input_tokens` as a TOTAL and repeats the
+  // same number split by TTL in `cache_creation`. Reading both would bill
+  // every cached token twice, and cache writes are the second-largest line in
+  // a real session — so this pins that exactly one of the two is read.
+  const scanned = (usageBlock) => [
+    {
+      kind: 'session',
+      agent_type: 'conductor',
+      ticket: null,
+      by_model: { 'claude-opus-5': usageBlock },
+      last_ts: null,
+    },
+  ];
+  const split = { ...emptyCounters(), requests: 1, cache_write: 400, cache_write_1h: 600 };
+  const out = rollup(scanned(split), { rate_card: null, models: Object.create(null) }, {});
+  assert.equal(out.totals.tokens, 1000, 'the two halves sum to the aggregate, and are counted ONCE');
+  // Opus 5: 5m writes at $6.25/MTok, 1h writes at $10/MTok.
+  assert.equal(out.totals.usd, (400 * 6.25 + 600 * 10) / 1e6);
+});
+
+test('a 1-hour cache write costs more than a 5-minute one, which is the point', () => {
+  const one = (counters) =>
+    rollup(
+      [{ kind: 'session', agent_type: 'conductor', ticket: null, by_model: { 'claude-opus-5': counters }, last_ts: null }],
+      { rate_card: null, models: Object.create(null) },
+      {}
+    ).totals.usd;
+  const fiveMin = one({ ...emptyCounters(), requests: 1, cache_write: 1_000_000 });
+  const oneHour = one({ ...emptyCounters(), requests: 1, cache_write_1h: 1_000_000 });
+  assert.equal(fiveMin, 6.25);
+  assert.equal(oneHour, 10);
+  // MUTANT: price both at the 5-minute rate. A long agent run caches for an
+  // hour, so the flat reading under-reports its largest cache line by 60%.
+  assert.ok(oneHour > fiveMin);
+});
+
+test('a four-key rate card still prices 1-hour writes rather than dropping them', () => {
+  // Back-compat: configs written before the 1-hour rate existed must not
+  // silently stop pricing, and must not yield NaN.
+  const models = Object.create(null);
+  models['claude-opus-5'] = { input: 4, cache_write: 5, cache_read: 1, output: 20 };
+  const out = rollup(
+    [
+      {
+        kind: 'session',
+        agent_type: 'conductor',
+        ticket: null,
+        by_model: { 'claude-opus-5': { ...emptyCounters(), requests: 1, cache_write_1h: 1_000_000 } },
+        last_ts: null,
+      },
+    ],
+    { rate_card: 'legacy', models },
+    {}
+  );
+  assert.equal(out.totals.usd, 5, 'falls back to the 5-minute rate the config did give');
+});
+
+// --- the period a total describes ------------------------------------------
+
+test('a report names the period it covers, so a monthly price has something to meet', () => {
+  // The tile shows a MONTHLY subscription price. A total summed over every
+  // transcript on the machine is not a month of anything, so the span has to
+  // travel with it — otherwise the two sit side by side and the reader does
+  // the division themselves, wrongly.
+  const out = report(makeTree());
+  assert.ok(out.covers !== null, 'a report with timestamps must name its span');
+  assert.ok(out.covers.days >= 1);
+  assert.equal(typeof out.covers.from, 'string');
+  assert.equal(typeof out.covers.to, 'string');
+});
+
+test('spanOf refuses to invent a period it cannot measure', () => {
+  assert.equal(spanOf(null, '2026-08-17T00:00:00.000Z'), null);
+  assert.equal(spanOf('2026-08-17T00:00:00.000Z', null), null);
+  assert.equal(spanOf('not a date', '2026-08-17T00:00:00.000Z'), null);
+  // MUTANT: allow end < start. A clock skew between two transcripts would
+  // yield a negative span, and a negative day count divides the wrong way in
+  // any rate derived from it.
+  assert.equal(spanOf('2026-08-17T00:00:00.000Z', '2026-08-01T00:00:00.000Z'), null);
+});
+
+test('a span shorter than a day counts as one, never zero', () => {
+  // An hour of work is one day of usage. Zero would divide by zero the first
+  // time anyone normalises this to a monthly rate.
+  const sameDay = spanOf('2026-08-17T09:00:00.000Z', '2026-08-17T10:00:00.000Z');
+  assert.equal(sameDay.days, 1);
+  const twoWeeks = spanOf('2026-08-03T00:00:00.000Z', '2026-08-17T00:00:00.000Z');
+  assert.equal(twoWeeks.days, 14);
+});
+
+test('a cache written by an older schema is discarded, not read short', () => {
+  // The failure this prevents is a WRONG number, not a missing one. When
+  // `first_ts` was added without bumping the schema, every unchanged
+  // transcript kept its old cached record, `first_ts` read null, and the
+  // reported span came back as one day instead of nineteen.
+  const tree = makeTree();
+  const cachePath = join(tree.tyranDir, 'state', 'cost.json');
+  report(tree);
+  const fresh = JSON.parse(readFileSync(cachePath, 'utf8'));
+  assert.equal(fresh.schema, COST_SCHEMA);
+  assert.ok(fresh.sources.every((s) => 'first_ts' in s), 'every cached source carries the field');
+
+  // Now poison it the way a version upgrade would: an older schema, and
+  // sources missing the newer field.
+  writeFileSync(
+    cachePath,
+    JSON.stringify({
+      ...fresh,
+      schema: COST_SCHEMA - 1,
+      sources: fresh.sources.map(({ first_ts: _drop, ...rest }) => rest),
+    })
+  );
+  const after = report(tree);
+  assert.ok(after.covers !== null, 'the stale cache must be rescanned, not trusted');
 });

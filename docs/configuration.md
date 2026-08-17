@@ -106,32 +106,62 @@ either dial for a single subtask are in [the roster](agents.md#choosing-models).
 
 ## The rate card
 
-`pricing:` is the only place dollars enter Tyran. It is **operator-written**,
-never scanner-inferred — so it carries no provenance wrapper, exactly like
-`limits:` — and it is optional. Absent, [the spend ledger](cost.md) reports
-tokens and no money, which is the honest default: Tyran does not know what
-anyone pays.
+**You do not have to write this block.** Tyran ships the published list
+prices — the card is labelled `list-2026-08` — so [the spend ledger](cost.md)
+reports money on a fresh install with no configuration at all. `pricing:` is
+how you override them, and it is **operator-written**, never scanner-inferred,
+so it carries no provenance wrapper, exactly like `limits:`.
+
+This reverses an earlier decision that absent pricing must show no money,
+taken on the ground that "Tyran does not know what anyone pays". That
+conflated two quantities. What a subscriber pays at the margin is zero and
+Tyran indeed cannot know it; what these tokens would list-price at on the API
+is published and fixed. The ledger reports the second and labels it as such —
+the tile reads *cost through the API*, and `rate_card` travels with every
+amount. Read that label as load-bearing: it is the condition the reversal
+rests on.
 
 | key | required | accepted |
 |---|---|---|
-| `rate_card` | no | a non-empty label, free text (`'list-2026-08'`, `'enterprise-q3'`) |
+| `rate_card` | no | a non-empty label, free text (`'enterprise-q3'`) |
 | `models` | no | a mapping of model id to a rate block |
 | `models.<id>.input` · `cache_write` · `cache_read` · `output` | **all four** | a finite number ≥ 0, in dollars per **million** tokens |
+| `models.<id>.cache_write_1h` | no | as above; defaults to the `cache_write` rate |
 
 The model id is the string the platform reports, which is what the ledger's
 `By model` table prints — copy it from there rather than from a price list, so
 the key you write is the key the transcripts will match.
 
-**All four rate keys are required, and that is the point of the block.** A
+**Overriding is per model, not all or nothing.** A negotiated rate for one
+model keeps the shipped numbers for every other, rather than costing you every
+other amount. A card that mixes the two says so: the label becomes
+`list-2026-08+config`, because an amount computed partly from list prices must
+not claim to come from someone's private card.
+
+**The four base rate keys are required, and that is the point of the block.** A
 table carrying three of them would price the fourth at zero, silently; cache
 reads alone were measured at roughly three quarters of a real session's cost,
 so the omission would not be a rounding error, it would be the bill. A partial
 rate card is a wrong number, not a partial one. The validator therefore rejects
-a model missing any key, and `pricingOf` drops a model whose rates fail that
-shape rather than pricing it — enforcing a value the schema rejects is how a
-bad config becomes a confident wrong answer. A dropped model is not silent: it
-appears in the ledger's `unpriced` list, counted in tokens and absent from
+a model missing any of the four, and `pricingOf` drops a model whose rates fail
+that shape rather than pricing it — enforcing a value the schema rejects is how
+a bad config becomes a confident wrong answer. A dropped model is not silent:
+it appears in the ledger's `unpriced` list, counted in tokens and absent from
 every amount.
+
+`cache_write_1h` is the one exception, and it is optional for compatibility
+rather than because it matters less: cards written before the 1-hour rate
+existed carry four keys, and failing them on upgrade would unprice a working
+ledger. Absent, 1-hour writes are billed at the 5-minute rate — which
+**under**-reports, since a 1-hour write costs 2x base input against the
+5-minute write's 1.25x. A long agent run caches for an hour, so this is not a
+corner: measured on 1.8 B tokens of real transcripts, the 1-hour line was
+$175 against the 5-minute line's $70.
+
+What the shipped card does NOT model, each of which makes the real bill
+**higher** than reported: fast mode (2x on Opus 5 / 4.8), US-pinned inference
+(1.1x), and server-side tool charges such as web search at $10 per 1,000
+searches. None of them is visible in a transcript.
 
 `rate_card` is a label, not a lookup — nothing fetches anything. It exists so
 that every amount can say which card produced it, because two people quoting

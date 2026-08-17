@@ -213,8 +213,12 @@ export function validateConfig(doc) {
               }
             }
             for (const key of PRICING_RATE_KEYS) {
+              // `cache_write_1h` is the one OPTIONAL rate: cards written
+              // before the 1-hour price existed carry four keys, and failing
+              // them on upgrade would unprice a working ledger. Absent, it
+              // falls back to the 5-minute rate in `pricingOf`.
               if (!(key in rates)) {
-                errors.push(`pricing.models.${model}.${key}: required`);
+                if (PRICING_REQUIRED_RATE_KEYS.includes(key)) errors.push(`pricing.models.${model}.${key}: required`);
               } else if (typeof rates[key] !== 'number' || !Number.isFinite(rates[key]) || rates[key] < 0) {
                 errors.push(`pricing.models.${model}.${key}: must be a non-negative number (price per million tokens)`);
               }
@@ -296,7 +300,24 @@ export function limitsOf(doc) {
  * real session's cost. A partial rate card is a wrong number, not a partial
  * one.
  */
-export const PRICING_RATE_KEYS = Object.freeze(['input', 'cache_write', 'cache_read', 'output']);
+/**
+ * The rate keys an amount is computed from. `cache_write` is the 5-MINUTE
+ * write and `cache_write_1h` the 1-hour one; they are DISJOINT counters, never
+ * a total and a subset, because `costOf` multiplies every key by its rate and
+ * sums — so an overlapping pair would silently bill the same tokens twice.
+ */
+export const PRICING_RATE_KEYS = Object.freeze(['input', 'cache_write', 'cache_write_1h', 'cache_read', 'output']);
+
+/**
+ * Rate keys a hand-written config MUST supply. `cache_write_1h` is absent from
+ * this list on purpose: configs predating the 1-hour rate carry four keys, and
+ * failing them would turn a Tyran upgrade into a silently unpriced ledger. A
+ * config without it prices 1-hour writes at the 5-minute rate, which is the
+ * best reading of "they only told us one cache-write number" — and it is
+ * wrong in the direction of UNDER-reporting, so it is stated in the docs
+ * rather than left to be inferred from a smaller bill.
+ */
+export const PRICING_REQUIRED_RATE_KEYS = Object.freeze(['input', 'cache_write', 'cache_read', 'output']);
 
 /**
  * The pricing block, normalized — the ONE place the shape lives. Returns
@@ -317,12 +338,15 @@ export function pricingOf(doc) {
   if (isPlainObject(pricing.models)) {
     for (const [model, rates] of Object.entries(pricing.models)) {
       if (!isPlainObject(rates)) continue;
-      const usable = PRICING_RATE_KEYS.every(
-        (key) => typeof rates[key] === 'number' && Number.isFinite(rates[key]) && rates[key] >= 0
-      );
+      const rate = (key) =>
+        typeof rates[key] === 'number' && Number.isFinite(rates[key]) && rates[key] >= 0 ? rates[key] : null;
+      const usable = PRICING_REQUIRED_RATE_KEYS.every((key) => rate(key) !== null);
       if (!usable) continue;
       const row = Object.create(null);
-      for (const key of PRICING_RATE_KEYS) row[key] = rates[key];
+      for (const key of PRICING_REQUIRED_RATE_KEYS) row[key] = rates[key];
+      // The one optional rate. Falling back to the 5-minute write keeps a
+      // four-key config priced instead of dropping it into `unpriced`.
+      row.cache_write_1h = rate('cache_write_1h') ?? row.cache_write;
       models[model] = row;
     }
   }

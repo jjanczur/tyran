@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.1.33 — 2026-08-17
+
+### The board was hiding what its own journal already knew
+
+Three directory slugs and one blended percentage. The journal has carried a
+written title since it existed — "The kanban board: one screen that answers
+what is going on" — and `crossBoard` summed every initiative's progress before
+throwing the parts away, so an operator reading "47%" across three slugs could
+not tell which was nearly done from which had not started.
+
+Each initiative now has its own row: title, progress, and how many questions
+it is waiting on. The payload reads no clock — it ships `last_ts` and the page
+ages it — so `board.mjs --check` stays byte-exact.
+
+**This replaced an archive feature, on measurement.** Across 63 distinct real
+journals only 6 were finished-and-archivable while **43 were waiting on a
+question nobody had answered**. The board was never cluttered with completed
+work; it was full of ABANDONED work. Archiving would have touched under 10% of
+initiatives, left the 64-initiative ceiling exactly where it is, and — since
+archivable means 100% merged — pulled the headline percentage DOWN.
+
+### Two more things that had never worked and said nothing
+
+- **`/run.json` never carried a reset time.** `pickWindow` tested
+  `typeof resets_at === 'string'` while every writer produces epoch SECONDS,
+  so it returned null for every real payload it was ever given: the run panel
+  could say a pause was in force but never when it would end. Live since the
+  feature shipped.
+- **The closing checkpoint had no producer.** The projection has closed every
+  still-open spawn on `checkpoint phase=closed` since 0.1.31, and nothing ever
+  emitted one — 9 of 63 real journals had one. So an agent that finished weeks
+  ago still read as live work. The conductor is now told to write it, including
+  when an initiative ends because it was ABANDONED, and the test executes the
+  command rather than grepping for it.
+
+`runState` also reports `limits_mode`: "the gate cannot see" and "the feature
+was never switched on" are different facts with the same symptom.
+
+### An ask offers its recommendation as one click
+
+It was shown as text, and the only way to accept it was to retype it into the
+box beneath it. For an operator who is not an engineer, that gap was most of
+the difficulty of the page. The button fills the box rather than submitting,
+so the wording stays editable and the answer stays deliberate.
+
+### Findings are pointed at, not copied
+
+Measured across 63 distinct journals: 3 carry any finding, 49 in total, and
+none names a ticket — so they cannot enrich a card. Median claim is 429
+characters and `STATE.md` already renders the full table. The initiative row
+carries a count when it is non-zero and nothing else; a test forbids `claim`
+or `proof` reaching the byte-compared payload.
+
 ## 0.1.32 — 2026-08-17
 
 ### Overnight mode could never fire, on any install

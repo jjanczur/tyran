@@ -115,6 +115,12 @@ and you publish a site whose sandbox link 404s.
   file is invisible to it: the suite passes locally and CI — which only ever
   sees committed files — is the first thing to look at the real set. Two
   separate cycles have been lost to this.
+- **When a change adds or removes TESTS, update the README's count.** It is
+  verified by a CI step, not by the suite, so `node --test` stays green and
+  the push is the first thing that disagrees. `grep -n 'unit tests' README.md`
+  against the run's own `tests N`. Two cycles lost to this in one session,
+  which is the same shape as the entry above: a check the local loop cannot
+  see.
 - **A field added to `cost.mjs`'s scan needs two more edits or it is silently
   null forever.** `report.sources` is a WHITELIST projection, and `COST_SCHEMA`
   is what discards caches written before the field existed. Missing either, an

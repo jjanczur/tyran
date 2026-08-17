@@ -45,7 +45,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { parse } from './yaml-lite.mjs';
 import { pricingOf, PRICING_RATE_KEYS } from './schema.mjs';
-import { defaultRateCard, RATE_CARD_ID, planOfTier, PLAN_LABELS, SUBSCRIPTION_USD } from './pricing.mjs';
+import { defaultRateCard, RATE_CARD_ID, planOfTier, PLAN_LABELS, SUBSCRIPTION_USD, periodStart } from './pricing.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
 
 export const COST_FILE = 'cost.json';
@@ -63,8 +63,9 @@ export const COST_FILE = 'cost.json';
  * one, and it would have made a monthly comparison off by a factor of 19.
  *
  * 2: sources carry `first_ts`; counters split `cache_write` by TTL.
+ * 3: sources carry `by_day`, without which every windowed figure reads zero.
  */
-export const COST_SCHEMA = 2;
+export const COST_SCHEMA = 3;
 
 /** Read buffer for the chunked line reader. Transcripts reach tens of MB. */
 const CHUNK_BYTES = 1 << 20;
@@ -296,6 +297,16 @@ export function forEachLine(path, onLine, { maxBytes = Infinity } = {}) {
  */
 export function scanTranscript(path) {
   const byModel = Object.create(null);
+  // The same counters, bucketed by UTC day. This is what makes a window
+  // possible at all — a subscription is billed monthly, and a total summed
+  // over every transcript on the machine cannot be compared against a monthly
+  // price. It is also the per-day series, which nothing else could produce
+  // from a fold that only ever kept running totals.
+  //
+  // UTC, not local: two machines in different zones must attribute the same
+  // request to the same day, or the same journal produces two different
+  // series. The boundary is stated in the docs rather than left to be found.
+  const byDay = Object.create(null);
   const seen = new Set();
   let malformed = 0;
   let firstTs = null;
@@ -325,14 +336,34 @@ export function scanTranscript(path) {
     }
     const model = typeof field(message, 'model') === 'string' ? field(message, 'model') : 'unknown';
     if (byModel[model] === undefined) byModel[model] = emptyCounters();
-    const into = byModel[model];
-    into.requests += 1;
-    into.input += finiteCount(field(usage, 'input_tokens'));
-    addCacheWrites(into, usage);
-    into.cache_read += finiteCount(field(usage, 'cache_read_input_tokens'));
-    into.output += finiteCount(field(usage, 'output_tokens'));
+    // Written into BOTH tables from one read of the record, so the two can
+    // never disagree about a request. A record with no usable timestamp is
+    // counted in the total and omitted from the day buckets — the alternative
+    // is inventing a day for it, and a windowed figure built on an invented
+    // date is worse than one that is honestly short.
+    const day = dayOf(ts);
+    const into = [byModel[model]];
+    if (day !== null) {
+      if (byDay[day] === undefined) byDay[day] = Object.create(null);
+      if (byDay[day][model] === undefined) byDay[day][model] = emptyCounters();
+      into.push(byDay[day][model]);
+    }
+    for (const counters of into) {
+      counters.requests += 1;
+      counters.input += finiteCount(field(usage, 'input_tokens'));
+      addCacheWrites(counters, usage);
+      counters.cache_read += finiteCount(field(usage, 'cache_read_input_tokens'));
+      counters.output += finiteCount(field(usage, 'output_tokens'));
+    }
   });
-  return { byModel, malformed, skippedLines, firstTs, lastTs };
+  return { byModel, byDay, malformed, skippedLines, firstTs, lastTs };
+}
+
+/** The UTC day of an ISO timestamp, `YYYY-MM-DD`, or null if unusable. */
+export function dayOf(ts) {
+  if (typeof ts !== 'string' || ts.length < 10) return null;
+  const day = ts.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(Date.parse(ts)) ? day : null;
 }
 
 /**
@@ -550,6 +581,7 @@ export function scanAll(sources, cache) {
         mtime_ms: stat.mtimeMs,
         size: stat.size,
         by_model: before.by_model,
+        by_day: before.by_day ?? null,
         last_ts: before.last_ts ?? null,
         first_ts: before.first_ts ?? null,
         // Carried through the cache too: a damaged transcript stays damaged,
@@ -572,6 +604,7 @@ export function scanAll(sources, cache) {
       mtime_ms: stat.mtimeMs,
       size: stat.size,
       by_model: result.byModel,
+      by_day: result.byDay,
       last_ts: result.lastTs,
       first_ts: result.firstTs,
       malformed: result.malformed,
@@ -622,16 +655,28 @@ export function rollup(scanned, pricing, extra = {}) {
   const byAgentType = Object.create(null);
   const byTicket = Object.create(null);
   const unpriced = new Set();
+  // Per-UTC-day model counters across every source. This is both the series
+  // the Spend tab draws and the raw material any window is summed from.
+  const perDay = Object.create(null);
+  const window = extra.window ?? null;
   let agentTranscripts = 0;
   let attributed = 0;
   let newestTs = null;
   let oldestTs = null;
   let malformed = 0;
   let skippedLines = 0;
+  let undated = 0;
 
   for (const source of scanned) {
     malformed += source.malformed ?? 0;
     skippedLines += source.skipped_lines ?? 0;
+    for (const [day, byDayModel] of Object.entries(source.by_day ?? {})) {
+      if (perDay[day] === undefined) perDay[day] = Object.create(null);
+      for (const [model, counters] of Object.entries(byDayModel)) {
+        if (perDay[day][model] === undefined) perDay[day][model] = emptyCounters();
+        addCounters(perDay[day][model], counters);
+      }
+    }
     if (source.kind === 'agent') agentTranscripts += 1;
     if (source.kind === 'agent' && source.ticket !== null) attributed += 1;
     // The OLDEST record, not just the newest. Without it the report cannot say
@@ -643,7 +688,9 @@ export function rollup(scanned, pricing, extra = {}) {
     if (typeof source.last_ts === 'string' && (newestTs === null || source.last_ts > newestTs)) {
       newestTs = source.last_ts;
     }
-    for (const [model, counters] of Object.entries(source.by_model)) {
+    const restricted = windowedModels(source, window);
+    undated += restricted.undated;
+    for (const [model, counters] of Object.entries(restricted.models)) {
       addCounters(totals, counters);
       if (totalsByModel[model] === undefined) totalsByModel[model] = emptyCounters();
       addCounters(totalsByModel[model], counters);
@@ -679,6 +726,23 @@ export function rollup(scanned, pricing, extra = {}) {
     // invites a comparison that is off by however long the operator has been
     // using the tool. Named, not implied.
     covers: spanOf(oldestTs, newestTs),
+    // The window applied, or null for everything. `undated` is the count of
+    // sources a window could not place in time — reported rather than folded
+    // in, because a windowed total that quietly includes undatable spend is
+    // the error this feature exists to remove.
+    window: window === null ? null : { ...window, undated },
+    // The per-day series, priced. Ordered oldest first so a renderer can draw
+    // it without sorting, and always the FULL series regardless of the window
+    // — the window selects what the totals describe, not what the chart may
+    // show, and a chart that shrinks with the window cannot show you that
+    // last month was worse.
+    per_day: Object.keys(perDay)
+      .sort()
+      .map((day) => ({
+        day,
+        tokens: tokensOf(Object.values(perDay[day]).reduce(addCounters, emptyCounters())),
+        usd: costOfTable(perDay[day], models),
+      })),
     totals: {
       ...totals,
       tokens: tokensOf(totals),
@@ -755,10 +819,28 @@ function table(headers, body) {
 }
 
 /** The human report. */
+/** The one line that says what period the total above describes. */
+function periodLine(report) {
+  const window = report.window;
+  const covers = report.covers;
+  if (window === null) {
+    return covers === null
+      ? 'all time'
+      : `all time — ${covers.from.slice(0, 10)} to ${covers.to.slice(0, 10)}, ${covers.days} day(s)`;
+  }
+  const undated = window.undated > 0 ? `, ${window.undated} transcript(s) with no dates omitted` : '';
+  const name = window.name === 'period' ? 'this billing period' : 'last 30 days';
+  return `${name} — ${window.from} to ${window.to}${undated}`;
+}
+
 export function renderReport(report) {
   const out = [];
   const card = report.rate_card === null ? 'no rate card — tokens only' : `rate card ${report.rate_card}`;
   out.push(`Spend — ${tokens(report.totals.tokens)} tokens, ${money(report.totals.usd)} (${card})`);
+  // The period, on the line with the number. Everything below is a breakdown
+  // of a total, and a total whose window is only visible in a flag someone
+  // typed a minute ago gets quoted without it.
+  out.push(periodLine(report));
   out.push('');
   out.push(
     table(
@@ -842,6 +924,32 @@ function pricingOfDoc(doc) {
 /** Where Claude Code stores the account it is signed in as. */
 export const CLAUDE_CONFIG_RELPATH = '.claude.json';
 
+/** The windows the ledger can describe. `30d` is the default — see below. */
+export const WINDOWS = Object.freeze(['30d', 'period', 'all']);
+
+/**
+ * A named window as `{ name, from, to }` in UTC days, or null for `all`.
+ *
+ * `30d` is the DEFAULT rather than `period`, and deliberately: it needs
+ * nothing from the account, so it means the same thing on every machine, and
+ * it is directly comparable to a monthly price without the reader knowing
+ * when their subscription renews. `period` is the more precise answer and is
+ * offered only when the subscription date is actually readable — a period
+ * window guessed from a default anniversary would be wrong for 29 operators
+ * in 30.
+ */
+export function resolveWindow(name, { now = new Date().toISOString(), subscriptionCreatedAt = null } = {}) {
+  const today = dayOf(now);
+  if (name === 'all' || today === null) return null;
+  if (name === 'period') {
+    const from = periodStart(subscriptionCreatedAt, now);
+    return from === null ? null : { name: 'period', from, to: today };
+  }
+  // 30 days INCLUSIVE of today, so the window is 30 days long rather than 31.
+  const from = dayOf(new Date(Date.parse(today) - 29 * 86_400_000).toISOString());
+  return from === null ? null : { name: '30d', from, to: today };
+}
+
 /**
  * The subscription this machine is signed in on, or null when it cannot be
  * established. Never throws — every figure on the Spend tab must survive an
@@ -860,17 +968,24 @@ export const CLAUDE_CONFIG_RELPATH = '.claude.json';
  */
 export function subscriptionOf({ home = homedir(), readFile = readFileSync } = {}) {
   let tier = null;
+  let createdAt = null;
   try {
     const doc = JSON.parse(readFile(join(home, CLAUDE_CONFIG_RELPATH), 'utf8'));
     const account = doc !== null && typeof doc === 'object' ? doc.oauthAccount : null;
-    if (account !== null && typeof account === 'object') tier = account.organizationRateLimitTier ?? null;
+    if (account !== null && typeof account === 'object') {
+      tier = account.organizationRateLimitTier ?? null;
+      // The billing anniversary, and the only thing that makes a "this
+      // period" window mean the operator's actual period rather than a
+      // calendar month someone assumed.
+      createdAt = typeof account.subscriptionCreatedAt === 'string' ? account.subscriptionCreatedAt : null;
+    }
   } catch {
     // Not signed in, no config, unreadable, or not JSON. All the same answer.
     return null;
   }
   const plan = planOfTier(tier);
   if (plan === null) return null;
-  return { plan, label: PLAN_LABELS[plan], monthly_usd: SUBSCRIPTION_USD[plan] };
+  return { plan, label: PLAN_LABELS[plan], monthly_usd: SUBSCRIPTION_USD[plan], created_at: createdAt };
 }
 
 /**
@@ -901,6 +1016,33 @@ export function spanOf(from, to) {
   const end = Date.parse(to);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
   return { from, to, days: Math.max(1, Math.round((end - start) / 86_400_000)) };
+}
+
+/**
+ * One source's counters, restricted to a window — or its whole `by_model`
+ * when there is no window.
+ *
+ * A source whose `by_day` is missing (an older cache, or records with no
+ * usable timestamp) contributes NOTHING to a windowed figure, and the count
+ * of such sources is reported as `undated`. The alternative — falling back to
+ * the unwindowed totals — would silently put a year of spend inside a
+ * thirty-day window, which is the exact error this whole feature exists to
+ * remove.
+ */
+function windowedModels(source, window) {
+  if (window === null) return { models: source.by_model, undated: 0 };
+  if (source.by_day === null || source.by_day === undefined) {
+    return { models: Object.create(null), undated: 1 };
+  }
+  const models = Object.create(null);
+  for (const [day, byModel] of Object.entries(source.by_day)) {
+    if (day < window.from || day > window.to) continue;
+    for (const [model, counters] of Object.entries(byModel)) {
+      if (models[model] === undefined) models[model] = emptyCounters();
+      addCounters(models[model], counters);
+    }
+  }
+  return { models, undated: 0 };
 }
 
 /** Every model id these scanned transcripts name, in no particular order. */
@@ -959,10 +1101,17 @@ function writeAtomic(path, text) {
  * served board benefits too — cannot drift between the derived-dir path and
  * the explicit-dirs path below.
  */
-function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed, transcriptDirsMissing }) {
+function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed, transcriptDirsMissing, window: windowName }) {
   const cachePath = join(tyranDir, 'state', COST_FILE);
   const { scanned, unreadable, reused } = scanAll(sources, readCache(cachePath));
-  const report = rollup(scanned, pricing, { unreadable, reused, subscription: subscriptionOf() });
+  const subscription = subscriptionOf();
+  // Resolved HERE, where the subscription is already in hand: a `period`
+  // window needs the billing anniversary, and asking every caller to fetch it
+  // first would put the same read in three places.
+  const window = resolveWindow(windowName ?? 'all', {
+    subscriptionCreatedAt: subscription?.created_at ?? null,
+  });
+  const report = rollup(scanned, pricing, { unreadable, reused, subscription, window });
   report.transcripts_found = true;
   report.transcript_dirs = transcriptDirsUsed;
   report.transcript_dirs_missing = transcriptDirsMissing;
@@ -983,6 +1132,7 @@ function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed,
     malformed: s.malformed ?? 0,
     skipped_lines: s.skipped_lines ?? 0,
     by_model: s.by_model,
+    by_day: s.by_day ?? null,
   }));
   // Persisting is the whole point of the cache, and it has to happen HERE
   // rather than only in the `--json` branch: the board server calls this per
@@ -1030,7 +1180,7 @@ function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed,
  * missing the report reads exactly like "no transcripts found" — gaps are
  * reported, never zeroed (property 3 above).
  */
-export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = null, transcriptDirs = [] } = {}) {
+export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = null, transcriptDirs = [], window = 'all' } = {}) {
   const root = repoRoot ?? resolve(tyranDir, '..');
   // Read ONCE and handed to both readers below: `pricingOfDoc` and
   // `spendTranscriptDirsOf` used to each open and parse config.yaml
@@ -1063,6 +1213,7 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
       session,
       transcriptDirsUsed: present,
       transcriptDirsMissing: missing,
+      window,
     });
   }
 
@@ -1081,11 +1232,12 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
     session,
     transcriptDirsUsed: [dir],
     transcriptDirsMissing: [],
+    window,
   });
 }
 
 function parseArgs(argv) {
-  const flags = { dir: '.tyran', session: null, projects: null, json: false, transcripts: [] };
+  const flags = { dir: '.tyran', session: null, projects: null, json: false, transcripts: [], window: 'all' };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
@@ -1094,6 +1246,14 @@ function parseArgs(argv) {
       if (value === undefined || value.startsWith('--')) throw new UsageError(`${arg} needs a value`);
       // Repeatable: sources are the union over every directory given.
       flags.transcripts.push(value);
+      i += 1;
+    } else if (arg === '--window') {
+      const value = argv[i + 1];
+      // Validated against the closed list HERE rather than deep in the report:
+      // an operator who mistypes a window should be told, not handed the
+      // all-time total under a name they thought meant something narrower.
+      if (!WINDOWS.includes(value)) throw new UsageError(`--window must be one of ${WINDOWS.join(' | ')}`);
+      flags.window = value;
       i += 1;
     } else if (arg === '--dir' || arg === '--session' || arg === '--projects') {
       const value = argv[i + 1];
@@ -1113,7 +1273,7 @@ function main(argv) {
     console.error(String(err.message ?? err));
     console.error(
       'usage: cost.mjs [--dir <.tyran>] [--session <id>] [--projects <dir>] ' +
-        '[--transcripts <dir>]... [--json]'
+        '[--transcripts <dir>]... [--window 30d|period|all] [--json]'
     );
     return 2;
   }
@@ -1127,6 +1287,7 @@ function main(argv) {
     projectsRoot: flags.projects,
     session: flags.session,
     transcriptDirs: flags.transcripts,
+    window: flags.window,
   });
   if (report.transcripts_found === false) {
     // Two different gaps, two different sentences: a `--transcripts` (or

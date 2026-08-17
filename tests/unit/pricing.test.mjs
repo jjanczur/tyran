@@ -17,6 +17,7 @@ import {
   SUBSCRIPTION_USD,
   defaultRateCard,
   normalizeModel,
+  periodStart,
   planOfTier,
   ratesFor,
 } from '../../scripts/pricing.mjs';
@@ -157,4 +158,48 @@ test('an unknown, absent or reshaped tier yields null, never a default plan', ()
 test('every plan has both a price and a human label', () => {
   assert.deepEqual(Object.keys(SUBSCRIPTION_USD).sort(), Object.keys(PLAN_LABELS).sort());
   assert.deepEqual(SUBSCRIPTION_USD, { pro: 20, max_5x: 100, max_20x: 200 });
+});
+
+// --- the subscription period ------------------------------------------------
+
+test('the period starts on the most recent anniversary at or before today', () => {
+  const created = '2026-08-11T04:14:54.939Z';
+  // Measured account: created on the 11th, so mid-August is the 11th.
+  assert.equal(periodStart(created, '2026-08-17T12:00:00Z'), '2026-08-11');
+  // On the anniversary itself the new period has begun.
+  assert.equal(periodStart(created, '2026-09-11T00:00:01Z'), '2026-09-11');
+  // The day before, the previous period is still running.
+  assert.equal(periodStart(created, '2026-09-10T23:59:59Z'), '2026-08-11');
+  assert.equal(periodStart(created, '2026-12-31T00:00:00Z'), '2026-12-11');
+});
+
+test('a month too short for the anniversary clamps to its last day', () => {
+  // MUTANT: let the date roll over. A subscription created on the 31st has no
+  // 31st in February; naive maths yields March 3rd, which is in the FUTURE
+  // and produces a period that has not started. Billing clamps; so does this.
+  const created = '2026-01-31T00:00:00.000Z';
+  assert.equal(periodStart(created, '2026-02-28T12:00:00Z'), '2026-02-28');
+  // On March 30th the March anniversary (clamped to the 31st) has NOT
+  // arrived, so the running period is still February's.
+  assert.equal(periodStart(created, '2026-03-30T12:00:00Z'), '2026-02-28');
+  assert.equal(periodStart(created, '2026-03-31T12:00:00Z'), '2026-03-31');
+  // A leap February takes the 29th.
+  assert.equal(periodStart('2024-01-31T00:00:00.000Z', '2024-02-29T12:00:00Z'), '2024-02-29');
+});
+
+test('the first period starts when the subscription did, not before it', () => {
+  // MUTANT: return the anniversary unconditionally. Two days after signing up
+  // on the 20th, the "period" would start on the 20th of a month that ended
+  // before the account existed, and the window would sweep in spend from
+  // before there was anything to compare against.
+  const created = '2026-08-20T10:00:00.000Z';
+  assert.equal(periodStart(created, '2026-08-22T10:00:00Z'), '2026-08-20');
+  // A `now` before the subscription existed has no period at all.
+  assert.equal(periodStart(created, '2026-08-01T10:00:00Z'), null);
+});
+
+test('an unparseable date yields null rather than a wrong window', () => {
+  assert.equal(periodStart('not a date', '2026-08-17T00:00:00Z'), null);
+  assert.equal(periodStart('2026-08-11T00:00:00Z', 'not a date'), null);
+  assert.equal(periodStart(null, '2026-08-17T00:00:00Z'), null);
 });

@@ -45,7 +45,7 @@ import {
 } from './project.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
 import { renderBoardError, renderBoardHtml } from './board-html.mjs';
-import { COST_SCHEMA, costJson, costReport } from './cost.mjs';
+import { COST_SCHEMA, WINDOWS, costJson, costReport } from './cost.mjs';
 import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
 import { checkStopAt } from './stop-check.mjs';
 import { runState } from './overnight.mjs';
@@ -787,14 +787,20 @@ function main() {
         // journal disagree and break the byte-exact `--check` contract. The
         // page fetches this route and simply omits the section when the fetch
         // fails, which is what happens over file://.
-        if (req.url === '/cost.json') {
+        if (req.url === '/cost.json' || req.url.startsWith('/cost.json?')) {
           let body;
           try {
+            // The window is the ONLY query parameter, and it is validated
+            // against a closed list rather than passed through — an unknown
+            // value falls back to `all` instead of reaching the report, so a
+            // hand-typed URL cannot produce a window nobody defined.
+            const asked = new URLSearchParams(req.url.slice(req.url.indexOf('?') + 1)).get('window');
+            const window = WINDOWS.includes(asked) ? asked : 'all';
             // `flags.transcripts` is [] unless the operator started this
             // server with `--transcripts`; costReport falls through to
             // `spend.transcript_dirs` and then the derived directory on its
             // own, so an empty array here changes nothing for the common case.
-            body = costJson(costReport({ tyranDir: dir, transcriptDirs: flags.transcripts }));
+            body = costJson(costReport({ tyranDir: dir, transcriptDirs: flags.transcripts, window }));
           } catch (err) {
             // A cost failure must never take the board down with it: the
             // board answers "what is going on", and that answer does not

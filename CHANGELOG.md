@@ -60,6 +60,37 @@ count beside it — the agents are still counted and still in the strip, but an
 open spawn and live work are not the same fact and the tile was asserting the
 second from the first.
 
+### The two findings doctor could only ever report
+
+`state-legacy-initiatives-dir` shipped with a remedy that read "relocate the
+contents by hand, one initiative directory at a time". That is advice, not a
+remedy, and the installs carrying the finding are by definition the ones
+nobody has touched since 0.1.8. `scripts/migrate.mjs` does the move.
+
+It is explicit and never automatic, because it MOVES an append-only history
+rather than seeding a file that does not exist yet — the same reason it is not
+a step inside setup. It previews by default and does nothing until asked twice.
+It never overwrites: a name that already exists under `state/` is a conflict,
+reported and skipped and left untouched on **both** sides, because merging two
+directories that share a name is a decision only the operator can make and
+making it silently would destroy the evidence needed to make it correctly. It
+never deletes anything it did not itself empty. It is idempotent, and it exits
+1 while any conflict stands, so an automated caller can tell "done" from "done
+except for the part that mattered".
+
+**`mistakes-file-missing`** (`info`) splits an absence that used to be one
+thing. Deleting `MISTAKES.md` is the documented opt-out and still produces no
+finding at all — a tool that nags about a file you deliberately removed is a
+tool you switch off, and that would cost the gates sitting next to it. But an
+install created before the ledger existed never declined anything; nobody
+offered. Git is the only witness that can tell those apart, so the finding
+fires only where git can answer AND has never seen the file. Where there is no
+repository, or no git, it says nothing rather than guessing — a guess there
+nags precisely the operator who already opted out.
+
+Both are `info`-adjacent by design: nothing is broken in either case. The
+first is a repair that was previously unavailable; the second is an offer.
+
 ## 0.1.30 — 2026-08-17
 
 The first release built on an outside contribution. It fixes a spend ledger

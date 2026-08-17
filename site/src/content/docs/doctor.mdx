@@ -6,7 +6,7 @@ import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 
 <Provenance>
-`scripts/doctor.mjs --state` · 103 unit tests
+`scripts/doctor.mjs --state` · 106 unit tests
 </Provenance>
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
@@ -95,7 +95,7 @@ possible to change one and keep the suite green.
 | `state-not-a-directory` | error | `state/` exists but is not a directory |
 | `state-unreadable` | error | `state/` could not be listed (errno printed) |
 | `state-stray-file` | warning | something under `state/` is not an initiative directory |
-| `state-legacy-initiatives-dir` | warning | a `.tyran/initiatives/` directory from before 0.1.9 — initiative files live under `state/`, and nothing mechanical reads the old location |
+| `state-legacy-initiatives-dir` | warning | a `.tyran/initiatives/` directory from before 0.1.9 — initiative files live under `state/`, and nothing mechanical reads the old location. The fix is `scripts/migrate.mjs`, which previews by default and never overwrites |
 | `lease-file-tracked` | warning | lease files are committed to git — a lease records who holds a resource right now, so a committed one conflicts on every parallel merge |
 | `initiative-untracked` | warning | git has never seen this initiative’s ledger — `journal.mjs append` writes the working tree and nothing else, so an initiative nobody committed is one `git clean -fd` from having never happened |
 | `initiative-ignored` | warning | a .gitignore rule covers the ledger, so nothing under it can be committed at all — and `git add` on an ignored path is a silent no-op |
@@ -106,6 +106,7 @@ possible to change one and keep the suite green.
 | `limit-telemetry-missing` | warning | `limits.mode` is `warn` or `pause` but the usage telemetry sidecar is absent or over a day old — the gate fails open, so the configured pause protects nothing |
 | `mistakes-unreadable` | warning | `MISTAKES.md` is present but could not be read or parsed, so nothing in it was counted. Warning rather than error: nothing mechanical consumes the ledger at write time, so an unreadable one degrades learning without stopping work |
 | `mistakes-repeat-unpromoted` | info | one signature's `open` entries have reached the knowledge threshold ([self-improvement](../self-improvement/)) — a failure that recurred that often is evidence a rule is missing, and `/tyran:retro` promotes it into `.tyran/knowledge/`. Info, because a healthy repo sits here between a breakage and its next retrospective |
+| `mistakes-file-missing` | info | there is no `MISTAKES.md` **and git has never seen one** — the repository predates the ledger rather than having opted out of it. A deletion is the documented opt-out and produces NO finding, and where git cannot answer at all this says nothing rather than guessing. Info, because nothing is broken: it is an offer, not a defect ([self-improvement](../self-improvement/)) |
 | `claude-md-fence-missing` | info | entries claim status `law` while `CLAUDE.md` carries no `tyran:rules` fence — the earned rule is not in force in any session — or carries a malformed one, where the next promotion cannot land at all |
 
 An **absent** `MISTAKES.md` produces no finding at all: deleting the file is

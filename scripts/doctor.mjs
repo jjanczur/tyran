@@ -236,6 +236,10 @@ export const SEVERITY_BY_CODE = Object.freeze(
     // red during normal operation is a check people learn to skip.
     'mistakes-unreadable': 'warning',
     'mistakes-repeat-unpromoted': 'info',
+    // `info`, and it fires only where git proves the file NEVER existed —
+    // a deletion is the documented opt-out and stays silent. See
+    // `absentMistakes` for why the two need telling apart at all.
+    'mistakes-file-missing': 'info',
     'claude-md-fence-missing': 'info',
     // overnight mode
     'limit-pause-active': 'info',
@@ -1302,9 +1306,56 @@ export function trackedLeaseFiles(run, tyranDirName = '.tyran') {
  * owned by `mistakes.mjs`, the same discipline doctor already follows for
  * `validateKnowledge` and `pairSpawns` (ADR-18).
  */
-export function mistakesFindings(repoRoot) {
+
+/**
+ * Absence, split into the two situations that look identical on disk.
+ *
+ * Deleting the file is the documented opt-out and it stays silent — a tool
+ * that nags about a file you deliberately removed is a tool you disable, and
+ * that argument has not changed. But an install created before this ledger
+ * existed never made that choice: there is nothing to opt out of, nobody was
+ * ever offered the file, and silence there is not respect for a decision, it
+ * is a feature the operator has never heard of.
+ *
+ * Git is the only witness that can tell the two apart. A file with history is
+ * one somebody had and removed; a file with no history in a repo git can read
+ * never existed. When git cannot answer at all — no repository, no git on the
+ * PATH — this says NOTHING, because a guess here would nag exactly the
+ * operator who already opted out.
+ *
+ * `info`, never a warning: nothing is broken, and the check exists to make an
+ * offer rather than to report a defect.
+ */
+function absentMistakes(repoRoot, path, run) {
+  const checked = `${MISTAKES_FILE}: absent`;
+  if (run === null) return { findings: [], checked };
+  // The same probe `untrackedTyranDir` uses, for the same reason: `run`
+  // returns '' for "git said nothing" and for "git is not here", and those
+  // need opposite conclusions.
+  if (run(['rev-parse', '--is-inside-work-tree']).trim() !== 'true') {
+    return { findings: [], checked: `${checked} (no git here to say whether it ever existed)` };
+  }
+  const history = run(['log', '--max-count=1', '--format=%H', '--', MISTAKES_FILE]).trim();
+  if (history !== '') {
+    return { findings: [], checked: `${checked} — deleted deliberately, which IS the opt-out` };
+  }
+  return {
+    findings: [
+      finding(
+        'mistakes-file-missing',
+        show(path),
+        `no ${MISTAKES_FILE}, and git has never seen one — this repository predates the incident ledger ` +
+          'rather than having opted out of it. Nothing is broken; the ledger is what turns a mistake that ' +
+          'happened three times into a rule that stops the fourth',
+        `node scripts/scan-repo.mjs --dir ${sq(repoRoot)} --ensure-policy   # seeds it from the shipped template; deleting it again is the opt-out, and this will not put it back on its own`,
+      ),
+    ],
+    checked: `${checked} — never existed`,
+  };
+}
+export function mistakesFindings(repoRoot, run = null) {
   const path = join(repoRoot, MISTAKES_FILE);
-  if (!existsSync(path)) return { findings: [], checked: `${MISTAKES_FILE}: absent` };
+  if (!existsSync(path)) return absentMistakes(repoRoot, path, run);
 
   let parsed;
   try {
@@ -1669,13 +1720,18 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
         'legacy layout — initiative files (PLAN.md, NOTES.md, RETRO.md, locks/) live under ' +
           'state/<initiative>/ since 0.1.9. Mechanical consumers read only state/, so anything ' +
           'kept here is invisible to the projections, the retrospective and the session summary',
-        `ls -la ${sq(legacyDir)}   # relocate the contents by hand, one initiative directory at a time, into ${sq(join(dir, 'state'))} — see https://jjanczur.github.io/tyran/journal/`,
+        // Was "relocate the contents by hand, one initiative directory at a
+        // time" — which is advice, not a remedy, on the one class of install
+        // that by definition nobody has touched since 0.1.8. The script says
+        // what it WOULD move until asked twice, never overwrites, and never
+        // deletes anything it did not empty.
+        `node scripts/migrate.mjs --dir ${sq(dir)}   # what it would move; add --apply to move it`,
       ),
     );
   }
   checked.push(`initiatives/ (legacy): ${isDirectory(legacyDir) ? 'PRESENT' : 'absent'}`);
 
-  const mistakes = mistakesFindings(repoRoot);
+  const mistakes = mistakesFindings(repoRoot, gitRun);
   findings.push(...mistakes.findings);
   checked.push(mistakes.checked);
 

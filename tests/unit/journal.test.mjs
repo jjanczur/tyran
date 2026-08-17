@@ -1447,3 +1447,25 @@ test('an id collision on a type that does not mint ids is not this check', () =>
   const again = append(f, ev({ ts: '2026-07-26T10:05:00.000Z', ev: 'ticket.created', data: { id: 'T-1', title: 'restated' } }));
   assert.equal(again.data.id, 'T-1');
 });
+
+test('the conductor is TOLD to write the closing checkpoint the fold consumes', () => {
+  // The fold has closed every open spawn on a closing checkpoint since
+  // 0.1.31, and NOTHING emitted one: measured across 63 real journals, 9 ever
+  // received one, so the feature was inert from the day it shipped. A
+  // consumer with no producer is the shape of dead code that still looks
+  // alive, and the producer here is a sentence in a skill — which is exactly
+  // the kind of thing that vanishes in an edit with nothing objecting.
+  //
+  // MUTANT: delete the instruction. Open spawns from finished initiatives go
+  // back to reading as live agents on the board, indefinitely.
+  const skill = readFileSync(new URL('../../skills/run/SKILL.md', import.meta.url), 'utf8');
+  assert.match(skill, /--phase closed/, 'the run skill must tell the conductor to close an initiative');
+  assert.ok(
+    isClosingPhase('closed'),
+    'and the phase it names must be the one the fold recognises',
+  );
+  // The instruction and the constant must agree; a skill saying `--phase done`
+  // would read as correct and close nothing.
+  const named = /--phase (\w+)/.exec(skill);
+  assert.ok(isClosingPhase(named[1]), `the skill says --phase ${named[1]}, which the fold does not treat as closing`);
+});

@@ -992,3 +992,43 @@ test('findings are POINTED AT, never copied into the payload', () => {
   assert.ok(!json.includes('"proof"'), 'no proof text may reach the board payload');
   assert.ok(!json.includes('"claim"'), 'no claim text may reach the board payload');
 });
+
+test('the detail panel renders the commit, the reviewer and the model that ran', () => {
+  // All three live in the client script, so no other test in this repository
+  // would notice them being reverted: board.json is unchanged by removing
+  // the code that DISPLAYS these fields, and the lane the card sits in is
+  // unchanged too. This asserts against the rendered page for that reason.
+  //
+  // MUTANT 1: drop the `card.review` / `card.merge` rows — the board goes
+  // back to saying a ticket shipped without saying what shipped.
+  // MUTANT 2: drop the Execution table — the model each run used, which is
+  // the half of "what did this cost me" that the Spend tab cannot answer,
+  // stops being reachable from the ticket entirely.
+  const html = renderBoardHtml(
+    JSON.stringify({
+      schema: 1,
+      as_of: '2026-07-26T09:00:00.000Z',
+      totals: { agents: 0, initiatives: 1, tickets: 1, merged: 1, percent: 100 },
+      asks: [], agents: [], paused: [], errors: [], initiatives: [], files: {},
+      lanes: { done: [{
+        id: 'T-1', title: 'a ticket', init: 'demo', agents: [], worked_by: ['impl-1'],
+        since: '2026-07-26T09:00:00.000Z', report_text: null, annotation: null,
+        review: { verdict: 'APPROVE', by: 'rev-1', ts: '2026-07-26T08:55:00.000Z' },
+        merge: { sha: '88ea8cb', mode: 'rebase', ts: '2026-07-26T09:00:00.000Z' },
+        execution: [{ agent: 'impl-1', role: 'implementer', model: 'deep', started: '2026-07-26T08:00:00.000Z', ended: '2026-07-26T08:50:00.000Z', verdict: 'done' }],
+      }] },
+    }),
+  );
+  assert.match(html, /card\.merge/, 'the merge row must exist in the client');
+  assert.match(html, /card\.review/, 'the review row must exist in the client');
+  assert.match(html, /card\.execution/, 'the execution table must exist in the client');
+  assert.match(html, /'agent', 'model', 'started', 'verdict'/, 'the run columns are named');
+  // The payload the client reads from must actually carry them. Whitespace
+  // tolerant: the embedded copy is written as given, so this asserts the
+  // DATA is there and not how the caller happened to format it.
+  assert.match(html, /"sha":\s*"88ea8cb"/);
+  assert.match(html, /"model":\s*"deep"/);
+  assert.match(html, /"verdict":\s*"APPROVE"/);
+  // And the table has to be styled, or it renders as run-together text.
+  assert.match(html, /\.runs\{/, 'the execution table needs its CSS');
+});

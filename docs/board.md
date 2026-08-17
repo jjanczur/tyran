@@ -225,6 +225,25 @@ the ticket, the board's own annotation, and — once the spend fetch has landed
 goes into the panel rather than into a wider card, which is what a grid of
 lanes cannot afford.
 
+The panel also carries the two facts the **lane could only imply** and an
+**Execution** table:
+
+| row | what it answers |
+|---|---|
+| `review` | the verdict, **who** wrote it, and when. `changes-requested` used to name a lane and never a reviewer |
+| `merged` | the **commit**, the merge mode, and when. `done` said a ticket shipped without saying what shipped |
+| Execution | one row per run: agent, **model**, when it started, how it ended |
+
+All three come from journal events that already existed — `review` carries
+ticket/verdict/by, `merge` carries ticket/sha — and reached no surface at all.
+Measured across 387 real journals and 1799 cards: **1243 carried a merge sha
+and 1074 a review verdict** that nothing displayed.
+
+Execution is the half of "what did this cost me" that Spend cannot answer:
+Spend gives dollars per ticket, this gives what was actually spawned to earn
+them — three implementers on one ticket, or the same story reopened on a
+bigger model, read down a column.
+
 The **Waiting on you** tab prints the three commands of
 [Answering](#answering) above the queue, and states the three answer words
 with them. It is the one thing on this page an operator cannot derive from

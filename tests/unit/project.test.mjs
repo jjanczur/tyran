@@ -1475,3 +1475,92 @@ test('a report carries WHAT the agent said, not only its verdict', () => {
   assert.equal(card({ text: '   ', note: 'used' }).report_text, 'used', 'blank is not text');
   assert.equal(card({}).report_text, null, 'and a report with no prose says nothing rather than empty');
 });
+
+// ------------------------------------- what the lane could only ever imply
+
+/** The card for one ticket, whatever lane it landed in. */
+const cardFor = (events, id) => {
+  const board = boardOf(fold({ events }));
+  for (const [, cards] of board.lanes) for (const c of cards) if (c.id === id) return c;
+  return null;
+};
+
+test('a merged card carries the COMMIT, not just the fact of merging', () => {
+  // MUTANT: drop `merge` from the card. The lane still says `done`, so
+  // nothing goes red — and the board can tell you a ticket shipped without
+  // being able to tell you what shipped. Measured across 387 real journals:
+  // 1243 of 1799 cards have a sha that reached no surface at all.
+  const card = cardFor(
+    [T('T-1'), ev({ ev: 'merge', ts: '2026-07-26T09:05:00.000Z', data: { ticket: 'T-1', sha: '88ea8cb', mode: 'rebase' } })],
+    'T-1',
+  );
+  assert.deepEqual(card.merge, { sha: '88ea8cb', mode: 'rebase', ts: '2026-07-26T09:05:00.000Z' });
+});
+
+test('a reviewed card carries the verdict AND who wrote it', () => {
+  // MUTANT: drop `review`. `changes-requested` still lands in its lane with
+  // the reviewer's name discarded — and "who said this" is the first question
+  // asked of a rejection.
+  const card = cardFor(
+    [T('T-2'), ev({ ev: 'review', ts: '2026-07-26T09:06:00.000Z', data: { ticket: 'T-2', verdict: 'CHANGES-REQUESTED', by: 'rev-1' } })],
+    'T-2',
+  );
+  assert.equal(card.review.verdict, 'CHANGES-REQUESTED');
+  assert.equal(card.review.by, 'rev-1');
+  assert.equal(card.review.ts, '2026-07-26T09:06:00.000Z');
+});
+
+test('the execution report names the MODEL each run used', () => {
+  // The half of "what did this cost me" that spend cannot answer: spend gives
+  // dollars per ticket, this gives what was actually spawned to earn them.
+  const card = cardFor(
+    [
+      T('T-3'),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:07:00.000Z', data: { agent: 'impl-1', role: 'implementer', model: 'deep', ticket: 'T-3' } }),
+    ],
+    'T-3',
+  );
+  assert.equal(card.execution.length, 1);
+  assert.deepEqual(card.execution[0], {
+    agent: 'impl-1', role: 'implementer', model: 'deep', started: '2026-07-26T09:07:00.000Z', ended: null, verdict: null,
+  });
+});
+
+test('a run that has REPORTED carries its verdict and end, not a frozen spawn', () => {
+  // MUTANT: copy the spawn into `runs` instead of referencing it. The report
+  // fold mutates the spawn AFTER the push, so a copy freezes every run as
+  // running with no verdict — which is exactly the row an operator opens a
+  // FINISHED ticket to read.
+  const card = cardFor(
+    [
+      T('T-4'),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:08:00.000Z', data: { agent: 'impl-9', role: 'implementer', model: 'work', ticket: 'T-4' } }),
+      ev({ ev: 'report', ts: '2026-07-26T09:09:00.000Z', data: { agent: 'impl-9', verdict: 'done', ticket: 'T-4' } }),
+    ],
+    'T-4',
+  );
+  assert.equal(card.execution[0].verdict, 'done');
+  assert.equal(card.execution[0].ended, '2026-07-26T09:09:00.000Z');
+});
+
+test('a ticket nothing ran on has an empty execution, never a missing key', () => {
+  // The shape is stable on purpose: board.json is byte-compared, and a key
+  // that appears only sometimes makes every consumer branch on its absence.
+  const card = cardFor([T('T-5')], 'T-5');
+  assert.deepEqual(card.execution, []);
+  assert.equal(card.review, null);
+  assert.equal(card.merge, null);
+});
+
+test('two runs on one ticket both survive, in spawn order', () => {
+  const card = cardFor(
+    [
+      T('T-6'),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:10:00.000Z', data: { agent: 'a1', role: 'implementer', model: 'work', ticket: 'T-6' } }),
+      ev({ ev: 'spawn', ts: '2026-07-26T09:11:00.000Z', data: { agent: 'a2', role: 'implementer', model: 'deep', ticket: 'T-6' } }),
+    ],
+    'T-6',
+  );
+  assert.deepEqual(card.execution.map((r) => r.agent), ['a1', 'a2']);
+  assert.deepEqual(card.execution.map((r) => r.model), ['work', 'deep']);
+});

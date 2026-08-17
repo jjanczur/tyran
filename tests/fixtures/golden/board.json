@@ -56,6 +56,9 @@
         "worked_by": [],
         "since": "2026-07-26T09:02:02.000Z",
         "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
         "annotation": null
       }
     ],
@@ -78,6 +81,18 @@
         ],
         "since": "2026-07-26T09:41:50.000Z",
         "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [
+          {
+            "agent": "impl-2",
+            "role": "implementer",
+            "model": "work",
+            "started": "2026-07-26T09:36:01.000Z",
+            "ended": null,
+            "verdict": null
+          }
+        ],
         "annotation": "worktree lease held by another window"
       }
     ],
@@ -91,6 +106,26 @@
         ],
         "since": "2026-07-26T09:32:00.000Z",
         "report_text": null,
+        "review": {
+          "verdict": "APPROVE",
+          "by": "rev-1",
+          "ts": "2026-07-26T09:31:00.000Z"
+        },
+        "merge": {
+          "sha": "88ea8cb",
+          "mode": "rebase",
+          "ts": "2026-07-26T09:32:00.000Z"
+        },
+        "execution": [
+          {
+            "agent": "impl-1",
+            "role": "implementer",
+            "model": "work",
+            "started": "2026-07-26T09:04:01.000Z",
+            "ended": "2026-07-26T09:30:00.000Z",
+            "verdict": "done"
+          }
+        ],
         "annotation": null
       }
     ]

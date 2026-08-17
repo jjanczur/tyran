@@ -135,6 +135,12 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .file .fname{color:var(--steel-bright);font-family:var(--mono);font-weight:600;min-width:6rem}
 .file code{color:var(--muted);font-size:.72rem;word-break:break-all}
 
+/* ---- what actually ran on a ticket ---- */
+.runs{width:100%;border-collapse:collapse;margin-top:.3rem;font-size:.74rem;display:block;overflow-x:auto}
+.runs th{text-align:left;color:var(--muted);font-weight:600;padding:.2rem .5rem .2rem 0;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.runs td{padding:.22rem .5rem .22rem 0;border-bottom:1px solid var(--hairline);vertical-align:top}
+.runs td:first-child{font-family:var(--mono);color:var(--steel-bright)}
+
 /* ---- lanes ---- */
 .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.6rem;align-items:start}
 .lane{background:var(--bg-sunken);border:1px solid var(--hairline-soft);border-radius:var(--radius);padding:.55rem}
@@ -731,6 +737,16 @@ if (data.schema !== 1) {
     // a ticket had come back and never why, which is the one thing the card is
     // opened for.
     row('reported', card.report_text);
+    // The two lifecycle facts the lane could only imply: which commit a
+    // merged ticket became, and who wrote the review that sent it back.
+    if (card.review) {
+      row('review', card.review.verdict + (card.review.by ? ' by ' + card.review.by : '')
+        + (card.review.ts ? ' · ' + ago(card.review.ts) : ''));
+    }
+    if (card.merge) {
+      row('merged', (card.merge.sha || 'no sha') + (card.merge.mode ? ' (' + card.merge.mode + ')' : '')
+        + (card.merge.ts ? ' · ' + ago(card.merge.ts) : ''));
+    }
     row('last event', card.since ? ago(card.since) + ' (' + card.since + ')' : null);
     if (cost) {
       var hit = (cost.by_ticket || []).filter(function (r) { return r.ticket === card.id; })[0];
@@ -739,6 +755,30 @@ if (data.schema !== 1) {
       row('spend', costError);
     }
     box.appendChild(dl);
+    // What actually ran on this ticket: agent, model, when, verdict. A table
+    // rather than more dl rows, because the interesting reading is DOWN a
+    // column — three implementers on one ticket, or the same story reopened
+    // on a bigger model — and that comparison is what a list of prose rows
+    // makes impossible.
+    var runs = card.execution || [];
+    if (runs.length > 0) {
+      box.appendChild(el('div', 'dt', 'Execution'));
+      var tbl = el('table', 'runs');
+      var head = el('tr');
+      ['agent', 'model', 'started', 'verdict'].forEach(function (h) { head.appendChild(el('th', null, h)); });
+      tbl.appendChild(head);
+      runs.forEach(function (r) {
+        var tr = el('tr');
+        tr.appendChild(el('td', null, r.agent + (r.role ? ' (' + r.role + ')' : '')));
+        // A spawn that named no model is a real state, not a gap to hide: it
+        // means the conductor let the platform default decide.
+        tr.appendChild(el('td', null, r.model || '—'));
+        tr.appendChild(el('td', null, r.started ? ago(r.started) : '—'));
+        tr.appendChild(el('td', null, r.verdict || (r.ended ? 'no verdict' : 'running')));
+        tbl.appendChild(tr);
+      });
+      box.appendChild(tbl);
+    }
     // The files this initiative ACTUALLY has, listed by the server after an
     // existsSync — never a fixed list of what a well-run initiative ought to
     // contain. Paths, not links: the board serves three URLs and derives a

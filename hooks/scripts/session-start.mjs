@@ -26,6 +26,9 @@ import { checkHooks } from '../../scripts/hooks-check.mjs';
 import { readJournal } from '../../scripts/journal.mjs';
 import { SESSION_ID_RE } from '../../scripts/overnight.mjs';
 import { fold, inlinePlain, progressLine } from '../../scripts/project.mjs';
+import { findLiveServer, startDetachedNoWait, urlFor } from '../../scripts/board-daemon.mjs';
+import { boardSettings } from '../../scripts/schema.mjs';
+import { parse as parseYaml } from '../../scripts/yaml-lite.mjs';
 import { field, main, runProbe } from './hook-io.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -169,14 +172,18 @@ function rows(list, render) {
  * 120 characters under the platform's hard ceiling. Escaping first means the
  * length fitBudget sees is the length that ships.
  */
-export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso, pause = null }) {
-  if (initiatives.length === 0 && pause === null) return '';
+export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso, pause = null, board = null }) {
+  if (initiatives.length === 0 && pause === null && board === null) return '';
   const lines = [
     '## Tyran state (injected by the session-start probe)',
     '',
     `Repo: ${inlinePlain(repoRoot)} · as of ${inlinePlain(nowIso)}`,
     `Machine: ${inlinePlain(hardware)}`,
   ];
+  // In the HEADER for the same reason the pause notice is: `fitBudget` drops
+  // whole sections from the END, and the URL is the one line a reader wants
+  // from a repo with enough state to overflow the budget.
+  if (board !== null) lines.push(renderBoardLine(board));
   // The pause notice lives in the HEADER, before any `### ` section, because
   // fitBudget always keeps the preamble and drops sections from the end — a
   // paused session must never lose the one line that says why it is paused.
@@ -401,6 +408,71 @@ export function recordConductor(stateDir, input, { now = new Date(), cwd = null 
   }
 }
 
+/**
+ * Start the dashboard, if it is not already up and the repo has not said no.
+ *
+ * This is the step that makes the board something an install HAS rather than
+ * something an operator remembers to run. Before it, the board was reached
+ * only by typing a command that holds a terminal, so on any install where
+ * nobody typed it every projection Tyran writes existed and nothing ever
+ * displayed them.
+ *
+ * Three properties, each of which the obvious implementation gets wrong:
+ *
+ *   - it does NOT wait. `startDetachedNoWait` spawns and returns. This probe's
+ *     whole budget is 4 s, already shared with doctor, and confirming a
+ *     convenience would cost the user their session summary on a slow machine.
+ *     The next session finds the server through `findLiveServer` and says so.
+ *   - it asks whether one is running FIRST, over HTTP, scoped to this
+ *     directory — so repeated sessions, `resume` and `compact` do not stack up
+ *     servers, and another repo's board is never mistaken for this one's.
+ *   - every failure is silent and returns a state, never an exception: a probe
+ *     may not cost a session (ADR-22).
+ *
+ * Returns what to tell the reader, or null to say nothing at all.
+ */
+export async function ensureBoard(stateDir, { settings = null, find = findLiveServer, start = startDetachedNoWait, env = process.env } = {}) {
+  try {
+    // A machine-wide off switch, above the per-repo config. CI is the case
+    // that needs it: an automated run has no browser, no operator and no
+    // interest in a dashboard, but it does clone repositories whose committed
+    // config says `autostart: true` — and a detached server started by a
+    // build outlives the build. Also the honest way for this repository's own
+    // end-to-end tests to run the real hook without leaking a server per test.
+    if (env.TYRAN_NO_BOARD === '1') return null;
+    const board = settings ?? boardSettings(readConfigDoc(stateDir));
+    if (board.autostart === false) return null;
+    const live = await find(stateDir, board.port);
+    if (live !== null) return { running: true, port: live.port, url: urlFor(live.port) };
+    // The port it actually chose, not the one asked for: with several repos
+    // open at once the preferred one is routinely taken, and printing a URL
+    // that belongs to a different repository's board is worse than silence.
+    const chosen = await start(stateDir, { port: board.port, write: board.write });
+    return chosen === null ? null : { running: false, port: chosen, url: urlFor(chosen) };
+  } catch {
+    return null; // a dashboard that could not start is not worth a failed session
+  }
+}
+
+/** This repo's config, parsed, or null — every failure reads as "no config". */
+function readConfigDoc(stateDir) {
+  try {
+    const path = join(stateDir, 'config.yaml');
+    if (!existsSync(path)) return null;
+    return parseYaml(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** One line telling the operator where the board is. */
+export function renderBoardLine(board) {
+  if (board === null) return '';
+  return board.running
+    ? `Dashboard: ${inlinePlain(board.url)}`
+    : `Dashboard: starting at ${inlinePlain(board.url)} (give it a moment)`;
+}
+
 /** The pause marker, if one is active. Garbage reads as absent. */
 export function readPauseMarker(stateDir) {
   try {
@@ -413,7 +485,19 @@ export function readPauseMarker(stateDir) {
   }
 }
 
-export async function buildContext({ input, now = new Date(), env = process.env, health = hookHealth } = {}) {
+/**
+ * `ensure` is injectable and that is not a testing nicety — it is the seam
+ * that keeps a test suite from spawning servers.
+ *
+ * Every call of this function against a directory that has a `.tyran/` starts
+ * a detached board for it, and a test's temp directory is a NEW directory
+ * every time, so the idempotence that makes this safe in a real repo (one
+ * repo, one board) does not apply: each run leaves another live server behind
+ * it. Measured after adding autostart without this parameter — ten orphaned
+ * servers holding ports 4173-4182, the entire search span, which then made an
+ * unrelated test fail because no port was left to bind.
+ */
+export async function buildContext({ input, now = new Date(), env = process.env, health = hookHealth, ensure = ensureBoard } = {}) {
   // Said even in a repository that has nothing to do with Tyran: the claim
   // being corrected is about the PLUGIN the user installed, not about this
   // project's state, and a user whose gates are dead needs to hear it in the
@@ -425,6 +509,7 @@ export async function buildContext({ input, now = new Date(), env = process.env,
   if (!existsSync(stateDir)) return fitBudget(warning); // not a Tyran repo — but a dead gate still counts
   recordConductor(stateDir, input, { now, cwd: repoRoot });
   const nowIso = now.toISOString();
+  const board = await ensure(stateDir);
   return fitBudget(
     warning +
     renderContext({
@@ -434,6 +519,7 @@ export async function buildContext({ input, now = new Date(), env = process.env,
       hardware: hardwareLine(),
       nowIso,
       pause: readPauseMarker(stateDir),
+      board,
     }),
   );
 }

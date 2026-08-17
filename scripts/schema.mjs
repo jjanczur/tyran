@@ -68,7 +68,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits', 'pricing', 'spend'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits', 'pricing', 'spend', 'board'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -259,7 +259,57 @@ export function validateConfig(doc) {
     }
   }
 
+  // The dashboard's own switches. Absent means the DEFAULTS below apply, and
+  // those defaults are ON — the board is where everything Tyran does becomes
+  // legible, and an install that leaves it off is an install where none of it
+  // is. This block exists to turn it DOWN, which is why every key is optional.
+  if ('board' in doc) {
+    if (!isPlainObject(doc.board)) errors.push('board: must be a mapping');
+    else {
+      const board = doc.board;
+      for (const key of ['autostart', 'write', 'open']) {
+        if (key in board && typeof board[key] !== 'boolean') {
+          errors.push(`board.${key}: must be true or false (quote 'off'/'on' if you meant a string — bare ones are YAML booleans)`);
+        }
+      }
+      if ('port' in board) {
+        const port = board.port;
+        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+          errors.push('board.port: must be an integer in (0, 65535]');
+        }
+      }
+      const knownBoard = ['autostart', 'port', 'write', 'open'];
+      for (const key of Object.keys(board)) {
+        if (!knownBoard.includes(key)) errors.push(`board.${key}: unknown key`);
+      }
+    }
+  }
+
   return errors;
+}
+
+/**
+ * The board's settings, with the defaults applied.
+ *
+ * ONE function, because three callers need this answer — the session-start
+ * hook that autostarts, the setup skill's command, and doctor — and three
+ * copies of "default the port to 4173" is ADR-21 with a port number in it.
+ *
+ * `autostart` and `write` default TRUE. The board was previously reached only
+ * by a human typing a blocking command, which meant that on any install where
+ * nobody typed it, every projection Tyran writes existed and nothing read
+ * them. Defaulting off would preserve exactly that.
+ */
+export const BOARD_DEFAULTS = Object.freeze({ autostart: true, port: 4173, write: true, open: false });
+
+export function boardSettings(doc) {
+  const board = isPlainObject(doc) && isPlainObject(doc.board) ? doc.board : {};
+  return {
+    autostart: typeof board.autostart === 'boolean' ? board.autostart : BOARD_DEFAULTS.autostart,
+    port: Number.isInteger(board.port) && board.port > 0 && board.port <= 65535 ? board.port : BOARD_DEFAULTS.port,
+    write: typeof board.write === 'boolean' ? board.write : BOARD_DEFAULTS.write,
+    open: typeof board.open === 'boolean' ? board.open : BOARD_DEFAULTS.open,
+  };
 }
 
 export const LIMITS_MODES = Object.freeze(['off', 'warn', 'pause']);

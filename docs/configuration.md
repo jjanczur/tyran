@@ -58,6 +58,17 @@ limits:                    # OPTIONAL. Overnight mode (docs/overnight.md):
                            # watcher waits — never the display, so the screen
                            # lock is untouched (docs/overnight.md)
 
+board:                     # OPTIONAL, and the one block that defaults ON.
+  autostart: true          # start the dashboard with the session, if it is not
+                           # already up. `limits:` off is inert; a board that
+                           # never starts means every projection Tyran writes
+                           # is generated and read by nobody (docs/board.md)
+  port: 4173               # the FIRST port tried — the next 9 are used if it
+                           # is taken, so several repos each get their own
+  write: true              # the Settings tab may edit config.yaml and the
+                           # autonomy policy. false serves the page read-only
+  open: false              # true also launches a browser EVERY session
+
 pricing:                   # OPTIONAL. The spend ledger (docs/cost.md).
   rate_card: 'list-2026-08'  # free label; it travels with every amount
   models:                    # dollars per MILLION tokens; all four required

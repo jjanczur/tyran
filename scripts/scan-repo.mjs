@@ -375,6 +375,17 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
       resume_margin_minutes: 5,
       keep_awake: false,
     },
+    // The dashboard, ON. Written in full for the same reason `limits:` is —
+    // the Settings tab patches keys that exist and will not invent them — but
+    // with the opposite default, because the argument for OFF does not apply.
+    // `limits:` off is inert; a board that does not start means every
+    // projection Tyran writes is generated and never read by anyone.
+    board: {
+      autostart: true,
+      port: 4173,
+      write: true,
+      open: false,
+    },
   };
 
   const questions = [];
@@ -745,6 +756,9 @@ export const STATE_GITIGNORE_LINES = Object.freeze([
   // that was stale the moment it was written.
   'state/conductor.json',
   'state/ANSWERS.md',
+  // The running board's own record: a pid and a port, which name a process on
+  // THIS machine and a stranger anywhere else.
+  'state/board-server.json',
 ]);
 const STATE_GITIGNORE_BODY =
   '# Runtime files, never history. Leases record who holds a worktree or a\n' +

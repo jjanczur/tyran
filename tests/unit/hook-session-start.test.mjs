@@ -21,11 +21,13 @@ import {
   DEADLINE_MS,
   buildContext,
   recordConductor,
+  ensureBoard,
   fitBudget,
   hardwareLine,
   hookHealth,
   readInitiatives,
   readPauseMarker,
+  renderBoardLine,
   renderContext,
   renderHookWarning,
   renderPauseNotice,
@@ -52,6 +54,11 @@ function runScript(input, cwd = REPO_ROOT) {
     cwd,
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
+    // The real hook, in a real process, so the `ensure` seam the in-process
+    // tests use cannot reach it — and a probe against a tempRepo would
+    // autostart a detached board that outlives the whole suite. The env
+    // switch is the shipped opt-out, exercised here rather than mocked.
+    env: { ...process.env, TYRAN_NO_BOARD: '1' },
   });
   return r;
 }
@@ -330,6 +337,7 @@ test('end to end: the probe exits 0 even when everything about the input is wron
     input: 'nonsense',
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, TYRAN_NO_BOARD: '1' },
   });
   assert.equal(typeof r, 'string');
   // execFileSync throws on a non-zero exit, so reaching here IS the assertion.
@@ -601,6 +609,18 @@ test('the working budget is measured AFTER sanitization, so it still binds', () 
  * doctor test stayed green. That is the exact shape the story is about, one
  * level up: a control that looks installed and says nothing.
  */
+/**
+ * The board seam, held shut.
+ *
+ * `buildContext` autostarts a dashboard for any directory that has a
+ * `.tyran/`, and every `tempRepo()` is a NEW directory — so the idempotence
+ * that makes autostart safe in a real repo (one repo, one board) does not
+ * apply here, and an uninjected call leaves a live server behind on every
+ * run. Ten of them once held the whole 4173-4182 search span, which made an
+ * unrelated test in another file fail for a reason nothing pointed at.
+ */
+const noBoard = async () => null;
+
 const unhealthy = (counts = { error: 1, warning: 0, info: 0 }) => ({
   ok: false,
   counts,
@@ -634,13 +654,14 @@ test('a warning reaches the injected context even with no .tyran directory', asy
   const text = await buildContext({
     input: { cwd: dir },
     health: () => unhealthy(),
+    ensure: noBoard,
   });
   assert.match(text, /gates that cannot fire/);
 });
 
 test('the warning survives the budget: it is never the section that gets dropped', async () => {
   const dir = tempRepo();
-  const text = await buildContext({ input: { cwd: dir }, health: () => unhealthy() });
+  const text = await buildContext({ input: { cwd: dir }, health: () => unhealthy(), ensure: noBoard });
   assert.ok(text.length <= CONTEXT_BUDGET + 400, `budget respected, got ${text.length}`);
   // fitBudget drops whole sections from the END. The warning is placed first
   // precisely so that the repos with the most state cannot lose it.
@@ -660,4 +681,107 @@ test('the hooks.json this repository SHIPS is healthy', () => {
   const result = checkHooks();
   assert.equal(result.counts.error, 0, JSON.stringify(result.findings, null, 2));
   assert.equal(result.counts.warning, 0, JSON.stringify(result.findings, null, 2));
+});
+
+// ------------------------------------------------- the dashboard autostart
+
+test('a repo that has never started a board gets one, and is told where', async () => {
+  // The property the whole feature exists for: before this, the board was
+  // reached only by a human typing a blocking command, so on any install
+  // where nobody typed it every projection Tyran writes was generated and
+  // never read.
+  const dir = tempRepo();
+  let spawnedWith = null;
+  const board = await ensureBoard(dir, {
+    settings: { autostart: true, port: 4173, write: true, open: false },
+    find: async () => null,
+    start: async (_d, opts) => { spawnedWith = opts; return opts.port; },
+  });
+  assert.equal(spawnedWith.port, 4173);
+  assert.equal(spawnedWith.write, true, 'the Settings tab must be able to edit, or setup has nowhere to send people');
+  assert.equal(board.running, false);
+  assert.match(renderBoardLine(board), /starting at http:\/\/127\.0\.0\.1:4173\//);
+});
+
+test('a board that is already up is NOT started a second time', async () => {
+  // SessionStart fires on startup, resume AND compact. Without this check a
+  // long day of work leaves a stack of servers behind it.
+  const dir = tempRepo();
+  let started = 0;
+  const board = await ensureBoard(dir, {
+    settings: { autostart: true, port: 4173, write: true, open: false },
+    find: async () => ({ port: 4173, health: { tyran_board: true, dir, pid: 9 } }),
+    start: async () => { started += 1; return 4173; },
+  });
+  assert.equal(started, 0);
+  assert.equal(board.running, true);
+  assert.match(renderBoardLine(board), /^Dashboard: http:\/\/127\.0\.0\.1:4173\/$/);
+});
+
+test('autostart: false starts nothing and says nothing', async () => {
+  const dir = tempRepo();
+  let started = 0;
+  const board = await ensureBoard(dir, {
+    settings: { autostart: false, port: 4173, write: true, open: false },
+    find: async () => { throw new Error('must not even probe'); },
+    start: async () => { started += 1; return 4173; },
+  });
+  assert.equal(started, 0);
+  assert.equal(board, null);
+  assert.equal(renderBoardLine(board), '');
+});
+
+test('the URL reported is the port actually taken, not the one asked for', async () => {
+  // With several repos open the preferred port is routinely occupied, and
+  // printing a URL that belongs to a DIFFERENT repository's board is worse
+  // than printing nothing.
+  const dir = tempRepo();
+  const board = await ensureBoard(dir, {
+    settings: { autostart: true, port: 4173, write: true, open: false },
+    find: async () => null,
+    start: async () => 4177,
+  });
+  assert.match(renderBoardLine(board), /4177/);
+});
+
+test('a board that cannot start costs the session nothing', async () => {
+  // ADR-22: SessionStart cannot refuse anything, so a probe that threw here
+  // would cost a user their session to report that a convenience failed.
+  const dir = tempRepo();
+  const board = await ensureBoard(dir, {
+    settings: { autostart: true, port: 4173, write: true, open: false },
+    find: async () => { throw new Error('network gone'); },
+    start: async () => 4173,
+  });
+  assert.equal(board, null);
+});
+
+test('the dashboard line survives the budget, like the pause notice', async () => {
+  // fitBudget drops sections from the END; the URL is in the header for the
+  // same reason the pause notice is.
+  const text = renderContext({
+    repoRoot: '/repo',
+    initiatives: [],
+    doctor: { available: true, counts: { error: 0, warning: 0, info: 0 }, findings: [] },
+    hardware: '8 cores',
+    nowIso: '2026-08-17T00:00:00.000Z',
+    board: { running: true, port: 4173, url: 'http://127.0.0.1:4173/' },
+  });
+  assert.ok(text.indexOf('Dashboard:') < text.indexOf('### '), 'the URL is above the first section');
+});
+
+test('TYRAN_NO_BOARD=1 outranks a config that says autostart: true', () => {
+  // The machine-wide off switch. CI clones repositories whose COMMITTED
+  // config says autostart: true, and a detached server started by a build
+  // outlives the build — so the per-repo setting cannot be the only control.
+  let probed = 0;
+  return ensureBoard('/anything/.tyran', {
+    settings: { autostart: true, port: 4173, write: true, open: false },
+    env: { TYRAN_NO_BOARD: '1' },
+    find: async () => { probed += 1; return null; },
+    start: async () => 4173,
+  }).then((board) => {
+    assert.equal(board, null);
+    assert.equal(probed, 0, 'it must not even probe — the switch is above the config');
+  });
 });

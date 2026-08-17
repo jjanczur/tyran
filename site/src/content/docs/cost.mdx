@@ -54,6 +54,38 @@ carry the split. A long agent run caches for an hour, so the distinction is
 not a corner — measured on 1.8 B tokens of real transcripts, the 1-hour line
 was $175 against the 5-minute line's $70.
 
+## The period a total describes
+
+A plan is billed **monthly**, so a total summed over every transcript on the
+machine has nothing to compare against. `--window` picks the period, and the
+board offers the same three as buttons:
+
+| window | what it covers |
+|---|---|
+| `30d` | the last 30 days, inclusive of today. The board's DEFAULT — it needs nothing from the account, so it means the same thing on every machine. |
+| `period` | the current billing period, from the most recent anniversary of the subscription start. Offered only when that date is readable; a period guessed from an assumed anniversary is wrong for almost everyone. |
+| `all` | everything, and the only window under which no multiple against the plan price is shown. |
+
+The window is printed on the line under the total, and the board states it
+beside the figure, for the same reason the rate card travels with every
+amount: a number that cannot say what period it covers is not a measurement.
+
+Transcripts whose records carry no usable timestamp cannot be placed in a
+window. They are counted and named — `N transcript(s) with no dates omitted`
+— rather than folded into whichever window happens to be showing.
+
+Under a month-shaped window the board also shows the plan price beside the
+API-equivalent. Under `all` it does not: measured on real data, an all-time
+total read as "6.9x what you pay" where the honest monthly figure was about
+11x, and a comparison off by however long the machine has been running is
+worse than no comparison.
+
+The **By day** chart on the Spend tab is the same daily buckets drawn as a
+series, and it deliberately shows the FULL history whatever window is chosen
+— a chart that shrank with the window could not show you that last month was
+worse, which is the comparison worth having. Days are UTC, so two machines in
+different time zones attribute the same request to the same day.
+
 Overriding the shipped card, its shape, the accepted ranges and the rule that
 all four base rate keys are required are in
 [the configuration reference](../configuration/#the-rate-card).

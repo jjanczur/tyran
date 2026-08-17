@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import { FORBIDDEN } from './invisible.mjs';
+// Interpolated into the client script below rather than typed there as a
+// literal. It was a literal `1`, cost.mjs bumped to 2, and the Spend tab
+// started rejecting the very payload its own server was sending — the whole
+// tab replaced by "a format this page does not know". ADR-21 exactly: one
+// answer, one place. No cycle: cost.mjs does not import this file.
+import { COST_SCHEMA } from './cost.mjs';
 /**
  * board-html — the one page an operator stares at overnight.
  *
@@ -189,6 +195,13 @@ pre.how .c{color:var(--muted)}
    input against the 5-minute write's 1.25x. Without a distinct colour the
    most expensive caching decision on the page is invisible. */
 .comp .s-cache_write_1h{background:var(--ink)}
+/* ---- the per-day series ---- */
+.days{display:flex;align-items:flex-end;gap:2px;height:74px;margin:.5rem 0 .3rem;
+  overflow-x:auto;padding-bottom:2px}
+.day{flex:1 0 6px;min-width:6px;height:100%;display:flex;align-items:flex-end}
+.day i{display:block;width:100%;background:var(--brass);border-radius:1px 1px 0 0}
+/* Outside the chosen window: context, not absence. */
+.day.out i{background:var(--line)}
 .comp .s-output{background:var(--sage)}
 .comp .s-input{background:var(--muted)}
 .compkey{display:flex;flex-wrap:wrap;gap:.85rem;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.3rem}
@@ -287,6 +300,18 @@ if (data.schema !== 1) {
   var errors = data.errors || [];
   var cost = null;
   var costError = null;
+  var spendWindow = '30d';
+
+  // How the period reads to a person. The window carries machine dates; a
+  // reader wants "last 30 days", and for the billing period the actual start
+  // date, because that is the number they can check against their invoice.
+  var windowLabel = function (payload) {
+    var w = payload && payload.window;
+    if (!w) return 'all time';
+    if (w.name === 'period') return 'this billing period, since ' + w.from;
+    if (w.name === '30d') return 'last 30 days';
+    return w.from + ' to ' + w.to;
+  };
 
   // The queue count, in the browser tab. The whole point of this page is that
   // you can leave it open while agents work overnight, and a background tab
@@ -947,6 +972,25 @@ if (data.schema !== 1) {
       toggle.appendChild(button);
     });
     header.appendChild(toggle);
+
+    // The period the numbers describe. A plan is billed MONTHLY, so an
+    // all-time total has nothing to compare against; these two windows do.
+    // "this period" is offered only when the subscription date was readable,
+    // because a period guessed from an assumed anniversary is wrong for
+    // almost everyone.
+    var periods = [['30d', 'last 30 days'], ['all', 'all time']];
+    if (cost.subscription && cost.subscription.created_at) {
+      periods.splice(1, 0, ['period', 'this billing period']);
+    }
+    var picker = el('div', 'toggle');
+    periods.forEach(function (pair) {
+      var button = el('button', null, pair[1]);
+      button.setAttribute('type', 'button');
+      button.setAttribute('aria-pressed', spendWindow === pair[0] ? 'true' : 'false');
+      button.addEventListener('click', function () { loadCost(pair[0], metric); });
+      picker.appendChild(button);
+    });
+    header.appendChild(picker);
     into.appendChild(header);
 
     var tiles = el('div', 'tiles');
@@ -958,22 +1002,23 @@ if (data.schema !== 1) {
     // above is true of the API and false of the operator's bank account —
     // shown alone it invites exactly the wrong conclusion. Rendered only when
     // the plan is known; a guess here would be worse than the silence.
+    var w = cost.window;
     var sub = cost.subscription;
     if (sub && typeof sub.monthly_usd === 'number') {
-      // NO multiple is shown against the raw total. A subscription is billed
-      // monthly and the total above covers however long this machine has been
-      // running Claude Code, so "6.9x what you pay" would be off by exactly
-      // that ratio. The span is stated instead, and the comparison waits for
-      // a window the operator has chosen.
-      var covers = cost.covers;
-      tiles.appendChild(tile(
-        'you pay',
-        fmtUsd(sub.monthly_usd) + '/mo',
-        sub.label + (covers && covers.days
-          ? ' — the total above covers ' + covers.days + ' day' + (covers.days === 1 ? '' : 's')
-          : ''),
-        'lead'
-      ));
+      // The multiple is shown ONLY under a month-shaped window. Against an
+      // all-time total it would be off by however long this machine has been
+      // running Claude Code — measured at 6.9x when the honest figure was
+      // about 11x — so under "all time" the tile states the span and stops.
+      var monthly = w && (w.name === '30d' || w.name === 'period') && typeof t.usd === 'number';
+      var note = sub.label;
+      if (monthly && sub.monthly_usd > 0) {
+        note += ' — the API cost of ' + windowLabel(cost) + ' is ' +
+          (t.usd / sub.monthly_usd).toFixed(1) + 'x that';
+      } else if (cost.covers && cost.covers.days) {
+        note += ' — the total above covers ' + cost.covers.days +
+          ' day' + (cost.covers.days === 1 ? '' : 's');
+      }
+      tiles.appendChild(tile('you pay', fmtUsd(sub.monthly_usd) + '/mo', note, 'lead'));
     }
     tiles.appendChild(tile('conductor overhead', (t.conductor_token_share || 0) + '%', 'of tokens, no ticket'));
     tiles.appendChild(tile('attributed', (cov.attributed || 0) + ' / ' + (cov.agent_transcripts || 0),
@@ -1007,6 +1052,40 @@ if (data.schema !== 1) {
       });
       into.appendChild(bar);
       into.appendChild(key);
+    }
+
+    // The series. Every other view on this tab is a snapshot, so nothing has
+    // ever been able to answer "am I getting cheaper" — the single question a
+    // spend page exists for. Always the FULL history regardless of the window:
+    // a chart that shrank with the window could not show you that last month
+    // was worse, which is the comparison worth having.
+    var series = cost.per_day || [];
+    if (series.length > 1) {
+      into.appendChild(el('h3', null, 'By day'));
+      var peak = 0;
+      series.forEach(function (d) {
+        var v = metric === 'usd' ? (d.usd || 0) : d.tokens;
+        if (v > peak) peak = v;
+      });
+      var days = el('div', 'days');
+      series.forEach(function (d) {
+        var value = metric === 'usd' ? (d.usd || 0) : d.tokens;
+        var col = el('div', 'day');
+        var bar = el('i');
+        bar.style.height = (peak > 0 ? Math.max(2, (value / peak) * 100) : 0) + '%';
+        // Inside the window is the emphasis; outside it is context, not
+        // absence — the days either side are exactly what makes the window
+        // legible as a choice.
+        if (w && (d.day < w.from || d.day > w.to)) col.className = 'day out';
+        col.appendChild(bar);
+        col.setAttribute('title', d.day + ' \u2014 ' + fmtTokens(d.tokens) + ' tokens' +
+          (typeof d.usd === 'number' ? ' \u00b7 ' + fmtUsd(d.usd) : ''));
+        days.appendChild(col);
+      });
+      into.appendChild(days);
+      into.appendChild(el('div', 'hint',
+        series[0].day + ' to ' + series[series.length - 1].day + ' \u00b7 ' +
+        series.length + ' day(s) with recorded activity \u00b7 hover a bar for its total'));
     }
 
     [['By model', cost.by_model || [], 'model', []],
@@ -1065,8 +1144,13 @@ if (data.schema !== 1) {
     clear(spBody);
     spBody.appendChild(el('div', 'err', why));
   };
-  if (typeof fetch === 'function') {
-    fetch('cost.json', { headers: { accept: 'application/json' } })
+  // Re-fetches with a chosen window. The server recomputes rather than the
+  // page filtering, because only the server has the per-day buckets and a
+  // page that filtered a total it was handed could only ever subtract wrong.
+  var loadCost = function (window, metric) {
+    if (typeof fetch !== 'function') return;
+    spendWindow = window;
+    fetch('cost.json?window=' + encodeURIComponent(window), { headers: { accept: 'application/json' } })
       .then(function (r) {
         // 404 is not a failure, it is an ANSWER: no such route, so this page
         // is not being served by the board server — a copy on a docs site, a
@@ -1085,7 +1169,7 @@ if (data.schema !== 1) {
           showCostFailure('Spend could not be read: ' + ((payload && payload.error) || 'the server refused the request') + '.');
           return;
         }
-        if (!payload || payload.schema !== 1) {
+        if (!payload || payload.schema !== ${COST_SCHEMA}) {
           showCostFailure('Spend was served in a format this page does not know (schema ' +
             ((payload && payload.schema) || 'absent') + ') — regenerate the board with the Tyran that served it.');
           return;
@@ -1106,11 +1190,14 @@ if (data.schema !== 1) {
           return;
         }
         cost = payload;
-        renderSpend(spBody, 'tokens');
+        renderSpend(spBody, metric || 'tokens');
         var t = cost.totals || {};
+        // CLEARED first: this runs again on every window change, and appending
+        // left one "Spend" heading and one tile stacked up per click.
+        clear(ovSpend);
         var strip = el('div', 'tiles');
         strip.appendChild(tile('spend so far', fmtUsd(t.usd),
-          fmtTokens(t.tokens || 0) + ' tokens · see the Spend tab'));
+          fmtTokens(t.tokens || 0) + ' tokens · ' + windowLabel(cost) + ' · see the Spend tab'));
         ovSpend.appendChild(el('h2', null, 'Spend'));
         ovSpend.appendChild(strip);
       })
@@ -1120,7 +1207,12 @@ if (data.schema !== 1) {
         if (String(location.protocol) === 'file:') return;
         showCostFailure('Spend could not be read: the board server did not answer. It is served, never embedded — start it with: npx @jjanczur/tyran board --dir .tyran --serve');
       });
-  }
+  };
+
+  // The DEFAULT is 30 days, not all time: a plan is billed monthly, so a
+  // month-shaped window is the only one an operator can compare against the
+  // price without doing arithmetic. All time remains one click away.
+  loadCost('30d', 'tokens');
 
   // ---- settings ---------------------------------------------------------
   //

@@ -33,6 +33,7 @@ import {
   openInBrowser,
 } from '../../scripts/board.mjs';
 import { renderBoardError, renderBoardHtml } from '../../scripts/board-html.mjs';
+import { COST_SCHEMA } from '../../scripts/cost.mjs';
 import { BOARD_FILE, BOARD_JSON_FILE, LANES } from '../../scripts/project.mjs';
 import { readJournal, validateJournal } from '../../scripts/journal.mjs';
 
@@ -209,7 +210,9 @@ test('the page fetches spend rather than embedding it, so the artefacts stay byt
   // local, different in every clone — so embedding it would break the
   // byte-exact --check contract and make two people with one journal
   // disagree about what their own board says.
-  assert.ok(html.includes("fetch('cost.json'"), 'the page asks a server for spend');
+  // The URL now carries the chosen window, so match the route rather than a
+  // whole literal — the query string is exactly the part that varies.
+  assert.match(html, /fetch\('cost\.json\?window='/, 'the page asks a server for spend, by window');
   assert.ok(!html.includes('"conductor_token_share":'), 'no spend numbers are baked into the page');
   assert.ok(!files[BOARD_JSON_FILE].includes('conductor_token_share'), 'board.json carries no spend');
   // Over file:// there is no server: the request fails and the section never
@@ -875,4 +878,35 @@ test('--open without --serve is a usage error, like --write', () => {
   const r = run(['--open']);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /--open only means anything with --serve/);
+});
+
+test('the page accepts exactly the cost schema its server sends', () => {
+  // MEASURED REGRESSION, shipped and caught the same day: the client script
+  // carried a literal `payload.schema !== 1`, cost.mjs bumped COST_SCHEMA to
+  // 2, and the whole Spend tab was replaced by "Spend was served in a format
+  // this page does not know (schema 2)" — served BY the page's own server.
+  //
+  // The number now interpolates from the constant, so this test exists to
+  // catch anyone typing it back in.
+  const html = renderBoardHtml(
+    JSON.stringify({
+      schema: 1,
+      as_of: null,
+      totals: { agents: 0, initiatives: 0, tickets: 0, merged: 0, percent: 0 },
+      asks: [], agents: [], paused: [], lanes: {}, errors: [],
+    }),
+  );
+  // Scoped to the cost fetch: `settings.json` has its OWN schema, also gated
+  // on a `payload.schema` literal, and it is legitimately 1. A whole-page
+  // substring search cannot tell the two apart.
+  const start = html.indexOf("fetch('cost.json?window='");
+  assert.ok(start > -1, 'the page must fetch cost.json');
+  const block = html.slice(start, start + 2000);
+  const gate = /payload\.schema !== (\d+)/.exec(block);
+  assert.ok(gate !== null, 'the cost fetch must check the schema it was served');
+  assert.equal(
+    Number(gate[1]),
+    COST_SCHEMA,
+    `the page gates cost on schema ${gate[1]} while its server sends ${COST_SCHEMA}`,
+  );
 });

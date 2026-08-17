@@ -192,6 +192,58 @@ export const PLAN_LABELS = Object.freeze({
  * and strict about the multiplier, because the prefix is the platform's
  * business and the multiplier is the part that changes the price.
  */
+/**
+ * The start of the subscription period containing `now`, given the day the
+ * subscription was created — `YYYY-MM-DD`, or null when it cannot be derived.
+ *
+ * A plan is billed monthly on its anniversary, so "what have I spent this
+ * period" means "since the most recent anniversary at or before today". That
+ * is the only window whose comparison against the monthly price needs no
+ * arithmetic from the reader.
+ *
+ * SHORT MONTHS ARE THE WHOLE DIFFICULTY. A subscription created on the 31st
+ * has no 31st in February, and naive date maths rolls that into March 3rd —
+ * which lands in the FUTURE and produces a period that has not begun. Every
+ * overflowing day clamps to the last day of its month instead, which is what
+ * billing does. Tested at every boundary, because this is wrong once a year
+ * and silently.
+ */
+export function periodStart(createdAt, now) {
+  // Strings only. `new Date(null)` is epoch zero, not an invalid date, so a
+  // null subscription date would otherwise produce a confident 1970
+  // anniversary and a window sweeping in everything ever recorded.
+  if (typeof createdAt !== 'string' || typeof now !== 'string') return null;
+  const created = new Date(createdAt);
+  const at = new Date(now);
+  if (!Number.isFinite(created.getTime()) || !Number.isFinite(at.getTime())) return null;
+  if (at < created) return null;
+
+  const anniversary = created.getUTCDate();
+  // Candidate: the anniversary within the current month. If that is still in
+  // the future, the period began in the previous month.
+  let year = at.getUTCFullYear();
+  let month = at.getUTCMonth();
+  if (clampedDay(year, month, anniversary) > at.getUTCDate()) {
+    month -= 1;
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+  }
+  const day = clampedDay(year, month, anniversary);
+  const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  // Never earlier than the subscription itself: the first period starts the
+  // day it was created, not on an anniversary that predates it.
+  const createdDay = createdAt.slice(0, 10);
+  return iso < createdDay ? createdDay : iso;
+}
+
+/** `day`, or the last day of that month when the month is too short for it. */
+function clampedDay(year, month, day) {
+  const lastOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return Math.min(day, lastOfMonth);
+}
+
 export function planOfTier(tier) {
   if (typeof tier !== 'string') return null;
   const key = tier.trim().toLowerCase();

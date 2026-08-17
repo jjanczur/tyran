@@ -2,6 +2,29 @@
 
 ## Install
 
+**One command, then one restart, then one paste.** That is the whole of it,
+and the restart is the only part no script can do — Claude Code loads plugins
+at startup and nothing inside a session can make the app reload itself.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jjanczur/tyran/main/install.sh | sh
+```
+
+It checks Node, installs the plugin, installs the secrets scanner the write
+gate needs, and then prints the prompt to paste after you restart. That last
+prompt runs setup, proves the install works, and **opens the dashboard in your
+browser** — because everything before that point is files on disk, and the
+board is where any of it becomes something you can look at.
+
+You do not need to know what a gate, a tier or an autonomy class is to use
+this. Setup works out what it can from the repository and asks you at most one
+question in ordinary words. Everything it decides is written down with the
+reason, and all of it is editable later from the dashboard's **Settings** tab
+rather than by hand.
+
+## Install, step by step
+
+
 **Paste this into Claude Code and let it install itself.** `/plugin` is a
 slash command a human has to type, so this asks for the same steps through
 the `claude` CLI instead, which Claude Code can run on its own — followed by

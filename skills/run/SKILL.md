@@ -80,6 +80,16 @@ English regardless.
    - **dry-run every automaton** for one no-op iteration before you trust it
      with unattended work. Trust dialogs and missing dependencies surface
      then, not at 3am.
+   - **exercise cloud access, never infer it.** A profile in `~/.aws/config`, a
+     key in the environment and a role named in a template are three claims
+     that the call you actually need will succeed — none of them is the call.
+     Make one cheap read-only request per service the plan names, starting with
+     an identity check (`aws sts get-caller-identity` and its equivalents) and
+     then a `list`/`describe` on the one resource you will touch, and record
+     the account, region and profile as a `decision`. This is the teammate
+     probe two bullets up, one layer out: availability that was inferred rather
+     than exercised has already been wrong here, and the cloud version of that
+     mistake surfaces at deploy time — after the work, in front of the operator.
 5. **Project configuration — detect it yourself.**
    - If `.tyran/config.yaml` exists, read it and treat it as binding.
    - Otherwise send `tyran:scout` to establish: (a) the **stack** — languages,
@@ -295,6 +305,16 @@ open one.
    your scope without the domain owner's consent — proposals go to `NOTES.md`.
    Secrets never enter the repo. Production data only through the accounts the
    configuration names.
+   - **The gate below is a way in, so it has its own rule.** `journal.mjs ask`
+     writes the question into the journal, and `answer.mjs apply` folds the
+     operator's reply back as a `decision` — both in a file you commit. **Never
+     ask for a credential's VALUE. Ask where it lives**: the SSM parameter
+     NAME, the secrets-manager key, the vault path — something whose disclosure
+     costs nothing and which the machine doing the work can already resolve.
+     *"Which SSM parameter holds the staging database password?"* is a question
+     whose answer is safe in a committed file. *"What is the staging database
+     password?"* is a leak with a ticket number on it, and the operator who
+     pasted it now has a credential to rotate.
 6. **Gates are the only stops:** plan acceptance (L) or concept acceptance
    (XL); product, visual and irreversible decisions, put in plain language
    with your recommendation; anything hard to undo or visible outside the

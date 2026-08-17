@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.35 — 2026-08-17
+
+### Three surfaces promised a consolidation step that nobody implements
+
+`knowledge.mjs audit` printed, in its own output, *"/tyran:retro
+consolidates, writing a NEW file for review"*. Both doc surfaces said the same.
+Grep `skills/retro/SKILL.md` and `agents/retro.md`: there is no consolidation
+step in either, and no such file has ever been written.
+
+A tool that names a downstream step BY NAME is the last place a reader will
+doubt it, which is how this survived on three surfaces at once — worse than
+ADR-21's three spellings of one answer, because it is three spellings of a
+NON-answer.
+
+What the retrospective really does to `.tyran/knowledge/` is counter upkeep:
+it folds each report's knowledge-brief verdicts into the entries' counters,
+retires an entry the counters have written off, and splits one `doctor --state`
+flags as `knowledge-entry-oversized`. **Merging two overlapping entries is
+still yours**, and all three surfaces now say so.
+
+Two tests, because correcting one surface was never going to be enough: the
+audit's own output makes no such claim, and either doc growing it back fails
+while `scripts/` has no consolidation — stepping aside automatically if
+someone builds it, so the test blocks the false promise without blocking the
+feature. It stays specced in `NOTES-REQUESTS.md` §12.2.
+
 ## 0.1.34 — 2026-08-17
 
 ### The dashboard starts itself

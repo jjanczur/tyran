@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -297,4 +297,42 @@ test('the audit never edits — it returns a measurement', () => {
   const before = JSON.stringify(entries);
   auditEntries(entries, { budget: 4000 });
   assert.equal(JSON.stringify(entries), before, 'inputs are untouched');
+});
+
+test('the audit does not promise a consolidation step that nobody implements', () => {
+  // It did, for as long as the feature has existed: the audit printed
+  // "/tyran:retro consolidates, writing a NEW file for review", and both doc
+  // surfaces said the same. Grep the skill and the agent — there is no
+  // consolidation step in either, and no such file is ever written.
+  //
+  // A tool that names a downstream step BY NAME is the last place a reader
+  // will doubt it, which is what made this survive three surfaces.
+  const d = store({ 'a.yaml': [entry()] });
+  const r = cli(['audit', '--dir', d]);
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(
+    r.stdout,
+    /consolidat/i,
+    'the audit must not claim a consolidation step until one exists',
+  );
+  // What it SHOULD say is what the retro really does to this store.
+  assert.match(r.stdout, /never edits/);
+});
+
+test('no shipped surface claims consolidation while no code implements it', () => {
+  // The claim lived in three places at once, which is why correcting one was
+  // never going to be enough. This test fails if any of them grows it back
+  // while `scripts/` still has no consolidation.
+  const root = fileURLToPath(new URL('../..', import.meta.url));
+  const implemented = readdirSync(join(root, 'scripts'))
+    .filter((f) => f.endsWith('.mjs'))
+    .some((f) => /export function consolidate|'consolidate'/.test(readFileSync(join(root, 'scripts', f), 'utf8')));
+  if (implemented) return; // someone built it — the claim is then allowed
+  for (const surface of ['docs/self-improvement.md', 'site/src/content/docs/self-improvement.mdx']) {
+    const text = readFileSync(join(root, surface), 'utf8');
+    const promises = text
+      .split('\n')
+      .filter((l) => /consolidat/i.test(l) && !/nothing merges|said otherwise|still yours/i.test(l));
+    assert.deepEqual(promises, [], `${surface} promises consolidation, which nothing implements`);
+  }
 });

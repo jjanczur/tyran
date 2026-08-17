@@ -400,6 +400,17 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
         title: null,
         deps: null,
         agents: [],
+        // The same spawns as `agents`, by REFERENCE rather than by name, so a
+        // ticket can answer "what actually ran here" — which model, from when
+        // to when, ending in what verdict. `agents` stays a list of names
+        // because BOARD.md and the lane cards both read it as one.
+        //
+        // References, not copies, on purpose: the `report` fold mutates a
+        // spawn's status, verdict and reportTs after this push, and a copy
+        // taken at spawn time would freeze every run as `running` with no
+        // verdict — which is exactly the row an operator opens a finished
+        // ticket to read.
+        runs: [],
         report: null,
         review: null,
         merge: null,
@@ -482,7 +493,11 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           }
         }
         state.agents.push(agent);
-        if (data.ticket != null) ticketOf(data.ticket, ts).agents.push(agent.agent);
+        if (data.ticket != null) {
+          const onTicket = ticketOf(data.ticket, ts);
+          onTicket.agents.push(agent.agent);
+          onTicket.runs.push(agent);
+        }
         break;
       }
       case 'report': {
@@ -909,6 +924,25 @@ export function boardOf(state, { staleHours = DEFAULT_STALE_HOURS } = {}) {
       // discarded at fold time, so the board could say a ticket had come back
       // and never why — the one thing the reader opens the card for.
       report_text: t.report?.text ?? null,
+      // The two lifecycle facts the LANE could only imply. `done` said a
+      // ticket was merged and never which commit; `changes-requested` said a
+      // review had come back and never who wrote it. Both are in the journal
+      // — `review` carries ticket/verdict/by and `merge` carries ticket/sha —
+      // and neither reached the one surface people open to ask.
+      review: t.review === null ? null : { verdict: t.review.verdict, by: t.review.by, ts: t.review.ts },
+      merge: t.merge === null ? null : { sha: t.merge.sha, mode: t.merge.mode, ts: t.merge.ts },
+      // What actually ran, in spawn order: which agent, on which model, from
+      // when to when, ending in what verdict. `worked_by` answers "who
+      // touched this"; this answers "what did it cost me and how did it go",
+      // which is the question a finished ticket is opened for.
+      execution: t.runs.map((a) => ({
+        agent: a.agent,
+        role: a.role,
+        model: a.model,
+        started: a.spawnTs,
+        ended: a.reportTs,
+        verdict: a.verdict,
+      })),
       annotation: annotations.length > 0 ? annotations.join(' · ') : null,
     });
   }

@@ -14,6 +14,17 @@ ends up approving their own patch. This removes the easy path, not every path
 — `Bash` can still write — so treat it as a boundary you keep, not a wall
 that keeps you.
 
+**Never retype evidence. Ask for the file.** You also have no MCP tools, so a
+database row or an API response someone else fetched can only reach you as
+text in the handoff — and text in a handoff gets retyped. Measured on a
+production run: 1.6% of hand-copied values were silently wrong, which makes a
+reviewer that mistranscribes evidence worse than no reviewer, because the
+verdict carries authority the numbers do not deserve. When a claim rests on
+output you cannot obtain yourself, require the raw bytes on disk and `Read`
+them: reply asking for the path, do not reason about the retyped copy. A
+value you read from a file is evidence; a value someone pasted into a
+sentence is a claim about evidence.
+
 1. **Read the whole diff** plus the story file that holds the acceptance
    criteria. **Follow the `code-review` skill for the sweep** — it carries the
    dimensions a diff is read against and the rule that you try to refute your

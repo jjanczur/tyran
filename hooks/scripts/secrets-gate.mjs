@@ -62,9 +62,9 @@
  * It is never interpolated into another command and never expanded.
  */
 import { spawn } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -110,8 +110,83 @@ const MAX_FINDINGS_SHOWN = 10;
 export const MAX_PATH_CHARS = 120;
 export const MAX_RULE_CHARS = 60;
 
-/** Where the scanner lives. An operator may point at a pinned build. */
-export const GITLEAKS_BIN = () => process.env.TYRAN_GITLEAKS_BIN || 'gitleaks';
+/**
+ * Where the scanner lives, in order of authority.
+ *
+ *   1. TYRAN_GITLEAKS_BIN — the operator pointing at a build they chose.
+ *   2. `gitleaks` on PATH — the machine's own, if it has one.
+ *   3. ~/.tyran/bin/gitleaks — the pinned build `scripts/ensure-gitleaks.mjs`
+ *      fetched and checksummed, for a machine that had none.
+ *
+ * Step 3 exists because the prerequisite was the wall. This gate refuses
+ * every commit and push until a scanner exists, and it refuses rather than
+ * warning for a reason that has not changed — but the design assumed the
+ * operator could install a binary, and for the people now adopting Tyran that
+ * is often false: no Homebrew, no admin rights, Windows. Their realistic
+ * response to "install gitleaks and re-run" is to switch this hook off, and a
+ * gate nobody can satisfy protects nothing.
+ *
+ * It is the HOME directory and deliberately not `<repo>/.tyran/bin/`, which
+ * was the first shape of this and is worse in a way worth recording: a path
+ * inside the repository travels with a clone, so a planted binary that
+ * reports clean on everything would arrive with the checkout — an attack the
+ * tracked-only rule for `.gitleaksignore` already exists to prevent, reopened
+ * through a file that is not even in a diff. Under the home directory the
+ * scanner is the operator's machine, exactly like PATH, and one install
+ * serves every repository on it.
+ *
+ * PATH is consulted BEFORE it: a gitleaks the operator installed themselves
+ * is their decision, and a newer one should not be silently displaced by
+ * whatever version Tyran happens to pin.
+ */
+export function gitleaksBin() {
+  const explicit = process.env.TYRAN_GITLEAKS_BIN;
+  if (typeof explicit === 'string' && explicit !== '') return explicit;
+  if (onPath('gitleaks')) return 'gitleaks';
+  return managedScanner() ?? 'gitleaks';
+}
+
+/** Backwards-compatible alias: this was a zero-argument arrow. */
+export const GITLEAKS_BIN = gitleaksBin;
+
+/**
+ * Is a name resolvable through PATH? Checked by looking rather than by
+ * spawning: this runs before every scan, and a spawn to answer "does a spawn
+ * work" costs more than the lookup it is standing in for.
+ */
+function onPath(name) {
+  const entries = String(process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':');
+  const names = process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name];
+  for (const dir of entries) {
+    if (dir === '') continue;
+    for (const candidate of names) {
+      try {
+        if (statSync(join(dir, candidate)).isFile()) return true;
+      } catch { /* not here; keep looking */ }
+    }
+  }
+  return false;
+}
+
+/**
+ * The pinned build under the operator's home, or null.
+ *
+ * Every failure returns null rather than throwing: this runs inside a gate
+ * whose refusal is the product, and an unreadable home directory must degrade
+ * to the ordinary "gitleaks is not installed" refusal — which already carries
+ * instructions — never take the session down with an unhandled error.
+ */
+function managedScanner() {
+  try {
+    const home = homedir();
+    if (typeof home !== 'string' || home === '') return null;
+    const name = process.platform === 'win32' ? 'gitleaks.exe' : 'gitleaks';
+    const path = join(home, '.tyran', 'bin', name);
+    return statSync(path).isFile() ? path : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Suppression files, honoured ONLY when git tracks them. See `suppression`. */
 export const SUPPRESSION_FILES = Object.freeze({
@@ -1028,6 +1103,23 @@ export async function isTracked(repo, path, { runner, timeoutMs }) {
  * unexamined. Reproduced on the first attempt: the range counted 0 commits
  * while origin held none of them.
  */
+/**
+ * The branch HEAD is on, or null when git cannot say (detached HEAD, a repo
+ * with no commits, git unavailable). Null becomes a placeholder in the remedy
+ * rather than a wrong branch name: a command that looks runnable and is not
+ * is worse than one that visibly needs a word filled in.
+ */
+async function currentBranch(repo, { runner, timeoutMs }) {
+  try {
+    const r = await runner('git', ['-C', repo, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { timeoutMs });
+    if (r.spawned !== true || r.timedOut === true || r.code !== 0) return null;
+    const name = String(r.stdout ?? '').trim();
+    return name === '' ? null : name;
+  } catch {
+    return null;
+  }
+}
+
 export async function pushRange(repo, remote, refs, { runner, timeoutMs }) {
   const listed = await git(['-C', repo, 'remote'], { runner, timeoutMs, what: 'listing remotes' });
   const remotes = String(listed).trim().split('\n').filter((r) => r !== '');
@@ -1036,11 +1128,28 @@ export async function pushRange(repo, remote, refs, { runner, timeoutMs }) {
     if (remotes.length === 1) target = remotes[0];
     else if (remotes.length === 0) target = null;
     else {
+      // Hand over the command, do not describe its shape.
+      //
+      // This refusal is CORRECT — excluding commits present on any remote let
+      // a key held on a private upstream reach a public origin unscanned — but
+      // it was reported twice from two installs as a false positive, and both
+      // reporters worked around it rather than satisfying it. The reason is
+      // visible in the old text: `git push <remote> <branch>` is a template,
+      // and the operator has to work out both halves while being told no.
+      //
+      // Everything needed to write the real line is already in hand here, so
+      // it is written. A remedy you can paste is a different object from a
+      // remedy you have to translate, and this gate's whole cost is paid in
+      // the moments people spend deciding whether to route around it.
+      const branch = await currentBranch(repo, { runner, timeoutMs });
+      const ref = branch === null ? '<branch>' : branch;
+      const lines = remotes.map((r) => `    git push ${r} HEAD:refs/heads/${ref}`).join('\n');
       throw new ScanFailure(
         `this push does not name which of ${remotes.length} remotes it targets (${remotes.join(', ')})`,
-        'name the remote explicitly (`git push <remote> <branch>`). Excluding commits that exist ' +
-          'on ANY remote would let a commit held on a private remote be published to a public one ' +
-          'without ever being scanned — measured, not hypothetical.',
+        'name the remote — one of these is the command you meant:\n' +
+          `${lines}\n` +
+          'Excluding commits that exist on ANY remote would let a commit held on a private remote ' +
+          'be published to a public one without ever being scanned — measured, not hypothetical.',
       );
     }
   }

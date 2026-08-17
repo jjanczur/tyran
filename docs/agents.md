@@ -106,8 +106,17 @@ Roles down the side, cost profile across the top:
 | arbitration | **top** | **top** | **top** |
 | acceptance | deep | top | top |
 | retro | work | work | deep |
+| authoring (a skill, an agent, a prompt) | **top** | **top** | **top** |
 | bookkeeping | cheap | cheap | cheap |
 | conductor (**advisory**) | deep | top | top |
+
+`authoring` is separated from `retro` because retro does two unlike things
+with one agent: folding a ledger, which the middle model does fine, and
+writing the text every future session will obey. It sits at `top` with a
+`max` effort floor on a stronger version of the security-review argument — a
+bad security verdict costs one merge, while a bad prompt misroutes every run
+that reads it, for as long as it ships, and it is the one output nothing
+downstream checks. A skill that reads plausibly passes review.
 
 `conductor` is the one row nothing can enforce: the conductor is your own
 session, and no plugin can change a running session's model. The row records

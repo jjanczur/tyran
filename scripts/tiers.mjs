@@ -73,6 +73,11 @@ export const EFFORT_BY_TIER = Object.freeze({
 export const ROLE_EFFORT_FLOOR = Object.freeze({
   'security-review': 'max',
   arbitration: 'high',
+  // Authoring a prompt is the one output nothing downstream checks: a skill
+  // that reads plausibly passes review, and a weak one misroutes every run
+  // that obeys it, quietly, for as long as it ships. Thinking harder is the
+  // cheapest correction available and it is paid once per skill, not per run.
+  authoring: 'max',
 });
 
 /**
@@ -92,6 +97,21 @@ export const ROLE_TIERS = Object.freeze({
   arbitration: { eco: 'top', balanced: 'top', full: 'top' },
   acceptance: { eco: 'deep', balanced: 'top', full: 'top' },
   retro: { eco: 'work', balanced: 'work', full: 'deep' },
+  // Writing a PROMPT — a skill, an agent, the conductor's own instructions.
+  //
+  // Separated from `retro` because retro does two unlike things with one
+  // agent: reading a ledger and folding counters, which the middle model does
+  // fine, and authoring the text that every future session will obey. Routing
+  // the whole of retro at `top` would spend the tier on bookkeeping; routing
+  // the authoring at `work` is the failure this row exists to prevent.
+  //
+  // `top` at EVERY profile, with a floor under it, on the same argument
+  // `security-review` already makes and a stronger version of it: a bad
+  // security verdict costs one merge, while a bad prompt misroutes every run
+  // that reads it, for as long as it ships. It is also the one output nothing
+  // downstream checks — a skill that reads plausibly passes review, and the
+  // cost surfaces later as work done slightly wrong, everywhere, quietly.
+  authoring: { eco: 'top', balanced: 'top', full: 'top' },
   bookkeeping: { eco: 'cheap', balanced: 'cheap', full: 'cheap' },
   // ADVISORY. The conductor is the operator's own session, and no plugin can
   // change a running session's model — so this row records the choice in the
@@ -112,6 +132,10 @@ export const ROLE_TIERS = Object.freeze({
 export const ROLE_FLOOR = Object.freeze({
   'security-review': 'top',
   arbitration: 'top',
+  // So `--profile eco --risk low` cannot quietly write the next skill on the
+  // cheap tier. Every other floor here protects a judgement made once; this
+  // one protects a judgement every later session inherits.
+  authoring: 'top',
   // One weak coordinator spends a whole team's budget on the wrong plan, and
   // the floor is what `--profile eco --risk low` cannot shift out of.
   conductor: 'deep',

@@ -685,6 +685,35 @@ function appendUnderLock(file, event, preread = null) {
   if (issuePrefix !== undefined && isDataObject(stamped.data) && (stamped.data.id === undefined || stamped.data.id === '')) {
     // a fresh object: the `data` the caller passed in stays the caller's
     stamped.data = { ...stamped.data, id: nextIdFrom(read().events, issuePrefix) };
+  } else if (issuePrefix !== undefined && isDataObject(stamped.data) && typeof stamped.data.id === 'string') {
+    // A caller-supplied id that is ALREADY TAKEN is refused.
+    //
+    // Measured in the field: two implementers running in parallel each passed
+    // an id they had worked out for themselves, and both were honoured — the
+    // ledger then held two `F-7`s, and "see F-7" is ambiguous forever, because
+    // history is append-only and nothing detects it later.
+    //
+    // The narrow fix, not the broad one. Refusing EVERY caller-supplied id was
+    // the first proposal and it removes a documented capability — the comment
+    // above says an explicit id still wins, and a test pins it — to prevent a
+    // failure that only ever occurs on COLLISION. So collision is what this
+    // refuses, and a fresh explicit id still passes untouched.
+    //
+    // Inside the lock, on the same read as the mint above: a check outside it
+    // would let two concurrent writers both pass and both append, which is the
+    // exact race being closed.
+    const taken = read().events.some(
+      (e) => e?.ev === stamped.ev && typeof e?.data?.id === 'string' && e.data.id === stamped.data.id,
+    );
+    if (taken) {
+      throw new Error(
+        `invalid event: ${q(stamped.ev)} id ${q(stamped.data.id)} is already used in ${q(file)}.\n` +
+          '  Two events under one id make every later reference to it ambiguous, and the journal is\n' +
+          '  append-only, so nothing can disambiguate them afterwards.\n' +
+          `  Omit "id" and ${q('append')} issues the next free one, which is what it is for — or run\n` +
+          `  node scripts/journal.mjs next-id ${q(file)} ${q(issuePrefix)}`,
+      );
+    }
   }
   const errors = validateEvent(stamped);
   if (errors.length > 0) {

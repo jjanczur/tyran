@@ -624,7 +624,11 @@ if (data.schema !== 1) {
       fill.style.width = (typeof i.percent === 'number' ? i.percent : 0) + '%';
       bar.appendChild(fill);
       row.appendChild(bar);
-      row.appendChild(el('div', 'iv', i.merged + '/' + i.tickets + ' merged'));
+      var counts = i.merged + '/' + i.tickets + ' merged';
+      // Named only when there is something to name. A findings count of zero
+      // on every row is noise that teaches the eye to skip the column.
+      if (i.findings > 0) counts += ' \u00b7 ' + i.findings + ' finding' + (i.findings === 1 ? '' : 's');
+      row.appendChild(el('div', 'iv', counts));
       var age = ageMsOf(i.last_ts);
       row.appendChild(el('div', i.waiting > 0 ? 'iw warn' : 'iw',
         i.waiting > 0

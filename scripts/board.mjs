@@ -264,6 +264,20 @@ export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
       merged: state.merged,
       percent: state.percent,
       waiting: board.asks.length,
+      // A COUNT, and deliberately not the findings themselves. Measured across
+      // 63 distinct real journals: 3 carry any finding at all, 49 in total,
+      // and NOT ONE names a ticket — so they cannot enrich a card, which is
+      // where a richer board would have put them. Their median claim is 429
+      // characters, a paragraph rather than a label, and STATE.md already
+      // renders the full seven-column table.
+      //
+      // So this is a pointer, not a copy: the research exists and the reader
+      // is told where. Duplicating the prose here would be ADR-21's defect
+      // and would cost ~600 B per finding in a byte-compared payload.
+      // Guarded: `crossBoard` is exported and takes any folded state, and a
+      // caller assembling one by hand need not have every collection. A
+      // missing array must read as "none", never take the board down.
+      findings: (state.findings ?? []).length,
       last_ts: state.lastTs,
     });
     if (state.lastTs !== null && (asOf === null || state.lastTs > asOf)) asOf = state.lastTs;

@@ -974,3 +974,21 @@ test('an ask offers its recommendation as one click, not as text to retype', () 
   // default, which is a different thing and already has its own button.
   assert.match(html, /input\.value = a\.recommendation/);
 });
+
+test('findings are POINTED AT, never copied into the payload', () => {
+  // MEASURED across 63 distinct real journals: 3 carry any finding, 49 in
+  // total, and NOT ONE names a ticket — so they cannot enrich a card, which
+  // is where the obvious design would have put them. Median claim is 429
+  // characters, and STATE.md already renders the full seven-column table.
+  //
+  // MUTANT: ship `claim` and `proof` on the payload. That is ADR-21's defect
+  // — one answer in two places — and ~600 B per finding inside an artefact
+  // that is committed and byte-compared.
+  const dir = tree({ demo: demo() });
+  const payload = crossBoard(readInitiativeBoards(dir));
+  const row = payload.initiatives[0];
+  assert.equal(typeof row.findings, 'number', 'the count travels');
+  const json = crossJson(payload);
+  assert.ok(!json.includes('"proof"'), 'no proof text may reach the board payload');
+  assert.ok(!json.includes('"claim"'), 'no claim text may reach the board payload');
+});

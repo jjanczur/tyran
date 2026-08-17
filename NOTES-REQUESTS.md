@@ -425,7 +425,36 @@ This specific instruction does not take.
 open spawns silent it would fire on every one — the always-on warning this
 repo already refuses by name (see `SEVERITY_BY_CODE`'s comment on `spawn-open`).
 
-Three honest options, in order of preference:
+**DECIDED 2026-08-17 (0.1.36): options 1 and 2, together.** The measurement
+below was made and it settles the mechanism half without waiting for the
+compliance experiment. Folding 420 real journals through `boardOf`: **72
+running agents on boards, `last_signal === since` for 72 of 72** — never once
+an actual signal — with `detail`, `next` and `state: 'blocked'` at zero across
+the same set.
+
+So `last_signal` was not merely empty, it was *spawn time under a label saying
+"when it last spoke"*, published in three places: the agent chip
+(*"N min since last signal"*), the `BOARD.md` column, and the cross-repo line.
+A wrong number reads as a measurement; a blank does not. The fallback is gone,
+the age the chip shows is now measured from `since` and says *"since it
+started"*, and the golden fixture's blind spot is named: its one agent DOES
+signal, so the case that is universal in the wild was the case no fixture
+covered.
+
+Option 2 shipped with it — `agents/implementer.md` now asks for ONE emission,
+at the first blockage. Three of the four were reconstructable from events
+another party writes (the lease IS `started`, the report IS the end of
+`working`), and a self-report that only its author can contradict is worth less
+than one somebody else produces. A blockage is the exception: nothing else in
+the journal says an agent is stuck, or why.
+
+Option 3 was rejected: it would delete the one emission carrying information
+nothing else can reconstruct. `spawn-blocked` and the `blocked` lane stay, now
+fed by an instruction with a plausible chance of being followed. Whether it IS
+followed is still unmeasured — revisit with a count of `progress` events after
+a few real initiatives under the new wording.
+
+The original three options, for the record:
 
 1. **Derive freshness from what agents actually write.** `lease.acquired`
    (434) is already the `started` signal, and it is emitted at the same moment
@@ -459,8 +488,13 @@ Recorded because the list has only ever lived in a conversation.
    388 journals, median proof length short. The ask is for the raw command
    output, which is a payload-size question the byte-compared projection makes
    non-trivial. **S–M.**
-4. **STEP-0 live cloud probe** and **the credential-gate template asking for
-   the SSM parameter NAME**. Both are skill-text edits, both small. **S.**
+4. ~~**STEP-0 live cloud probe** and **the credential-gate template asking for
+   the SSM parameter NAME**.~~ SHIPPED 0.1.36. Both landed in
+   `skills/run/SKILL.md`: cloud access is exercised rather than inferred, on
+   the same argument STEP 0 already makes about Agent Teams; and a gate must
+   never ask for a secret's VALUE, because `journal.mjs ask` writes the
+   question and `answer.mjs apply` folds the reply back as a `decision`, both
+   into a committed file.
 5. **The third policy-gate false positive** — a word ending `.key`/`.pem`
    refused as a file. Deliberately unfixed: the safe direction is refusing,
    and the obvious fix kills the whole credential family.

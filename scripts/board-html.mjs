@@ -501,11 +501,21 @@ if (data.schema !== 1) {
       // Four buckets, not three. The old top bucket was "30 minutes or six
       // hours", which are not the same event: one is a long test run, the
       // other is an agent that is not coming back.
-      var ageMs = ageMsOf(a.last_signal);
-      var ageText = ageMs === null ? 'no signal recorded'
-        : ageMs >= 10800000 ? Math.round(ageMs / 3600000) + ' HOURS since last signal — likely dead'
-        : Math.round(ageMs / 60000) + ' min since last signal';
+      // Measured from SPAWN, and it says so. This line read "N min since last
+      // signal" off a field that held spawn time for 72 of 72 agents across
+      // 420 journals — a real number under a label describing a different
+      // event. The number was worth keeping; the label was not.
+      var ageMs = ageMsOf(a.since);
+      var ageText = ageMs === null ? 'start time unknown'
+        : ageMs >= 10800000 ? Math.round(ageMs / 3600000) + ' HOURS since it started — likely dead'
+        : Math.round(ageMs / 60000) + ' min since it started';
       chip.appendChild(el('div', ageClass(ageMs), ageText));
+      // Shown only when there IS one. An agent that has signalled is rare
+      // enough that it deserves its own line rather than a slot that reads the
+      // same whether it spoke or not.
+      if (a.last_signal) {
+        chip.appendChild(el('div', ageClass(ageMsOf(a.last_signal)), 'said so ' + ago(a.last_signal)));
+      }
       // Signal is what the agent SAID; evidence is what it SHOWED. An agent
       // emitting progress every few minutes while achieving nothing is the
       // healthiest-looking chip on the board, and the strip is sorted by the

@@ -535,13 +535,27 @@ stale agents are still counted, still in the strip, and now said out loud. The
 same correction reaches `BOARD.md`, whose headline says *open* rather than
 *running*, with the stale count beside it.
 
-Every agent now carries two times. **`last_signal`** is what it SAID, from its
-own `progress` events. **`last_evidence`** is what it SHOWED: a `report` with
-its `evidence[]`, a `finding` with its proof, a `review` verdict. The strip
-sorts on evidence, and an agent that has shown nothing ages from its SPAWN
-rather than from the last thing it said — otherwise the chatty agent outranks
-one that produced something twenty minutes ago, which is the exact inversion
-this split exists to correct.
+Every agent carries three times. **`since`** is when it was spawned.
+**`last_signal`** is what it SAID, from its own `progress` events — and it is
+`null` until it says something. **`last_evidence`** is what it SHOWED: a
+`report` with its `evidence[]`, a `finding` with its proof, a `review` verdict.
+The strip sorts on evidence, and an agent that has shown nothing ages from its
+SPAWN rather than from the last thing it said — otherwise the chatty agent
+outranks one that produced something twenty minutes ago, which is the exact
+inversion this split exists to correct.
+
+**`last_signal` fell back to the spawn time until 0.1.36, and that was a wrong
+number rather than a missing one.** Measured over 420 real journals: 72 running
+agents on boards, `last_signal === since` for **72 of 72** — never once an
+actual signal — with `detail`, `next` and `state: "blocked"` at zero across the
+same set. The chip therefore printed *"N min since last signal"* about agents
+that had never signalled, and the golden fixture missed it because its one
+agent does signal: the case that is universal in the wild was the case no
+fixture covered. The age is still shown, because an agent open for six hours is
+worth flagging — it now says *"since it started"*, which is what it measures.
+`agents/implementer.md` asked for four `progress` emissions per story and got
+**one across 388 journals**; it now asks for one, at a blockage, which is the
+only one of the four that carries something no other event can reconstruct.
 
 There is deliberately no doctor finding for it. The threshold that separates
 "quiet because the work is hard" from "quiet because nothing is happening" is

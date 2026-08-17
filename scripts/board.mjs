@@ -234,6 +234,7 @@ export const MAX_LOGGED_ERRORS = 20;
 
 export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
   const asks = [];
+  const summaries = [];
   const agents = [];
   const paused = [];
   const logged = [];
@@ -246,6 +247,39 @@ export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
   for (const { name, state, board, files: docs } of initiatives) {
     merged += state.merged;
     tickets += state.ticketList.length;
+    // Per-initiative, because one blended percentage over every initiative is
+    // not a fact about any of them: an operator reading "50%" across four
+    // slugs cannot tell which is nearly done from which has not started.
+    //
+    // The TITLE is the point of the row. `init.created` has carried a written
+    // sentence all along — "Settings on the board: edit config and the
+    // autonomy policy from the page" — and the board showed the directory
+    // slug. `waiting` and `last_ts` are here rather than a computed idle time
+    // because this payload is byte-compared under `--check` and reads no
+    // clock; the page ages them, exactly as it already ages agents.
+    summaries.push({
+      name,
+      title: typeof state.created?.data?.title === 'string' ? state.created.data.title : null,
+      tickets: state.ticketList.length,
+      merged: state.merged,
+      percent: state.percent,
+      waiting: board.asks.length,
+      // A COUNT, and deliberately not the findings themselves. Measured across
+      // 63 distinct real journals: 3 carry any finding at all, 49 in total,
+      // and NOT ONE names a ticket — so they cannot enrich a card, which is
+      // where a richer board would have put them. Their median claim is 429
+      // characters, a paragraph rather than a label, and STATE.md already
+      // renders the full seven-column table.
+      //
+      // So this is a pointer, not a copy: the research exists and the reader
+      // is told where. Duplicating the prose here would be ADR-21's defect
+      // and would cost ~600 B per finding in a byte-compared payload.
+      // Guarded: `crossBoard` is exported and takes any folded state, and a
+      // caller assembling one by hand need not have every collection. A
+      // missing array must read as "none", never take the board down.
+      findings: (state.findings ?? []).length,
+      last_ts: state.lastTs,
+    });
     if (state.lastTs !== null && (asOf === null || state.lastTs > asOf)) asOf = state.lastTs;
     for (const a of board.asks) asks.push({ ...a, init: name });
     for (const a of board.agents) agents.push({ ...a, init: name });
@@ -329,6 +363,10 @@ export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
     stop: stop === null ? null : { stopped: stop.stopped, reason: stop.reason },
     paused,
     asks,
+    // Ordered by directory name, like everything else here, so two renders of
+    // one journal set are byte-identical. `totals.percent` blends these; the
+    // rows are what let a reader see WHICH initiative it blends.
+    initiatives: summaries,
     agents,
     files,
     lanes,

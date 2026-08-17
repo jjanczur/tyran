@@ -40,6 +40,7 @@ import {
   raiseAsk,
 } from '../../scripts/journal.mjs';
 import { eventsFor } from '../../scripts/answer.mjs';
+import { fold } from '../../scripts/project.mjs';
 
 const SCRIPT = new URL('../../scripts/journal.mjs', import.meta.url).pathname;
 const tmp = () => join(mkdtempSync(join(tmpdir(), 'tyran-journal-')), 'journal.jsonl');
@@ -1446,4 +1447,45 @@ test('an id collision on a type that does not mint ids is not this check', () =>
   append(f, ev({ ev: 'ticket.created', data: { id: 'T-1', title: 'first' } }));
   const again = append(f, ev({ ts: '2026-07-26T10:05:00.000Z', ev: 'ticket.created', data: { id: 'T-1', title: 'restated' } }));
   assert.equal(again.data.id, 'T-1');
+});
+
+test('the conductor is TOLD to write the closing checkpoint the fold consumes', () => {
+  // The fold has closed every open spawn on a closing checkpoint since
+  // 0.1.31, and NOTHING emitted one: measured across 63 real journals, 9 ever
+  // received one, so the feature was inert from the day it shipped. A
+  // consumer with no producer is the shape of dead code that still looks
+  // alive, and the producer here is a sentence in a skill — which is exactly
+  // the kind of thing that vanishes in an edit with nothing objecting.
+  //
+  // MUTANT: delete the instruction. Open spawns from finished initiatives go
+  // back to reading as live agents on the board, indefinitely.
+  const skill = readFileSync(new URL('../../skills/run/SKILL.md', import.meta.url), 'utf8');
+
+  // THE FIRST VERSION OF THIS TEST ASSERTED A STRING AND PASSED ON A BROKEN
+  // COMMAND. It checked that `--phase closed` appeared in the skill — and it
+  // did, inside `journal.mjs checkpoint <file> <init> --phase closed`, a
+  // subcommand that does not exist. The conductor would have got a usage
+  // block and closed nothing, and the test would have stayed green forever.
+  //
+  // So RUN what the skill says. Extract the command, substitute the real
+  // paths, execute it, and assert the fold actually closes the spawn.
+  const line = /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/journal\.mjs" (append [^\n]*checkpoint[^\n]*)\\?\n\s*([^\n]*)/.exec(skill);
+  assert.ok(line !== null, 'the run skill must carry a runnable closing-checkpoint command');
+
+  const file = tmp();
+  execFileSync(process.execPath, [SCRIPT, 'append', file, 'spawn', 'demo', '--actor', 'conductor',
+    '--data', '{"agent":"impl-1","role":"implementer"}'], { encoding: 'utf8' });
+
+  const args = `${line[1]} ${line[2]}`
+    .replace('<abs-journal>', file)
+    .replace('<init>', 'demo')
+    .trim()
+    .match(/'[^']*'|\S+/g)
+    .map((a) => (a.startsWith("'") ? a.slice(1, -1) : a));
+  execFileSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+
+  const state = fold(readJournal(file));
+  const running = [...state.agents].filter((a) => a.status === 'running');
+  assert.equal(running.length, 0, 'the command in the skill must actually close the open spawn');
+  assert.ok(isClosingPhase(state.checkpoint.phase), 'and the phase it writes must be the one the fold recognises');
 });

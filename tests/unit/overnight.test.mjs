@@ -28,6 +28,7 @@ import {
   resumeArgv,
   resumeTook,
   runResume,
+  runState,
   scheduleDecision,
   skipReason,
   watcherAlive,
@@ -593,4 +594,48 @@ test('numeric flags refuse junk that would wake the watcher hours early', () => 
     assert.equal(r.code, 2, JSON.stringify(bad));
     assert.match(r.stderr, /needs a positive number/);
   }
+});
+
+test('run state carries the reset time, which it never has', () => {
+  // SHIPPED BUG, live since the feature existed. `pickWindow` tested
+  // `typeof resets_at === 'string'`, but every writer produces epoch SECONDS
+  // — `statusline.mjs`'s windowOf keeps only finite NUMBERS, and
+  // `usage-source.mjs` normalises the platform's ISO string to the same. So
+  // it returned null for every real payload it was ever given, and the board
+  // could say a pause was in force but never when it would end.
+  //
+  // MUTANT: widen the guard to accept a number and pass it through. The page
+  // would then receive seconds and have to know to multiply — the string is
+  // the shape this function promises in its own doc comment.
+  const repo = mkdtempSync(join(tmpdir(), 'tyran-runstate-'));
+  mkdirSync(join(repo, '.tyran', 'state'), { recursive: true });
+  const resetsAt = Math.floor(Date.parse('2026-08-17T15:30:00.000Z') / 1000);
+  writeFileSync(
+    join(repo, SIDECAR_RELPATH),
+    JSON.stringify({
+      written_at: '2026-08-17T12:00:00.000Z',
+      five_hour: { used_percentage: 32, resets_at: resetsAt },
+      seven_day: { used_percentage: 68, resets_at: resetsAt },
+    }),
+  );
+  const state = runState(repo, Date.parse('2026-08-17T12:01:00.000Z'));
+  assert.equal(state.usage.five_hour.used_percentage, 32);
+  assert.equal(state.usage.five_hour.resets_at, '2026-08-17T15:30:00.000Z');
+  assert.equal(state.usage.seven_day.resets_at, '2026-08-17T15:30:00.000Z');
+});
+
+test('run state says which MODE the gate is in, not only what it can see', () => {
+  // "The gate cannot see" and "the feature was never switched on" are
+  // different facts with the same symptom, and off is the default — so a
+  // warning built on the usage field alone would fire on every repository
+  // that has never enabled overnight mode.
+  const repo = mkdtempSync(join(tmpdir(), 'tyran-runstate-mode-'));
+  mkdirSync(join(repo, '.tyran', 'state'), { recursive: true });
+  assert.equal(runState(repo, Date.now()).limits_mode, 'off', 'no config at all reads as off');
+
+  writeFileSync(
+    join(repo, '.tyran', 'config.yaml'),
+    "profile: 'balanced'\nautonomy: P1\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\nlimits:\n  mode: 'pause'\n",
+  );
+  assert.equal(runState(repo, Date.now()).limits_mode, 'pause');
 });

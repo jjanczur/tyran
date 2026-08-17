@@ -195,6 +195,20 @@ pre.how .c{color:var(--muted)}
    input against the 5-minute write's 1.25x. Without a distinct colour the
    most expensive caching decision on the page is invisible. */
 .comp .s-cache_write_1h{background:var(--ink)}
+/* ---- initiatives ---- */
+.inits{display:flex;flex-direction:column;gap:.3rem;margin:.5rem 0}
+.initrow{display:grid;grid-template-columns:minmax(0,1.6fr) 5rem auto minmax(0,1fr);
+  gap:.6rem;align-items:center;padding:.35rem .5rem;border-radius:4px}
+/* An initiative nobody can move without the operator is the one thing on this
+   section worth catching an eye. */
+.initrow.waiting{background:color-mix(in srgb,var(--brass) 12%,transparent)}
+.initrow .il{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.initrow .islug{color:var(--muted);margin-left:.4rem;font-size:.85em}
+.initrow .ib{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.initrow .ib i{display:block;height:100%;background:var(--sage)}
+.initrow .iv,.initrow .iw{color:var(--muted);font-size:.9em;white-space:nowrap}
+.initrow .iw.warn{color:var(--brass);font-weight:600}
+
 /* ---- the per-day series ---- */
 .days{display:flex;align-items:flex-end;gap:2px;height:74px;margin:.5rem 0 .3rem;
   overflow-x:auto;padding-bottom:2px}
@@ -572,6 +586,59 @@ if (data.schema !== 1) {
     ov.appendChild(first);
   }
 
+  // ---- initiatives, and the ones that have stopped moving ----------------
+  //
+  // MEASURED, and the reason this section exists rather than an archive: of 63
+  // real journals, 43 were waiting on a question nobody answered and only 6
+  // were finished-and-archivable. The board was not cluttered with completed
+  // work; it was full of ABANDONED work, and archiving the finished 6 would
+  // have removed the only initiatives at 100% and pulled the headline
+  // percentage down.
+  //
+  // "Waiting" is the initiative's own count of open operator questions. The
+  // idle time is computed HERE, from last_ts, because the payload is
+  // byte-compared and reads no clock — the same split the agent strip uses.
+  var inits = Array.isArray(data.initiatives) ? data.initiatives : [];
+  if (inits.length > 0) {
+    var stalled = inits.filter(function (i) { return i.waiting > 0; }).sort(function (a, b) {
+      return (ageMsOf(b.last_ts) || 0) - (ageMsOf(a.last_ts) || 0);
+    });
+    ov.appendChild(el('h2', null, 'Initiatives'));
+    if (stalled.length > 0) {
+      ov.appendChild(el('div', 'hint',
+        stalled.length + ' of ' + inits.length + ' are waiting on an answer from you. ' +
+        'Longest-waiting first — an initiative with an open question does not move until it is answered.'));
+    }
+    var table = el('div', 'inits');
+    var ordered = stalled.concat(inits.filter(function (i) { return !(i.waiting > 0); }));
+    ordered.forEach(function (i) {
+      var row = el('div', i.waiting > 0 ? 'initrow waiting' : 'initrow');
+      // The TITLE, which the journal has carried all along while this page
+      // showed a directory slug.
+      var label = el('div', 'il');
+      label.appendChild(el('b', null, i.title || i.name));
+      if (i.title) label.appendChild(el('span', 'islug', i.name));
+      row.appendChild(label);
+      var bar = el('div', 'ib');
+      var fill = el('i');
+      fill.style.width = (typeof i.percent === 'number' ? i.percent : 0) + '%';
+      bar.appendChild(fill);
+      row.appendChild(bar);
+      var counts = i.merged + '/' + i.tickets + ' merged';
+      // Named only when there is something to name. A findings count of zero
+      // on every row is noise that teaches the eye to skip the column.
+      if (i.findings > 0) counts += ' \u00b7 ' + i.findings + ' finding' + (i.findings === 1 ? '' : 's');
+      row.appendChild(el('div', 'iv', counts));
+      var age = ageMsOf(i.last_ts);
+      row.appendChild(el('div', i.waiting > 0 ? 'iw warn' : 'iw',
+        i.waiting > 0
+          ? i.waiting + ' waiting on you \u00b7 quiet ' + ago(i.last_ts)
+          : (age === null ? '' : 'last moved ' + ago(i.last_ts))));
+      table.appendChild(row);
+    });
+    ov.appendChild(table);
+  }
+
   ov.appendChild(el('h2', null, 'Agents'));
   // Named, not implied by the order: the strip is sorted stalest-first by the
   // server, and a reader who does not know that reads the first chip as the
@@ -805,6 +872,21 @@ if (data.schema !== 1) {
     send.setAttribute('type', 'button');
     var useDefault = hasDefault ? el('button', 'sbtn', 'Take the default') : null;
     if (useDefault) useDefault.setAttribute('type', 'button');
+    // The recommendation was already shown, as TEXT, and the only way to
+    // accept it was to retype it into the box below it. For an operator who
+    // is not an engineer that gap is most of the difficulty of the whole
+    // page: the agent has said what it thinks should happen and the human is
+    // asked to transcribe it. This fills the box instead of submitting, so
+    // the wording stays editable and the answer is still deliberate.
+    var useRec = a.recommendation ? el('button', 'sbtn', 'Use the recommendation') : null;
+    if (useRec) {
+      useRec.setAttribute('type', 'button');
+      useRec.addEventListener('click', function () {
+        input.value = a.recommendation;
+        input.focus();
+        holdRefresh();
+      });
+    }
     var status = el('div', 'sstat');
 
     var submit = function (text) {
@@ -847,6 +929,7 @@ if (data.schema !== 1) {
 
     box.appendChild(input);
     acts.appendChild(send);
+    if (useRec) acts.appendChild(useRec);
     if (useDefault) acts.appendChild(useDefault);
     box.appendChild(acts);
     box.appendChild(status);

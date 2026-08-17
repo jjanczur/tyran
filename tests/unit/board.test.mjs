@@ -910,3 +910,85 @@ test('the page accepts exactly the cost schema its server sends', () => {
     `the page gates cost on schema ${gate[1]} while its server sends ${COST_SCHEMA}`,
   );
 });
+
+// --- the initiatives section, which replaced archiving ----------------------
+
+test('each initiative carries its own title and progress, not just a slug', () => {
+  // MEASURED: `init.created` has carried a written sentence since the journal
+  // existed — "The kanban board: one screen that answers what is going on" —
+  // and the board rendered the DIRECTORY NAME. One blended percentage over
+  // several initiatives is also not a fact about any of them: an operator
+  // seeing 47% across three slugs cannot tell which is nearly done.
+  const dir = tree({ alpha: demo(), beta: demo().replaceAll('"init":"demo"', '"init":"beta"') });
+  const payload = crossBoard(readInitiativeBoards(dir));
+  assert.equal(payload.initiatives.length, 2);
+  assert.deepEqual(payload.initiatives.map((i) => i.name), ['alpha', 'beta']);
+  for (const row of payload.initiatives) {
+    assert.equal(typeof row.title, 'string', 'the human title must reach the payload');
+    assert.ok(row.title.length > 0);
+    assert.equal(typeof row.percent, 'number');
+    assert.equal(row.tickets, 3);
+    assert.equal(row.merged, 1);
+  }
+});
+
+test('an initiative waiting on the operator is countable from the payload', () => {
+  // The whole reason this section exists instead of an archive. Measured
+  // across 63 real journals: 43 were waiting on a question nobody answered
+  // and only 6 were finished-and-archivable, so the board was full of
+  // ABANDONED work rather than completed work.
+  const dir = tree({ demo: demo() });
+  const payload = crossBoard(readInitiativeBoards(dir));
+  assert.equal(payload.initiatives[0].waiting, 2, 'the fixture has two waiting-operator gates');
+  assert.equal(payload.initiatives[0].waiting, payload.asks.length);
+});
+
+test('the payload reads no clock, so the section cannot break --check', () => {
+  // MUTANT: compute an idle time here instead of shipping `last_ts`. Every
+  // render would then differ from the last and `board.mjs --check` — the
+  // byte-exact contract this whole layer rests on — would fail forever.
+  const dir = tree({ demo: demo() });
+  const once = crossJson(crossBoard(readInitiativeBoards(dir)));
+  const twice = crossJson(crossBoard(readInitiativeBoards(dir)));
+  assert.equal(once, twice, 'two renders of one journal set must be byte-identical');
+  for (const row of crossBoard(readInitiativeBoards(dir)).initiatives) {
+    assert.match(row.last_ts, /^\d{4}-\d{2}-\d{2}T/, 'a timestamp from the journal, never a computed age');
+  }
+});
+
+test('the page renders the initiative rows and names what is waiting', () => {
+  const html = demoHtml();
+  assert.match(html, /data\.initiatives/, 'the client must read the initiatives rows');
+  assert.match(html, /waiting on you/, 'the stalled count must be spelled out, not implied by a colour');
+  assert.match(html, /initrow/);
+});
+
+test('an ask offers its recommendation as one click, not as text to retype', () => {
+  // For a non-technical operator the gap WAS the difficulty: the agent had
+  // already said what it thought should happen, and accepting it meant
+  // transcribing the sentence into the box underneath it.
+  const html = demoHtml();
+  assert.match(html, /Use the recommendation/);
+  // MUTANT: submit on click. Filling the box keeps the wording editable and
+  // the answer deliberate — a one-click SEND turns a recommendation into a
+  // default, which is a different thing and already has its own button.
+  assert.match(html, /input\.value = a\.recommendation/);
+});
+
+test('findings are POINTED AT, never copied into the payload', () => {
+  // MEASURED across 63 distinct real journals: 3 carry any finding, 49 in
+  // total, and NOT ONE names a ticket — so they cannot enrich a card, which
+  // is where the obvious design would have put them. Median claim is 429
+  // characters, and STATE.md already renders the full seven-column table.
+  //
+  // MUTANT: ship `claim` and `proof` on the payload. That is ADR-21's defect
+  // — one answer in two places — and ~600 B per finding inside an artefact
+  // that is committed and byte-compared.
+  const dir = tree({ demo: demo() });
+  const payload = crossBoard(readInitiativeBoards(dir));
+  const row = payload.initiatives[0];
+  assert.equal(typeof row.findings, 'number', 'the count travels');
+  const json = crossJson(payload);
+  assert.ok(!json.includes('"proof"'), 'no proof text may reach the board payload');
+  assert.ok(!json.includes('"claim"'), 'no claim text may reach the board payload');
+});

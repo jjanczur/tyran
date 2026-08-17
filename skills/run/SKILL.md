@@ -452,6 +452,32 @@ open one.
   a lease still held by an agent that has already reported. An orphaned lease
   blocks the next initiative from a resource nobody is using, and the person
   who hits it has no way to know it is stale.
+- **Close the initiative when it is closed**, with the retrospective recorded
+  and the leases released:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs" append <abs-journal> checkpoint <init> \
+    --actor conductor --data '{"phase":"closed","next_steps":[]}'
+  ```
+
+  `append ... checkpoint`, not a `checkpoint` subcommand — there is no such
+  subcommand, and the first draft of this line invented one. It would have
+  printed a usage block and closed nothing.
+
+  This is one line and it is load-bearing. The projection closes every still-
+  open spawn on a closing checkpoint, which is what stops an agent that
+  finished weeks ago from reading as live work, and it is the only signal any
+  reader has that an initiative is DONE rather than abandoned mid-flight.
+
+  Measured across 63 real journals: **9 ever received one**, while 43 sat
+  waiting on a question nobody answered. Nothing had ever told you to write
+  it — the fold that consumes it shipped, and the event that triggers it was
+  never emitted by anything, so the feature has been inert since it landed.
+
+  A closing checkpoint is not the same as "every ticket merged". Say it when
+  the work is over, including when it is over because it was abandoned — an
+  initiative someone walked away from is finished too, and saying so is what
+  keeps the board honest about which of them are still waiting on you.
 - **A usage-gate refusal is a wind-down order, not an obstacle.** Near the
   subscription window the gate refuses everything except checkpointing;
   its refusal text IS the checklist — follow it verbatim, in order, then

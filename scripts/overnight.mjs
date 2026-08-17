@@ -228,15 +228,37 @@ export function runState(repo, nowMs = Date.now()) {
       five_hour: pickWindow(sidecar.five_hour),
       seven_day: pickWindow(sidecar.seven_day),
     },
+    // Which mode the gate is IN, not only what it can see. Without this a page
+    // cannot tell "the gate cannot see" from "the feature was never switched
+    // on", and off is the default (templates/config.yaml) — so a telemetry
+    // warning built on the `usage` field alone would fire on every repository
+    // that has never enabled overnight mode.
+    limits_mode: readLimitsFile(repo)?.mode ?? 'off',
   };
 }
 
-/** Numbers and an ISO string only — never a free payload string from a hook. */
+/**
+ * Numbers and an ISO string only — never a free payload string from a hook.
+ *
+ * `resets_at` arrives as epoch SECONDS: `statusline.mjs`'s `windowOf` keeps
+ * only `finiteNumber` values, and `usage-source.mjs` normalises the platform's
+ * ISO string to the same. This function tested `typeof === 'string'` and so
+ * returned null for every real payload it has ever been given — `/run.json`
+ * has never once carried a reset time, and the board's run panel could say a
+ * pause was in force but never when it would end.
+ *
+ * The string half of the guard was not wrong about the OUTPUT: this is the
+ * page's shape, and an ISO string is what a reader wants. It was wrong about
+ * the input. So convert, rather than widening the test and emitting seconds
+ * the page would have to know to multiply.
+ */
 function pickWindow(w) {
   if (w === null || typeof w !== 'object') return null;
+  const seconds = typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) ? w.resets_at : null;
+  const iso = seconds === null ? null : new Date(seconds * 1000);
   return {
     used_percentage: typeof w.used_percentage === 'number' ? w.used_percentage : null,
-    resets_at: typeof w.resets_at === 'string' ? w.resets_at : null,
+    resets_at: iso !== null && Number.isFinite(iso.getTime()) ? iso.toISOString() : null,
   };
 }
 

@@ -112,8 +112,34 @@ export function writeServerRecord(dir, record) {
   }
 }
 
-export function removeServerRecord(dir) {
+/**
+ * Remove the record — but only if it is THIS process's to remove.
+ *
+ * `owner` is the pid the caller claims. It defaults to this process because
+ * the ordinary caller is a server tidying up after itself, and the defect this
+ * guards is precisely a caller tidying up after somebody else: `board.mjs`
+ * registers its `clear` handler on `process.exit` unconditionally, so a
+ * `--serve` that lost the port to EADDRINUSE still ran it on the way out and
+ * deleted the record belonging to the healthy board that HELD the port. That
+ * board went on serving with no record naming it — invisible to `--status`,
+ * unreachable by `--stop`, and stoppable only with `lsof` and a kill. A leaked
+ * server is the exact failure this module was written to end, so it may not be
+ * reintroduced by the cleanup path.
+ *
+ * The guard lives here rather than at the call site on purpose. Ownership
+ * enforced by whoever remembers to check is caller discipline, which this
+ * repository rejects by name in `journal.mjs` and `doctor.mjs`.
+ *
+ * `owner: null` means "any", and `stopServer` is the one caller that has
+ * earned it: it health-probes the port and confirms the board answering there
+ * belongs to this directory before it signals or unlinks anything.
+ */
+export function removeServerRecord(dir, { owner = process.pid } = {}) {
   try {
+    if (owner !== null) {
+      const record = readServerRecord(dir);
+      if (record !== null && record.pid !== owner) return false;
+    }
     rmSync(serverRecordPath(dir), { force: true });
     return true;
   } catch {
@@ -290,7 +316,20 @@ export async function startDetached(
 ) {
   const existing = await findLiveServer(dir, port, { probe });
   if (existing !== null) {
-    return { started: false, reused: true, port: existing.port, url: urlFor(existing.port), pid: existing.health.pid ?? null };
+    // `write` comes back with the reuse so the caller can tell the operator
+    // when the flags on THIS command line did not apply. Start-time flags are
+    // silently inert against a server that is already up, and autostart has
+    // made "already up" the ordinary case rather than the unlucky one — so the
+    // remedy printed on the Spend tab (`--transcripts <dir>`) reported success
+    // and changed nothing for anyone whose board was already running.
+    return {
+      started: false,
+      reused: true,
+      port: existing.port,
+      url: urlFor(existing.port),
+      pid: existing.health.pid ?? null,
+      write: existing.health.write === true,
+    };
   }
   const chosen = await pickPort(dir, port, { probe });
   if (chosen === null) {
@@ -381,7 +420,10 @@ export async function stopServer(dir, { probe = probeHealth, kill = process.kill
   if (record === null) return { stopped: false, reason: 'no board server is recorded for this directory' };
   const health = await probe(record.port);
   if (health === null || !sameDir(health.dir, dir)) {
-    removeServerRecord(dir);
+    // `owner: null` — see removeServerRecord. Clearing a record that names
+    // another pid is this function's JOB, and it has proved the right to it:
+    // either nothing answers, or what answers is not this directory's board.
+    removeServerRecord(dir, { owner: null });
     return { stopped: false, reason: `nothing is answering on port ${record.port} — cleared the stale record` };
   }
   const pid = health.pid ?? record.pid;
@@ -391,7 +433,7 @@ export async function stopServer(dir, { probe = probeHealth, kill = process.kill
   } catch (err) {
     return { stopped: false, reason: `could not signal pid ${pid}: ${String(err?.message ?? err)}` };
   }
-  removeServerRecord(dir);
+  removeServerRecord(dir, { owner: null });
   return { stopped: true, pid, port: record.port };
 }
 

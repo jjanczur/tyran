@@ -193,12 +193,50 @@ test('a half-written record reads as no record at all', async () => {
 
 test('the record round-trips and carries the schema', async () => {
   const dir = tyranDir();
-  writeServerRecord(dir, { pid: 42, port: 4173, url: 'http://127.0.0.1:4173/', write: true });
+  // The pid is this process's because removal is now ownership-checked, and a
+  // real server is always removing its OWN record here.
+  writeServerRecord(dir, { pid: process.pid, port: 4173, url: 'http://127.0.0.1:4173/', write: true });
   const back = readServerRecord(dir);
   assert.equal(back.schema, SERVER_RECORD_SCHEMA);
-  assert.equal(back.pid, 42);
+  assert.equal(back.pid, process.pid);
   removeServerRecord(dir);
   assert.equal(readServerRecord(dir), null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a board that FAILED to start does not delete the record of the one that is running', async () => {
+  // MUTANT: drop the ownership check in removeServerRecord.
+  //
+  // Reproduced live before the fix. With a board already up on 4173, a second
+  // `--serve` loses the bind, prints "port 4173 is already in use", and exits —
+  // running the `clear` handler board.mjs registers on `process.exit`
+  // unconditionally. That deleted the RUNNING board's record. Measured after:
+  //
+  //   $ curl 127.0.0.1:4173/health.json   -> {"tyran_board":true,...,"pid":61160}
+  //   $ ls .tyran/state/                  -> (empty)
+  //   $ board.mjs --stop                  -> "no board server is recorded"
+  //
+  // A server serving with nothing naming it: invisible to --status, unreachable
+  // by --stop, killable only with lsof. That is the leak this module exists to
+  // end, arriving through the cleanup path instead of the start path.
+  const dir = tyranDir();
+  writeServerRecord(dir, { pid: process.pid + 1, port: 4173, url: 'http://127.0.0.1:4173/', write: true });
+  assert.equal(removeServerRecord(dir), false, 'a record naming another pid is not ours to remove');
+  assert.equal(readServerRecord(dir).pid, process.pid + 1, 'the running board keeps its record');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('stopServer still clears a stale record it did not write', async () => {
+  // The other side of the guard: `owner: null`. stopServer health-probes FIRST,
+  // so by the time it unlinks it has established that nothing is answering (or
+  // that what answers is not this directory's board). Without the exemption the
+  // ownership check would strand exactly the stale records it exists to clear.
+  const dir = tyranDir();
+  writeServerRecord(dir, { pid: process.pid + 1, port: 4173, url: 'http://127.0.0.1:4173/', write: true });
+  const result = await stopServer(dir, { probe: async () => null, kill: () => {} });
+  assert.equal(result.stopped, false);
+  assert.match(result.reason, /cleared the stale record/);
+  assert.equal(readServerRecord(dir), null, 'the stale record is gone');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -215,6 +253,31 @@ test('a live board is reused and NOTHING is spawned', async () => {
   assert.equal(spawned, 0, 'a second server must never be started next to a live one');
   assert.equal(result.reused, true);
   assert.equal(result.port, 4173);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('reuse reports whether the running board can WRITE, so inert flags can be named', async () => {
+  // MUTANT: drop `write` from the reuse result. Start-time flags never reach a
+  // server that is already up, and autostart made "already up" the ordinary
+  // case — so `--detach --write` against a read-only board printed
+  // "already serving", exit 0, and left Settings read-only with nothing on
+  // screen explaining why. The Spend tab's own remedy (`--transcripts <dir>`)
+  // failed the same way, which is worse: the product recommended it.
+  const dir = tyranDir();
+  const ro = await startDetached(dir, {
+    port: 4173,
+    probe: probeOver({ 4173: { tyran_board: true, dir, pid: 7, write: false } }),
+    spawn: () => ({ unref() {}, on() {} }),
+  });
+  assert.equal(ro.reused, true);
+  assert.equal(ro.write, false, 'a read-only board must be reported as read-only');
+
+  const rw = await startDetached(dir, {
+    port: 4173,
+    probe: probeOver({ 4173: { tyran_board: true, dir, pid: 7, write: true } }),
+    spawn: () => ({ unref() {}, on() {} }),
+  });
+  assert.equal(rw.write, true);
   rmSync(dir, { recursive: true, force: true });
 });
 

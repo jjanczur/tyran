@@ -115,6 +115,27 @@ received. The retrospective folds those verdicts into the counters at close
 (the procedure lives in the retro skill, its one home). An entry nobody
 reports as helpful is a retirement candidate on evidence, not on taste.
 
+**The budget is pressure, and somebody has to look at the total.** The brief
+names what it omitted on every run, but nothing added those omissions up —
+and measured on a real install the store had reached the state where
+`brief '**'` returned **1 of 31 entries**: 104,178 codepoints of hard-won
+detail, read by nobody, while a per-entry oversize warning fired five times
+and read as a small untidiness each time.
+
+```bash
+node scripts/knowledge.mjs audit --dir .tyran/knowledge
+```
+
+It answers the aggregate question — how many entries could reach ONE brief,
+how many could not, and which are so wide they cannot appear even alone, where
+no budget a caller passes will ever reach them. `doctor --state` carries the
+same number as `knowledge-store-unreachable`.
+
+It is a MEASUREMENT and never an edit. Which of two overlapping entries is the
+true one is a judgement, and a script that guessed would delete exactly the
+detail the store exists to hold — so consolidation is a retrospective step
+that writes a **new** file for you to review, leaving the original untouched.
+
 ## Where a lesson lands: four stores, four questions
 
 A fourth store is only defensible if it answers a question none of the others

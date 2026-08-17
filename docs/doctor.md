@@ -83,6 +83,7 @@ possible to change one and keep the suite green.
 | `policies-unreadable` | error | `policies/` could not be listed (errno printed) — **not** "zero policies" |
 | `knowledge-not-a-directory` · `policies-not-a-directory` | warning | the path exists but is not a directory, so nothing in it was checked |
 | `knowledge-entry-oversized` | warning | an entry's `text` exceeds the size a budgeted brief can carry — it validates, but it crowds out every other entry `knowledge.mjs brief` would select |
+| `knowledge-store-unreachable` | info | how many entries can reach ONE budgeted brief, and how many cannot. The aggregate of the line above: measured on a real install the per-entry warning fired five times while `brief` was returning 1 of 31 entries and 104,178 codepoints reached nobody. Info, because a store outgrows the budget in the ordinary course of being useful — but the ratio is the number that gets acted on |
 | `policy-kernel-downgrade` | error | a rule that tries to lower a protected kernel path |
 | `policy-rule-dead` | warning | a rule glob that can never match any path |
 | `policy-rule-overruled` | warning | a rule that quietly fails to cover part of what it looks like it covers |

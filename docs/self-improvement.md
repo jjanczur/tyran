@@ -174,7 +174,7 @@ knowledge brief already delivers scoped.
 
 ```
 a correction or a breakage, mid-run
-   │  the agent appends a `finding` event (claim + proof)
+   │  the agent appends a `finding` event (claim + proof, + the command)
    ▼
 a `finding` in the journal                   [one initiative; dies at close]
    │  the retro at close: did something actually BREAK, or is this a discovery?

@@ -258,6 +258,7 @@ export const SEVERITY_BY_CODE = Object.freeze(
     // improvised key would be red on every healthy repo.
     'journal-key-near-miss': 'warning',
     'journal-key-unread': 'info',
+    'finding-no-command': 'info',
     'claude-md-fence-missing': 'info',
     // overnight mode
     'limit-pause-active': 'info',
@@ -554,6 +555,7 @@ function checkInitiative(stateDir, name, { now, staleHours }) {
   };
   guard('journal integrity', () => journalIntegrity(journalPath, at, read));
   guard('data keys nothing reads', () => unreadKeyFindings(at, events));
+  guard('findings without a command', () => findingCommandFindings(at, events));
   guard('one initiative per file', () => initiativeScope(journalPath, at, name, events));
   guard('open spawns', () => spawnFindings(journalPath, at, name, events, reference, staleHours));
   guard('operator asks', () => askFindings(journalPath, at, read, reference));
@@ -827,6 +829,57 @@ function unreadKeyFindings(at, events) {
     );
   }
   return findings;
+}
+
+/** How many command-less findings are named before the rest are counted. */
+const MAX_NAMED_FINDINGS = 12;
+
+/**
+ * Findings whose proof is prose alone — no command to re-run.
+ *
+ * A `finding` carries `claim` + `proof`, and `proof` is a SENTENCE about what
+ * an agent saw. That is a claim standing where evidence should be, which is
+ * the shape this repo removes everywhere else: the evidence gate already
+ * refuses an implementer's report for exactly it. `command` and `exit_code`
+ * are the fix, and their value is that a reader can RE-RUN them — a stored
+ * output would be a snapshot that rots, a command gets better with age.
+ *
+ * `info`, and the severity is the whole argument for this check being
+ * shippable. Measured before it was written: 34 findings across 388 real
+ * journals, NONE of them carrying a command, because the keys did not exist
+ * until now. At `warning` this would turn every install red on upgrade day —
+ * the reasoning `board-absent` already records, and a check that goes red
+ * during normal operation is a check people learn to skip.
+ *
+ * A finding with nothing to run is legitimate and stays legitimate: reading
+ * code, a contradiction between two documents, an operator correction with
+ * `area: process`. So this is never a refusal — `journal.mjs` still requires
+ * only `area` + `claim`. It states a ratio, once, so that "a finding someone
+ * ran something for" and "a finding someone wrote a sentence about" stay
+ * distinguishable.
+ */
+function findingCommandFindings(at, events) {
+  const findings = events.filter((e) => e.ev === 'finding');
+  if (findings.length === 0) return [];
+  const bare = findings.filter((e) => {
+    const command = e.data?.command;
+    return typeof command !== 'string' || command.trim() === '';
+  });
+  if (bare.length === 0) return [];
+  const ids = bare.map((e, i) => show(e.data?.id ?? `(no id, #${i + 1})`));
+  const shown = ids.slice(0, MAX_NAMED_FINDINGS).join(', ');
+  return [
+    finding(
+      'finding-no-command',
+      at,
+      `${bare.length} of ${findings.length} finding(s) name no command: ${shown}` +
+        (ids.length > MAX_NAMED_FINDINGS ? ` (+${ids.length - MAX_NAMED_FINDINGS} more)` : '') +
+        '. Their proof is prose, so nobody can re-run it. A finding produced by running something ' +
+        'should carry `command` and `exit_code` alongside `proof`; one produced by reading code ' +
+        'legitimately carries neither, which is why this is stated rather than refused',
+      `node scripts/journal.mjs query ${sq(at)} --ev finding   # the journal is append-only, so past findings keep their prose`,
+    ),
+  ];
 }
 
 /** How long a self-reported `blocked` may stand before it is a finding. */

@@ -26,9 +26,9 @@
 
 ## Findings
 
-| Id | Area | Claim | Proof | Ticket | By | At |
-|---|---|---|---|---|---|---|
-| F-1 | scripts/** | the suite needs the quoted glob | MODULE_NOT_FOUND without it | &mdash; | impl-2 | 2026-07-26T09:41:45.000Z |
+| Id | Area | Claim | Proof | Command | Exit | Ticket | By | At |
+|---|---|---|---|---|---|---|---|---|
+| F-1 | scripts/** | the suite needs the quoted glob | MODULE_NOT_FOUND without it | node --test tests/unit/ | 1 | &mdash; | impl-2 | 2026-07-26T09:41:45.000Z |
 
 ## Ledger
 

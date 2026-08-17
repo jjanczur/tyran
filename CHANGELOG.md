@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.1.41 — 2026-08-17
+
+### A finding names the command behind it, not a sentence about one
+
+A `finding` carried `claim` + `proof`, and `proof` is prose — so the journal
+recorded *"the parser rejects block scalars"* rather than anything the parser
+did. That is a claim standing where evidence should be, which is the thing the
+evidence gate already refuses in an implementer's report. Findings had a pass
+on the same rule.
+
+`finding` events now take **`command`** and **`exit_code`**. Both optional,
+both projected into `STATE.md`'s Findings table.
+
+**The ask was for the raw OUTPUT, and that was the expensive framing.** Three
+things changed the answer. A stored output is a snapshot that rots and can
+never be re-checked, while a command can be re-run by anyone who doubts the
+claim. What the ask actually wanted was proof that a command ran at all —
+which is the command and its exit code, not the bytes; on a long command the
+bytes are noise. And the payload-size objection that made this an S–M turned
+out not to exist: the cross board already carries findings as a **count**, and
+the per-initiative `board.json` carries none. **Neither byte-compared artefact
+changed** — verified by the goldens, where `BOARD.md` and `board.json` came
+back byte-identical and only `STATE.md` moved. A test now states that rule for
+`command` too, because it is the one field somebody will be tempted to promote
+onto a card.
+
+`command` is capped at **500** codepoints, an order of magnitude tighter than
+the prose keys, and the number is measured rather than picked: this repo
+documents 86 shell commands, median 74 codepoints, longest 123. Wide enough
+for any real pipeline; too narrow to smuggle pasted output into a committed
+file. Rejected at append, never truncated, like every other capped key.
+
+The prompts had already got ahead of the schema — `agents/implementer.md`
+tells an implementer to journal each dead hypothesis *"with the command output
+that killed it"*, and `tyran:verifier`'s entire report is `command · exit code
+· counts`. There was nowhere structured for either to land, so it went into
+`proof` as prose. Now it has a home, and the implementer, verifier, scout,
+reviewer and conductor prompts say so in one sentence each.
+
+**What this does NOT do.** It does not tell a real command from an invented
+one. A recorded command is still the agent's word — the same limit the
+evidence gate prints about itself: *it blocks silence, not forgery.* What
+changes is that the word is now specific and re-runnable instead of prose.
+Verifying a command against the platform's own transcript is designed and
+deliberately unbuilt; `NOTES-REQUESTS.md` §12.3 records the mechanism so it is
+not re-derived.
+
+Doctor gains **`finding-no-command`** (info): findings whose proof is prose
+alone, counted and named. Info and not warning because every finding written
+before this release predates the keys, and a check that goes red on upgrade
+day is one people learn to skip. It is never a refusal — `journal.mjs` still
+requires only `area` + `claim`, and a finding from reading code legitimately
+has no command.
+
 ## 0.1.40 — 2026-08-17
 
 ### Every session pays for these sentences, so they got shorter

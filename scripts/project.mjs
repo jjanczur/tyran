@@ -571,6 +571,12 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           area: data.area ?? null,
           claim: data.claim ?? null,
           proof: data.proof ?? null,
+          // The command that produced the claim, and what it exited with. Kept
+          // beside `proof` rather than folded into it: a reader can re-RUN a
+          // command, which is the one thing a sentence about a command can
+          // never offer.
+          command: data.command ?? null,
+          exit_code: data.exit_code ?? null,
           ticket: data.ticket ?? null,
           confidence: data.confidence ?? null,
           ts,
@@ -1247,12 +1253,14 @@ function renderState(state) {
   parts.push('\n## Findings\n\n');
   parts.push(
     table(
-      ['Id', 'Area', 'Claim', 'Proof', 'Ticket', 'By', 'At'],
+      ['Id', 'Area', 'Claim', 'Proof', 'Command', 'Exit', 'Ticket', 'By', 'At'],
       state.findings.map((f) => [
         inline(f.id),
         inline(f.area),
         inline(f.claim),
         inline(f.proof),
+        inline(f.command),
+        inline(f.exit_code),
         inline(f.ticket),
         inline(f.actor),
         inline(f.ts),

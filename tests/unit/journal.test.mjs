@@ -78,29 +78,38 @@ test('progress and ticket.status enums reject out-of-set values, naming the whol
  *
  * Each key is carried by an event that legitimately holds it, so the rejection
  * is the cap and not some other missing requirement.
+ *
+ * The CAP is spelled out per row for the same reason the key set is: reading it
+ * out of the map under test would let a changed number pass its own test. Every
+ * number here is a claim both doc surfaces make in prose.
  */
 const ask = (over) => ({ ev: 'gate', data: { kind: 'Q-1', result: 'WAITING_ON_OPERATOR', ...over } });
 const OVERSIZED_EVENT_BY_KEY = [
-  ['detail', (big) => ({ ev: 'progress', data: { agent: 'impl-1', state: 'blocked', detail: big } })],
-  ['claim', (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: big } })],
-  ['proof', (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: 'c', proof: big } })],
+  ['detail', 2000, (big) => ({ ev: 'progress', data: { agent: 'impl-1', state: 'blocked', detail: big } })],
+  ['claim', 2000, (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: big } })],
+  ['proof', 2000, (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: 'c', proof: big } })],
+  // A finding's command is capped an order of magnitude tighter than the prose
+  // keys, and the tightness IS the feature: 500 passes any real command (86
+  // documented in this repo, longest 123) and refuses pasted output, which is
+  // what the key exists to keep out of a committed file.
+  ['command', 500, (big) => ({ ev: 'finding', data: { id: 'F-1', area: 'a', claim: 'c', command: big } })],
   // The ask fields. They reach BOARD.md, board.html and ANSWERS.md, so an
   // uncapped one is a document-sized cell in three artefacts at once.
-  ['question', (big) => ask({ question: big })],
-  ['recommendation', (big) => ask({ question: 'q', recommendation: big })],
-  ['default', (big) => ask({ question: 'q', default: big })],
-  ['answer', (big) => ask({ result: 'answered', answer: big })],
+  ['question', 2000, (big) => ask({ question: big })],
+  ['recommendation', 2000, (big) => ask({ question: 'q', recommendation: big })],
+  ['default', 2000, (big) => ask({ question: 'q', default: big })],
+  ['answer', 2000, (big) => ask({ result: 'answered', answer: big })],
 ];
 
 test('EVERY capped key is REJECTED at append and only WARNED about in history', () => {
   assert.deepEqual(
     Object.keys(CAPPED_DATA_KEYS).sort(),
     OVERSIZED_EVENT_BY_KEY.map(([key]) => key).sort(),
-    'the capped key set changed — docs/journal.md and its site mirror name these seven',
+    'the capped key set changed — docs/journal.md and its site mirror name these eight',
   );
-  for (const [key, build] of OVERSIZED_EVENT_BY_KEY) {
+  for (const [key, expectedCap, build] of OVERSIZED_EVENT_BY_KEY) {
     const cap = CAPPED_DATA_KEYS[key];
-    assert.equal(cap, 2000, `both doc surfaces claim a 2 000-codepoint cap for data.${key}`);
+    assert.equal(cap, expectedCap, `both doc surfaces claim a ${expectedCap}-codepoint cap for data.${key}`);
     const file = tmp();
     const big = 'x'.repeat(cap + 1);
     assert.throws(

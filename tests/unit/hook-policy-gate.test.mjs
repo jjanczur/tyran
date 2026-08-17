@@ -2139,3 +2139,42 @@ test('GATED + main + acceptEdits asks; a subagent in the same mode still gets de
   const sub = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'acceptEdits', agentId: 'a1' });
   assert.equal(sub.decision, 'deny');
 });
+
+// --- the ssh-key rule is a key rule, not an `id_` rule ----------------------
+
+test('a SCREAMING_SNAKE constant beginning ID_ is not an ssh private key', () => {
+  // `^id_[a-z0-9]+$/i` was really "any identifier starting with id_", and
+  // `shellPathFindings` runs these rules over every literal WORD of a command,
+  // not only over things shaped like paths. Measured live: a grep for
+  // ID_ISSUED came back refused as an ssh private key.
+  for (const word of ['ID_ISSUED', 'ID_TOKEN', 'ID_SPEND', 'ID_MISSING', 'ID_2', 'id_counter']) {
+    assert.deepEqual(secretReadRules(word), [], `${word} must not be read as a credential`);
+  }
+});
+
+test('every real OpenSSH private key name is still caught', () => {
+  // The narrowing is only safe if it loses none of these. `_sk` is FIDO;
+  // the suffixed forms are the commonest per-host naming there is.
+  const keys = [
+    'id_rsa', 'id_rsa1', 'id_dsa', 'id_ecdsa', 'id_ed25519', 'id_xmss',
+    'id_ecdsa_sk', 'id_ed25519_sk',
+    'id_rsa_github', 'id_ed25519_work', 'id_rsa-personal',
+  ];
+  for (const key of keys) {
+    assert.ok(secretReadRules(key).includes('ssh-private-key'), `${key} must still be recognised`);
+  }
+  // Case-folding is load-bearing: on macOS and Windows these are ONE file, and
+  // a classifier that let casing pick the weaker answer would be walked past
+  // by a rename.
+  assert.ok(secretReadRules('ID_RSA').includes('ssh-private-key'));
+  assert.ok(secretReadRules('Id_Ed25519').includes('ssh-private-key'));
+});
+
+test('the declared cost of the narrowing is bounded by ssh-directory', () => {
+  // A key with a non-algorithm stem is no longer matched by NAME. Inside
+  // `.ssh/` the whole-path rule still catches it, which is where such a file
+  // actually lives. Stated as a test so the loss stays visible rather than
+  // becoming a surprise.
+  assert.deepEqual(secretReadRules('id_deploy'), [], 'the loss is real and this pins it');
+  assert.ok(secretReadRules('/home/x/.ssh/id_deploy').includes('ssh-directory'));
+});

@@ -390,7 +390,126 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
     });
   }
 
-  return { config, languages, packageManager: manager, claudeMd, questions };
+  const scan = { config, languages, packageManager: manager, claudeMd, questions };
+  return { ...scan, plain: plainQuestion(scan) };
+}
+
+/**
+ * The `questions` array above is the machine contract, and it is written for
+ * someone who knows what an autonomy class is. Most operators do not. Sales
+ * and marketing people are running this now, on repositories whose secrets are
+ * nobody's crown jewels, and four questions phrased as `field: source` is where
+ * they stop.
+ *
+ * So this is the SAME scan, said once, in ordinary words: one question, and a
+ * list of things Tyran decided for itself with the reason attached.
+ *
+ * Exactly one thing is worth asking a non-expert, and it is the only one the
+ * repository genuinely cannot answer: **how far may this go without me?** The
+ * other three flagged fields are not decisions a non-expert can make — the
+ * package manager is a fact, the validation commands are a fact or a gap, and
+ * the CLAUDE.md line is a paste. Those become statements. A question someone
+ * cannot answer is not a safeguard; it is a place to give up.
+ *
+ * P3 is not offered. It is never inferred (see `detectAutonomy`), and putting
+ * "let me deploy to production" in a menu is a way of inferring it — a menu
+ * makes every item look like a normal choice. It stays something a person says
+ * in their own words, and the closing note says so.
+ */
+export function plainQuestion(scan) {
+  const autonomy = scan.config.autonomy;
+  const validation = scan.config.validation;
+
+  // P2 is returned by `detectAutonomy` on exactly one path — a staging-class
+  // branch AND CI — so the value alone tells us the second option is real
+  // here. Offering "put it on the test site" to a repo with no test site
+  // would be inventing infrastructure.
+  const hasStaging = autonomy.value === 'P2';
+
+  const options = [
+    {
+      value: 'P1',
+      label: 'Show me everything before it counts',
+      detail:
+        'I do the work on a separate copy and then open a request for you to look at. ' +
+        'Nothing reaches the main version of this project unless you say yes.',
+    },
+  ];
+  if (hasStaging) {
+    options.push({
+      value: 'P2',
+      label: 'That, and you can put things on the test site',
+      detail:
+        'Everything above, plus I can publish to the testing area on my own. ' +
+        'Anything a customer could see still waits for you.',
+    });
+  }
+
+  const derived = [];
+  if (Array.isArray(validation.value) && validation.value.length > 0) {
+    derived.push(
+      `I will check my own work by running ${validation.value.map((c) => `\`${c}\``).join(' and ')}, ` +
+        'which this project already defines.',
+    );
+  } else {
+    // Not a question. Nobody can name a test command that does not exist, and
+    // asking makes the absence look like the operator's failing rather than
+    // the repository's state.
+    derived.push(
+      'I could not find a command that runs this project\'s checks — I looked in package.json and the ' +
+        'Makefile. Until you tell me one, I cannot prove my own work here, and I will say so every time ' +
+        'rather than implying it passed.',
+    );
+  }
+  if (scan.packageManager?.value) {
+    derived.push(`This project uses \`${scan.packageManager.value}\`, which I read from the files themselves.`);
+  }
+  if (scan.languages.length > 0) {
+    derived.push(`It is mostly ${scan.languages.slice(0, 3).join(', ')}.`);
+  }
+  if (scan.claudeMd.present && !scan.claudeMd.hasMistakesPointer) {
+    derived.push(
+      'One line in your CLAUDE.md would make every session here record its own mistakes. ' +
+        'I am not adding it myself — it is your file — but I will show you the line.',
+    );
+  }
+
+  return {
+    question: 'How far should I go on my own before checking with you?',
+    // The evidence is the scanner's own sentence, softened. Keeping the raw
+    // `source` here too means the plain version is never the only record: a
+    // reader who wants the git numbers can still have them.
+    because: plainEvidence(autonomy),
+    evidence: autonomy.source,
+    options,
+    recommended: autonomy.value,
+    derived,
+    note:
+      'Anything beyond this — releasing to the live site, for instance — is something you would have to ' +
+      'tell me in your own words, and I will never assume it. You can change any of this later on the ' +
+      "dashboard's Settings tab; you do not have to edit a file.",
+  };
+}
+
+/** The autonomy `source` line, restated for someone who does not read git. */
+function plainEvidence(autonomy) {
+  const source = autonomy.source;
+  if (source.startsWith('not a git repository')) {
+    return 'This folder is not tracked by git, so there is no history to learn from — I am starting careful.';
+  }
+  if (source.startsWith('no commit history')) {
+    return 'This project has no history yet, so there is nothing to learn from — I am starting careful.';
+  }
+  if (autonomy.value === 'P2') {
+    return 'This project has a testing area separate from the live one, and checks that run automatically.';
+  }
+  const merges = /: (\d+) of the last (\d+)|: (\d+)\/(\d+)/.exec(source);
+  if (merges) {
+    const done = merges[1] ?? merges[3];
+    const total = merges[2] ?? merges[4];
+    return `Of the last ${total} changes to this project, ${done} were reviewed by a person before they landed.`;
+  }
+  return 'I could not tell much from the history here, so I am starting careful.';
 }
 
 /**

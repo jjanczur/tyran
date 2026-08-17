@@ -88,16 +88,37 @@ test('no frontmatter value contains a bare colon — the shape that silently voi
   }
 });
 
-test('the reviewer is granted no editing tools', () => {
-  // A reviewer that can fix what it found ends up approving its own patch.
-  // Not airtight — Bash can write — but the grant must not quietly widen.
+test('the reviewer may edit lines but never author files', () => {
+  // The property worth protecting was never "a reviewer cannot type" — it is
+  // that NOBODY APPROVES THEIR OWN CODE, and the prompt carries that as a
+  // mechanical rule: editing forfeits APPROVE, the verdict becomes REVISED.
+  //
+  // What stays in the tool list is the part a prompt cannot enforce. `Edit`
+  // changes lines that already exist; `Write` and `NotebookEdit` author new
+  // ones, which is designing rather than reviewing, and no amount of asking
+  // nicely keeps an agent on the right side of that line.
   const fm = frontmatter(readFileSync(join(AGENTS_DIR, 'reviewer.md'), 'utf8'));
   assert.ok(fm.tools, 'reviewer must declare an explicit tool list, not inherit everything');
   const granted = fm.tools.split(',').map((t) => t.trim());
-  for (const tool of EDIT_TOOLS) {
-    assert.ok(!granted.includes(tool), `reviewer must not be granted ${tool}`);
+  for (const tool of ['Write', 'NotebookEdit']) {
+    assert.ok(!granted.includes(tool), `reviewer must not be granted ${tool} — that is authoring`);
   }
   assert.ok(granted.includes('Bash'), 'reviewer needs Bash to run its own verification');
+});
+
+test('the reviewer cannot approve a diff it edited', () => {
+  // The whole safety of granting Edit rests on this one sentence surviving
+  // future edits of the prompt. If it goes, the grant becomes a reviewer that
+  // fixes and blesses its own patch, which is worse than no reviewer.
+  const text = readFileSync(join(AGENTS_DIR, 'reviewer.md'), 'utf8');
+  assert.match(
+    // Whitespace-flexible: the sentence is wrapped at 79 columns like every
+    // other line here, so a literal-space regex breaks on the next reflow.
+    text.replace(/\s+/g, ' '),
+    /if you touched the diff, `APPROVE` is not available to you/i,
+    'reviewer.md must state the forfeit rule verbatim — it is what makes Edit safe to grant',
+  );
+  assert.match(text, /\bREVISED\b/, 'the third verdict must be named');
 });
 
 test('the scout is granted no editing tools either', () => {
@@ -106,6 +127,27 @@ test('the scout is granted no editing tools either', () => {
   const granted = fm.tools.split(',').map((t) => t.trim());
   for (const tool of EDIT_TOOLS) {
     assert.ok(!granted.includes(tool), `scout must not be granted ${tool}`);
+  }
+});
+
+test('both read-only agents can still reach the operator MCP servers', () => {
+  // `tools:` is an EXHAUSTIVE allowlist, so naming six built-ins silently
+  // removed every mcp__* tool. That is not a small loss for these two: the
+  // scout's own description promises reconnaissance over "its data", which
+  // is unreachable without them, and the reviewer's 1.6% transcription-error
+  // rule existed only because it could not re-fetch what it was handed.
+  //
+  // The wildcard is the only expressible form — a shipped plugin cannot know
+  // which servers an operator runs. Grants are still gated: write-guard's
+  // matcher carries `mcp__.*` (see GUARD_MATCHER), so an MCP call is scanned
+  // like any Write.
+  for (const agent of ['scout.md', 'reviewer.md']) {
+    const fm = frontmatter(readFileSync(join(AGENTS_DIR, agent), 'utf8'));
+    const granted = fm.tools.split(',').map((t) => t.trim());
+    assert.ok(
+      granted.includes('mcp__*'),
+      `${agent} must grant mcp__* — an exhaustive allowlist without it strips every MCP tool`,
+    );
   }
 });
 

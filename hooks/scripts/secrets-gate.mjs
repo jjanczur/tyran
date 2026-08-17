@@ -200,9 +200,22 @@ export const SUPPRESSION_FILES = Object.freeze({
 /**
  * Characters at which one shell command can end and another begin.
  *
- * Quoting is deliberately NOT honoured: splitting inside a quoted string can
- * only produce MORE candidate segments, never fewer, and more candidates is
- * the direction this gate wants to be wrong in.
+ * QUOTING is deliberately NOT honoured, and that is not laziness — it is the
+ * only safe reading. Splitting inside a quoted string can only produce MORE
+ * candidate segments, never fewer, and more candidates is the direction this
+ * gate wants to be wrong in. A quote-aware lexer is worse than this one:
+ * measured, `git commit -m "it's the source of truth" ; git push origin main`
+ * has its apostrophe close the double quote, swallows the `;`, and the push
+ * becomes INVISIBLE — the gate reads the verb as `commit`, runs no
+ * deployment-class check, and scans the commit instead of the push range.
+ * This repository's own commit messages say "source of truth" constantly.
+ *
+ * BACKSLASH ESCAPES are honoured, because unlike quoting they cannot hide a
+ * separator. In all three shell contexts — unquoted, single-quoted,
+ * double-quoted — `\<sep>` is never an operator, so consuming it can only
+ * remove a split the shell would not have made. Verified against `/bin/sh`
+ * with a side-effect oracle over 34 join constructions: zero cases where the
+ * shell ran a second command and this lexer kept one segment.
  */
 export const SEPARATORS = ';&|\n\r()`{}<>';
 
@@ -296,8 +309,22 @@ export function splitSegments(command) {
   const folded = stripHeredocBodies(command).replace(/\\\r?\n/g, ' ');
   const out = [];
   let current = '';
+  let escaped = false;
   for (const ch of folded) {
-    if (SEPARATORS.includes(ch)) {
+    // ORDER IS LOAD-BEARING. This branch must come first so an escaped
+    // backslash consumes itself: without it `echo a\\; git push origin main`
+    // reads the real `;` as escaped and the push disappears. Measured — it is
+    // the most likely way to get this patch subtly wrong.
+    if (escaped) {
+      escaped = false;
+      current += ch;
+    } else if (ch === '\\') {
+      escaped = true;
+      // KEPT, not dropped: `tokensOf` strips backslashes downstream and
+      // `isLiteralPath` inspects this text, so removing it here would change
+      // what every consumer sees for a reason unrelated to splitting.
+      current += ch;
+    } else if (SEPARATORS.includes(ch)) {
       out.push(current);
       current = '';
     } else {

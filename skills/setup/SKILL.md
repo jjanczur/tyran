@@ -241,18 +241,29 @@ copies of the config. Stage explicit paths until this commit exists.
 
 Overnight mode (https://jjanczur.github.io/tyran/overnight/) pauses autonomous work near the
 subscription usage limit and resumes after the window resets. It is OFF by
-default because its telemetry is a statusline the plugin cannot install:
-`.claude/settings.json` in user scope is the operator's file, and the policy
-gate refuses agents writing the in-repo one — so print the snippet with the
-plugin path RESOLVED and let the human paste it:
+default, and turning it on is now **one edit to `.tyran/config.yaml`** — the
+Settings tab will do it — because the gate reads the platform's own usage
+cache in `~/.claude.json` when no statusline is installed.
+
+That fallback is why this step is short. Until it existed, the telemetry came
+only from a statusline the plugin cannot install (`.claude/settings.json` in
+user scope is the operator's file, and the gate refuses agents writing the
+in-repo one), so overnight mode's real prerequisite was a paste — and on an
+install that skipped it the pause failed open and said nothing.
+
+Show the `limits:` block to enable (`mode: 'pause'` — quoted, since bare
+`off`/`on` are YAML booleans), and say that `doctor --state` reports
+`limit-telemetry-missing` only when NO telemetry is reachable at all, which
+usually means signed out rather than misconfigured.
+
+A statusline is still worth offering to anyone who wants the sharpest
+possible pause: it is session-scoped and refreshed every few seconds, where
+the platform's cache is refreshed on its own schedule and has been measured
+over an hour old. Print the snippet with the plugin path RESOLVED and let the
+human paste it — never attempt the settings write yourself, the refusal is the
+boundary working:
 
 ```json
 { "statusLine": { "type": "command",
   "command": "node <resolved-plugin-root>/scripts/statusline.mjs" } }
 ```
-
-Then show the `limits:` block to enable (`mode: 'pause'` — quoted, bare
-`off`/`on` are YAML booleans) and note that `doctor --state` reports
-`limit-telemetry-missing` if the pause is configured while the statusline is
-not installed. Do not attempt the settings write yourself; the refusal is
-the boundary working.

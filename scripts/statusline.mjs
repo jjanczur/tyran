@@ -31,8 +31,11 @@
  */
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { SIDECAR_RELPATH } from './usage-source.mjs';
 
-export const SIDECAR_RELPATH = join('.tyran', 'state', 'usage.json');
+// Re-exported, not re-declared: this file is the WRITER and the gate is the
+// reader, and the two disagreeing is a pause that silently never fires.
+export { SIDECAR_RELPATH } from './usage-source.mjs';
 const MAX_INPUT_BYTES = 1024 * 1024;
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 

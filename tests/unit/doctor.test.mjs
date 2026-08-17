@@ -715,7 +715,10 @@ test('limits configured with no telemetry is a warning; mode off or no limits is
   const config = (mode) =>
     `profile: balanced\nautonomy: P1\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\nlimits:\n  mode: '${mode}'\n`;
   writeFileSync(join(dir, 'config.yaml'), config('pause'));
-  const missing = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' });
+  // No platform fallback: otherwise this test reads whoever ran it out of
+  // ~/.claude.json and passes or fails by accident of who is signed in.
+  const blind = { usageFallback: () => null };
+  const missing = runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z', ...blind });
   assert.equal(byCode(missing, 'limit-telemetry-missing').length, 1);
 
   // fresh telemetry silences it
@@ -723,14 +726,29 @@ test('limits configured with no telemetry is a warning; mode off or no limits is
     join(dir, 'state', 'usage.json'),
     JSON.stringify({ written_at: '2026-08-13T12:59:00.000Z', five_hour: { used_percentage: 10 } }),
   );
-  assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing'), []);
+  assert.deepEqual(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z', ...blind }), 'limit-telemetry-missing'), []);
 
   // a sidecar over a day old is as blind as an absent one (25h before --now)
   writeFileSync(
     join(dir, 'state', 'usage.json'),
     JSON.stringify({ written_at: '2026-08-12T12:00:00.000Z', five_hour: { used_percentage: 10 } }),
   );
-  assert.equal(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z' }), 'limit-telemetry-missing').length, 1);
+  assert.equal(byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z', ...blind }), 'limit-telemetry-missing').length, 1);
+
+  // THE FINDING'S MEANING CHANGED. It used to ask "is the statusline
+  // installed", and fired on nearly every install — the statusline was the
+  // only writer and its payload is not always populated, so the usual cause
+  // was the platform sending nothing, not the operator forgetting a step.
+  // It now asks whether ANY telemetry is reachable, and the platform's own
+  // cache silences it with no statusline at all.
+  const viaPlatform = {
+    usageFallback: () => ({ written_at: '2026-08-13T13:00:00.000Z', lower_bound: true, five_hour: { used_percentage: 12, resets_at: 1786980600 } }),
+  };
+  assert.deepEqual(
+    byCode(runStateChecks({ dir, now: '2026-08-13T13:00:00.000Z', ...viaPlatform }), 'limit-telemetry-missing'),
+    [],
+    'a reachable platform cache means the pause CAN fire, so there is nothing to report',
+  );
 
   writeFileSync(join(dir, 'config.yaml'), config('off'));
   writeFileSync(join(dir, 'state', 'usage.json'), '');

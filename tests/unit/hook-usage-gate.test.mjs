@@ -386,10 +386,61 @@ test('the refusal never leaks free sidecar strings — only numbers and the vali
   assert.doesNotMatch(text, /undefined/);
 });
 
+/** No platform fallback, so a test asserting the sidecar path stays hermetic
+ * — otherwise it reads the developer's own ~/.claude.json and passes or fails
+ * by accident of who ran it. */
+const noPlatform = () => null;
+
 test('readSidecar and readMarker tolerate hostile shapes', () => {
   const dir = repo();
   writeFileSync(join(dir, SIDECAR_RELPATH), JSON.stringify({ written_at: 42, five_hour: 'lots' }));
-  assert.equal(readSidecar(dir, NOW), null);
+  assert.equal(readSidecar(dir, NOW, undefined, noPlatform), null);
   writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify([1, 2, 3]));
   assert.equal(readMarker(dir, NOW), null);
+});
+
+test('the platform cache answers when the statusline never wrote a sidecar', () => {
+  // The measured reality this exists for: only the statusline writes the
+  // sidecar, it writes only when the payload carries `rate_limits`, and that
+  // block is not always sent — so on a real install running `mode: 'pause'`
+  // no sidecar had EVER been written and the pause could never fire.
+  const dir = repo();
+  const platform = () => ({ written_at: new Date(NOW).toISOString(), lower_bound: true, five_hour: { used_percentage: 98, resets_at: NOW / 1000 + 3600 } });
+  const got = readSidecar(dir, NOW, undefined, platform);
+  assert.equal(got.five_hour.used_percentage, 98);
+  assert.equal(got.lower_bound, true);
+});
+
+test('a FRESH sidecar still wins over the platform cache', () => {
+  // The statusline is session-scoped and refreshed every few seconds; the
+  // platform cache was measured 83 minutes old under continuous use. The
+  // fallback is a fallback.
+  const dir = repo();
+  writeFileSync(join(dir, SIDECAR_RELPATH), JSON.stringify({
+    written_at: new Date(NOW).toISOString(),
+    five_hour: { used_percentage: 10, resets_at: NOW / 1000 + 3600 },
+  }));
+  const platform = () => ({ written_at: new Date(NOW).toISOString(), lower_bound: true, five_hour: { used_percentage: 99, resets_at: NOW / 1000 + 3600 } });
+  assert.equal(readSidecar(dir, NOW, undefined, platform).five_hour.used_percentage, 10);
+});
+
+test('a platform reader that throws never takes the gate down with it', () => {
+  const dir = repo();
+  const platform = () => { throw new Error('unreadable'); };
+  assert.equal(readSidecar(dir, NOW, undefined, platform), null);
+});
+
+test('a pause from the platform cache records that it was a LOWER BOUND', () => {
+  // "at least 97%" is a reason to stop and never a reason to start. The
+  // marker has to carry that distinction, or a resume decision made later
+  // reads a bound as a measurement.
+  const limits = { pause_at_percent: 97, weekly_pause_at_percent: 97, wait_max_hours: 5, long_wait: 'hold', resume_margin_minutes: 5 };
+  const bound = trippedWindow({ lower_bound: true, five_hour: { used_percentage: 98, resets_at: NOW / 1000 + 3600 } }, limits);
+  assert.equal(bound.lower_bound, true);
+  assert.equal(markerOf(bound, limits, NOW, null, null).source, 'claude.json');
+  assert.equal(markerOf(bound, limits, NOW, null, null).lower_bound, true);
+
+  const measured = trippedWindow({ five_hour: { used_percentage: 98, resets_at: NOW / 1000 + 3600 } }, limits);
+  assert.equal(measured.lower_bound, false);
+  assert.equal(markerOf(measured, limits, NOW, null, null).source, 'sidecar');
 });

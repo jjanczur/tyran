@@ -1,0 +1,14 @@
+# Runtime files, never history. Leases record who holds a worktree or a
+# heavy slot RIGHT NOW; committing one makes every parallel merge conflict
+# on state that was stale the moment it was written. The overnight files
+# are machine-local by nature: another clone has a different watcher pid,
+# a different telemetry stream, and no business inheriting this one's pause.
+state/*/locks/
+state/paused-until.json
+state/resume.json
+state/resume.log
+state/usage.json
+state/cost.json
+state/conductor.json
+state/ANSWERS.md
+state/board-server.json

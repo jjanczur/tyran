@@ -848,6 +848,13 @@ test('THIS repository scans clean end to end', () => {
     ".github/workflows/pages.yml",
     ".github/workflows/security.yml",
     ".gitignore",
+    // This repository adopted Tyran on 2026-08-17, so its own `.tyran/` is
+    // tracked like any user's. The scan sees them because they are COMMITTED —
+    // and this test is how CI told the local run it had measured the wrong
+    // file set, the trap CLAUDE.md names by name.
+    ".tyran/.gitignore",
+    ".tyran/config.yaml",
+    ".tyran/policies/autonomy.yaml",
     "CHANGELOG.md",
     "CLAUDE.md",
     "CODE_OF_CONDUCT.md",

@@ -1,0 +1,109 @@
+# What Tyran's retrospective agent may change on its own.
+#
+# Enforced by a PreToolUse hook on write paths — the boundary does not
+# depend on the model behaving. Three classes:
+#
+#   AUTO    retro commits it itself (rollback = git revert)
+#   GATED   retro proposes, you approve
+#   KERNEL  humans only, by hand — never autonomously
+#
+# Tighten this per repo freely — but `hooks/**` and `.tyran/policies/**`
+# MUST stay KERNEL: the validator rejects a policy that downgrades them,
+# so the boundary can never be edited away by the loop it constrains.
+#
+# Precedence: the most specific matching rule wins (longest path glob);
+# ties go to the stricter class. Paths no rule matches get `default`.
+#
+# Validate:  node scripts/schema.mjs validate policy .tyran/policies/autonomy.yaml
+
+# Applied when no rule matches. GATED means "ask me" — the safe answer.
+default: GATED
+
+rules:
+  - path: .tyran/knowledge/**
+    class: AUTO
+    reason: learned facts about this repo; cheap to revert, high value to accumulate
+
+  - path: .claude/skills/tyran-local/**
+    class: AUTO
+    reason: repo-specific skills, gated by a passing activation test
+
+  # This rule also covers the lease files at `.tyran/state/<slug>/locks/`.
+  # Leases are runtime, never history: `.tyran/.gitignore` (seeded by
+  # scan-repo.mjs) excludes `state/*/locks/`, so the blast radius of a bad
+  # write is a stale lock file, cleared by deleting it.
+  - path: .tyran/state/**
+    class: AUTO
+    reason: the execution journal is append-only and written by the conductor itself
+
+  # LEGACY ALIAS, kept 2026-08 for installs adopted at <= 0.1.8, whose leases
+  # live under `.tyran/initiatives/<slug>/locks/`. The canonical layout since
+  # 0.1.9 is `.tyran/state/<slug>/locks/`, covered by the `.tyran/state/**`
+  # rule above; `doctor --state` reports a leftover `.tyran/initiatives/`
+  # directory. The measured incident that produced this rule: leases matched
+  # NO rule, fell through to `default: GATED`, and `verdictForClass(GATED,
+  # unsupervised)` denies unconditionally — so no implementer in any repo
+  # could satisfy the take-your-own-lease protocol of iron rule 7, and the
+  # conductor had to write every lease itself, putting the record of who
+  # holds a resource in the one place rule 7 says it must not live: the lead.
+  - path: .tyran/initiatives/*/locks/**
+    class: AUTO
+    reason: legacy lease location for installs adopted at <= 0.1.8; GATED denies every subagent unconditionally, which makes the take-your-own-lease protocol of iron rule 7 unsatisfiable
+
+  # Was GATED. The cost was measured on a real install: setup had inferred
+  # `pnpm test`, which in that repo is bare `vitest` — it never exits, so every
+  # agent would have hung forever. The session that FOUND that could not fix it,
+  # and handed the operator a heredoc to paste. A boundary that blocks the repair
+  # of a footgun it created is one the user edits away, and then it protects
+  # nothing at all.
+  #
+  # What this gives up, in one sentence, because an unstated cost is a false
+  # guarantee: `autonomy:` lives in this file too, so an agent can now raise its
+  # own deployment class. Set this rule back to GATED if that trade is wrong for
+  # your repo — and read `docs/policy-gate.md`, which measured the same
+  # escalation happening under GATED anyway wherever `Write` is allow-listed.
+  - path: .tyran/config.yaml
+    class: AUTO
+    reason: mostly a description of this repo — validation commands, package manager, shared zones — and an agent that finds it wrong is what is best placed to correct it
+
+  - path: .claude/agents/**
+    class: GATED
+    reason: overriding a core agent freezes it at the version it was copied from
+
+  # Operator-owned prose, loaded into every session in this repository. The
+  # gate is otherwise SILENT at the repo root — the governed prefixes are
+  # `.tyran/`, `.claude/` and the enforcement-script directory, and a root file
+  # matches none of them — so without this rule a subagent could rewrite the law
+  # it is bound by and no gate would have an opinion. An explicit rule outranks
+  # the prefix test, which is why one line here is enough.
+  #
+  # It bans the HAND, not the mechanism. GATED denies a subagent
+  # unconditionally, so no agent free-hand rewrites this file with Write or
+  # Edit; `scripts/mistakes.mjs promote --law` still passes, because it is a
+  # Bash command and a repo-root file is not in the shell-protected globs.
+  # That asymmetry is the design: the law changes only through the mechanism
+  # that requires evidence — five recorded occurrences of one signature — and
+  # it changes only inside the `tyran:rules` fence.
+  - path: CLAUDE.md
+    class: GATED
+    reason: operator-owned prose loaded into every session; only mistakes.mjs writes it, and only inside its fence
+
+  - path: .tyran/STOP
+    class: KERNEL
+    reason: the brake an operator uses to halt a running initiative; a loop that can clear its own stop signal has none
+
+  - path: .claude/settings.json
+    class: KERNEL
+    reason: this file registers the hooks; anything that can edit it can switch every gate off
+
+  - path: .claude/settings.local.json
+    class: KERNEL
+    reason: the local override of the hook registry, with exactly the same reach
+
+  - path: hooks/**
+    class: KERNEL
+    reason: enforcement hooks are the mechanism; a system that can disable its own gates has none
+
+  - path: .tyran/policies/**
+    class: KERNEL
+    reason: the boundary must protect itself, including this rule

@@ -143,6 +143,60 @@ export function renderBrief(selected, matched, { budget = DEFAULT_BUDGET, dir = 
   return [header, ...lines, ...tail].join('\n') + '\n';
 }
 
+/**
+ * Which entries can never reach a handoff, and why.
+ *
+ * The budget is deliberately the pressure that keeps entries scoped, and the
+ * omission line names the cost of every individual brief. What nothing did
+ * was AGGREGATE that: measured on a real install, `brief '**'` returned **1
+ * of 31 entries** and the other thirty were dropped by the 4000-codepoint
+ * budget. Ninety kilobytes of measured detail — migration-number races,
+ * TEST/PROD schema drift — accumulated for months and reached nobody.
+ *
+ * That is the opposite of the failure people expect. The store is not
+ * expensive to read; it is unread, while growing without bound, and the
+ * pressure the budget applies lands on nothing because no one is looking at
+ * the total.
+ *
+ * So this reports the whole store against the budget at once. It is a
+ * MEASUREMENT, never an edit: pruning needs judgement about which of two
+ * overlapping entries is the true one, and a script that guessed would delete
+ * exactly the hard-won detail this exists to protect.
+ *
+ * `alone` is the diagnostic that matters most: an entry that does not fit the
+ * budget even as the ONLY entry can never appear in any brief, under any
+ * paths, ever. It is not competing for space — it is unreachable.
+ */
+export function auditEntries(entries, { budget = DEFAULT_BUDGET } = {}) {
+  const sized = entries.map((entry) => {
+    const cost = Array.from(entryLine(entry)).length + 1;
+    return { id: entry.id, kind: entry.kind, confidence: entry.confidence, cost, alone: cost > budget };
+  });
+  // Ranked the way `brief` ranks, so "would reach a brief" means what a brief
+  // would actually do rather than what this function finds convenient.
+  const ranked = [...sized].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  let used = 0;
+  let reachable = 0;
+  for (const entry of ranked) {
+    if (used + entry.cost > budget && reachable > 0) break;
+    used += entry.cost;
+    reachable += 1;
+  }
+  const total = sized.reduce((sum, e) => sum + e.cost, 0);
+  return {
+    budget,
+    entries: sized.length,
+    // How many a single widest-possible brief could carry.
+    reachable,
+    unreachable: sized.length - reachable,
+    // Entries too large to appear even alone — the ones pruning must address
+    // first, because no budget any caller passes will rescue them.
+    aloneTooBig: sized.filter((e) => e.alone).map((e) => ({ id: e.id, cost: e.cost })),
+    totalCost: total,
+    widest: sized.slice().sort((a, b) => b.cost - a.cost).slice(0, 5).map((e) => ({ id: e.id, cost: e.cost })),
+  };
+}
+
 // ---------------------------------------------------------------- CLI
 
 const VALUE_FLAGS = ['dir', 'kinds', 'limit', 'budget'];
@@ -190,8 +244,10 @@ function parseArgs(argv) {
 
 function main() {
   const [command, ...rest] = process.argv.slice(2);
-  const usage = 'usage: knowledge.mjs brief [<path>...] [--dir <knowledge-dir>] [--kinds k,k] [--limit N] [--budget CHARS] [--json]';
-  if (command !== 'brief') {
+  const usage =
+    'usage: knowledge.mjs brief [<path>...] [--dir <knowledge-dir>] [--kinds k,k] [--limit N] [--budget CHARS] [--json]\n' +
+    '       knowledge.mjs audit [--dir <knowledge-dir>] [--budget CHARS] [--json]';
+  if (command !== 'brief' && command !== 'audit') {
     console.error(usage);
     process.exit(2);
   }
@@ -229,6 +285,37 @@ function main() {
     }
     console.error('knowledge: refusing to brief from a store that does not validate — a partial brief reads as a complete one');
     process.exitCode = 1;
+    return;
+  }
+
+  if (command === 'audit') {
+    const report = auditEntries(entries, { budget: flags.budget });
+    if (flags.json) {
+      console.log(jsonEscapeInvisible(JSON.stringify(report, null, 2)));
+      process.exitCode = 0;
+      return;
+    }
+    const out = [
+      `knowledge audit (${escapeInvisible(flags.dir)})`,
+      `  ${report.entries} entries, ${report.totalCost} codepoints total`,
+      `  ${report.reachable} could reach one brief at the ${report.budget}-codepoint budget; ` +
+        `${report.unreachable} could not`,
+    ];
+    if (report.aloneTooBig.length > 0) {
+      const n = report.aloneTooBig.length;
+      out.push(`  ${n} entr${n === 1 ? 'y' : 'ies'} cannot appear in ANY brief, even alone:`);
+      for (const e of report.aloneTooBig) out.push(`    ${escapeInvisible(e.id)} — ${e.cost} codepoints`);
+    }
+    if (report.widest.length > 0) {
+      out.push('  widest:');
+      for (const e of report.widest) out.push(`    ${escapeInvisible(e.id)} — ${e.cost}`);
+    }
+    // A measurement, never an edit: which of two overlapping entries is the
+    // true one is a judgement, and a script that guessed would delete the
+    // hard-won detail this exists to protect.
+    out.push('  This reports; it never edits. /tyran:retro consolidates, writing a NEW file for review.');
+    process.stdout.write(out.join('\n') + '\n');
+    process.exitCode = 0;
     return;
   }
 

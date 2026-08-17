@@ -1673,6 +1673,7 @@ const EXPECTED_SEVERITY = {
   'knowledge-unreadable': 'error',
   'knowledge-not-a-directory': 'warning',
   'knowledge-entry-oversized': 'warning',
+  'knowledge-store-unreachable': 'info',
   'tyran-dir-untracked': 'warning',
   'policy-missing': 'error',
   'policy-invalid': 'error',

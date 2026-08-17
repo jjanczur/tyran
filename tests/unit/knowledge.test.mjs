@@ -11,6 +11,7 @@ import {
   selectEntries,
   renderBrief,
   knowledgeFiles,
+  auditEntries,
   DEFAULT_BUDGET,
 } from '../../scripts/knowledge.mjs';
 
@@ -242,4 +243,58 @@ test('--dir naming a FILE is exit 2 — an empty brief must not claim the store 
   const r = cli(['brief', 'x', '--dir', join(d, 'k.yaml')]);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /not a directory/);
+});
+
+// --- is the store readable AS A WHOLE? ----------------------------------
+
+const sized = (id, chars, confidence = 0.9) => ({
+  id, kind: 'gotcha', confidence, text: 'x'.repeat(chars), applies_to: ['**'], file: 'k.yaml',
+});
+
+test('the audit reports how many entries can reach ONE brief', () => {
+  // The per-entry oversize warning fires once per fat entry and each reads as
+  // a small local untidiness. Measured on a real install it fired five times
+  // while `brief` was returning 1 of 31 entries — 104,178 codepoints reaching
+  // nobody. MUTANT: report only the count of oversized entries; the ratio is
+  // the number that gets acted on and the per-entry note never added up to it.
+  const report = auditEntries([sized('a', 1500), sized('b', 1500), sized('c', 1500)], { budget: 4000 });
+  assert.equal(report.entries, 3);
+  assert.equal(report.reachable, 2, 'two fit the budget; the third does not');
+  assert.equal(report.unreachable, 1);
+});
+
+test('an entry too big to appear ALONE is called out separately', () => {
+  // The diagnostic that matters most: this entry is not competing for space,
+  // it is unreachable under any budget a caller passes. MUTANT: fold it into
+  // the plain unreachable count and the remedy becomes "raise the budget",
+  // which cannot work.
+  const report = auditEntries([sized('small', 100), sized('huge', 9000)], { budget: 4000 });
+  assert.deepEqual(report.aloneTooBig.map((e) => e.id), ['huge']);
+  assert.ok(report.aloneTooBig[0].cost > 4000);
+});
+
+test('a store that fits reports nothing unreachable', () => {
+  // Pressure that is being obeyed is not a finding — a check red on every
+  // healthy repo is one people learn to skip.
+  const report = auditEntries([sized('a', 100), sized('b', 100)], { budget: 4000 });
+  assert.equal(report.unreachable, 0);
+  assert.deepEqual(report.aloneTooBig, []);
+});
+
+test('reachability is counted the way brief actually ranks', () => {
+  // MUTANT: count in file order. `brief` ranks by confidence, so an audit that
+  // counted differently would report a reachability no brief ever delivers.
+  const report = auditEntries([sized('low', 3000, 0.1), sized('high', 3000, 0.99)], { budget: 4000 });
+  assert.equal(report.reachable, 1);
+  assert.equal(report.widest.length, 2, 'both are still measured and listed');
+});
+
+test('the audit never edits — it returns a measurement', () => {
+  // Which of two overlapping entries is the true one is a judgement, and a
+  // script that guessed would delete exactly the hard-won detail the store
+  // exists to hold. Consolidation is a retro step that writes a NEW file.
+  const entries = [sized('a', 9000)];
+  const before = JSON.stringify(entries);
+  auditEntries(entries, { budget: 4000 });
+  assert.equal(JSON.stringify(entries), before, 'inputs are untouched');
 });

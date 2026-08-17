@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### The knowledge store was write-only, and nothing said so
+
+Measured on a real install: `knowledge.mjs brief '**'` returned **1 of 31
+entries**. The other thirty were dropped by the 4000-codepoint budget, and
+104,178 codepoints of hard-won detail — migration-number races, TEST/PROD
+schema drift, a deploy gate that silently blocks on the commit author — had
+been accumulating for months and reaching nobody.
+
+That is the opposite of the failure people expect from a growing store. It is
+not expensive to read; it is **unread**, while growing without bound.
+
+Every piece of the machinery was already correct and none of it added up. The
+budget is deliberately the pressure that keeps entries scoped. Each brief
+already names what it omitted. `doctor` already warned per oversized entry —
+five times on that install. What nobody had was the total, and five local
+tidy-up notes are not the same message as "your knowledge store is 97%
+unread". Only the second one gets acted on.
+
+`knowledge.mjs audit` reports it: how many entries could reach ONE brief, how
+many could not, and — the diagnostic that matters most — which entries are so
+wide they cannot appear **even alone**, where no budget any caller passes will
+ever reach them. Eight of that install's thirty-one are in that state; the
+widest is 10,210 codepoints, two and a half times the whole budget.
+`doctor --state` carries the same number as `knowledge-store-unreachable`
+(`info` — a store outgrows the budget in the ordinary course of being useful).
+
+It measures and never edits. Which of two overlapping entries is the true one
+is a judgement, and a script that guessed would delete exactly the detail the
+store exists to hold — so consolidation is a retrospective step that writes a
+**new** file for review and leaves the original untouched.
+
 ### The prerequisite that blocked day one
 
 The secrets gate refuses every commit and push until `gitleaks` exists, and

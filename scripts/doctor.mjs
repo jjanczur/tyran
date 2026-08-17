@@ -62,6 +62,7 @@ import {
   STATE_FILE,
 } from './project.mjs';
 import { classifyPath, normalizePath, validateFile, knowledgeWarnings, MANDATORY_KERNEL_PATHS } from './schema.mjs';
+import { auditEntries, loadEntries as loadKnowledgeEntries } from './knowledge.mjs';
 import { gitRunner } from './scan-repo.mjs';
 import { parseMistakes, countSignatures, fenceState, KNOWLEDGE_THRESHOLD, MISTAKES_FILE, CLAUDE_MD_FILE } from './mistakes.mjs';
 
@@ -202,6 +203,11 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'knowledge-unreadable': 'error',
     'knowledge-not-a-directory': 'warning',
     'knowledge-entry-oversized': 'warning',
+    // The AGGREGATE of the line above. `info`, not `warning`: nothing is
+    // broken and a store outgrows the budget in the ordinary course of being
+    // useful — but "1 of 31 entries reaches a brief" is the number that gets
+    // acted on, and five per-entry notes never added up to it for anyone.
+    'knowledge-store-unreachable': 'info',
     // Not `info`, which is what it was: with `.tyran/` on disk and no policy
     // under it the gate refuses every write in the repository. A severity that
     // does not fail the check reports a locked-out repo as a note.
@@ -722,6 +728,45 @@ function closeSpawnHint(journalPath, init, agent) {
   return String(agent).startsWith('-')
     ? `node scripts/journal.mjs close-spawn ${sq(journalPath)} --reason "<why>" ${sq(slug)} -- ${sq(agent)}`
     : `node scripts/journal.mjs close-spawn ${sq(journalPath)} ${sq(slug)} ${sq(agent)} --reason "<why>"`;
+}
+
+/**
+ * Is the knowledge store actually READABLE, as a whole?
+ *
+ * Every failure returns [] rather than throwing: this is advisory, it runs
+ * after the checks that decide whether the repo works at all, and a store
+ * that cannot be listed is already reported by `yamlFilesIn` above.
+ */
+function knowledgeReachability(knowledgeDir) {
+  let entries;
+  try {
+    if (!isDirectory(knowledgeDir)) return [];
+    ({ entries } = loadKnowledgeEntries(knowledgeDir));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const report = auditEntries(entries);
+  // Silent while the store still fits: pressure that is being obeyed is not a
+  // finding, and a check that is red on every healthy repo is one people skip.
+  if (report.unreachable === 0) return [];
+  const stuck = report.aloneTooBig;
+  const detail =
+    stuck.length === 0
+      ? ''
+      : ` ${stuck.length} of them cannot appear in ANY brief even alone (widest: ` +
+        `${show(stuck[0].id)} at ${stuck[0].cost}), so no budget a caller passes will reach them.`;
+  return [
+    finding(
+      'knowledge-store-unreachable',
+      show(knowledgeDir),
+      `${report.reachable} of ${report.entries} knowledge entries can reach one brief at the ` +
+        `${report.budget}-codepoint budget; ${report.unreachable} cannot.${detail} The store is written ` +
+        'by every retrospective and read through that budget, so what does not fit is not merely ' +
+        'crowded — it reaches nobody',
+      `node scripts/knowledge.mjs audit --dir ${sq(knowledgeDir)}   # the full list, widest first`,
+    ),
+  ];
 }
 
 /** How many unread keys are named before the rest are counted instead. */
@@ -1699,6 +1744,15 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
     }
   }
   checked.push(`knowledge/: ${knowledge.files.length} file(s)`);
+  // The AGGREGATE, which the per-entry warning above cannot show.
+  //
+  // `knowledge-entry-oversized` fires once per fat entry and each one reads as
+  // a small, local untidiness. Measured on a real install it fired five times
+  // while the true state was that `brief` returned ONE of thirty-one entries:
+  // 104,178 codepoints of hard-won detail, reaching nobody. Five tidy-up notes
+  // and "your knowledge store is 97% unread" are not the same message, and
+  // only the second one gets acted on.
+  findings.push(...knowledgeReachability(join(dir, 'knowledge')));
 
   const policies = yamlFilesIn(join(dir, 'policies'), 'policies');
   findings.push(...policies.findings);

@@ -28,6 +28,8 @@ import {
   DEFAULT_STALE_HOURS,
   runHookChecks,
   mistakesFindings,
+  worktreeFindings,
+  WORKTREE_CEILING,
 } from '../../scripts/doctor.mjs';
 import {
   DEFAULT_PLUGIN_ROOT,
@@ -860,6 +862,34 @@ test('an expired lease is a warning even when its holder is still working', () =
   assert.match(expired[0].message, /2\.0 h ago/);
 });
 
+test('the expiry spelling agents actually use is the one doctor reads', () => {
+  // MEASURED across every journal on a real machine: agents wrote `expiry` 33
+  // times and `expires` 3, while this finding read only `expires`/`expires_at`
+  // /`until`. So 33 of 36 recorded expiries were invisible and `lease-expired`
+  // was effectively dead code that still looked alive.
+  //
+  // Recording one also used to trip `journal-key-unread`, because no expiry
+  // spelling was in DATA_KNOWN — the schema flagged the very field that would
+  // have made the finding work.
+  for (const key of ['expiry', 'expires', 'expires_at', 'until']) {
+    const root = repo();
+    const dir = scaffold(root);
+    const journal = journalPathFor(dir);
+    writeJournal(journal, [
+      ev('2026-07-26T09:00:00.000Z', 'spawn', { agent: 'impl-1', role: 'implementer' }),
+      ev('2026-07-26T09:01:00.000Z', 'lease.acquired', {
+        resource: 'worktree:a', holder: 'impl-1', [key]: '2026-07-26T10:00:00.000Z',
+      }),
+      ev('2026-07-26T12:00:00.000Z', 'checkpoint', { phase: 'x', next_steps: [] }),
+    ]);
+    regenerate(journal);
+    const result = runStateChecks({ dir });
+    assert.equal(byCode(result, 'lease-expired').length, 1, `${key} must reach lease-expired`);
+    assert.equal(byCode(result, 'journal-key-near-miss').length, 0, `${key} must not read as a typo`);
+    assert.equal(byCode(result, 'journal-key-unread').length, 0, `${key} must be a known data key`);
+  }
+});
+
 test('a release by a non-holder is raised from journal.tail(), leaving the lease open', () => {
   const root = repo();
   const dir = scaffold(root);
@@ -1659,6 +1689,7 @@ const EXPECTED_SEVERITY = {
   'lease-orphan': 'warning',
   'lease-expired': 'warning',
   'lease-release-by-non-holder': 'warning',
+  'worktree-accumulating': 'warning',
   'projection-drift': 'warning',
   'projection-absent': 'info',
   'projection-missing': 'warning',
@@ -2076,4 +2107,62 @@ test('where git cannot answer, absence says NOTHING rather than guessing', () =>
   assert.match(mistakesFindings(bare, gitRunnerFor(bare)).checked, /no git here/);
   // and with no runner at all — the pre-existing signature — it is silent too
   assert.deepEqual(mistakesFindings(bare).findings, []);
+});
+
+// --- worktrees, which nothing has ever removed ------------------------------
+
+/** A fake `git`, so the test does not depend on this checkout's worktrees. */
+const fakeWorktreeGit = (worktrees, inRepo = true) => (args) => {
+  if (args[0] === 'rev-parse') return inRepo ? 'true\n' : '';
+  if (args[0] === 'worktree') {
+    return worktrees
+      .map((w) => `worktree ${w.path}\nHEAD abc123\nbranch refs/heads/${w.branch}${w.prunable ? '\nprunable gone' : ''}\n`)
+      .join('\n');
+  }
+  return '';
+};
+
+const wt = (n, opts = {}) =>
+  Array.from({ length: n }, (_, i) => ({ path: `/repo${i === 0 ? '' : '-' + i}`, branch: `b${i}`, ...opts }));
+
+test('a handful of worktrees is the system working, not a finding', () => {
+  // MUTANT: fire on any worktree at all. Tyran's parallel model IS a worktree
+  // per agent, so a threshold of one would warn on every healthy run and
+  // teach operators to ignore the line.
+  const { findings } = worktreeFindings('/repo', fakeWorktreeGit(wt(WORKTREE_CEILING + 1)));
+  assert.deepEqual(findings, [], `${WORKTREE_CEILING} beside the main checkout must stay silent`);
+});
+
+test('worktrees that have stopped being cleaned up are reported, never removed', () => {
+  const { findings, checked } = worktreeFindings('/repo', fakeWorktreeGit(wt(WORKTREE_CEILING + 2)));
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].code, 'worktree-accumulating');
+  assert.match(findings[0].message, new RegExp(`${WORKTREE_CEILING + 1} git worktrees`));
+  assert.match(checked, new RegExp(`${WORKTREE_CEILING + 1} beside the main checkout`));
+  // MUTANT: emit `git worktree remove` as the remedy. Measured on a real
+  // machine, most of these hold work that never CONCLUDED rather than work
+  // that finished — a remedy someone pastes without reading would delete it.
+  assert.match(findings[0].fix, /worktree list/, 'the suggested command must be a LIST, not a removal');
+  assert.doesNotMatch(findings[0].fix, /^git -C \S+ worktree remove/m);
+});
+
+test('the main checkout is never counted as a leak', () => {
+  // `worktree list` always includes the checkout you ran it from. Counting it
+  // would report every repository as carrying one worktree it cannot lose.
+  const { checked } = worktreeFindings('/repo', fakeWorktreeGit(wt(1)));
+  assert.match(checked, /0 beside the main checkout/);
+});
+
+test('no git, or no runner, is not a worktree finding', () => {
+  // The distinction `absentMistakes` already draws: "there are none" and "I
+  // could not tell" must not produce the same silence for different reasons.
+  assert.deepEqual(worktreeFindings('/repo', null).findings, []);
+  assert.match(worktreeFindings('/repo', null).checked, /not checked/);
+  assert.deepEqual(worktreeFindings('/repo', fakeWorktreeGit(wt(20), false)).findings, []);
+  assert.match(worktreeFindings('/repo', fakeWorktreeGit(wt(20), false)).checked, /no git here/);
+});
+
+test('already-prunable worktrees are counted and named', () => {
+  const { findings } = worktreeFindings('/repo', fakeWorktreeGit(wt(WORKTREE_CEILING + 3, { prunable: true })));
+  assert.match(findings[0].message, /already prunable/);
 });

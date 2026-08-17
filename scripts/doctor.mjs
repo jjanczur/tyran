@@ -187,6 +187,8 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'lease-orphan': 'warning',
     'lease-expired': 'warning',
     'lease-release-by-non-holder': 'warning',
+    // worktrees
+    'worktree-accumulating': 'warning',
     // projections
     'projection-drift': 'warning',
     'projection-absent': 'info',
@@ -944,7 +946,17 @@ function askFindings(journalPath, at, read, reference) {
   return findings;
 }
 
-const EXPIRY_KEYS = Object.freeze(['expires', 'expires_at', 'until']);
+/**
+ * Every spelling an agent has actually used for a lease's expiry.
+ *
+ * `expiry` leads because it is what agents overwhelmingly write: measured
+ * across every journal on a real machine, 33 `expiry` against 3 `expires`, so
+ * this finding read 3 of 36 recorded expiries and `lease-expired` was
+ * effectively dead. A denylist of spellings is a poor mechanism, but the
+ * alternative — refusing the ones agents naturally reach for — trades a quiet
+ * miss for a loud one over a field that is advisory anyway.
+ */
+const EXPIRY_KEYS = Object.freeze(['expiry', 'expires', 'expires_at', 'until']);
 
 function leaseFindings(journalPath, at, events, reference) {
   const findings = [];
@@ -1461,6 +1473,64 @@ function absentMistakes(repoRoot, path, run) {
     checked: `${checked} — never existed`,
   };
 }
+/**
+ * How many git worktrees this repository is carrying, and whether that has
+ * become a problem nobody is looking at.
+ *
+ * Tyran's parallel model is a worktree per agent, and NOTHING removes one.
+ * There is no removal path in any skill, agent or script; the journal has no
+ * event that can even represent a worktree being destroyed; and doctor has
+ * never enumerated them. Measured on one real machine: 26 in one repository,
+ * 33 GB under another's `.worktrees/`, the oldest active for 68 days.
+ *
+ * REPORTS, never removes — and that restraint is the finding's whole design,
+ * not doctor's general rule applied by rote. Most of those worktrees turned
+ * out to hold work that never CONCLUDED rather than work that finished, so a
+ * tool deleting "merged" ones would clear almost nothing while being able, on
+ * a bad day, to delete something someone wanted. The operator gets the count,
+ * the ages, and a command they can read before running.
+ *
+ * The threshold is deliberately generous: a handful of worktrees is the system
+ * working as designed. This fires when they have stopped being cleaned up at
+ * all, which is what the measured installs look like.
+ */
+export const WORKTREE_CEILING = 8;
+
+export function worktreeFindings(repoRoot, run = null) {
+  const checked = 'git worktrees';
+  if (run === null) return { findings: [], checked: `${checked}: not checked (no git runner)` };
+  if (run(['rev-parse', '--is-inside-work-tree']).trim() !== 'true') {
+    return { findings: [], checked: `${checked}: no git here` };
+  }
+  const listing = run(['worktree', 'list', '--porcelain']);
+  if (listing.trim() === '') return { findings: [], checked: `${checked}: none reported` };
+  // One record per blank-line-separated block; the main checkout is one of
+  // them and is never a leak, so it is counted and then subtracted.
+  const blocks = listing.split(/\n\s*\n/).filter((b) => b.trim() !== '');
+  const extra = Math.max(0, blocks.length - 1);
+  const prunable = blocks.filter((b) => /^prunable /m.test(b)).length;
+  if (extra <= WORKTREE_CEILING) {
+    return { findings: [], checked: `${checked}: ${extra} beside the main checkout` };
+  }
+  return {
+    findings: [
+      finding(
+        'worktree-accumulating',
+        show(repoRoot),
+        `${extra} git worktrees beside the main checkout` +
+          (prunable > 0 ? `, ${prunable} of them already prunable` : '') +
+          ' — Tyran creates one per parallel agent and removes none, so they accumulate silently. ' +
+          'They cost disk, and a stale one has already cost a validation baseline: a lint run swept ' +
+          'leftover worktrees and reported 32,243 phantom errors. Nothing here is deleted for you; ' +
+          'read the list before removing anything, because an unmerged worktree may hold work that ' +
+          'was never finished rather than work that was',
+        `git -C ${sq(repoRoot)} worktree list   # then: git worktree remove <path>, after checking git -C <path> status`,
+      ),
+    ],
+    checked: `${checked}: ${extra} beside the main checkout`,
+  };
+}
+
 export function mistakesFindings(repoRoot, run = null) {
   const path = join(repoRoot, MISTAKES_FILE);
   if (!existsSync(path)) return absentMistakes(repoRoot, path, run);
@@ -1851,6 +1921,10 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
   const mistakes = mistakesFindings(repoRoot, gitRun);
   findings.push(...mistakes.findings);
   checked.push(mistakes.checked);
+
+  const worktrees = worktreeFindings(repoRoot, gitRun);
+  findings.push(...worktrees.findings);
+  checked.push(worktrees.checked);
 
   findings.push(...overnightFindings(dir, { now, configDoc }));
   checked.push('overnight: checked');

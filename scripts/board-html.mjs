@@ -185,6 +185,10 @@ pre.how .c{color:var(--muted)}
 .comp span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.63rem;color:var(--bg);font-weight:700;white-space:nowrap;overflow:hidden}
 .comp .s-cache_read{background:var(--brass)}
 .comp .s-cache_write{background:var(--steel)}
+/* The 1-hour write is its own segment because it is its own PRICE — 2x base
+   input against the 5-minute write's 1.25x. Without a distinct colour the
+   most expensive caching decision on the page is invisible. */
+.comp .s-cache_write_1h{background:var(--ink)}
 .comp .s-output{background:var(--sage)}
 .comp .s-input{background:var(--muted)}
 .compkey{display:flex;flex-wrap:wrap;gap:.85rem;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.3rem}
@@ -854,6 +858,15 @@ if (data.schema !== 1) {
   sp.appendChild(spBody);
   spBody.appendChild(el('div', 'hint', 'Spend is read from the transcripts Claude Code already writes, and it is served rather than embedded — open this board with "board.mjs --serve" to see it. Over file:// there is no server, so this tab stays empty.'));
 
+  // Mirrors compositionLabel in cost.mjs. Restated rather than imported
+  // because this file is a browser bundle with no module graph — the two are
+  // pinned equal by a test so the drift is caught rather than lived with.
+  var compLabel = function (kind) {
+    if (kind === 'cache_write') return 'cache write (5 min)';
+    if (kind === 'cache_write_1h') return 'cache write (1 hour)';
+    return kind.replace(/_/g, ' ');
+  };
+
   var chart = function (allRows, key, metric, dimKeys) {
     var box = el('div', 'chart');
     // Ranked by the metric on screen, not by the one the server sorted by:
@@ -940,6 +953,21 @@ if (data.schema !== 1) {
     tiles.appendChild(tile('tokens', fmtTokens(t.tokens || 0), (t.requests || 0) + ' requests'));
     tiles.appendChild(tile('cost through the API', fmtUsd(t.usd),
       cost.rate_card ? 'rate card ' + cost.rate_card : 'no rate card set', 'lead'));
+    // What the API-equivalent figure is actually WORTH knowing against. On a
+    // subscription the marginal cost of a token is zero, so the dollar total
+    // above is true of the API and false of the operator's bank account —
+    // shown alone it invites exactly the wrong conclusion. Rendered only when
+    // the plan is known; a guess here would be worse than the silence.
+    var sub = cost.subscription;
+    if (sub && typeof sub.monthly_usd === 'number' && typeof t.usd === 'number') {
+      var multiple = sub.monthly_usd > 0 ? t.usd / sub.monthly_usd : null;
+      tiles.appendChild(tile(
+        'you pay',
+        fmtUsd(sub.monthly_usd) + '/mo',
+        sub.label + (multiple === null ? '' : ' — the tokens above are ' + multiple.toFixed(1) + 'x that'),
+        'lead'
+      ));
+    }
     tiles.appendChild(tile('conductor overhead', (t.conductor_token_share || 0) + '%', 'of tokens, no ticket'));
     tiles.appendChild(tile('attributed', (cov.attributed || 0) + ' / ' + (cov.agent_transcripts || 0),
       (cov.unattributed || 0) + ' agent(s) without a ticket'));
@@ -967,7 +995,7 @@ if (data.schema !== 1) {
         var legend = el('span', null);
         legend.appendChild(el('i', 's-' + c.kind));
         legend.appendChild(el('span', null,
-          c.kind.replace('_', ' ') + ' ' + (metric === 'usd' ? fmtUsd(c.usd) : fmtTokens(c.tokens))));
+          compLabel(c.kind) + ' ' + (metric === 'usd' ? fmtUsd(c.usd) : fmtTokens(c.tokens))));
         key.appendChild(legend);
       });
       into.appendChild(bar);

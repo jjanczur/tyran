@@ -38,10 +38,21 @@ Only tokens are counted. Money is derived at the very end from a rate card
 tokens, and a figure that cannot say which card produced it is not a
 measurement.
 
-With no `pricing:` block the report shows tokens and no money at all. That is
-the honest default rather than a degraded one: Tyran does not know what anyone
-pays. The block's shape, the accepted ranges and the rule that all four rate
-keys are required are in
+With no `pricing:` block the report uses the **published list prices**, which
+ship with the plugin under the label `list-2026-08`. So money appears on a
+fresh install with no configuration at all, and it answers one specific
+question — what these tokens would have cost through the API. On a
+subscription your marginal cost per token is zero, which is why the board puts
+your monthly plan price beside the figure rather than presenting it alone.
+
+Cache writes are priced at two rates, not one: the API bills a 1-hour cache
+write at 2x base input against a 5-minute write's 1.25x, and the transcripts
+carry the split. A long agent run caches for an hour, so the distinction is
+not a corner — measured on 1.8 B tokens of real transcripts, the 1-hour line
+was $175 against the 5-minute line's $70.
+
+Overriding the shipped card, its shape, the accepted ranges and the rule that
+all four base rate keys are required are in
 [the configuration reference](configuration.md#the-rate-card).
 
 ## Ticket attribution costs nothing

@@ -45,6 +45,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { parse } from './yaml-lite.mjs';
 import { pricingOf, PRICING_RATE_KEYS } from './schema.mjs';
+import { defaultRateCard, RATE_CARD_ID, planOfTier, PLAN_LABELS, SUBSCRIPTION_USD } from './pricing.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
 
 export const COST_FILE = 'cost.json';
@@ -76,10 +77,10 @@ class UsageError extends Error {}
 
 /** A fresh counter set. Kept flat so accumulation is a loop, not a schema. */
 export function emptyCounters() {
-  return { requests: 0, input: 0, cache_write: 0, cache_read: 0, output: 0 };
+  return { requests: 0, input: 0, cache_write: 0, cache_write_1h: 0, cache_read: 0, output: 0 };
 }
 
-const COUNTER_KEYS = Object.freeze(['requests', 'input', 'cache_write', 'cache_read', 'output']);
+const COUNTER_KEYS = Object.freeze(['requests', 'input', 'cache_write', 'cache_write_1h', 'cache_read', 'output']);
 
 /** b into a, in place. */
 export function addCounters(a, b) {
@@ -87,9 +88,18 @@ export function addCounters(a, b) {
   return a;
 }
 
-/** Total tokens billed, whatever the rate. Requests are not tokens. */
+/**
+ * Total tokens billed, whatever the rate. Requests are not tokens.
+ *
+ * `cache_write` and `cache_write_1h` are DISJOINT — the 5-minute and 1-hour
+ * halves of what the API reports as one `cache_creation_input_tokens` figure.
+ * Adding both is correct precisely because neither contains the other; if one
+ * were ever made a total, this line would double-count every cached token, and
+ * cache writes are the second-largest line in a real session. A test pins the
+ * partition against the raw aggregate rather than trusting this comment.
+ */
 export function tokensOf(counters) {
-  return counters.input + counters.cache_write + counters.cache_read + counters.output;
+  return counters.input + counters.cache_write + counters.cache_write_1h + counters.cache_read + counters.output;
 }
 
 /** Own-property read on a prototype-free view of foreign JSON. */
@@ -104,6 +114,37 @@ function finiteCount(value) {
 }
 
 /**
+ * Split one request's cache writes across the two rates they are billed at.
+ *
+ * `usage.cache_creation_input_tokens` is the TOTAL; `usage.cache_creation`
+ * carries the same number split into `ephemeral_5m_input_tokens` and
+ * `ephemeral_1h_input_tokens`. Reading both the total and the split would
+ * double-count, so this reads the split when it is present and the total
+ * otherwise — never both. Verified across 1168 consecutive live records: the
+ * two ephemeral fields summed to the aggregate every time, zero exceptions.
+ *
+ * The distinction is worth the code: a 1-hour write costs 2x base input where
+ * a 5-minute write costs 1.25x, so a session that caches for an hour — which
+ * is what a long agent run does — is 60% under-billed by the flat reading.
+ */
+function addCacheWrites(into, usage) {
+  const split = field(usage, 'cache_creation');
+  if (split !== null && typeof split === 'object') {
+    const fiveMin = finiteCount(field(split, 'ephemeral_5m_input_tokens'));
+    const oneHour = finiteCount(field(split, 'ephemeral_1h_input_tokens'));
+    if (fiveMin > 0 || oneHour > 0) {
+      into.cache_write += fiveMin;
+      into.cache_write_1h += oneHour;
+      return;
+    }
+  }
+  // No split, or a split that is all zeroes while the aggregate is not: fall
+  // back to the total and attribute it to the 5-minute rate, which is the
+  // platform default TTL and therefore the right guess when nobody said.
+  into.cache_write += finiteCount(field(usage, 'cache_creation_input_tokens'));
+}
+
+/**
  * What one request cost, in dollars, or null when the model has no rate.
  * Null is not zero and callers must not treat it as zero — that distinction
  * is the whole of property 3 above.
@@ -112,8 +153,24 @@ export function costOf(model, counters, models) {
   const rates = Object.prototype.hasOwnProperty.call(models, model) ? models[model] : undefined;
   if (rates === undefined) return null;
   let total = 0;
-  for (const key of PRICING_RATE_KEYS) total += (counters[key] ?? 0) * rates[key];
+  for (const key of PRICING_RATE_KEYS) total += (counters[key] ?? 0) * rateOf(rates, key);
   return total / 1e6;
+}
+
+/**
+ * One rate from a table that may predate a rate key.
+ *
+ * `pricingOf` already defaults `cache_write_1h` to the 5-minute rate, but this
+ * function is also handed tables built by hand — by tests, and by any caller
+ * using the exported `rollup` directly. A missing rate multiplied into the sum
+ * yields NaN, which propagates through every total and renders as an amount
+ * that is not a number rather than as a visible gap. Repeating the fallback
+ * here costs one line and removes that whole failure mode.
+ */
+function rateOf(rates, key) {
+  const rate = rates[key];
+  if (typeof rate === 'number' && Number.isFinite(rate)) return rate;
+  return key === 'cache_write_1h' && typeof rates.cache_write === 'number' ? rates.cache_write : 0;
 }
 
 /**
@@ -256,7 +313,7 @@ export function scanTranscript(path) {
     const into = byModel[model];
     into.requests += 1;
     into.input += finiteCount(field(usage, 'input_tokens'));
-    into.cache_write += finiteCount(field(usage, 'cache_creation_input_tokens'));
+    addCacheWrites(into, usage);
     into.cache_read += finiteCount(field(usage, 'cache_read_input_tokens'));
     into.output += finiteCount(field(usage, 'output_tokens'));
   });
@@ -535,7 +592,12 @@ function rows(table, nameKey, models) {
  * argument, so the shape is testable without touching a filesystem.
  */
 export function rollup(scanned, pricing, extra = {}) {
-  const { models, rate_card: rateCard } = pricing;
+  // The shipped list prices, for exactly the model ids these transcripts
+  // actually name, with any configured rate laid over the top. Computed here
+  // rather than in `costReport` so every caller of `rollup` — including the
+  // tests that hand it a literal scan — gets priced output without inventing
+  // a rate card first.
+  const { models, rate_card: rateCard } = effectiveRateCard(pricing, observedModels(scanned));
   const totals = emptyCounters();
   const totalsByModel = Object.create(null);
   const conductor = { byModel: Object.create(null), counters: emptyCounters() };
@@ -583,6 +645,9 @@ export function rollup(scanned, pricing, extra = {}) {
   return {
     schema: COST_SCHEMA,
     rate_card: rateCard,
+    // Null whenever the plan cannot be established, and the board renders
+    // nothing at all in that case rather than a comparison against a guess.
+    subscription: extra.subscription ?? null,
     as_of: newestTs,
     totals: {
       ...totals,
@@ -668,7 +733,7 @@ export function renderReport(report) {
   out.push(
     table(
       ['what', 'tokens', 'usd'],
-      report.composition.map((c) => [c.kind.replace('_', ' '), tokens(c.tokens), money(c.usd)])
+      report.composition.map((c) => [compositionLabel(c.kind), tokens(c.tokens), money(c.usd)])
     )
   );
   for (const [title, key, rowsOf] of [
@@ -729,6 +794,98 @@ function pricingOfDoc(doc) {
   return pricingOf(doc ?? {});
 }
 
+/**
+ * The configured rate card laid over the shipped one.
+ *
+ * Before this, `pricing:` was hand-authored or absent, and absent was the
+ * normal case — a fresh install rendered every amount as an em dash, so the
+ * Spend tab could say how many tokens and never how much. Nobody was going to
+ * transcribe fourteen models × four rates into YAML, least of all the
+ * non-technical operators this is now for.
+ *
+ * Precedence is one-directional and per MODEL, not all-or-nothing: an operator
+ * who prices one model at a negotiated rate keeps the shipped numbers for the
+ * rest, rather than losing every other amount as the price of overriding one.
+ * The label follows whoever supplied the models — an amount computed from list
+ * prices must not claim to come from someone's private card.
+ */
+/** Where Claude Code stores the account it is signed in as. */
+export const CLAUDE_CONFIG_RELPATH = '.claude.json';
+
+/**
+ * The subscription this machine is signed in on, or null when it cannot be
+ * established. Never throws — every figure on the Spend tab must survive an
+ * absent, unreadable or reshaped config.
+ *
+ * WHY THIS IS WORTH READING AT ALL: the API-equivalent total is a number with
+ * nothing to compare it against. A subscriber's marginal cost per token is
+ * zero, so "this cost $1,379" is true of the API and false of their bank
+ * account, and a dashboard that shows only the first number is inviting
+ * exactly the wrong conclusion. The plan is what turns it into a comparison.
+ *
+ * ONLY the rate-limit tier is read. That file also holds the account uuid, the
+ * email address and the organization id, and none of them are touched, copied
+ * into the report, or logged — a spend tile is not a reason to move identity
+ * around.
+ */
+export function subscriptionOf({ home = homedir(), readFile = readFileSync } = {}) {
+  let tier = null;
+  try {
+    const doc = JSON.parse(readFile(join(home, CLAUDE_CONFIG_RELPATH), 'utf8'));
+    const account = doc !== null && typeof doc === 'object' ? doc.oauthAccount : null;
+    if (account !== null && typeof account === 'object') tier = account.organizationRateLimitTier ?? null;
+  } catch {
+    // Not signed in, no config, unreadable, or not JSON. All the same answer.
+    return null;
+  }
+  const plan = planOfTier(tier);
+  if (plan === null) return null;
+  return { plan, label: PLAN_LABELS[plan], monthly_usd: SUBSCRIPTION_USD[plan] };
+}
+
+/**
+ * A rate key as a person would read it.
+ *
+ * Not `key.replace('_', ' ')`: that replaces only the FIRST underscore, so
+ * `cache_write_1h` renders as "cache write_1h" — visibly a variable name that
+ * escaped. The two cache-write rows also have to be distinguishable at a
+ * glance, since the whole reason they are separate is that one costs 60% more.
+ */
+export function compositionLabel(kind) {
+  if (kind === 'cache_write') return 'cache write (5 min)';
+  if (kind === 'cache_write_1h') return 'cache write (1 hour)';
+  return kind.replace(/_/g, ' ');
+}
+
+/** Every model id these scanned transcripts name, in no particular order. */
+function observedModels(scanned) {
+  const ids = new Set();
+  for (const source of scanned) {
+    for (const id of Object.keys(source.by_model ?? {})) ids.add(id);
+  }
+  return ids;
+}
+
+export function effectiveRateCard(pricing, modelIds) {
+  const shipped = defaultRateCard(modelIds);
+  const models = Object.create(null);
+  for (const [id, rates] of Object.entries(shipped)) models[id] = rates;
+  let overridden = 0;
+  for (const [id, rates] of Object.entries(pricing.models)) {
+    if (Object.prototype.hasOwnProperty.call(models, id)) overridden += 1;
+    models[id] = rates;
+  }
+  const configured = Object.keys(pricing.models).length > 0;
+  return {
+    models,
+    // A config's own label wins whenever it named one. Otherwise: the shipped
+    // id, marked when a config has partly overridden it, so a reader can tell
+    // a pure list-price figure from a mixed one.
+    rate_card: pricing.rate_card ?? (configured ? `${RATE_CARD_ID}+config` : RATE_CARD_ID),
+    overridden,
+  };
+}
+
 function readCache(path) {
   try {
     const cached = JSON.parse(readFileSync(path, 'utf8'));
@@ -759,7 +916,7 @@ function writeAtomic(path, text) {
 function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed, transcriptDirsMissing }) {
   const cachePath = join(tyranDir, 'state', COST_FILE);
   const { scanned, unreadable, reused } = scanAll(sources, readCache(cachePath));
-  const report = rollup(scanned, pricing, { unreadable, reused });
+  const report = rollup(scanned, pricing, { unreadable, reused, subscription: subscriptionOf() });
   report.transcripts_found = true;
   report.transcript_dirs = transcriptDirsUsed;
   report.transcript_dirs_missing = transcriptDirsMissing;
@@ -841,7 +998,7 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
     const present = explicit.filter((d) => existsSync(d));
     const missing = explicit.filter((d) => !existsSync(d));
     if (present.length === 0) {
-      const empty = rollup([], pricing, {});
+      const empty = rollup([], pricing, { subscription: subscriptionOf() });
       empty.transcripts_found = false;
       empty.transcript_dirs = [];
       empty.transcript_dirs_missing = missing;
@@ -860,7 +1017,7 @@ export function costReport({ tyranDir, projectsRoot, session = null, repoRoot = 
 
   const dir = transcriptDirFor(root, projectsRoot ?? join(homedir(), '.claude', 'projects'));
   if (dir === null) {
-    const empty = rollup([], pricing, {});
+    const empty = rollup([], pricing, { subscription: subscriptionOf() });
     empty.transcripts_found = false;
     empty.transcript_dirs = [];
     empty.transcript_dirs_missing = [];

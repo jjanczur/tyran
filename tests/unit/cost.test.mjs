@@ -254,6 +254,168 @@ test('a repo with no transcripts says so rather than reporting zero spend', () =
   assert.equal(empty.transcripts_found, false);
 });
 
+/* -------------------------- explicit transcript dirs --------------------- */
+//
+// The measured bug: a conductor session started from a working directory
+// OTHER than the repo it operates on has its transcript filed under a
+// project directory neither `transcriptDirFor` heuristic can reach — the
+// computed slug is derived from the CONDUCTOR's cwd, and every record in
+// that transcript carries the conductor's cwd too, never the repo's. Real
+// run: a `claude` session once started inside the repo (for the trust
+// dialog) left a directory the direct lookup matched and stopped at, while
+// ~66 agent transcripts sat under the real project dir with nothing on the
+// board pointing at them. `--transcripts` / `spend.transcript_dirs` is the
+// operator-named escape hatch.
+
+test('an explicit transcript dir is used even when it is not derivable from the repo root at all', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tyran-cost-explicit-'));
+  const repo = join(base, 'repo'); // the repo the conductor is WORKING ON
+  const otherCwd = join(base, 'other-session-cwd'); // where the conductor actually RAN from
+  const projects = join(base, 'projects'); // empty: the fallback must find nothing here
+  const elsewhere = join(base, 'elsewhere-transcripts'); // not under `projects` at all
+  mkdirSync(join(repo, '.tyran', 'state'), { recursive: true });
+  mkdirSync(join(elsewhere, 'sess-1', 'subagents'), { recursive: true });
+  writeFileSync(
+    join(elsewhere, 'sess-1.jsonl'),
+    assistant('m-cheap', usage(1, 1, 1, 1), 'r1', otherCwd) + '\n'
+  );
+  const agents = join(elsewhere, 'sess-1', 'subagents');
+  writeFileSync(join(agents, 'agent-a1.jsonl'), assistant('m-cheap', usage(1, 1, 1, 1), 'r2', otherCwd) + '\n');
+  writeFileSync(join(agents, 'agent-a1.meta.json'), JSON.stringify({ agentType: 'implementer', description: 'T-1 do it' }));
+  writeFileSync(join(repo, '.tyran', 'config.yaml'), "profile: 'balanced'\n");
+
+  // MUTANT: ignore `transcriptDirs` and keep calling `transcriptDirFor` —
+  // this is the exact shape of the measured failure this flag exists to fix.
+  assert.equal(transcriptDirFor(repo, projects), null, 'the existing resolution genuinely cannot find it');
+
+  const out = costReport({
+    tyranDir: join(repo, '.tyran'),
+    projectsRoot: projects,
+    repoRoot: repo,
+    transcriptDirs: [elsewhere],
+  });
+  assert.equal(out.transcripts_found, true);
+  assert.deepEqual(out.transcript_dirs, [elsewhere]);
+  assert.deepEqual(out.transcript_dirs_missing, []);
+  assert.equal(out.coverage.agent_transcripts, 1, 'the agent transcript sitting in the explicit dir is found');
+});
+
+test('a --transcripts dir that does not exist is reported missing, never silently dropped', () => {
+  const tree = makeTree();
+  const missing = join(tree.base, 'nowhere-at-all');
+  const out = costReport({ tyranDir: tree.tyranDir, projectsRoot: tree.projects, transcriptDirs: [missing] });
+  // MUTANT: skip an absent dir instead of reporting it — property 3 in this
+  // file's header: gaps are reported, never zeroed.
+  assert.equal(out.transcripts_found, false);
+  assert.deepEqual(out.transcript_dirs, []);
+  assert.deepEqual(out.transcript_dirs_missing, [missing]);
+});
+
+test('one present and one missing --transcripts dir: the present one still reports, the missing one is named', () => {
+  const a = makeTree();
+  const missing = join(a.base, 'nope');
+  const out = costReport({
+    tyranDir: a.tyranDir,
+    projectsRoot: a.projects,
+    transcriptDirs: [a.project, missing],
+  });
+  assert.equal(out.transcripts_found, true);
+  assert.deepEqual(out.transcript_dirs, [a.project]);
+  assert.deepEqual(out.transcript_dirs_missing, [missing]);
+  assert.equal(out.coverage.agent_transcripts, 2);
+});
+
+test('spend.transcript_dirs in config.yaml is honoured when no --transcripts flag is given', () => {
+  const tree = makeTree({ slugged: false }); // the derived slug will not match
+  const configPath = join(tree.tyranDir, 'config.yaml');
+  writeFileSync(
+    configPath,
+    readFileSync(configPath, 'utf8') + 'spend:\n' + '  transcript_dirs:\n' + `    - '${tree.project}'\n`
+  );
+  // `projectsRoot` points at an empty directory, so the derived-slug / cwd
+  // probe fallback has nothing to find — only the config block can locate it.
+  const out = costReport({
+    tyranDir: tree.tyranDir,
+    projectsRoot: join(tree.base, 'nowhere'),
+    repoRoot: tree.repo,
+  });
+  assert.equal(out.transcripts_found, true);
+  assert.deepEqual(out.transcript_dirs, [tree.project]);
+});
+
+test('a CLI --transcripts argument outranks spend.transcript_dirs in config.yaml', () => {
+  const winner = makeTree();
+  const loser = makeTree();
+  const configPath = join(winner.tyranDir, 'config.yaml');
+  writeFileSync(
+    configPath,
+    readFileSync(configPath, 'utf8') + 'spend:\n' + '  transcript_dirs:\n' + `    - '${loser.project}'\n`
+  );
+  const out = costReport({
+    tyranDir: winner.tyranDir,
+    projectsRoot: join(winner.base, 'nowhere'),
+    repoRoot: winner.repo,
+    transcriptDirs: [winner.project],
+  });
+  // MUTANT: read the config block before the CLI argument, or merge the two
+  // instead of the CLI winning outright — the documented precedence is CLI >
+  // config > fallback, in that order.
+  assert.deepEqual(out.transcript_dirs, [winner.project]);
+});
+
+test('CLI accepts repeated --transcripts, unions the dirs, and reports a missing one', () => {
+  const a = makeTree();
+  const b = makeTree();
+  const missing = join(a.base, 'nope');
+  const out = execFileSync(
+    process.execPath,
+    [
+      COST_CLI,
+      '--dir', a.tyranDir,
+      '--transcripts', a.project,
+      '--transcripts', b.project,
+      '--transcripts', missing,
+      '--json',
+    ],
+    { encoding: 'utf8' }
+  ).trim();
+  const parsed = JSON.parse(readFileSync(out, 'utf8'));
+  assert.equal(parsed.transcripts_found, true);
+  assert.deepEqual(parsed.transcript_dirs.slice().sort(), [a.project, b.project].sort());
+  assert.deepEqual(parsed.transcript_dirs_missing, [missing]);
+  // MUTANT: scan only the first --transcripts dir instead of the union — the
+  // agent count would read 2 instead of 4, the exact shape of the measured
+  // bug this flag exists to fix (agents sitting in a dir the report never
+  // opened).
+  assert.equal(parsed.coverage.agent_transcripts, 4);
+});
+
+test('CLI: --transcripts with no value is a usage error, exit 2', () => {
+  const tree = makeTree();
+  assert.throws(
+    () => execFileSync(process.execPath, [COST_CLI, '--dir', tree.tyranDir, '--transcripts'], { encoding: 'utf8', stdio: 'pipe' }),
+    (err) => err.status === 2
+  );
+});
+
+test('CLI: none of the given transcript dirs exist names them, distinct from the derived-dir message', () => {
+  const tree = makeTree();
+  const missing = join(tree.base, 'gone');
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, [COST_CLI, '--dir', tree.tyranDir, '--transcripts', missing], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+      }),
+    (err) => {
+      assert.equal(err.status, 2);
+      assert.match(String(err.stderr), /none of the given transcript directories exist/);
+      assert.match(String(err.stderr), new RegExp(missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      return true;
+    }
+  );
+});
+
 test('an unchanged transcript is reused from cache; a changed one is rescanned', () => {
   const tree = makeTree();
   const sources = listSources(tree.project, null);

@@ -149,6 +149,16 @@ test('the initiative ceiling refuses loudly instead of quietly truncating', () =
   assert.match(cli.stderr, /ceiling/);
 });
 
+test('--transcripts only means anything with --serve, exactly like --write', () => {
+  const dir = tree({ demo: demo() });
+  // MUTANT: let --transcripts through without --serve — it would silently do
+  // nothing (the one-shot renderer never calls costReport at all), which is
+  // the same kind of invisible no-op --write's own guard already refuses.
+  const r = run(['--dir', dir, '--transcripts', '/tmp/somewhere']);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--transcripts only means anything with --serve/);
+});
+
 test('the CLI writes three files, --check is clean after and drifts after a hand edit', () => {
   const dir = tree({ demo: demo() });
   assert.equal(run(['--dir', dir]).code, 0);
@@ -303,6 +313,28 @@ test('spend reaches three places from the one fetch, and explains itself when th
   assert.match(html, /if \(cost\) \{/, 'a selected card must be able to show its own spend');
   assert.match(html, /row\('spend', fmtTokens\(hit\.tokens\) \+ ' tokens [^']*' \+ fmtUsd\(hit\.usd\)\);/);
   assert.match(html, /Over file:\/\/ there is no server, so this tab stays empty\./);
+});
+
+test('the missing-transcript-dir hint renders even when nothing was found at all', () => {
+  // MUTANT: revert the fetch handler's `if (!payload.transcripts_found)` back
+  // to a bare `return;`. The pure function's own tests (board-client-literal
+  // .test.mjs) would stay green — they never touch this call site — while the
+  // Spend tab silently keeps its pre-fetch "open with --serve" hint on the
+  // exact payload review reproduced live: every `spend.transcript_dirs` entry
+  // present but every one of them a typo. This test pins the WIRING, not just
+  // the function it wires in.
+  const html = demoHtml();
+  const handler = html.slice(
+    html.indexOf('if (!payload.transcripts_found) {'),
+    html.indexOf('cost = payload;'),
+  );
+  assert.notEqual(handler.indexOf('if (!payload.transcripts_found) {'), -1, 'the guard itself must survive');
+  assert.match(handler, /clear\(spBody\)/, 'the stale pre-fetch hint must be cleared, not left standing');
+  assert.match(
+    handler,
+    /spendResolutionHints\(payload\)\.forEach\(function \(h\) \{ spBody\.appendChild\(el\('div', 'hint', h\)\); \}\)/,
+    'the branch that never reaches renderSpend must still call the shared hint function',
+  );
 });
 
 // --- the half that did not render -----------------------------------------

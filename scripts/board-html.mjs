@@ -858,6 +858,37 @@ if (data.schema !== 1) {
     return box;
   };
 
+  // A PURE function on purpose: no DOM, so a test can extract this one
+  // function's source out of the page and evaluate it standalone, without a
+  // browser, and check what it decides for a payload it never had to fetch.
+  //
+  // Two callers, one decision. renderSpend calls this once spend loaded
+  // normally; the cost-fetch handler below calls it BEFORE the early return
+  // on a payload with transcripts_found false — a directory named in
+  // transcript_dirs_missing is exactly as real a fact when nothing was
+  // found at all as when something was, and a single function neither call
+  // site can restate differently is what keeps that true.
+  var spendResolutionHints = function (payload) {
+    var hints = [];
+    var missing = (payload && payload.transcript_dirs_missing) || [];
+    if (missing.length > 0) {
+      var noun = missing.length === 1 ? 'directory' : 'directories';
+      hints.push('Given transcript ' + noun + ' not found: ' + missing.join(', ') + '.');
+    }
+    // Only on the branch that never reaches renderSpend at all: when spend
+    // WAS found, "no transcripts" would be false and misleading — the tab
+    // renders its own numbers and, if it turns out zero agents were among
+    // them, the separate agents-vs-coverage hint inside renderSpend covers it.
+    if (payload && payload.transcripts_found === false) {
+      hints.push(
+        'No transcripts found for this repo. If the conductor ran from another working directory, ' +
+        'point the board at that session: board.mjs --serve --transcripts <dir> or set ' +
+        'spend.transcript_dirs in .tyran/config.yaml.'
+      );
+    }
+    return hints;
+  };
+
   var renderSpend = function (into, metric) {
     clear(into);
     var t = cost.totals || {};
@@ -932,6 +963,27 @@ if (data.schema !== 1) {
         ' oversized record(s) were skipped; their tokens are missing from every figure here.');
     }
     into.appendChild(el('div', 'caveat', notes.join(' ')));
+
+    // Zero agent transcripts while the board itself lists agents is not "no
+    // agents ran" — it is the resolved directory being the WRONG one. A
+    // conductor session started from a working directory other than the repo
+    // it operates on files its transcript under a project directory no
+    // derivation from the repo path reaches, and this is the one place an
+    // operator would otherwise have no reason to suspect it: the tab renders,
+    // the totals are honest numbers, and they are honest numbers about the
+    // wrong session.
+    if ((cov.agent_transcripts || 0) === 0 && agents.length > 0) {
+      into.appendChild(el('div', 'hint',
+        'No agent transcripts found where this repo\\u2019s transcripts are expected. If the conductor ' +
+        'ran from another working directory, point the board at that session: board.mjs --serve ' +
+        '--transcripts <dir> or set spend.transcript_dirs in .tyran/config.yaml.'));
+    }
+    // cost.transcripts_found is true whenever this function runs at all, so
+    // spendResolutionHints only ever contributes the missing-dirs line here
+    // — the "no transcripts found" line is reachable exclusively through the
+    // fetch handler's own call below, on the branch that never reaches this
+    // function.
+    spendResolutionHints(cost).forEach(function (h) { into.appendChild(el('div', 'hint', h)); });
   };
 
   // Spend is FETCHED, never embedded: it is derived from transcripts under
@@ -973,7 +1025,21 @@ if (data.schema !== 1) {
             ((payload && payload.schema) || 'absent') + ') — regenerate the board with the Tyran that served it.');
           return;
         }
-        if (!payload.transcripts_found) return; // genuinely nothing to show
+        if (!payload.transcripts_found) {
+          // Genuinely nothing to roll up — but the explanation still has to
+          // reach the page. This used to be a silent early return that left
+          // spBody carrying the "open with --serve" hint written before the
+          // fetch even started, unconditionally wrong once the fetch answers:
+          // it made the everyday single-typo spend.transcript_dirs case
+          // (payload carries transcript_dirs_missing but no coverage at all,
+          // since renderSpend — the only other place that hint used to live
+          // — never runs on this branch) look exactly like a repo that had
+          // never been served at all. Reviewed and reproduced live via
+          // cost.json before this fix.
+          clear(spBody);
+          spendResolutionHints(payload).forEach(function (h) { spBody.appendChild(el('div', 'hint', h)); });
+          return;
+        }
         cost = payload;
         renderSpend(spBody, 'tokens');
         var t = cost.totals || {};

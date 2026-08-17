@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Spend, when the conductor ran from somewhere else
+
+Measured on a real run: a Claude Code Desktop session operated on a repo
+through absolute paths and worktrees, but was itself started in a sibling
+folder. `cost.mjs` derives a transcript directory from the repo path and falls
+back to scanning every project directory for a `cwd` match — both assume the
+conductor ran *from* the repo, and neither one held here. A different,
+unrelated `claude` run had once been started inside the repo (for the trust
+dialog), so the direct lookup found a directory and stopped there. The board's
+Spend tab rendered that unrelated session — 17 requests, one model, "0 agents
+attributed", conductor overhead 100% — as if it were the whole initiative,
+with nothing on the page saying that ~66 agent transcripts and 2 300 requests
+were sitting elsewhere.
+
+Two operator-named overrides, both resolved by `cost.mjs` itself so
+`board.mjs --serve` gets them for free: a repeatable `--transcripts <dir>` on
+the command line, and `spend.transcript_dirs` in `.tyran/config.yaml`. Either
+replaces the derived-slug / cwd-probe resolution outright; a given directory
+that does not exist is reported in the new `transcript_dirs_missing` field
+rather than dropped. The Spend tab now shows a hint — pointing at both
+overrides — whenever it finds zero agent transcripts while the board itself
+lists running agents, which is the shape this failure actually has: a tab that
+renders, with honest numbers about the wrong session.
+
 ## 0.1.29 — 2026-08-16
 
 Tyran has videos. Five cuts, and a page that says which one to send.

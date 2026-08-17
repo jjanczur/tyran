@@ -20,7 +20,8 @@
  * initiative reads as "all is well" exactly when it is not.
  *
  * CLI:
- *   node board.mjs [--dir <.tyran>] [--check] [--serve [--port <n>] [--write]]
+ *   node board.mjs [--dir <.tyran>] [--check]
+ *                  [--serve [--port <n>] [--write] [--transcripts <dir>]...]
  * Exit: 0 ok · 1 drift (--check) · 2 usage/IO
  */
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
@@ -561,9 +562,12 @@ function handleSettingsWrite(dir, route, body) {
 
 const BOOLEAN_FLAGS = ['check', 'serve', 'write'];
 const VALUE_FLAGS = ['dir', 'port'];
+// Repeatable, unlike VALUE_FLAGS: sources are the union over every directory
+// given, exactly like cost.mjs's own `--transcripts`.
+const REPEATABLE_FLAGS = ['transcripts'];
 
 function parseArgs(argv) {
-  const flags = { dir: '.tyran', port: 4173, check: false, serve: false, write: false };
+  const flags = { dir: '.tyran', port: 4173, check: false, serve: false, write: false, transcripts: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith('--')) throw new UsageError(`unexpected argument "${arg}"`);
@@ -573,6 +577,11 @@ function parseArgs(argv) {
       const value = argv[i + 1];
       if (value === undefined) throw new UsageError(`flag --${name} needs a value`);
       flags[name] = name === 'port' ? Number(value) : value;
+      i += 1;
+    } else if (REPEATABLE_FLAGS.includes(name)) {
+      const value = argv[i + 1];
+      if (value === undefined) throw new UsageError(`flag --${name} needs a value`);
+      flags[name].push(value);
       i += 1;
     } else throw new UsageError(`unknown flag --${name}`);
   }
@@ -589,11 +598,21 @@ function main() {
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
     console.error(`board: ${err.message}`);
-    console.error('usage: board.mjs [--dir <.tyran>] [--check] [--serve [--port <n>] [--write]]');
+    console.error(
+      'usage: board.mjs [--dir <.tyran>] [--check] ' +
+        '[--serve [--port <n>] [--write] [--transcripts <dir>]...]'
+    );
     process.exit(2);
   }
   if (flags.write && !flags.serve) {
     console.error('board: --write only means anything with --serve (it is what the served page may edit)');
+    process.exit(2);
+  }
+  if (flags.transcripts.length > 0 && !flags.serve) {
+    console.error(
+      'board: --transcripts only means anything with --serve (it is what /cost.json reads instead of ' +
+        'the derived transcript directory)'
+    );
     process.exit(2);
   }
   const dir = resolve(flags.dir);
@@ -717,7 +736,11 @@ function main() {
         if (req.url === '/cost.json') {
           let body;
           try {
-            body = costJson(costReport({ tyranDir: dir }));
+            // `flags.transcripts` is [] unless the operator started this
+            // server with `--transcripts`; costReport falls through to
+            // `spend.transcript_dirs` and then the derived directory on its
+            // own, so an empty array here changes nothing for the common case.
+            body = costJson(costReport({ tyranDir: dir, transcriptDirs: flags.transcripts }));
           } catch (err) {
             // A cost failure must never take the board down with it: the
             // board answers "what is going on", and that answer does not

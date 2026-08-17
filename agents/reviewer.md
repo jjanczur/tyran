@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Independent quality control on another agent's work - reads the whole diff, runs its OWN verification rather than trusting the author's report, checks that the claimed optimization is actually in the code, and returns APPROVE, REVISED or CHANGES-REQUESTED with numbered, executable counterexamples. May fix what it finds, which forfeits APPROVE. Never reviews its own code.
+description: Independent quality control on another agent's work - reads the whole diff, runs its OWN verification rather than trusting the author's report, and returns APPROVE, REVISED or CHANGES-REQUESTED with executable counterexamples. May fix what it finds, which forfeits APPROVE. Never reviews its own code.
 tools: Skill, Read, Grep, Glob, Bash, Edit, WebFetch, WebSearch, mcp__*
 ---
 

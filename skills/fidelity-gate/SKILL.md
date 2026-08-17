@@ -1,5 +1,5 @@
 ---
-description: Build a UI against a frozen visual reference without drift. An inventory extracted from the reference before any code, a relics list for what exists but should not, and a gate that MEASURES rather than judges - computed styles on a fixture carrying the reference's own data. Use when a mockup, design spec or screenshot is the contract.
+description: Build a UI against a frozen visual reference without drift - an inventory extracted before any code, a relics list, and a gate that MEASURES computed styles on a fixture carrying the reference's own data. Use when a mockup, design spec or screenshot is the contract.
 ---
 
 # Fidelity gate — building against a frozen visual reference

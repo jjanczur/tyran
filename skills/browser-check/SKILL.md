@@ -1,5 +1,5 @@
 ---
-description: Drive a real browser and come back with a MEASUREMENT rather than an impression - deterministic waits instead of sleeps, console errors and >=400 responses as counts, computed styles dumped to JSON when appearance is disputed. Use when work touches UI, when a review must verify one, or when fidelity-gate asks for its measurement.
+description: Drive a real browser and come back with a MEASUREMENT rather than an impression - console errors and >=400 responses as counts, computed styles as JSON when appearance is disputed. Use when work touches UI, when a review must verify one, or when fidelity-gate asks for its measurement.
 ---
 
 # Browser check — proving a UI works, in numbers

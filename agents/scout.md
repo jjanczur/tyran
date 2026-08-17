@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Fast, cheap reconnaissance over a repo, its documentation, its data or external sources, changing nothing. Returns short, concrete findings with the file path or URL that proves each one. Used by the conductor at the start of a task and through the research phase of a large initiative.
+description: Fast, cheap reconnaissance over a repo, its documentation, its data or external sources, changing nothing. Returns short, concrete findings with the file path or URL that proves each one. Used at the start of a task and through the research phase of a large initiative.
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch, mcp__*
 ---
 

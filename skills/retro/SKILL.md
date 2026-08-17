@@ -1,5 +1,5 @@
 ---
-description: Close an initiative by learning from it. Spawns the retrospective agent over the ledger, the notes and the agents reports, records what it changed and what it rejected, and writes durable facts about this repo into .tyran/knowledge/. Runs automatically at the end of an initiative; also available as /tyran:retro.
+description: Close an initiative by learning from it - spawns the retrospective agent over the ledger, the notes and the agents' reports, records what changed and what was rejected, and writes durable repo facts into .tyran/knowledge/. Runs at the end of an initiative; also available as /tyran:retro.
 ---
 
 # Retro

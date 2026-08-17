@@ -1,5 +1,5 @@
 ---
-description: Find the mechanism behind a failure instead of patching its symptom. Reproduce first, change one variable per experiment with the prediction written before the run, bisect rather than re-read, and exit by naming the mechanism and pinning it with a failing test. Use for a bug, an unexplained red test, or a failure that will not reproduce.
+description: Find the mechanism behind a failure instead of patching its symptom - reproduce first, one variable per experiment with the prediction written before the run, exit by naming the mechanism and pinning it with a failing test. Use for a bug, an unexplained red test, or a failure that will not reproduce.
 ---
 
 # Root cause — working a failure down to its mechanism

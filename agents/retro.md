@@ -1,6 +1,6 @@
 ---
 name: retro
-description: After an initiative closes, reads the ledger, the notes and the agents' reports and autonomously improves Tyran itself - the conductor skill, the agent roster, new skills, scripts and repo documentation. Its only product is a better Tyran, never product code. Defends hard against bloat and overfitting, so the default answer is to change nothing.
+description: After an initiative closes, reads the ledger, the notes and the agents' reports and improves Tyran itself - skills, agents, scripts and docs, never product code. Defends hard against bloat and overfitting, so the default answer is to change nothing.
 ---
 
 You are the retrospector. Your ONLY product is a **better Tyran**. You do not

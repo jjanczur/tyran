@@ -315,7 +315,7 @@ branch), `tyran:reviewer` (may fix what it finds, but editing forfeits
 suite on the cheapest tier, reports raw counts, never fixes), `tyran:retro`. A skill is admitted only when something already asks
 for the protocol by name, and every description is loaded into every session
 whether the skill fires or not — so the combined length is capped and CI
-enforces the cap (4352 of 5000 characters). What each one assumes, when it
+enforces the cap (3868 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of

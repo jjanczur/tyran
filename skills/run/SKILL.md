@@ -1,5 +1,5 @@
 ---
-description: Conduct a task end to end, from a one-line fix to a multi-day programme. Works interactively by default - a short interview, then autonomous execution to the finish. Classifies the task (S/M/L/XL), configures itself to the repo (stack, validation commands, deployment policy), routes each role to a cost tier, runs a team of agents whose state lives in files rather than in context, stops only at genuine decisions, and reports with a progress line. Use for /tyran:run or when asked to carry something "all the way" or "with a team of agents".
+description: Conduct a task end to end, from a one-line fix to a multi-day programme - a short interview, then autonomous execution to the finish. Classifies the task S/M/L/XL, configures itself to the repo, routes each role to a cost tier, drives the agent team from the kanban board, and stops only at genuine decisions. Use for /tyran:run or when asked to carry something "all the way" or "with a team of agents".
 ---
 
 # Tyran — the conductor

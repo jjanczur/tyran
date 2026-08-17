@@ -1,5 +1,5 @@
 ---
-description: How a skill earns its place here, and how one is written so it fires - a three-question admission test, one protocol per skill, a description priced against the CI budget before the body, and an activation test proving it triggers from a cold session. Use when the retrospective proposes a new skill or rewrites one.
+description: How a skill earns its place here and how it is written so it fires - a three-question admission test, one protocol per skill, the description priced against the CI budget, and an activation test from a cold session. Use when the retrospective proposes a new skill or rewrites one.
 ---
 
 # Writing a skill for this plugin

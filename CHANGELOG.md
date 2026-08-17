@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.40 — 2026-08-17
+
+### Every session pays for these sentences, so they got shorter
+
+Fifteen of the nineteen descriptions — ten skills, five agents — rewritten to
+carry only what routes: what it does, when it fires, the one distinguishing
+mechanism. The justifications live in the bodies, which load only when the
+skill fires. Skill total: **4352 → 3868 of 5000** (measured by the same CI
+guard that enforces the cap); the agent descriptions, which the Agent tool
+loads into every session the same way, shed a similar fraction.
+
+Nothing lost its trigger — `prompt-tuning` GAINED one (it was the only
+description with no "use when" clause), and `run`'s now names the kanban it
+drives the team from, which 0.1.39 made true.
+
 ## 0.1.39 — 2026-08-17
 
 ### A fifth agent, and the conductor plans from the board it shows you

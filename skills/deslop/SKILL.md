@@ -1,5 +1,5 @@
 ---
-description: The optimization pass, defined - delete before you add, one smell class per pass, behaviour pinned by a test that ran BEFORE the edit and again after. Lints a SKILL.md and prose by the same instinct. Use for the per-story optimization pass, before promoting a skill, or when code has grown noisy without growing capable.
+description: The optimization pass, defined - delete before you add, one smell class per pass, behaviour pinned by a test that ran BEFORE the edit. Lints a SKILL.md and prose by the same instinct. Use for the per-story optimization pass or when code has grown noisy without growing capable.
 ---
 
 # Deslop — the pass that removes rather than adds

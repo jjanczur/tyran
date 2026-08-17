@@ -1,5 +1,5 @@
 ---
-description: The depth half of a review - the dimensions a diff is read against (correctness, boundaries, concurrency, failure paths, secrets, test quality, lifecycle) and the rule that a finding is refuted before it is reported. The verdict itself stays with the reviewer agent. Use when reviewing a diff or a pull request.
+description: The depth half of a review - the dimensions a diff is read against (correctness, boundaries, concurrency, failure paths, secrets, test quality) and the rule that a finding is refuted before it is reported. The verdict stays with the reviewer agent. Use when reviewing a diff or a pull request.
 ---
 
 # Code review — reading depth

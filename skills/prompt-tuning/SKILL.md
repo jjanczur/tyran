@@ -1,5 +1,5 @@
 ---
-description: Iterate on a prompt, or on anything whose quality is measured by non-deterministic model output, without chasing noise. A noise baseline before the first edit, medians over repeated runs, enforcement AFTER generation rather than in the wording, and detectors that surface candidates rather than defects.
+description: Tune a prompt, or anything whose quality is measured by non-deterministic model output, without chasing noise - a noise baseline before the first edit, medians over repeated runs, enforcement AFTER generation rather than in the wording. Use when iterating on prompts or model-judged output.
 ---
 
 # Prompt tuning — working with non-deterministic output

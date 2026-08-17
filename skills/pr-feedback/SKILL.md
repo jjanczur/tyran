@@ -1,5 +1,5 @@
 ---
-description: Work a reviewer's comments on a pull request to the end. Enumerate all three comment surfaces before triaging any, give every comment a disposition - fixed, declined with a reason, or ticketed - push before you reply, and resolve only what you addressed. Use when a PR comes back with review feedback or a red check.
+description: Work a reviewer's comments on a pull request to the end - all three comment surfaces enumerated before any is triaged, every comment fixed, declined with a reason, or ticketed, push before you reply. Use when a PR comes back with review feedback or a red check.
 ---
 
 # PR feedback — closing the loop with a human reviewer

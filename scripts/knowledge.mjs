@@ -313,7 +313,17 @@ function main() {
     // A measurement, never an edit: which of two overlapping entries is the
     // true one is a judgement, and a script that guessed would delete the
     // hard-won detail this exists to protect.
-    out.push('  This reports; it never edits. /tyran:retro consolidates, writing a NEW file for review.');
+    //
+    // This line used to promise that `/tyran:retro` consolidates, writing a
+    // new file for review. It does not, and never has: grep the skill and the
+    // agent and there is no consolidation step in either. What the retro
+    // really does to this store is COUNTER upkeep — folding each report's
+    // brief verdicts in, retiring an entry the counters have written off, and
+    // splitting one `doctor` calls oversized. Merging two overlapping entries
+    // is nobody's job yet. Saying so is the point: a tool that names a
+    // downstream step by name is the last place a reader will doubt it.
+    out.push('  This reports; it never edits. Nothing merges overlapping entries yet — /tyran:retro');
+    out.push('  keeps the counters, retires what stopped earning its keep, and splits what is oversized.');
     process.stdout.write(out.join('\n') + '\n');
     process.exitCode = 0;
     return;

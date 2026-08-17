@@ -111,15 +111,23 @@ export const DATA_KNOWN = Object.freeze({
   spawn: Object.freeze(['agent', 'role', 'model', 'ticket', 'worktree']),
   report: Object.freeze(['agent', 'verdict', 'ticket', 'text', 'note', 'evidence', 'closed_by']),
   progress: Object.freeze(['agent', 'state', 'ticket', 'detail', 'next']),
-  // The last five are the evidence gate's own, written on every SubagentStop.
-  // They are as legitimate as the rest and belong here for exactly that reason.
+  // Row two is the evidence gate's own, written on every SubagentStop; row
+  // three is `answer.mjs` closing an operator question. Both are Tyran writing
+  // to its own journal, so leaving either out would have every install report
+  // its own normal operation back at itself.
   gate: Object.freeze([
     'kind', 'result', 'evidence', 'evidence_ref', 'ticket', 'question', 'recommendation', 'default',
     'reason', 'signals', 'code', 'would_be', 'initiative_inferred_from',
+    'answer', 'answer_mode', 'decision', 'via',
   ]),
   review: Object.freeze(['ticket', 'verdict', 'by']),
   merge: Object.freeze(['ticket', 'sha', 'mode']),
-  decision: Object.freeze(['id', 'text']),
+  // `ask`/`ticket` come from `answer.mjs` closing an operator question;
+  // `signature`/`occurrences`/`path` from `mistakes.mjs` recording a promoted
+  // rule. Tyran's OWN writers, so leaving them out would have every install
+  // that has ever answered a question or run a retrospective report its own
+  // normal operation back at itself.
+  decision: Object.freeze(['id', 'text', 'ask', 'ticket', 'signature', 'occurrences', 'path']),
   finding: Object.freeze(['area', 'claim', 'proof', 'id', 'ticket', 'confidence']),
   'lease.acquired': Object.freeze(['resource', 'holder', 'mode']),
   'lease.released': Object.freeze(['resource', 'holder']),

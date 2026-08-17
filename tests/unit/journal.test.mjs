@@ -39,6 +39,7 @@ import {
   nextAskKind,
   raiseAsk,
 } from '../../scripts/journal.mjs';
+import { eventsFor } from '../../scripts/answer.mjs';
 
 const SCRIPT = new URL('../../scripts/journal.mjs', import.meta.url).pathname;
 const tmp = () => join(mkdtempSync(join(tmpdir(), 'tyran-journal-')), 'journal.jsonl');
@@ -1365,5 +1366,26 @@ test('a hostile or absent data object is not a crash', () => {
     evt('spawn', null), evt('spawn', ['a']), evt('spawn', 'x'), { ev: 'spawn' }, null, evt('not-an-event', { x: 1 }),
   ]);
   assert.deepEqual([...unread.keys()], []);
+  assert.deepEqual(nearMisses, []);
+});
+
+test("Tyran's OWN writers produce no unread keys", () => {
+  // MUTANT: drop `ask`/`via`/`occurrences` from DATA_KNOWN. Every install that
+  // has ever answered an operator question or promoted a rule would then have
+  // doctor report its own normal operation back at it — which is precisely the
+  // nagging this design was shaped to avoid, arriving from inside the house.
+  //
+  // Built from the REAL writer rather than a hand-copied literal: a list
+  // written here would agree with DATA_KNOWN by construction and prove nothing
+  // about answer.mjs (ADR-21).
+  const ask = { init: 'demo', kind: 'Q-1', ticket: 'T-1' };
+  const { decision, gate } = eventsFor(ask, { mode: 'operator', text: 'em dash' }, 'D-3');
+  const { unread, nearMisses } = unreadDataKeys([
+    { ...decision, ts: '2026-07-26T09:00:00.000Z', data: { ...decision.data, id: 'D-3' } },
+    { ...gate, ts: '2026-07-26T09:00:01.000Z' },
+    // mistakes.mjs, recording a promoted rule.
+    evt('decision', { id: 'D-4', text: 'promoted', signature: 'sig', occurrences: 3, path: 'CLAUDE.md' }),
+  ]);
+  assert.deepEqual([...unread.keys()], [], 'a key Tyran itself writes is not an unread key');
   assert.deepEqual(nearMisses, []);
 });

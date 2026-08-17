@@ -456,9 +456,13 @@ open one.
   and the leases released:
 
   ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs" checkpoint <abs-journal> <init> \
-    --actor conductor --phase closed --next-steps 'none — initiative complete'
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/journal.mjs" append <abs-journal> checkpoint <init> \
+    --actor conductor --data '{"phase":"closed","next_steps":[]}'
   ```
+
+  `append ... checkpoint`, not a `checkpoint` subcommand — there is no such
+  subcommand, and the first draft of this line invented one. It would have
+  printed a usage block and closed nothing.
 
   This is one line and it is load-bearing. The projection closes every still-
   open spawn on a closing checkpoint, which is what stops an agent that

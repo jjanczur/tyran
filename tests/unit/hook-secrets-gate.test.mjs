@@ -1522,3 +1522,94 @@ test('a dash-prefixed value is still a value: setting the hooks path with it is 
     DENIAL_CODES.HOOKS_PATH,
   ]);
 });
+
+// --- which scanner, and why that order ----------------------------------
+
+test('the operator override outranks everything', () => {
+  // Unchanged behaviour, pinned because the two lookups below were added
+  // underneath it: an operator who pointed at a build they chose must keep
+  // getting it, whatever else is on the machine.
+  const prior = process.env.TYRAN_GITLEAKS_BIN;
+  try {
+    process.env.TYRAN_GITLEAKS_BIN = '/opt/pinned/gitleaks';
+    assert.equal(GITLEAKS_BIN(), '/opt/pinned/gitleaks');
+  } finally {
+    if (prior === undefined) delete process.env.TYRAN_GITLEAKS_BIN;
+    else process.env.TYRAN_GITLEAKS_BIN = prior;
+  }
+});
+
+test('a gitleaks on PATH is preferred over the one Tyran manages', () => {
+  // MUTANT: consult the managed copy first. An operator who installed their
+  // own — very likely a newer one — must not have it silently displaced by
+  // whatever version this repo happens to pin.
+  const home = mkdtempSync(join(tmpdir(), 'tyran-home-'));
+  const onPath = mkdtempSync(join(tmpdir(), 'tyran-path-'));
+  mkdirSync(join(home, '.tyran', 'bin'), { recursive: true });
+  writeFileSync(join(home, '.tyran', 'bin', 'gitleaks'), '#!/bin/sh\n');
+  writeFileSync(join(onPath, 'gitleaks'), '#!/bin/sh\n');
+  const prior = { home: process.env.HOME, path: process.env.PATH, bin: process.env.TYRAN_GITLEAKS_BIN };
+  try {
+    delete process.env.TYRAN_GITLEAKS_BIN;
+    process.env.HOME = home;
+    process.env.PATH = onPath;
+    assert.equal(GITLEAKS_BIN(), 'gitleaks', 'PATH wins while it has one');
+    // With PATH emptied, the managed copy is what stands between this gate
+    // and refusing every commit on a machine that could not install one.
+    process.env.PATH = mkdtempSync(join(tmpdir(), 'tyran-empty-'));
+    assert.equal(GITLEAKS_BIN(), join(home, '.tyran', 'bin', 'gitleaks'));
+  } finally {
+    if (prior.home === undefined) delete process.env.HOME; else process.env.HOME = prior.home;
+    if (prior.path === undefined) delete process.env.PATH; else process.env.PATH = prior.path;
+    if (prior.bin !== undefined) process.env.TYRAN_GITLEAKS_BIN = prior.bin;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(onPath, { recursive: true, force: true });
+  }
+});
+
+test('no scanner anywhere still resolves to the name that produces the refusal', () => {
+  // MUTANT: return null or throw when nothing is found. The ENOENT from
+  // spawning `gitleaks` is what carries INSTALL_INSTRUCTIONS to the operator;
+  // a resolver that fails earlier loses the one message that says what to do.
+  const home = mkdtempSync(join(tmpdir(), 'tyran-home-'));
+  const empty = mkdtempSync(join(tmpdir(), 'tyran-empty-'));
+  const prior = { home: process.env.HOME, path: process.env.PATH, bin: process.env.TYRAN_GITLEAKS_BIN };
+  try {
+    delete process.env.TYRAN_GITLEAKS_BIN;
+    process.env.HOME = home;
+    process.env.PATH = empty;
+    assert.equal(GITLEAKS_BIN(), 'gitleaks');
+  } finally {
+    if (prior.home === undefined) delete process.env.HOME; else process.env.HOME = prior.home;
+    if (prior.path === undefined) delete process.env.PATH; else process.env.PATH = prior.path;
+    if (prior.bin !== undefined) process.env.TYRAN_GITLEAKS_BIN = prior.bin;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test('the managed scanner is under HOME, never inside the repository', () => {
+  // The first shape of this put it in <repo>/.tyran/bin/, which a clone
+  // carries — so a planted binary reporting clean on everything would arrive
+  // WITH the checkout, and unlike a tracked .gitleaksignore it would not even
+  // appear in a diff. MUTANT: resolve it relative to the repo.
+  const home = mkdtempSync(join(tmpdir(), 'tyran-home-'));
+  const repo = mkdtempSync(join(tmpdir(), 'tyran-repo-'));
+  mkdirSync(join(repo, '.tyran', 'bin'), { recursive: true });
+  writeFileSync(join(repo, '.tyran', 'bin', 'gitleaks'), '#!/bin/sh\necho planted\n');
+  const empty = mkdtempSync(join(tmpdir(), 'tyran-empty-'));
+  const prior = { home: process.env.HOME, path: process.env.PATH, bin: process.env.TYRAN_GITLEAKS_BIN, cwd: process.cwd() };
+  try {
+    delete process.env.TYRAN_GITLEAKS_BIN;
+    process.env.HOME = home;
+    process.env.PATH = empty;
+    process.chdir(repo);
+    assert.equal(GITLEAKS_BIN(), 'gitleaks', 'a scanner inside the repo is never picked up');
+  } finally {
+    process.chdir(prior.cwd);
+    if (prior.home === undefined) delete process.env.HOME; else process.env.HOME = prior.home;
+    if (prior.path === undefined) delete process.env.PATH; else process.env.PATH = prior.path;
+    if (prior.bin !== undefined) process.env.TYRAN_GITLEAKS_BIN = prior.bin;
+    for (const d of [home, repo, empty]) rmSync(d, { recursive: true, force: true });
+  }
+});

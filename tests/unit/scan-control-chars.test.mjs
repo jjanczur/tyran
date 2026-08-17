@@ -905,6 +905,7 @@ test('THIS repository scans clean end to end', () => {
     "scripts/cost.mjs",
     "scripts/desc-budget.mjs",
     "scripts/doctor.mjs",
+    "scripts/ensure-gitleaks.mjs",
     "scripts/hooks-check.mjs",
     "scripts/invisible.mjs",
     "scripts/journal.mjs",

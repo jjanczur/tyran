@@ -178,6 +178,38 @@ does not unburn it.
 
 ### The invariant, and why it is the invariant
 
+### The scanner, and who installs it
+
+This gate needs `gitleaks` and refuses everything until it has one, which is
+correct and has a cost the design used to leave with the operator: some people
+adopting Tyran have no Homebrew, no admin rights, or are on Windows, and their
+realistic answer to "install it and re-run" is to switch the hook off. A gate
+nobody can satisfy protects nothing.
+
+So setup fetches it:
+
+```bash
+node scripts/ensure-gitleaks.mjs          # install if missing
+node scripts/ensure-gitleaks.mjs --check  # say whether one is reachable, install nothing
+```
+
+Pinned version **and** pinned SHA-256, per platform, from the release's own
+checksums — the same thing `ci.yml` has always done, moved to where a user can
+reach it. A digest mismatch deletes the download and installs nothing: this
+writes an executable that something else later runs, and a scanner that has
+been replaced reports clean on everything.
+
+It lands in `~/.tyran/bin/`, under the HOME directory and deliberately not
+inside the repository. A path in the repo travels with a clone, so a planted
+binary reporting clean on everything would arrive with the checkout — the
+attack the tracked-only rule for `.gitleaksignore` already prevents, reopened
+through a file that is not even in a diff. One install serves every repo on
+the machine.
+
+Resolution order is `TYRAN_GITLEAKS_BIN`, then PATH, then the managed copy:
+a gitleaks you installed yourself is your decision and is never silently
+displaced by whatever version Tyran happens to pin.
+
 The first version of this gate asked **"did the scan break?"** — scanner
 missing, killed, crashed, report unreadable — and answered all four correctly.
 It never asked **"did the scan cover what is about to be published?"**, and

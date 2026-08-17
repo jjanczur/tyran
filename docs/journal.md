@@ -1,6 +1,6 @@
 # Journal reference
 
-`scripts/journal.mjs` · 77 unit tests
+`scripts/journal.mjs` · 81 unit tests
 
 This page is the schema contract; extending the event set is a reviewed core
 change.
@@ -115,6 +115,12 @@ renders and still closes.
   number twice; an id taken from `journal.mjs next-id <file> D` and appended
   later still can, because another writer may append in between — prefer
   letting `append` issue it whenever the caller does not need the value first.
+  An explicit id is still honoured, but one that is **already used for that
+  event type** is REFUSED: two implementers running in parallel each worked
+  out a number for themselves and both were written, and "see F-7" is
+  ambiguous forever once two events carry it. The check is per event type
+  (a `D-1` and an `F-1` never collide) and it runs under the write lock, so
+  two concurrent writers cannot both pass it.
 - **Resume surface:** `journal.mjs tail <file>` returns the latest
   `checkpoint` and all unreleased leases — exactly what the `SessionStart`
   hook re-injects.

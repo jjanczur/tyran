@@ -1,5 +1,89 @@
 # Changelog
 
+## Unreleased
+
+### The prerequisite that blocked day one
+
+The secrets gate refuses every commit and push until `gitleaks` exists, and
+it refuses rather than warning for a reason that has not changed. What had
+been left with the operator is the *installing*: some people adopting Tyran
+have no Homebrew, no admin rights, or are on Windows, and their realistic
+answer to "install it and re-run" is not a safer repository — it is switching
+the hook off. A gate nobody can satisfy protects nothing, which is the same
+argument that made `.tyran/config.yaml` AUTO.
+
+`scripts/ensure-gitleaks.mjs` fetches it: pinned version **and** pinned
+SHA-256 per platform, taken from the release's own checksums, which is the
+thing `ci.yml` has always done moved to where a user can reach it. A mismatch
+deletes the download and installs nothing — this writes an executable that
+something else later runs, and a scanner that has been replaced reports clean
+on everything.
+
+It installs to `~/.tyran/bin/`. The first version of this put it under
+`<repo>/.tyran/bin/`, which is worse in a way worth recording: a path inside
+the repository travels with a clone, so a planted binary reporting clean on
+everything would arrive **with the checkout** — the attack the tracked-only
+rule for `.gitleaksignore` already prevents, reopened through a file that is
+not even in a diff. Under HOME the scanner is the operator's machine, exactly
+like PATH, and one install serves every repository on it. PATH is still
+consulted first: a gitleaks you installed yourself is never silently
+displaced by whatever version this repo pins.
+
+### Writing a prompt is now a top-tier job
+
+`retro` was routed at `work` and reached `deep` only under `--profile full`,
+so the agent that writes skills, agents and prompts — the text every later
+session obeys — ran on the middle model, and `--profile eco` kept it there.
+
+A new `authoring` role sits at `top` at every profile, with `top` and `max`
+floors under it. Separated from `retro` rather than raising the whole of it,
+because retro does two unlike things with one agent: folding a ledger, which
+the middle model does fine, and authoring. The argument is `security-review`'s
+in a stronger form — a bad security verdict costs one merge, while a bad
+prompt misroutes every run that reads it for as long as it ships, and it is
+the one output nothing downstream checks, because a skill that reads plausibly
+passes review.
+
+### A duplicate ledger id is refused
+
+Measured in the field: two implementers running in parallel each worked out an
+id for themselves, both were honoured, and the ledger kept two `F-7`s. History
+is append-only, so "see F-7" stays ambiguous forever and nothing detects it
+later.
+
+`append` now refuses a caller-supplied `id` that is **already used for that
+event type**. Deliberately not the broader fix of refusing every explicit id:
+that removes a documented capability — an explicit id still wins, and a test
+pins it — to prevent a failure that only occurs on collision. A fresh explicit
+id still passes, `ticket.created` is unaffected because its ids come from the
+plan, and the check runs under the write lock so two concurrent writers cannot
+both pass it.
+
+### Refusals you can paste
+
+The multi-remote push refusal is correct — excluding commits present on ANY
+remote let a key held on a private upstream reach a public origin unscanned —
+but it was reported twice, from two installs, as a false positive, and both
+reporters routed around it instead of satisfying it. The old text handed over
+`git push <remote> <branch>`, a shape to translate rather than a line to run.
+
+Everything needed to write the real command was already in hand, so it is
+written: one runnable line per remote, with the branch filled in.
+
+### Reviewers stop retyping evidence
+
+`tyran:reviewer` has no MCP tools, so a database row or an API response
+someone else fetched reaches it as text in a handoff — and text in a handoff
+gets retyped. Measured on a production run: **1.6% of hand-copied values were
+silently wrong**, which makes a reviewer that mistranscribes evidence worse
+than no reviewer, because the verdict carries authority the numbers do not.
+
+The roster is unchanged, because it cannot express the fix: `tools:` is a
+static list shipped in the plugin and MCP tool names differ on every install.
+The prompt closes it instead — require the raw bytes on disk and `Read` them,
+rather than reasoning about a retyped copy. A value read from a file is
+evidence; a value pasted into a sentence is a claim about evidence.
+
 ## 0.1.31 — 2026-08-17
 
 Seven things the journal had recorded and nothing was reading. The theme is

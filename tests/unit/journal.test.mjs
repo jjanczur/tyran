@@ -1389,3 +1389,61 @@ test("Tyran's OWN writers produce no unread keys", () => {
   assert.deepEqual([...unread.keys()], [], 'a key Tyran itself writes is not an unread key');
   assert.deepEqual(nearMisses, []);
 });
+
+// --- a caller-supplied id that is already taken -------------------------
+
+test('a caller-supplied id that COLLIDES is refused', () => {
+  // Measured in the field: two implementers running in parallel each worked
+  // out an id for themselves and both were honoured, so the ledger held two
+  // F-7s. "See F-7" is then ambiguous forever, because history is append-only
+  // and nothing detects it later. MUTANT: drop the collision check.
+  const f = tmp();
+  append(f, ev({ ev: 'decision', data: { id: 'D-1', text: 'first' } }));
+  assert.throws(
+    () => append(f, ev({ ts: '2026-07-26T10:05:00.000Z', ev: 'decision', data: { id: 'D-1', text: 'second' } })),
+    /already used/,
+    'a second event under one id must not be written',
+  );
+  // The refusal has to be actionable, not just correct.
+  try {
+    append(f, ev({ ts: '2026-07-26T10:06:00.000Z', ev: 'decision', data: { id: 'D-1', text: 'again' } }));
+    assert.fail('expected a refusal');
+  } catch (error) {
+    assert.match(error.message, /next-id/, 'the message names the command that issues a free one');
+  }
+  assert.equal(readJournal(f).events.length, 1, 'nothing was appended by the refused calls');
+});
+
+test('a FRESH explicit id still wins — the capability is not removed', () => {
+  // The narrow fix, pinned. Refusing every caller-supplied id was the broader
+  // proposal; it removes a documented capability to prevent a failure that
+  // only occurs on collision. An id nobody has used is not a collision.
+  const f = tmp();
+  append(f, ev({ ev: 'decision', data: { id: 'D-1', text: 'first' } }));
+  const mine = append(f, ev({ ts: '2026-07-26T10:05:00.000Z', ev: 'decision', data: { id: 'D-99', text: 'mine' } }));
+  assert.equal(mine.data.id, 'D-99');
+  // And an omitted id is still minted, past the explicit one.
+  const issued = append(f, ev({ ts: '2026-07-26T10:06:00.000Z', ev: 'decision', data: { text: 'issued' } }));
+  assert.equal(issued.data.id, 'D-100');
+});
+
+test('the collision check is per EVENT TYPE, not across the journal', () => {
+  // `decision` and `finding` mint from different prefixes, so a D-1 and an
+  // F-1 are not the same id and never collide. MUTANT: compare ids globally —
+  // the second write here would be refused for no reason.
+  const f = tmp();
+  append(f, ev({ ev: 'decision', data: { id: 'X-1', text: 'a decision' } }));
+  const finding = append(f, ev({ ts: '2026-07-26T10:05:00.000Z', ev: 'finding', data: { id: 'X-1', area: 'a', claim: 'c' } }));
+  assert.equal(finding.data.id, 'X-1');
+});
+
+test('an id collision on a type that does not mint ids is not this check', () => {
+  // `ticket.created` carries `data.id` and is deliberately absent from
+  // ID_ISSUED_FOR: ticket ids come from the plan, which numbers its own
+  // stories, and a plan may legitimately restate one. MUTANT: apply the check
+  // to every event carrying an id.
+  const f = tmp();
+  append(f, ev({ ev: 'ticket.created', data: { id: 'T-1', title: 'first' } }));
+  const again = append(f, ev({ ts: '2026-07-26T10:05:00.000Z', ev: 'ticket.created', data: { id: 'T-1', title: 'restated' } }));
+  assert.equal(again.data.id, 'T-1');
+});

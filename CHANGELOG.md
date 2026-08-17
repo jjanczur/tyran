@@ -21,6 +21,20 @@ work; it was full of ABANDONED work. Archiving would have touched under 10% of
 initiatives, left the 64-initiative ceiling exactly where it is, and — since
 archivable means 100% merged — pulled the headline percentage DOWN.
 
+**Upgrading: one expected `--check` drift.** The payload gains a top-level
+`initiatives` key, so a `board.json` committed by an earlier version no longer
+matches what this one generates. Measured: `board.mjs --check` exits 1 once on
+an upgraded install and 0 after a single regenerate —
+
+```bash
+node scripts/board.mjs --dir .tyran   # then commit the three artefacts
+```
+
+`doctor --state` is silent about it either way; the only surface is an
+explicit `--check`, which matters if you run one in CI. The board `schema`
+stays 1 because nothing about the existing keys changed, the same call made
+when `errors_logged` was added.
+
 ### Two more things that had never worked and said nothing
 
 - **`/run.json` never carried a reset time.** `pickWindow` tested

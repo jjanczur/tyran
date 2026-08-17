@@ -129,8 +129,16 @@ export const DATA_KNOWN = Object.freeze({
   // normal operation back at itself.
   decision: Object.freeze(['id', 'text', 'ask', 'ticket', 'signature', 'occurrences', 'path']),
   finding: Object.freeze(['area', 'claim', 'proof', 'id', 'ticket', 'confidence']),
-  'lease.acquired': Object.freeze(['resource', 'holder', 'mode']),
-  'lease.released': Object.freeze(['resource', 'holder']),
+  // The expiry spellings doctor reads, plus the human description agents
+  // attach. Measured across every journal on a real machine, agents wrote
+  // `expiry` 33 times, `purpose` 28, `story` 21, `text` 21 — none of them
+  // known, so every lease an agent took the trouble to describe reported
+  // `journal-key-unread` back at its author. A schema that flags the fields
+  // its own agents naturally write is training them to write less.
+  'lease.acquired': Object.freeze([
+    'resource', 'holder', 'mode', 'expiry', 'expires', 'expires_at', 'until', 'purpose', 'story', 'text', 'note',
+  ]),
+  'lease.released': Object.freeze(['resource', 'holder', 'text', 'note']),
   checkpoint: Object.freeze(['phase', 'next_steps']),
   'retro.entry': Object.freeze(['kind', 'target', 'confidence']),
   error: Object.freeze(['class', 'detail', 'ticket']),

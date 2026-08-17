@@ -6,7 +6,7 @@ import Provenance from '../../components/Provenance.astro';
 import Limit from '../../components/Limit.astro';
 
 <Provenance>
-`scripts/doctor.mjs --state` · 106 unit tests
+`scripts/doctor.mjs --state` · 112 unit tests
 </Provenance>
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
@@ -75,6 +75,7 @@ possible to change one and keep the suite green.
 | `lease-orphan` | warning | an open lease whose holder already reported — the resource is blocked by nobody |
 | `lease-expired` | warning | the acquiring event carried `expires` / `expires_at` / `until`, and it has passed |
 | `lease-release-by-non-holder` | warning | a release that did not free the lease |
+| `worktree-accumulating` | warning | more than eight git worktrees beside the main checkout — Tyran creates one per parallel agent and removes none |
 | `projection-drift` | warning | `STATE.md` / `PROGRESS.md` no longer match the journal, byte for byte |
 | `projection-absent` | info | neither projection generated yet — a repo that has not run the projector |
 | `projection-missing` | warning | one of the pair is gone while the other is there: a run stopped half way |

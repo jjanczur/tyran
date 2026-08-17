@@ -110,3 +110,14 @@ and you publish a site whose sandbox link 404s.
   `--ensure-policy` is the repair-only path.
 - Skill descriptions are summed into a context budget CI enforces. A new skill
   costs every session, whether it fires or not.
+- **When a change ADDS a file, `git add` before running the suite.** The
+  control-char scan builds its file list from `git ls-files`, so an untracked
+  file is invisible to it: the suite passes locally and CI — which only ever
+  sees committed files — is the first thing to look at the real set. Two
+  separate cycles have been lost to this.
+- **A field added to `cost.mjs`'s scan needs two more edits or it is silently
+  null forever.** `report.sources` is a WHITELIST projection, and `COST_SCHEMA`
+  is what discards caches written before the field existed. Missing either, an
+  unchanged transcript keeps its old record and the field reads null on every
+  later run — which produced a reported span of ONE day where the truth was
+  nineteen. A wrong number, not a missing one.

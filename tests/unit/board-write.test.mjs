@@ -543,7 +543,7 @@ test('run.json serves the machine-local half of "is this supposed to be running"
     const s = await serve(f.tyran, ['--write']);
     try {
       const quiet = await (await fetch(`${s.base}/run.json`)).json();
-      assert.deepEqual(quiet, { schema: 1, paused: null, watcher: null, usage: null });
+      assert.deepEqual(quiet, { schema: 1, paused: null, watcher: null, usage: null, limits_mode: 'off' });
 
       writeFileSync(join(f.tyran, 'state', 'paused-until.json'), JSON.stringify({
         paused_at: '2026-08-15T09:00:00.000Z',

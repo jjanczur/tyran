@@ -256,8 +256,32 @@ export function renderContext({ repoRoot, initiatives, doctor, hardware, nowIso,
     lines.push('- run `node scripts/doctor.mjs --state --now "$(date -u +%FT%TZ)"` by hand');
   }
   lines.push('');
-  lines.push('Run `/tyran` to resume, or read `.tyran/state/<init>/STATE.md` in full.');
+  lines.push(closingLine(initiatives));
   return lines.join('\n');
+}
+
+/**
+ * The last line — which, on a fresh install, is the FIRST sentence Tyran says.
+ *
+ * Until the board began starting itself this line was unreachable from an
+ * empty repo: the guard above returned '' when there was no initiative and no
+ * pause, so only someone with state to resume ever read it. Autostart made
+ * `board` non-null in every adopted repo, the guard stopped tripping, and a
+ * first-time user's opening message became an instruction to *resume* work
+ * that does not exist and to open a `STATE.md` under a literal `<init>`
+ * directory that is not on disk. A wrong first sentence, not a missing one.
+ *
+ * Naming the initiative when there is exactly one is the same defect a size
+ * down: `<init>` is a placeholder standing in a sentence whose writer already
+ * knows the answer. The name is a directory read off disk, so it is journal-
+ * adjacent input and goes through `inlinePlain` like everything else here.
+ */
+export function closingLine(initiatives) {
+  if (initiatives.length === 0) {
+    return 'No initiative here yet — run `/tyran` and describe what you want done.';
+  }
+  const where = initiatives.length === 1 ? inlinePlain(initiatives[0].name) : '<init>';
+  return `Run \`/tyran\` to resume, or read \`.tyran/state/${where}/STATE.md\` in full.`;
 }
 
 /**

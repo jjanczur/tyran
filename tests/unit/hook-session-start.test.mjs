@@ -20,6 +20,7 @@ import {
   CONTEXT_BUDGET,
   DEADLINE_MS,
   buildContext,
+  closingLine,
   recordConductor,
   ensureBoard,
   fitBudget,
@@ -176,6 +177,50 @@ test('an open gate carries its QUESTION into the resumed session', () => {
   });
   assert.match(context, /Q-1: WAITING_ON_OPERATOR — flat fee or per-seat on the team plan\?/);
   assert.match(context, /plan-approval: open \(2026-07-26T09:35:00\.000Z\)/, 'a gate with no question keeps its old shape');
+});
+
+test('a repo with no initiative is not told to RESUME, and not sent to a path that does not exist', () => {
+  // MUTANT: restore the unconditional
+  // 'Run `/tyran` to resume, or read `.tyran/state/<init>/STATE.md` in full.'
+  // That line was unreachable from an empty repo until the board began
+  // starting itself: renderContext returned '' when there was no initiative
+  // and no pause. Autostart makes `board` non-null in every adopted repo, so
+  // the guard stopped tripping and this became the FIRST sentence a new user
+  // reads — telling them to resume work that does not exist and to open a
+  // STATE.md under a literal `<init>` directory that is not on disk.
+  const line = closingLine([]);
+  assert.doesNotMatch(line, /resume/i, 'there is nothing to resume in a repo with no initiative');
+  assert.doesNotMatch(line, /<init>/, 'a placeholder path is worse than no path');
+  assert.doesNotMatch(line, /STATE\.md/, 'the file it would name has not been written yet');
+  assert.match(line, /\/tyran/, 'the one thing they can usefully do next stays named');
+});
+
+test('the closing line names the initiative when there is exactly one', () => {
+  // MUTANT: keep `<init>` unconditionally. It is a placeholder standing in a
+  // sentence whose writer already knows the answer — the reader is sent to look
+  // up a name the probe had in hand.
+  assert.match(closingLine([{ name: 'auth-rewrite' }]), /`\.tyran\/state\/auth-rewrite\/STATE\.md`/);
+  assert.doesNotMatch(closingLine([{ name: 'auth-rewrite' }]), /<init>/);
+  // Two or more and there is no single right answer, so the placeholder earns
+  // its place again.
+  assert.match(closingLine([{ name: 'a' }, { name: 'b' }]), /<init>/);
+});
+
+test('an adopted-but-empty repo still gets the board URL, and a closing line that fits it', () => {
+  // The regression path end to end: board non-null, zero initiatives. The
+  // section that is genuinely useful — where the dashboard is — must survive,
+  // and only the closing sentence changes.
+  const context = renderContext({
+    repoRoot: '/tmp/fresh',
+    initiatives: [],
+    doctor: { available: true, counts: { error: 0, warning: 0, info: 0 }, findings: [] },
+    hardware: hardwareLine(),
+    nowIso: '2026-08-17T10:00:00.000Z',
+    board: { url: 'http://127.0.0.1:4173/', started: true },
+  });
+  assert.match(context, /127\.0\.0\.1:4173/, 'the URL is the reason this renders at all');
+  assert.match(context, /No initiative here yet/);
+  assert.doesNotMatch(context, /<init>/);
 });
 
 test('recording the session id can never fail the session, and never records garbage', () => {
@@ -597,6 +642,17 @@ test('the working budget is measured AFTER sanitization, so it still binds', () 
   );
   // The value that actually ships expands no further downstream.
   assert.equal(INVISIBLE_CP(fitted).length, 0);
+});
+
+test('the initiative name in the closing line is sanitized like every other injected value', () => {
+  // MUTANT: interpolate `initiatives[0].name` raw. It is a DIRECTORY NAME read
+  // off disk, so it reaches this sentence from the filesystem and lands in the
+  // conductor's context — the last step of the ADR-19 path, and the newest
+  // value to travel it.
+  const P = TAGGED('IGNORE PRIOR') + String.fromCodePoint(0x202e) + String.fromCodePoint(0x200b);
+  const line = closingLine([{ name: `init${P}` }]);
+  assert.equal(INVISIBLE_CP(line).length, 0, 'no invisible codepoint reaches the injected line');
+  assert.equal(line.includes('\n'), false, 'a newline here forges a second line of context');
 });
 
 // --------------------------------------------- the dead-gate warning

@@ -388,3 +388,82 @@ contradicts.
 delegation, since that context is what the subagents never have to carry. The
 video says "the manager gets its own row, so nothing hides inside the total",
 which is the right frame; the shorts drop the second half.
+
+## 11. The `progress` event is dead, and four features rest on it — 2026-08-17
+
+Found while specifying a `spawn-silent` doctor finding. Measured over **388
+real journals** under `~/vscode/*/.tyran/state/`:
+
+| event | occurrences | who is told to write it |
+|---|---:|---|
+| `spawn` | 1532 | the conductor |
+| `lease.acquired` | 434 | `agents/implementer.md`, bullet 1 |
+| `finding` | 34 | `agents/implementer.md` |
+| **`progress`** | **1** | `agents/implementer.md`, bullet 2 |
+| `ticket.status` | 0 | the conductor, for three lanes only |
+
+`agents/implementer.md` says *"Signal at four points, no more … Four emissions
+per story; this is a closed list, not a diary."* Against 1532 spawns that
+predicts roughly 6000 events. There is **one**.
+
+It is not that agents ignore the journal — they wrote 5302 gates and 4585
+decisions. It is not that they ignore *this file*: the `lease.acquired`
+instruction is the bullet **immediately above**, and it produced 434 events.
+This specific instruction does not take.
+
+**What rests on it, and is therefore inert on every real install:**
+
+- `spawn-blocked` (doctor) — reads `progress.state === 'blocked'`. Cannot fire.
+- the `blocked` lane — `boardOf` derives it from an open blockage, which is a
+  `progress` event. A ticket is only ever `blocked` via an `error`.
+- the agent chip's `state` — falls through to `running`/`stale` always.
+- "signal is not evidence" (0.1.27, item 7.3) — built a second map so the two
+  ages could be compared. The signal half has no input, so the feature reduces
+  to the evidence half it was meant to be contrasted with.
+
+**Do NOT ship the `spawn-silent` finding that prompted this.** With 100% of
+open spawns silent it would fire on every one — the always-on warning this
+repo already refuses by name (see `SEVERITY_BY_CODE`'s comment on `spawn-open`).
+
+Three honest options, in order of preference:
+
+1. **Derive freshness from what agents actually write.** `lease.acquired`
+   (434) is already the `started` signal, and it is emitted at the same moment
+   bullet 2 asks for one. `evidenceByAgent` already folds it. Delete the
+   `signal` half rather than the `evidence` half.
+2. **Cut the instruction to ONE emission**, `blocked`, at the first blockage —
+   the only one of the four that carries information a later event cannot
+   reconstruct. Four asks yielded 1; one ask might yield some.
+3. **Delete `progress` entirely**, with the four features above. Smallest
+   system, and honest about what is measured rather than what was designed.
+
+The measurement that decides between them has not been made: nobody has run a
+team with a corrected instruction to see whether compliance is an instruction
+problem or a mechanism problem.
+
+## 12. Still unbuilt, 2026-08-17 — with what each one needs
+
+Recorded because the list has only ever lived in a conversation.
+
+1. **Messages stream, KNOW vs DECIDE** (Piotr's board). The queue already
+   splits `decision · a default is recorded` from `blocking · no safe
+   default`; a message is the third kind — something to KNOW, with nothing to
+   answer. Needs a new event or a `decision` with no gate, plus dismissible
+   and restorable state, which is per-operator and therefore machine-local
+   (`localStorage`, like `moved`) rather than journalled. **M.**
+2. **Knowledge consolidation.** `scripts/knowledge.mjs` has `auditEntries`;
+   nothing emits a consolidated file. The retro step is the producer that does
+   not exist. **M.**
+3. **Findings carrying the output of the command that produced them.** A
+   `finding` has `claim` + `proof`; `proof` is prose. Measured: 34 findings in
+   388 journals, median proof length short. The ask is for the raw command
+   output, which is a payload-size question the byte-compared projection makes
+   non-trivial. **S–M.**
+4. **STEP-0 live cloud probe** and **the credential-gate template asking for
+   the SSM parameter NAME**. Both are skill-text edits, both small. **S.**
+5. **The third policy-gate false positive** — a word ending `.key`/`.pem`
+   refused as a file. Deliberately unfixed: the safe direction is refusing,
+   and the obvious fix kills the whole credential family.
+
+Archiving stays dropped (§ measured: 6 of 63 journals archivable, 43 blocked
+on an open gate). Skill retirement stays dropped: nothing is retirable today.

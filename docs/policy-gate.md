@@ -219,7 +219,22 @@ finds by itself is a boundary it learns to prefer.
    installed; detecting the deletion belongs to `doctor`.
 4. **The read rule is a denylist and is therefore incomplete.** A credential in
    a file called `notes.md` is read without objection. It is not a claim that
-   no secret can reach the context by another name.
+   no secret can reach the context by another name. Two shapes are named
+   rather than left to be discovered:
+   - The ssh rule matches OpenSSH's own key-type names — `id_rsa`, `id_dsa`,
+     `id_ecdsa`, `id_ed25519`, `id_xmss`, their `_sk` hardware variants and a
+     per-host suffix. A key with an invented stem (`id_deploy`) is **not**
+     matched by name. Inside any `.ssh/` directory the whole-path rule still
+     catches it, and the secrets gate still catches its bytes at commit and
+     push. This narrowing bought back every `ID_`-prefixed constant: the old
+     rule was `^id_[a-z0-9]+$`, which read `ID_ISSUED` and `ID_TOKEN` as
+     private keys and refused any command that mentioned one.
+   - Because these rules also run over the raw WORDS of a command, a word that
+     merely ends like a key file — a regex, a flag value, a URL ending `.key`
+     or `.pem` — is refused even though no such file exists. That is the
+     denylist being deliberately wrong in the safe direction, and it is the
+     one false refusal you are most likely to meet. Reach for `Read`, which
+     is not subject to the word test.
 5. **`GATED` in a supervised main loop relies on the platform actually
    prompting, and the gate cannot tell whether it did.** Measured by review:
    `permission_mode` stays `default` when the user has allow-listed a tool, and

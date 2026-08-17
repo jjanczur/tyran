@@ -30,6 +30,7 @@ import {
   STATE_GITIGNORE_PATH,
   policyTemplatePath,
   underTyranDir,
+  plainQuestion,
 } from '../../scripts/scan-repo.mjs';
 import { parse } from '../../scripts/yaml-lite.mjs';
 import { validateConfig, validatePolicy } from '../../scripts/schema.mjs';
@@ -539,4 +540,74 @@ test('the CLI exits 2, loudly, when the policy cannot be installed', () => {
   } finally {
     chmodSync(join(d, '.tyran'), 0o700);
   }
+});
+
+// --- the one plain-language question ---------------------------------------
+
+/** A scan shaped like `scanRepo`'s return, for the fields `plainQuestion` reads. */
+const scanLike = (autonomy, over = {}) => ({
+  config: { autonomy, validation: over.validation ?? { value: ['npm test'] } },
+  packageManager: over.packageManager ?? { value: 'npm' },
+  languages: over.languages ?? ['TypeScript'],
+  claudeMd: over.claudeMd ?? { present: false, hasMistakesPointer: false },
+});
+
+test('the plain question offers only the classes the repo can actually support', () => {
+  // P2 comes out of detectAutonomy on exactly one path — a staging-class
+  // branch AND CI — so offering "put it on the test site" anywhere else would
+  // be inventing infrastructure the operator does not have.
+  const p1 = plainQuestion(scanLike({ value: 'P1', source: 'git log: 13/50 merges, no staging branch found' }));
+  assert.deepEqual(p1.options.map((o) => o.value), ['P1']);
+
+  const p2 = plainQuestion(scanLike({ value: 'P2', source: 'git log: 4/50 merges, plus a staging-class branch and CI' }));
+  assert.deepEqual(p2.options.map((o) => o.value), ['P1', 'P2']);
+});
+
+test('P3 is never an option — a menu is a way of inferring it', () => {
+  for (const value of ['P1', 'P2']) {
+    const q = plainQuestion(scanLike({ value, source: 'git log: 4/50 merges, plus a staging-class branch and CI' }));
+    assert.ok(!q.options.some((o) => o.value === 'P3'), 'P3 must never appear in the offered options');
+    assert.match(q.note, /in your own words/, 'the note must say how P3 is actually reached');
+  }
+});
+
+test('the question carries no jargon a non-expert would have to look up', () => {
+  const q = plainQuestion(scanLike({ value: 'P1', source: 'git log: 13/50 merges, no staging branch found' }));
+  // The point of this function. `evidence` keeps the raw scanner sentence on
+  // purpose and is exempt; everything a person READS must survive this.
+  const spoken = [q.question, q.because, ...q.options.flatMap((o) => [o.label, o.detail]), ...q.derived, q.note].join(' ');
+  for (const jargon of [/\bautonomy\b/i, /\bP[123]\b/, /\bclass\b/i, /\bprovenance\b/i, /\bCI\b/, /\bgate\b/i, /\btier\b/i]) {
+    assert.ok(!jargon.test(spoken), `plain text must not contain ${jargon}`);
+  }
+});
+
+test('the evidence is restated in ordinary words, and the raw line is kept too', () => {
+  const q = plainQuestion(scanLike({ value: 'P1', source: 'git log: 13 of the last 50 first-parent commits arrived as merges — main is PR-driven' }));
+  assert.match(q.because, /Of the last 50 changes to this project, 13 were reviewed/);
+  assert.match(q.evidence, /first-parent/, 'the scanner sentence stays available for whoever wants the numbers');
+});
+
+test('an empty validation list becomes a STATEMENT, never a question', () => {
+  // Nobody can name a test command that does not exist. Asking makes the
+  // repository's state look like the operator's failing.
+  const q = plainQuestion(scanLike(
+    { value: 'P1', source: 'no commit history to judge from — the safest class' },
+    { validation: { value: [] } },
+  ));
+  assert.ok(q.derived.some((d) => /could not find a command/.test(d)));
+  assert.ok(q.derived.some((d) => /package\.json and the\s+Makefile/.test(d)), 'it must say where it looked');
+  assert.equal(q.options.length, 1);
+});
+
+test('a repo with no history says so plainly rather than quoting a git ratio', () => {
+  const q = plainQuestion(scanLike({ value: 'P1', source: 'not a git repository — the safest class' }));
+  assert.match(q.because, /not tracked by git/);
+  assert.ok(!/\d+\/\d+/.test(q.because), 'no ratio to explain when there is no history');
+});
+
+test('scanRepo carries the plain question alongside the machine one', () => {
+  const d = repo({ 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }) });
+  const scan = scanRepo(d, { run: fakeGit({}) });
+  assert.ok(Array.isArray(scan.questions), 'the machine contract is untouched');
+  assert.equal(scan.plain.recommended, scan.config.autonomy.value, 'the two must never disagree');
 });

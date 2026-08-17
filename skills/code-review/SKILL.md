@@ -5,7 +5,7 @@ description: The depth half of a review - the dimensions a diff is read against 
 # Code review — reading depth
 
 > This is HOW a diff is read. WHAT the verdict looks like belongs to
-> `tyran:reviewer` — binary APPROVE or CHANGES-REQUESTED, numbered executable
+> `tyran:reviewer` — APPROVE, REVISED or CHANGES-REQUESTED, numbered executable
 > counterexamples, a re-review that first checks the previous round's findings
 > are pinned as tests, and a section naming what was not checked. Do not
 > restate any of that here; two definitions of "reviewed" drift apart, and the

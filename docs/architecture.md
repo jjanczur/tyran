@@ -118,7 +118,7 @@ sequenceDiagram
     Note right of A: SubagentStop gate REFUSES<br/>a report with no evidence
     C->>J: report · lease.released
     C->>R: spawn (never the author)
-    R-->>C: APPROVE / CHANGES-REQUESTED
+    R-->>C: APPROVE / REVISED / CHANGES-REQUESTED
     C->>J: review
     C->>J: merge
     Note over C,J: Stop gate REFUSES to end<br/>an initiative with no retrospective

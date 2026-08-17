@@ -1613,3 +1613,48 @@ test('the managed scanner is under HOME, never inside the repository', () => {
     for (const d of [home, repo, empty]) rmSync(d, { recursive: true, force: true });
   }
 });
+
+// --- escaped separators, and the two ways to get this wrong -----------------
+
+test('a backslash-escaped separator does NOT start a new segment', () => {
+  // `\<sep>` is not an operator in ANY shell quoting context, so honouring the
+  // escape can only remove a split the shell would not have made. Measured
+  // consequence of not doing so: `grep -nE 'A\|B' file` split into two
+  // segments, the second one's program slot held `B'`, `isReadOnlyCommand`
+  // said no, and an ordinary read was refused.
+  // Each literal below is the JS spelling of ONE shell backslash. Getting
+  // that wrong is silent: JS drops an unknown escape, so `'a\;'` reaches the
+  // lexer as `a;` and the test passes against the old behaviour.
+  assert.deepEqual(splitSegments("grep -nE 'A\\|B' file"), ["grep -nE 'A\\|B' file"]);
+  assert.deepEqual(splitSegments('echo a\\; echo b'), ['echo a\\; echo b']);
+  assert.deepEqual(splitSegments('echo a\\& echo b'), ['echo a\\& echo b']);
+});
+
+test('an escaped BACKSLASH consumes itself, so the next separator is real', () => {
+  // The single most likely way to get this patch subtly wrong. If `\\` were
+  // allowed to escape twice, `echo a\; git push origin main` would hide a
+  // real push behind a backslash that the shell has already consumed.
+  // Shell text: `echo a\\; git push origin main` — an escaped BACKSLASH, then
+  // a semicolon the shell really honours. Four JS backslashes make two.
+  assert.equal(splitSegments('echo a\\\\; git push origin main').length, 2);
+  assert.equal(splitSegments('echo a\\\\| git push origin main').length, 2);
+  assert.ok(planCommand('echo a\\\\; git push origin main', '/r').needsScan);
+});
+
+test('an UNescaped separator still splits — the true positives are untouched', () => {
+  assert.ok(planCommand('echo hi|git commit -m x', '/r').needsScan);
+  assert.equal(splitSegments("git commit -m 'a|b' && git push origin main").length, 3);
+  assert.ok(planCommand("git commit -m 'a|b' && git push origin main", '/r').needsScan);
+});
+
+test('the lexer stays quote-BLIND, because a quote-aware one swallows a push', () => {
+  // Not a hypothetical. One apostrophe in ordinary English closes a double
+  // quote for a naive tracker, everything after it reads as quoted, the `;`
+  // is swallowed, and the gate sees the verb `commit` — no deployment check,
+  // and the commit scanned instead of the push range. This repo's own commit
+  // messages use the phrase constantly.
+  const command = 'git commit -m "it\'s the source of truth" ; git push origin main';
+  const segments = splitSegments(command);
+  assert.ok(segments.length >= 2, 'the `;` must remain a separator despite the apostrophe');
+  assert.ok(planCommand(command, '/r').needsScan, 'the push must stay visible');
+});

@@ -234,7 +234,28 @@ export const SECRET_READ_RULES = Object.freeze([
     match: (b) => /^\.env(\.[^/]*)?$/i.test(b) && !/\.(example|sample|template|dist|defaults?|schema)$/i.test(b),
   },
   { id: 'private-key-file', on: 'basename', match: (b) => /\.(pem|key|p12|pfx|jks|keystore|kdbx|asc|ppk)$/i.test(b) },
-  { id: 'ssh-private-key', on: 'basename', match: (b) => /^id_[a-z0-9]+$/i.test(b) },
+  // Anchored on OpenSSH's actual key-type names. `^id_[a-z0-9]+$` was really
+  // "any identifier starting with id_", and because `shellPathFindings` runs
+  // these rules over every literal WORD of a command — not only over things
+  // shaped like paths — it refused `ID_ISSUED`, `ID_TOKEN`, `ID_SPEND`, and
+  // any other SCREAMING_SNAKE constant in that namespace. Measured live: a
+  // grep for `ID_ISSUED` was refused as an ssh private key.
+  //
+  // `_sk` covers FIDO/hardware keys; the trailing group covers the very common
+  // per-host naming (`id_rsa_github`, `id_ed25519_work`, `id_rsa-personal`).
+  // Case-folding stays: on macOS and Windows `ID_RSA` and `id_rsa` are one
+  // file, and dropping /i would let a rename walk past this rule.
+  //
+  // DECLARED COST: a private key with a non-algorithm stem — `id_deploy`,
+  // `id_ci` — no longer matches HERE. Inside any `.ssh/` directory the
+  // `ssh-directory` rule below still catches it, and the secrets gate still
+  // catches the key's BYTES at commit and push. This list is a denylist and
+  // has always been documented as incomplete.
+  {
+    id: 'ssh-private-key',
+    on: 'basename',
+    match: (b) => /^id_(rsa1?|dsa|ecdsa|ed25519|xmss)(_sk)?([_-][a-z0-9_-]+)?$/i.test(b),
+  },
   { id: 'credentials-file', on: 'basename', match: (b) => /^\.?credentials(\.[a-z0-9]+)?$/i.test(b) },
   { id: 'netrc', on: 'basename', match: (b) => /^_?\.?netrc$/i.test(b) },
   { id: 'registry-auth', on: 'basename', match: (b) => /^\.(npmrc|pypirc|pgpass|dockercfg)$/i.test(b) },

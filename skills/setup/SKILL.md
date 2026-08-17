@@ -77,6 +77,31 @@ is a `staging` branch with CI. That looks like P2 — I release to staging on
 my own, production stays yours. Confirm, or say P1 and I only ever touch
 branches."
 
+### If they are not an engineer, ask the ONE question instead
+
+Sales and marketing people run this now. `questions` is written for someone
+who knows what an autonomy class is, and four entries shaped `field: source`
+is where a non-expert stops. The same scan carries a `plain` object built for
+them — **one** question, its evidence in ordinary words, two options at most,
+and a `derived` list of what Tyran settled for itself.
+
+Use it whenever the operator has given you any sign they are not an engineer,
+and when you are unsure. It costs a fluent reader nothing: everything in
+`questions` is still in the config with its provenance, and `plain.evidence`
+keeps the raw git sentence for anyone who wants the numbers.
+
+Read `plain.question`, `plain.because`, then the options with
+`plain.recommended` marked. Then read the `derived` lines out as decisions,
+not as questions — those are the things the repository already answered, and
+re-asking them is what makes setup feel like an interrogation. Close with
+`plain.note`, which says how the one class Tyran will never infer is actually
+reached, and that the dashboard can change all of it later.
+
+The three questions you are NOT asking them are deliberate: the package
+manager is a fact, the validation commands are a fact or an honest gap, and
+the `CLAUDE.md` line is a paste they can see. A question someone cannot
+answer is not a safeguard; it is a place to give up.
+
 One flagged question is the `CLAUDE.md` pointer, and it is a question rather
 than an edit on purpose. Tyran writes `CLAUDE.md` only inside its own
 `tyran:rules` fence, and only through `mistakes.mjs promote --law`, which

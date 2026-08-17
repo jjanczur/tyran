@@ -959,12 +959,19 @@ if (data.schema !== 1) {
     // shown alone it invites exactly the wrong conclusion. Rendered only when
     // the plan is known; a guess here would be worse than the silence.
     var sub = cost.subscription;
-    if (sub && typeof sub.monthly_usd === 'number' && typeof t.usd === 'number') {
-      var multiple = sub.monthly_usd > 0 ? t.usd / sub.monthly_usd : null;
+    if (sub && typeof sub.monthly_usd === 'number') {
+      // NO multiple is shown against the raw total. A subscription is billed
+      // monthly and the total above covers however long this machine has been
+      // running Claude Code, so "6.9x what you pay" would be off by exactly
+      // that ratio. The span is stated instead, and the comparison waits for
+      // a window the operator has chosen.
+      var covers = cost.covers;
       tiles.appendChild(tile(
         'you pay',
         fmtUsd(sub.monthly_usd) + '/mo',
-        sub.label + (multiple === null ? '' : ' — the tokens above are ' + multiple.toFixed(1) + 'x that'),
+        sub.label + (covers && covers.days
+          ? ' — the total above covers ' + covers.days + ' day' + (covers.days === 1 ? '' : 's')
+          : ''),
         'lead'
       ));
     }

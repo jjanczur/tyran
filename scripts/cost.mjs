@@ -49,7 +49,22 @@ import { defaultRateCard, RATE_CARD_ID, planOfTier, PLAN_LABELS, SUBSCRIPTION_US
 import { jsonEscapeInvisible } from './invisible.mjs';
 
 export const COST_FILE = 'cost.json';
-export const COST_SCHEMA = 1;
+
+/**
+ * The version of BOTH the served report and the per-source scan cache, which
+ * share this file. Bump it whenever a field is added to a cached source —
+ * `readCache` discards a cache whose schema differs, and that discard is the
+ * only thing that makes an added field appear for transcripts that have not
+ * changed since the last run.
+ *
+ * Measured when this was missed: `first_ts` was added, every unchanged
+ * transcript kept its cached record with no such field, and the reported span
+ * came back as ONE day instead of nineteen — a wrong number, not a missing
+ * one, and it would have made a monthly comparison off by a factor of 19.
+ *
+ * 2: sources carry `first_ts`; counters split `cache_write` by TTL.
+ */
+export const COST_SCHEMA = 2;
 
 /** Read buffer for the chunked line reader. Transcripts reach tens of MB. */
 const CHUNK_BYTES = 1 << 20;
@@ -536,6 +551,7 @@ export function scanAll(sources, cache) {
         size: stat.size,
         by_model: before.by_model,
         last_ts: before.last_ts ?? null,
+        first_ts: before.first_ts ?? null,
         // Carried through the cache too: a damaged transcript stays damaged,
         // and a gap that disappears on the second render is worse than one
         // that was never reported.
@@ -557,6 +573,7 @@ export function scanAll(sources, cache) {
       size: stat.size,
       by_model: result.byModel,
       last_ts: result.lastTs,
+      first_ts: result.firstTs,
       malformed: result.malformed,
       skipped_lines: result.skippedLines,
     });
@@ -608,6 +625,7 @@ export function rollup(scanned, pricing, extra = {}) {
   let agentTranscripts = 0;
   let attributed = 0;
   let newestTs = null;
+  let oldestTs = null;
   let malformed = 0;
   let skippedLines = 0;
 
@@ -616,6 +634,12 @@ export function rollup(scanned, pricing, extra = {}) {
     skippedLines += source.skipped_lines ?? 0;
     if (source.kind === 'agent') agentTranscripts += 1;
     if (source.kind === 'agent' && source.ticket !== null) attributed += 1;
+    // The OLDEST record, not just the newest. Without it the report cannot say
+    // what period its total covers — and a total that does not name its period
+    // cannot honestly be compared against a monthly subscription price.
+    if (typeof source.first_ts === 'string' && (oldestTs === null || source.first_ts < oldestTs)) {
+      oldestTs = source.first_ts;
+    }
     if (typeof source.last_ts === 'string' && (newestTs === null || source.last_ts > newestTs)) {
       newestTs = source.last_ts;
     }
@@ -649,6 +673,12 @@ export function rollup(scanned, pricing, extra = {}) {
     // nothing at all in that case rather than a comparison against a guess.
     subscription: extra.subscription ?? null,
     as_of: newestTs,
+    // The window these numbers actually describe. A subscription is billed
+    // MONTHLY; a total summed over every transcript on the machine is not a
+    // month of anything, and putting the two side by side without saying so
+    // invites a comparison that is off by however long the operator has been
+    // using the tool. Named, not implied.
+    covers: spanOf(oldestTs, newestTs),
     totals: {
       ...totals,
       tokens: tokensOf(totals),
@@ -857,6 +887,22 @@ export function compositionLabel(kind) {
   return kind.replace(/_/g, ' ');
 }
 
+/**
+ * The period a report covers: `{ from, to, days }`, or null when there are no
+ * timestamps to measure it from.
+ *
+ * `days` is inclusive of both ends and never below 1 — an hour of work is one
+ * day of usage, not zero, and a zero would produce a division by zero the one
+ * time someone normalises this to a monthly rate.
+ */
+export function spanOf(from, to) {
+  if (typeof from !== 'string' || typeof to !== 'string') return null;
+  const start = Date.parse(from);
+  const end = Date.parse(to);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return { from, to, days: Math.max(1, Math.round((end - start) / 86_400_000)) };
+}
+
 /** Every model id these scanned transcripts name, in no particular order. */
 function observedModels(scanned) {
   const ids = new Set();
@@ -929,6 +975,11 @@ function finishReport({ sources, pricing, tyranDir, session, transcriptDirsUsed,
     agent_type: s.agent_type ?? null,
     ticket: s.ticket ?? null,
     last_ts: s.last_ts ?? null,
+    // This projection is a WHITELIST, so a field added to the scan and not
+    // added here is computed, cached as absent, and read back as null on
+    // every subsequent run — which is how the reported span came back as one
+    // day instead of nineteen.
+    first_ts: s.first_ts ?? null,
     malformed: s.malformed ?? 0,
     skipped_lines: s.skipped_lines ?? 0,
     by_model: s.by_model,

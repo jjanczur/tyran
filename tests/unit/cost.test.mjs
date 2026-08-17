@@ -20,6 +20,7 @@ import {
   rollup,
   scanAll,
   scanTranscript,
+  spanOf,
   tokensOf,
   transcriptDirFor,
 } from '../../scripts/cost.mjs';
@@ -927,4 +928,63 @@ test('a four-key rate card still prices 1-hour writes rather than dropping them'
     {}
   );
   assert.equal(out.totals.usd, 5, 'falls back to the 5-minute rate the config did give');
+});
+
+// --- the period a total describes ------------------------------------------
+
+test('a report names the period it covers, so a monthly price has something to meet', () => {
+  // The tile shows a MONTHLY subscription price. A total summed over every
+  // transcript on the machine is not a month of anything, so the span has to
+  // travel with it — otherwise the two sit side by side and the reader does
+  // the division themselves, wrongly.
+  const out = report(makeTree());
+  assert.ok(out.covers !== null, 'a report with timestamps must name its span');
+  assert.ok(out.covers.days >= 1);
+  assert.equal(typeof out.covers.from, 'string');
+  assert.equal(typeof out.covers.to, 'string');
+});
+
+test('spanOf refuses to invent a period it cannot measure', () => {
+  assert.equal(spanOf(null, '2026-08-17T00:00:00.000Z'), null);
+  assert.equal(spanOf('2026-08-17T00:00:00.000Z', null), null);
+  assert.equal(spanOf('not a date', '2026-08-17T00:00:00.000Z'), null);
+  // MUTANT: allow end < start. A clock skew between two transcripts would
+  // yield a negative span, and a negative day count divides the wrong way in
+  // any rate derived from it.
+  assert.equal(spanOf('2026-08-17T00:00:00.000Z', '2026-08-01T00:00:00.000Z'), null);
+});
+
+test('a span shorter than a day counts as one, never zero', () => {
+  // An hour of work is one day of usage. Zero would divide by zero the first
+  // time anyone normalises this to a monthly rate.
+  const sameDay = spanOf('2026-08-17T09:00:00.000Z', '2026-08-17T10:00:00.000Z');
+  assert.equal(sameDay.days, 1);
+  const twoWeeks = spanOf('2026-08-03T00:00:00.000Z', '2026-08-17T00:00:00.000Z');
+  assert.equal(twoWeeks.days, 14);
+});
+
+test('a cache written by an older schema is discarded, not read short', () => {
+  // The failure this prevents is a WRONG number, not a missing one. When
+  // `first_ts` was added without bumping the schema, every unchanged
+  // transcript kept its old cached record, `first_ts` read null, and the
+  // reported span came back as one day instead of nineteen.
+  const tree = makeTree();
+  const cachePath = join(tree.tyranDir, 'state', 'cost.json');
+  report(tree);
+  const fresh = JSON.parse(readFileSync(cachePath, 'utf8'));
+  assert.equal(fresh.schema, COST_SCHEMA);
+  assert.ok(fresh.sources.every((s) => 'first_ts' in s), 'every cached source carries the field');
+
+  // Now poison it the way a version upgrade would: an older schema, and
+  // sources missing the newer field.
+  writeFileSync(
+    cachePath,
+    JSON.stringify({
+      ...fresh,
+      schema: COST_SCHEMA - 1,
+      sources: fresh.sources.map(({ first_ts: _drop, ...rest }) => rest),
+    })
+  );
+  const after = report(tree);
+  assert.ok(after.covers !== null, 'the stale cache must be rescanned, not trusted');
 });

@@ -84,6 +84,109 @@ export const DATA_REQUIRED = Object.freeze({
 });
 
 /**
+ * Per-type keys that some consumer actually READS. Descriptive, not enforced.
+ *
+ * `append` does not and must not check this: `data may always carry extra
+ * keys` is a promise this file makes, the evidence gate relies on it for four
+ * of its own keys, and every journal ever written would fail retroactively if
+ * it became a rule. Measured on one real install: 130 distinct (event, key)
+ * pairs across 39 initiatives, and the long tail is deliberate annotation —
+ * `init.created.hardware`, `retro.entry.proposed_as_diffs`, `spawn.stories`.
+ *
+ * What this map is FOR is the narrow case hiding in that tail: a key that was
+ * MEANT to be read and is not, because it was misspelled. `next_step` for
+ * `next_steps` is accepted, ignored, and leaves the resume surface empty while
+ * the agent that wrote it believes it recorded something. Doctor compares
+ * unread keys against this map and reports only the near-misses; the rest are
+ * counted, because they are the contract working rather than a defect.
+ *
+ * `null` means "free-form on purpose": the fold keeps the whole `data` object
+ * for these, so there is no such thing as a key it does not read.
+ */
+export const DATA_KNOWN = Object.freeze({
+  'init.created': null,
+  'plan.accepted': null,
+  'ticket.created': Object.freeze(['id', 'title', 'text', 'deps']),
+  'ticket.status': Object.freeze(['ticket', 'column', 'reason', 'until']),
+  spawn: Object.freeze(['agent', 'role', 'model', 'ticket', 'worktree']),
+  report: Object.freeze(['agent', 'verdict', 'ticket', 'text', 'note', 'evidence', 'closed_by']),
+  progress: Object.freeze(['agent', 'state', 'ticket', 'detail', 'next']),
+  // The last five are the evidence gate's own, written on every SubagentStop.
+  // They are as legitimate as the rest and belong here for exactly that reason.
+  gate: Object.freeze([
+    'kind', 'result', 'evidence', 'evidence_ref', 'ticket', 'question', 'recommendation', 'default',
+    'reason', 'signals', 'code', 'would_be', 'initiative_inferred_from',
+  ]),
+  review: Object.freeze(['ticket', 'verdict', 'by']),
+  merge: Object.freeze(['ticket', 'sha', 'mode']),
+  decision: Object.freeze(['id', 'text']),
+  finding: Object.freeze(['area', 'claim', 'proof', 'id', 'ticket', 'confidence']),
+  'lease.acquired': Object.freeze(['resource', 'holder', 'mode']),
+  'lease.released': Object.freeze(['resource', 'holder']),
+  checkpoint: Object.freeze(['phase', 'next_steps']),
+  'retro.entry': Object.freeze(['kind', 'target', 'confidence']),
+  error: Object.freeze(['class', 'detail', 'ticket']),
+});
+
+/**
+ * Is `typo` one edit away from `known`? Insert, delete or substitute.
+ *
+ * Deliberately distance ONE and nothing looser. At two, `note` matches `next`
+ * and the check starts inventing typos in correct journals — and this feeds a
+ * finding that fails the check, so a false positive costs an operator a red
+ * doctor on a healthy repo, which is how a check gets switched off.
+ */
+export function isOneEditApart(typo, known) {
+  if (typo === known) return false;
+  const [a, b] = typo.length <= known.length ? [typo, known] : [known, typo];
+  if (b.length - a.length > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i += 1; j += 1; continue; }
+    if (++edits > 1) return false;
+    if (a.length === b.length) i += 1;
+    j += 1;
+  }
+  return edits + (b.length - j) + (a.length - i) <= 1;
+}
+
+/**
+ * Keys no consumer reads, split into the two that need different sentences.
+ *
+ * `nearMisses` are almost certainly misspellings of a key that IS read —
+ * the accept-then-ignore failure, worth a finding each. `unread` is everything
+ * else: counted, never dropped (ADR-19 correction 1), and not called a defect,
+ * because carrying extra keys is what the envelope promises.
+ *
+ * Short keys are exempt from the near-miss test: at three characters or fewer
+ * almost anything is one edit from something.
+ */
+export function unreadDataKeys(events) {
+  const unread = new Map(); // "ev.key" -> count
+  const nearMisses = new Map(); // "ev.key" -> {ev, key, meant, count}
+  for (const event of events) {
+    const known = DATA_KNOWN[event?.ev];
+    if (known === undefined || known === null) continue;
+    const data = event.data;
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) continue;
+    for (const key of Object.keys(data)) {
+      if (known.includes(key)) continue;
+      const id = `${event.ev}.${key}`;
+      unread.set(id, (unread.get(id) ?? 0) + 1);
+      if (key.length < 4) continue;
+      const meant = known.find((k) => k.length >= 4 && isOneEditApart(key, k));
+      if (meant === undefined) continue;
+      const hit = nearMisses.get(id) ?? { ev: event.ev, key, meant, count: 0 };
+      hit.count += 1;
+      nearMisses.set(id, hit);
+    }
+  }
+  return { unread, nearMisses: [...nearMisses.values()].sort((a, b) => (a.ev + a.key).localeCompare(b.ev + b.key)) };
+}
+
+/**
  * Closed VALUE sets inside `data`, for the same reason the event set is
  * closed: an unknown value must be a loud rejection at append time, not a
  * surprise in a projection. Hard errors are safe here because both types are

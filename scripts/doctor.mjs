@@ -46,6 +46,7 @@ import {
   tail,
   hoursBetween,
   spawnStaleness,
+  unreadDataKeys,
   DEFAULT_STALE_HOURS,
 } from './journal.mjs';
 import {
@@ -240,6 +241,12 @@ export const SEVERITY_BY_CODE = Object.freeze(
     // a deletion is the documented opt-out and stays silent. See
     // `absentMistakes` for why the two need telling apart at all.
     'mistakes-file-missing': 'info',
+    // Data keys nothing reads. The near miss is a WARNING because it is silent
+    // data loss and a healthy journal has none; the plain count is `info`
+    // because extra keys are what the envelope promises, and a warning per
+    // improvised key would be red on every healthy repo.
+    'journal-key-near-miss': 'warning',
+    'journal-key-unread': 'info',
     'claude-md-fence-missing': 'info',
     // overnight mode
     'limit-pause-active': 'info',
@@ -535,6 +542,7 @@ function checkInitiative(stateDir, name, { now, staleHours }) {
     }
   };
   guard('journal integrity', () => journalIntegrity(journalPath, at, read));
+  guard('data keys nothing reads', () => unreadKeyFindings(at, events));
   guard('one initiative per file', () => initiativeScope(journalPath, at, name, events));
   guard('open spawns', () => spawnFindings(journalPath, at, name, events, reference, staleHours));
   guard('operator asks', () => askFindings(journalPath, at, read, reference));
@@ -714,6 +722,61 @@ function closeSpawnHint(journalPath, init, agent) {
   return String(agent).startsWith('-')
     ? `node scripts/journal.mjs close-spawn ${sq(journalPath)} --reason "<why>" ${sq(slug)} -- ${sq(agent)}`
     : `node scripts/journal.mjs close-spawn ${sq(journalPath)} ${sq(slug)} ${sq(agent)} --reason "<why>"`;
+}
+
+/** How many unread keys are named before the rest are counted instead. */
+const MAX_NAMED_KEYS = 12;
+
+/**
+ * Data keys nothing reads — the end of accept-then-ignore, minus the nagging.
+ *
+ * `append` accepts any key by design, and it must: `data may always carry
+ * extra keys` is the envelope's promise, the evidence gate writes four of its
+ * own, and turning it into a rule would fail every journal ever written. So
+ * this is a REPORT, never a refusal, and it splits into two sentences because
+ * the two situations are not the same failure.
+ *
+ * A NEAR MISS is the defect: `next_step` for `next_steps` is accepted,
+ * ignored, and leaves the resume surface empty while the agent that wrote it
+ * believes it recorded something. That is worth a warning each, because it is
+ * silent data loss and a healthy journal has none.
+ *
+ * Everything else is the contract working. Measured on one real install: 130
+ * distinct (event, key) pairs across 39 initiatives, nearly all of it
+ * deliberate annotation. Those are COUNTED — never dropped, ADR-19 correction
+ * 1 — at `info`, in one line, because a warning per improvised key would go
+ * red on every healthy repo and a check that is red during normal operation is
+ * a check people learn to skip.
+ */
+function unreadKeyFindings(at, events) {
+  const { unread, nearMisses } = unreadDataKeys(events);
+  const findings = nearMisses.map((m) =>
+    finding(
+      'journal-key-near-miss',
+      at,
+      `${m.count} ${show(m.ev)} event(s) carry \`${show(m.key)}\`, one edit from \`${show(m.meant)}\`, which is ` +
+        'the key consumers actually read. A misspelled key is accepted, never read, and never reported — ' +
+        'the writer believes it recorded something and nothing did',
+      `node scripts/journal.mjs query ${sq(at)} --ev ${sq(m.ev)}   # then correct the writer; the journal is append-only, so past events keep the typo`,
+    ),
+  );
+  // Named minus the near-misses: those already have a finding of their own,
+  // and listing them twice would read as twice as many problems.
+  const rest = [...unread.keys()].filter((id) => !nearMisses.some((m) => `${m.ev}.${m.key}` === id)).sort();
+  if (rest.length > 0) {
+    const shown = rest.slice(0, MAX_NAMED_KEYS).map((id) => `${id} x${unread.get(id)}`).join(', ');
+    findings.push(
+      finding(
+        'journal-key-unread',
+        at,
+        `${rest.length} data key(s) that no consumer reads: ${show(shown)}` +
+          (rest.length > MAX_NAMED_KEYS ? ` (+${rest.length - MAX_NAMED_KEYS} more)` : '') +
+          '. Extra keys are legal and this is not a defect — it is what the envelope promises. Stated so ' +
+          'that "recorded" and "recorded AND read" stay distinguishable',
+      ),
+    );
+  }
+  return findings;
 }
 
 /** How long a self-reported `blocked` may stand before it is a finding. */

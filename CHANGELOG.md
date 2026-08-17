@@ -91,6 +91,40 @@ nags precisely the operator who already opted out.
 Both are `info`-adjacent by design: nothing is broken in either case. The
 first is a repair that was previously unavailable; the second is an offer.
 
+### Accept-then-ignore, ended without nagging
+
+`append` accepts any key inside `data` and always will: *"data may always
+carry extra keys"* is a promise the envelope makes, the evidence gate relies
+on it for four of its own, and turning it into a rule would fail every journal
+ever written the moment they were re-validated. So this is a report, never a
+refusal — and it is deliberately not the whole report.
+
+Measured on one real install: **130 distinct (event, key) pairs across 39
+initiatives**, and the long tail of that is deliberate annotation —
+`init.created.hardware`, `retro.entry.proposed_as_diffs`, `spawn.stories`.
+Naming all of it as findings would report the extension mechanism working as
+designed, on every healthy repo, and doctor's own severity notes already argue
+where that ends: a check that is red during normal operation is a check people
+learn to skip — and this one sits next to the gates.
+
+The defect hiding in that tail is narrower and worth a warning each.
+**`journal-key-near-miss`** reports a key one edit from the key consumers
+actually read: `next_step` for `next_steps` is accepted, never read, and never
+reported, so the resume surface is empty while the agent that wrote it
+believes it recorded something. Distance one and nothing looser — at two,
+`note` matches `next` and the check starts inventing typos in correct
+journals. Keys of three characters or fewer are exempt for the same reason.
+
+**`journal-key-unread`** (`info`) counts and names the rest, so nothing is
+dropped (ADR-19 correction 1) and "recorded" stays distinguishable from
+"recorded AND read" — without turning a documented contract into 130 rows of
+alarm.
+
+`DATA_KNOWN` in `journal.mjs` is the map of what each event type's consumers
+read, and it sits next to `DATA_REQUIRED` because both answer "what is in
+`data`". It is descriptive: an incomplete entry can only under-report, never
+invent a finding.
+
 ## 0.1.30 — 2026-08-17
 
 The first release built on an outside contribution. It fixes a spend ledger

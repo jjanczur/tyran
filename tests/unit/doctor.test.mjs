@@ -1640,6 +1640,8 @@ const EXPECTED_SEVERITY = {
   'journal-invalid': 'error',
   'journal-truncated': 'warning',
   'journal-warning': 'warning',
+  'journal-key-near-miss': 'warning',
+  'journal-key-unread': 'info',
   'journal-lock-present': 'warning',
   'journal-init-mismatch': 'error',
   'journal-cross-init-pairing': 'error',

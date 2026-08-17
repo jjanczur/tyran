@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.31 — 2026-08-17
+
+Seven things the journal had recorded and nothing was reading. The theme is
+one defect wearing different clothes: an answer that was available, a
+consumer that never asked for it, and a surface that reported confidence
+instead of the gap.
 
 ### Four things the fold recorded and threw away
 

@@ -138,21 +138,38 @@ the board itself — the lanes, overnight mode and the Settings tab — so every
 finding, logged error and open question on it is one that actually happened
 while the thing was made.
 
+**Most of the time you type none of this.** `/tyran:setup` writes a `board:`
+block with `autostart: true`, and from then on every session starts the board
+if it is not already up and prints the URL in its opening summary. The rest of
+this section is for turning that off, moving it, or driving it by hand.
+
 Two ways, and the difference between them is spend.
 
 **Serve it** — the whole page, spend included:
 
 ```bash
-npx @jjanczur/tyran board --dir .tyran --serve
+npx @jjanczur/tyran board --dir .tyran --detach --write   # returns; prints the URL
+npx @jjanczur/tyran board --dir .tyran --serve            # holds the terminal instead
 ```
 
-It prints `board: serving http://127.0.0.1:4173/`. Open that. The board
-re-renders on every request, so a reload is always current, and the page
-reloads itself every 30 seconds anyway. `--port <n>` if 4173 is taken.
-`Ctrl-C` stops it. It binds loopback only and pins the `Host` header, so
-nothing outside your machine can reach it, and it derives a filesystem path
-from no URL at all. It is read-only unless you add `--write`, which turns on
-the [Settings](#settings) tab and nothing else.
+Both start the same server. `--detach` waits only until the board answers,
+prints `board: serving http://127.0.0.1:4173/`, and gives you your shell back;
+`--serve` holds the terminal until `Ctrl-C`. **Anything that is not a person
+at a prompt wants `--detach`** — a script or an agent given `--serve` sits on
+it until its timeout, which is how the setup step that starts the dashboard
+used to silently eat every step after it.
+
+Running it twice is safe: `--detach` finds a board already serving this
+directory and reports it rather than starting a second one. If 4173 is taken
+it walks forward to 4174 and up, so several repositories can each have their
+own board without being told about each other. `--status` says where yours is,
+`--stop` ends it, and `--port <n>` picks a different starting point.
+
+The board re-renders on every request, so a reload is always current, and the
+page reloads itself every 30 seconds anyway. It binds loopback only and pins
+the `Host` header, so nothing outside your machine can reach it, and it
+derives a filesystem path from no URL at all. It is read-only unless you add
+`--write`, which turns on the [Settings](#settings) tab and nothing else.
 
 **Open the file** — no server, no spend:
 
@@ -234,21 +251,53 @@ client builds DOM with `createElement`/`textContent` only.
 ```bash
 node scripts/board.mjs --dir .tyran            # render all three artefacts
 node scripts/board.mjs --dir .tyran --check    # byte-exact drift check, exit 1
-node scripts/board.mjs --dir .tyran --serve    # localhost viewer, always fresh
+node scripts/board.mjs --dir .tyran --serve    # localhost viewer, holds the terminal
+node scripts/board.mjs --dir .tyran --detach   # ... same server, returns instead
+node scripts/board.mjs --dir .tyran --status   # where is it? exit 1 if nowhere
+node scripts/board.mjs --dir .tyran --stop     # end the running one
 node scripts/board.mjs --dir .tyran --serve --write   # ... and Settings can edit
 node scripts/board.mjs --dir .tyran --serve --transcripts <dir>   # ... and Spend reads THAT dir
 ```
 
 `--serve` binds `127.0.0.1` only, re-renders per request, and never derives a
 filesystem path from a URL; `--write` adds the [Settings](#settings) routes and
-nothing else, and refuses on its own (`--write` without `--serve` is a usage
-error, not a silent no-op). `--transcripts <dir>` is the same refusal, for the
-same reason: it means something only to `/cost.json`, which only exists under
-`--serve`. Repeatable, and it overrides `spend.transcript_dirs` in
+nothing else, and refuses on its own (`--write` without `--serve` or `--detach`
+is a usage error, not a silent no-op). `--transcripts <dir>` is the same
+refusal, for the same reason: it means something only to `/cost.json`, which
+only exists under a server. Repeatable, and it overrides `spend.transcript_dirs` in
 `.tyran/config.yaml` — see [Spend](#spend). The initiative ceiling is 64, refused loudly —
 archive closed initiatives rather than boarding them. An unreadable journal
 renders as a visible **UNREADABLE** entry: a board that omits a broken
 initiative would read as "all is well" exactly when it is not.
+
+### Starting itself, and how it knows it already has
+
+The `board:` block in `.tyran/config.yaml` — written at setup, editable on the
+[Settings](#settings) tab — decides this. It defaults ON:
+
+```yaml
+board:
+  autostart: true   # start with the session if not already up
+  port: 4173        # first port tried; the next 9 are used if it is taken
+  write: true       # the Settings tab can edit config.yaml and the policy
+  open: false       # true also launches a browser on every session
+```
+
+`TYRAN_NO_BOARD=1` in the environment outranks all of it, for the case the
+per-repo setting cannot cover: **CI**. An automated run clones a repository
+whose committed config says `autostart: true`, has no browser and no operator,
+and a detached server started by a build outlives the build.
+
+"Already up" is an HTTP question, never a recorded pid. The running server
+answers `/health.json` with the `.tyran` directory it serves, and a caller
+believes it only if that directory is its own. Both halves are load-bearing: a
+pid recorded by one process and read by another is dead before it is read and,
+once the OS recycles the number, names a stranger — while a check that only
+probed the *port* would see a **different repository's** board (same program,
+same route) and conclude this repo's board was already running, so it would
+never start. The port is recorded at `state/board-server.json` as a hint for
+`--stop`; it is gitignored, because a pid and a port name a process on one
+machine and a stranger on every other.
 
 ## Spend
 

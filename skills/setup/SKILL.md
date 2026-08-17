@@ -168,8 +168,15 @@ files on disk; the board is where any of it becomes legible, and it was the
 one thing installation never actually reached.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/board.mjs" --dir .tyran --serve --write --open
+node "${CLAUDE_PLUGIN_ROOT}/scripts/board.mjs" --dir .tyran --detach --write --open
 ```
+
+**`--detach`, never `--serve`.** They are the same server; `--serve` holds the
+terminal until Ctrl-C, which is right for a human who typed it and fatal here
+— an agent that runs it sits on the call until the platform's timeout, and
+every step below this one silently never happens. That is what this step used
+to do. `--detach` waits only until the board answers, prints the URL, and
+returns; `--stop` ends it.
 
 `--open` launches their browser; `--write` is what makes the **Settings** tab
 able to edit `config.yaml` and the autonomy policy from the page. Tell them
@@ -178,8 +185,12 @@ validation commands, shared zones, overnight limits — because for someone who
 would rather not hand-edit YAML in their own repository, that tab is the
 entire configuration story and they will not guess it is there.
 
-It holds the terminal while it serves. Say so, and say that Ctrl-C stops it
-and the board is still there next time.
+Say that they do not have to run this again: the scan wrote a `board:` block
+with `autostart: true`, so every later session starts the board if it is not
+already up, and prints the URL in its opening summary. Several repositories at
+once each get their own — the port walks forward from 4173 when one is taken.
+`node scripts/board.mjs --dir .tyran --status` says where it is; `--stop` ends
+it; `autostart: false` in the config turns the whole thing off.
 
 ## 5. Validate and report
 

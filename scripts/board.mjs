@@ -21,8 +21,13 @@
  *
  * CLI:
  *   node board.mjs [--dir <.tyran>] [--check]
- *                  [--serve [--port <n>] [--write] [--open] [--transcripts <dir>]...]
- * Exit: 0 ok · 1 drift (--check) · 2 usage/IO
+ *                  [--serve|--detach [--port <n>] [--write] [--open] [--transcripts <dir>]...]
+ *                  [--status] [--stop]
+ * Exit: 0 ok · 1 drift (--check), or no server (--status/--stop) · 2 usage/IO
+ *
+ * `--serve` holds the terminal; `--detach` starts the same server, waits only
+ * until it answers, and returns. Anything that is not a human with a spare
+ * terminal wants the second one — see board-daemon.mjs.
  */
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -50,8 +55,21 @@ import { SettingsError, applyPolicyClass, applySetting, readSettings } from './s
 import { checkStopAt } from './stop-check.mjs';
 import { runState } from './overnight.mjs';
 import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender, sortAsks } from './answer.mjs';
+import {
+  HEALTH_ROUTE,
+  PORT_SEARCH_SPAN,
+  findLiveServer,
+  removeServerRecord,
+  startDetached,
+  stopServer,
+  urlFor,
+  writeServerRecord,
+} from './board-daemon.mjs';
 
 export const BOARD_HTML_FILE = 'board.html';
+
+/** How often a served board checks that it still has a directory to serve. */
+export const DIR_WATCHDOG_MS = 60_000;
 
 /**
  * Open the served board in the operator's browser.
@@ -645,14 +663,17 @@ function handleSettingsWrite(dir, route, body) {
 
 // ------------------------------------------------------------------- CLI
 
-const BOOLEAN_FLAGS = ['check', 'serve', 'write', 'open'];
+const BOOLEAN_FLAGS = ['check', 'serve', 'write', 'open', 'detach', 'stop', 'status'];
 const VALUE_FLAGS = ['dir', 'port'];
 // Repeatable, unlike VALUE_FLAGS: sources are the union over every directory
 // given, exactly like cost.mjs's own `--transcripts`.
 const REPEATABLE_FLAGS = ['transcripts'];
 
 function parseArgs(argv) {
-  const flags = { dir: '.tyran', port: 4173, check: false, serve: false, write: false, open: false, transcripts: [] };
+  const flags = {
+    dir: '.tyran', port: 4173, check: false, serve: false, write: false, open: false,
+    detach: false, stop: false, status: false, transcripts: [],
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg.startsWith('--')) throw new UsageError(`unexpected argument "${arg}"`);
@@ -684,25 +705,34 @@ function main() {
     if (!(err instanceof UsageError)) throw err;
     console.error(`board: ${err.message}`);
     console.error(
-      'usage: board.mjs [--dir <.tyran>] [--check] ' +
-        '[--serve [--port <n>] [--write] [--transcripts <dir>]...]'
+      'usage: board.mjs [--dir <.tyran>] [--check]\n' +
+        '                 [--serve|--detach [--port <n>] [--write] [--open] [--transcripts <dir>]...]\n' +
+        '                 [--status] [--stop]'
     );
     process.exit(2);
   }
-  if (flags.write && !flags.serve) {
-    console.error('board: --write only means anything with --serve (it is what the served page may edit)');
+  // `--detach` is `--serve` that returns. Every flag describing HOW to serve
+  // therefore has to accept either, or the detached form would refuse exactly
+  // the arguments it exists to be given.
+  const serving = flags.serve || flags.detach;
+  if (flags.serve && flags.detach) {
+    console.error('board: --serve and --detach are the same server, one holding the terminal and one not — pass one');
     process.exit(2);
   }
-  if (flags.open && !flags.serve) {
+  if (flags.write && !serving) {
+    console.error('board: --write only means anything with --serve or --detach (it is what the served page may edit)');
+    process.exit(2);
+  }
+  if (flags.open && !serving) {
     // Same refusal as --write and --transcripts, for the same reason: there is
     // no URL to open without a server, and a flag that silently does nothing
     // reads as configuration.
-    console.error('board: --open only means anything with --serve (there is no URL to open without it)');
+    console.error('board: --open only means anything with --serve or --detach (there is no URL to open without it)');
     process.exit(2);
   }
-  if (flags.transcripts.length > 0 && !flags.serve) {
+  if (flags.transcripts.length > 0 && !serving) {
     console.error(
-      'board: --transcripts only means anything with --serve (it is what /cost.json reads instead of ' +
+      'board: --transcripts only means anything with --serve or --detach (it is what /cost.json reads instead of ' +
         'the derived transcript directory)'
     );
     process.exit(2);
@@ -728,6 +758,63 @@ function main() {
     process.exit(2);
   }
   const outDir = join(dir, 'state');
+
+  // ---- the three routes that talk ABOUT a server rather than being one ----
+  //
+  // All three are async, and `main` stays sync for everything else on
+  // purpose: the rendering path is the one every test and every hook drives,
+  // and making it return a promise would change the shape of a contract that
+  // has nothing to do with servers.
+  if (flags.status) {
+    findLiveServer(dir, flags.port).then((live) => {
+      if (live === null) {
+        console.log(
+          `board: no server is answering for ${dir} ` +
+            `(tried the recorded port, if any, then ${flags.port}-${flags.port + PORT_SEARCH_SPAN - 1}) — ` +
+            `start one with: node scripts/board.mjs --dir ${dir} --detach --write`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      console.log(
+        `board: serving ${urlFor(live.port)} (pid ${live.health.pid ?? '?'}; ` +
+          `${live.health.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'})`,
+      );
+    });
+    return;
+  }
+  if (flags.stop) {
+    stopServer(dir).then((result) => {
+      if (result.stopped) {
+        console.log(`board: stopped the server on port ${result.port} (pid ${result.pid})`);
+        return;
+      }
+      console.error(`board: ${result.reason}`);
+      process.exitCode = 1;
+    });
+    return;
+  }
+  if (flags.detach) {
+    startDetached(dir, { port: flags.port, write: flags.write, open: flags.open, transcripts: flags.transcripts })
+      .then((result) => {
+        if (result.error) {
+          console.error(`board: ${result.error}`);
+          process.exitCode = 2;
+          return;
+        }
+        // "Already running" is a SUCCESS, and saying which one it is matters:
+        // this command is meant to be safe to run on every session start, so
+        // its ordinary outcome is that there was nothing to do.
+        console.log(
+          result.reused
+            ? `board: already serving ${result.url} (pid ${result.pid ?? '?'})`
+            : `board: serving ${result.url} (pid ${result.pid ?? '?'}; ` +
+              `${flags.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'}; ` +
+              `stop it with: node scripts/board.mjs --dir ${dir} --stop)`,
+        );
+      });
+    return;
+  }
 
   if (flags.serve) {
     // Loopback-only, re-rendered per request so it is always fresh. No
@@ -764,6 +851,15 @@ function main() {
         // marker, the resume watcher and the usage sidecar are gitignored and
         // different on every machine, so they are served — the same split, and
         // the same argument, spend already makes.
+        // The liveness answer, and the ONLY reliable one. A caller asking
+        // "is a board already up for this repo" cannot use the recorded pid —
+        // see board-daemon.mjs for why — so it asks the server itself, and
+        // `dir` is what stops ANOTHER repository's board (same program, same
+        // route) from answering yes on this one's behalf.
+        if (req.url === HEALTH_ROUTE) {
+          sendJson(res, 200, { tyran_board: true, schema: 1, dir, pid: process.pid, port: flags.port, write: flags.write });
+          return;
+        }
         if (req.url === '/run.json') {
           try {
             sendJson(res, 200, { schema: 1, ...runState(resolve(dir, '..')) });
@@ -884,13 +980,46 @@ function main() {
       process.exitCode = 2;
     });
     server.listen(flags.port, '127.0.0.1', () => {
-      const url = `http://127.0.0.1:${flags.port}/`;
+      const url = urlFor(flags.port);
+      // Written from INSIDE the listen callback, so the record only ever
+      // describes a server that actually bound a port — a record written
+      // before this point would be an intention, and `--stop` would signal
+      // whatever inherited the pid of a board that never started.
+      writeServerRecord(dir, { pid: process.pid, port: flags.port, url, write: flags.write, started_at: new Date().toISOString() });
       console.log(
         `board: serving ${url} ` +
           `(${flags.write ? 'Settings can edit config.yaml and autonomy.yaml' : 'read-only'}; Ctrl-C to stop)`,
       );
       if (flags.open) openInBrowser(url);
     });
+    // Clear the record on the way out, so the next caller does not have to
+    // probe a port to learn that this one is gone. Best-effort: a killed
+    // process runs none of this, which is exactly why the reader treats the
+    // record as a hint and the health probe as the answer.
+    const clear = () => { removeServerRecord(dir); };
+    process.on('exit', clear);
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+      process.on(signal, () => {
+        clear();
+        process.exit(0);
+      });
+    }
+    // A board whose directory is gone is serving nothing, and nothing will
+    // ever ask it to stop: `--stop` needs a `.tyran` to find the record in,
+    // and the operator who deleted the checkout is not going to hunt a pid.
+    // Detached servers are started automatically now, so "nobody ever stops
+    // it" is the DEFAULT case rather than an unlucky one — a deleted worktree
+    // otherwise leaves a process holding a port until the machine reboots.
+    const watchdog = setInterval(() => {
+      if (!existsSync(dir)) {
+        clear();
+        process.exit(0);
+      }
+    }, DIR_WATCHDOG_MS);
+    // Unref'd so it is the SERVER that keeps this process alive, never the
+    // timer: a watchdog that held the loop open would turn every exit path
+    // above into a hang.
+    watchdog.unref?.();
     return;
   }
 

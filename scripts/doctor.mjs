@@ -65,6 +65,7 @@ import { classifyPath, normalizePath, validateFile, knowledgeWarnings, MANDATORY
 import { auditEntries, loadEntries as loadKnowledgeEntries } from './knowledge.mjs';
 import { readPlatformUsage } from './usage-source.mjs';
 import { gitRunner } from './scan-repo.mjs';
+import { SERVER_RECORD_FILE } from './board-daemon.mjs';
 import { parseMistakes, countSignatures, fenceState, KNOWLEDGE_THRESHOLD, MISTAKES_FILE, CLAUDE_MD_FILE } from './mistakes.mjs';
 
 /** Severity order is also the report order. `info` never fails the check. */
@@ -1613,7 +1614,17 @@ export function mistakesFindings(repoRoot, run = null) {
 
 /** The repo-global overnight runtime files that legally live at state/ level. */
 /** The cross-initiative board artefacts board.mjs writes at state/ level. */
-export const CROSS_BOARD_FILES = Object.freeze(['BOARD.md', 'board.json', 'board.html']);
+export const CROSS_BOARD_FILES = Object.freeze([
+  'BOARD.md',
+  'board.json',
+  'board.html',
+  // Not a projection like the three above — the running server's own record,
+  // written from inside its listen callback and removed on the way out. It
+  // sits at this level because the server serves the whole directory, and it
+  // is machine-local for the same reason the overnight files are: another
+  // clone has a different pid on a different port.
+  SERVER_RECORD_FILE,
+]);
 
 export const OVERNIGHT_RUNTIME_FILES = Object.freeze([
   'paused-until.json',

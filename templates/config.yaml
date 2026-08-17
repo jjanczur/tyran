@@ -68,6 +68,24 @@ limits:
   resume_margin_minutes: 5
   keep_awake: false # a real boolean, so the bare-off trap above cannot apply
 
+# The dashboard. Unlike everything above, this defaults ON: the board is where
+# a journal, a projection and a spend report become something a person can
+# read, and an install where nobody starts it is an install where none of that
+# is ever seen. Set autostart: false to turn it down.
+#
+#   autostart: true   start it with the session, if it is not already up
+#   port: 4173        the first port tried; the next 9 are used if it is taken,
+#                     so several repositories can each have their own board
+#   write: true       lets the Settings tab edit config.yaml and the autonomy
+#                     policy. false serves the same page read-only.
+#   open: false       true also launches your browser on every session, which
+#                     is a tab per session — the URL is printed either way.
+board:
+  autostart: true
+  port: 4173
+  write: true
+  open: false
+
 # What a model costs, per MILLION tokens. Optional; absent means the spend
 # report counts tokens and shows no money, which is the honest default —
 # Tyran does not know what you pay. Operator-written from a vendor's price

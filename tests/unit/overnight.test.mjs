@@ -88,7 +88,11 @@ function run(args, { cwd, env = {} } = {}) {
   const r = spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf8',
     cwd,
-    env: { ...process.env, ...env },
+    // HOME first, so a caller can still override it: the overnight scheduler
+    // reads usage telemetry, which now falls back to `~/.claude.json`, and a
+    // test that read the developer's real account would pass or fail by
+    // accident of how much they had used that day.
+    env: { ...process.env, HOME: mkdtempSync(join(tmpdir(), 'tyran-nohome-')), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };

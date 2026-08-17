@@ -70,8 +70,27 @@ const MAIN_SUPERVISED = { permission_mode: 'default', tool_name: 'Task', tool_in
 const MAIN_AUTONOMOUS = { permission_mode: 'acceptEdits', tool_name: 'Task', tool_input: {}, session_id: 'f9271c9c-e951-47be-af1f-a5742c6df046' };
 const SUBAGENT = { agent_id: 'a1b2c3d4', agent_type: 'implementer', tool_name: 'Task', tool_input: {} };
 
+/**
+ * HERMETIC BY DEFAULT. `readSidecar` now falls back to the platform's usage
+ * cache in the real `~/.claude.json`, so without this every test here reads
+ * whoever ran it. It would pass on a machine below the pause threshold and
+ * fail on one above it, and CI — which has no such file — would stay green
+ * either way. That is a latent flake, not a visible one.
+ *
+ * The stub keeps the ON-DISK sidecar working, because many tests below write
+ * one and assert on it; only the environment is removed.
+ */
+const hermetic = (root, nowMs, fresh) => readSidecar(root, nowMs, fresh, () => null);
+
+/** The same isolation for a SPAWNED gate, which cannot be handed a stub: a
+ * HOME with no `.claude.json` in it. */
+const noHome = () => ({ ...process.env, HOME: mkdtempSync(join(tmpdir(), 'tyran-nohome-')) });
+
 function verdict(dir, input, over = {}) {
-  return decide({ cwd: dir, ...input }, { now: () => NOW, locate: () => ({ file: null, init: 'demo' }), ...over });
+  return decide(
+    { cwd: dir, ...input },
+    { now: () => NOW, locate: () => ({ file: null, init: 'demo' }), readSidecarFn: hermetic, ...over },
+  );
 }
 
 // ------------------------------------------------------------- fails open
@@ -334,7 +353,11 @@ test('on the wire: a denial is hookSpecificOutput.permissionDecision deny', () =
     tool_name: 'Task',
     tool_input: {},
   });
-  const raw = execFileSync(process.execPath, [SCRIPT], { input, encoding: 'utf8' });
+  // A HOME with no `.claude.json`: this asserts the no-telemetry path, and a
+  // spawned process cannot be handed a stub.
+  const raw = execFileSync(process.execPath, [SCRIPT], {
+    input, encoding: 'utf8', env: noHome(),
+  });
   const parsed = JSON.parse(raw);
   assert.equal(parsed.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.equal(parsed.hookSpecificOutput.permissionDecision, 'deny');
@@ -344,7 +367,7 @@ test('on the wire: a denial is hookSpecificOutput.permissionDecision deny', () =
 test('on the wire: a pass is SILENCE (empty output), and exit 0', () => {
   const dir = repo(); // no telemetry
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', cwd: dir, permission_mode: 'acceptEdits', tool_name: 'Task', tool_input: {} });
-  const raw = execFileSync(process.execPath, [SCRIPT], { input, encoding: 'utf8' });
+  const raw = execFileSync(process.execPath, [SCRIPT], { input, encoding: 'utf8', env: noHome() });
   assert.equal(raw.trim() === '' || raw.trim() === '{}', true, `unexpected output: ${raw}`);
 });
 

@@ -54,6 +54,10 @@ async function serve(tyran, extraArgs = []) {
   });
   const child = spawn(process.execPath, [SCRIPT, '--dir', tyran, '--serve', '--port', String(port), ...extraArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    // A HOME with no `.claude.json`: the served spend payload reads the
+    // subscription from there, so without this the assertions below depend on
+    // which account the developer happens to be signed in as.
+    env: { ...process.env, HOME: mkdtempSync(join(tmpdir(), 'tyran-nohome-')) },
   });
   let log = '';
   child.stdout.on('data', (d) => { log += String(d); });

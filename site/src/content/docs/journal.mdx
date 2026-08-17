@@ -6,7 +6,7 @@ import { FileTree } from '@astrojs/starlight/components';
 import Provenance from '../../components/Provenance.astro';
 
 <Provenance>
-`scripts/journal.mjs` · 69 unit tests
+`scripts/journal.mjs` · 77 unit tests
 </Provenance>
 
 This page is the schema contract; extending the event set is a reviewed core
@@ -19,7 +19,21 @@ directory holds the initiative's authored files (`PLAN.md`, `NOTES.md`,
 `.tyran/.gitignore`). Installs adopted at ≤ 0.1.8 may still have a
 `.tyran/initiatives/` directory; nothing mechanical reads it, and
 `doctor --state` reports it (`state-legacy-initiatives-dir`) until its
-contents are moved, one initiative directory at a time, under `state/`.
+contents are moved under `state/`. `scripts/migrate.mjs` does that move:
+
+```bash
+node scripts/migrate.mjs --dir .tyran            # what it WOULD move
+node scripts/migrate.mjs --dir .tyran --apply    # move it
+```
+
+Explicit and never automatic, because it MOVES an append-only history rather
+than seeding a file that does not exist yet. It never overwrites — a name that
+already exists under `state/` is reported as a conflict, skipped, and left
+untouched on both sides, because merging two directories that share a name is
+a decision only the operator can make. It never deletes: the legacy directory
+goes only once it is empty. It is idempotent, so re-running after fixing a
+conflict by hand is safe, and it exits 1 while any conflict remains so an
+automated caller can tell "done" from "done except for the part that mattered".
 
 <FileTree>
 

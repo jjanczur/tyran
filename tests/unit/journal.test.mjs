@@ -25,6 +25,9 @@ import {
   openSpawns,
   spawnStaleness,
   isClosingPhase,
+  unreadDataKeys,
+  isOneEditApart,
+  DATA_KNOWN,
   DEFAULT_STALE_HOURS,
   closeSpawn,
   pairSpawns,
@@ -36,6 +39,7 @@ import {
   nextAskKind,
   raiseAsk,
 } from '../../scripts/journal.mjs';
+import { eventsFor } from '../../scripts/answer.mjs';
 
 const SCRIPT = new URL('../../scripts/journal.mjs', import.meta.url).pathname;
 const tmp = () => join(mkdtempSync(join(tmpdir(), 'tyran-journal-')), 'journal.jsonl');
@@ -1285,4 +1289,103 @@ test('exactly one checkpoint phase closes an initiative', () => {
   for (const no of ['closing', 'close', 'E2', 'resumed', 'usage-limit-pause', '', null, undefined, 3]) {
     assert.equal(isClosingPhase(no), false, JSON.stringify(no));
   }
+});
+
+// --- keys nothing reads --------------------------------------------------
+
+const evt = (ev, data) => ({ ts: '2026-07-26T09:00:00.000Z', ev, init: 'demo', actor: 'a', data });
+
+test('a misspelled key is found, and the key it MEANT is named', () => {
+  // MUTANT: drop the near-miss half. `next_step` is accepted by append, read
+  // by nothing, and reported by nothing — so the resume surface is empty while
+  // the agent that wrote it believes it recorded something.
+  const { nearMisses } = unreadDataKeys([
+    evt('checkpoint', { phase: 'E2', next_step: ['a'] }),
+    evt('checkpoint', { phase: 'E2', next_step: ['b'] }),
+  ]);
+  assert.equal(nearMisses.length, 1);
+  assert.deepEqual(
+    { ev: nearMisses[0].ev, key: nearMisses[0].key, meant: nearMisses[0].meant, count: nearMisses[0].count },
+    { ev: 'checkpoint', key: 'next_step', meant: 'next_steps', count: 2 },
+  );
+});
+
+test('deliberate extension keys are COUNTED, never called defects', () => {
+  // The envelope promises `data` may always carry extra keys, the evidence
+  // gate relies on it, and one real install carries 130 distinct (event, key)
+  // pairs of it. MUTANT: report these as near-misses — doctor goes red on
+  // every healthy repo and gets switched off, taking the gates with it.
+  const { unread, nearMisses } = unreadDataKeys([
+    evt('spawn', { agent: 'a', role: 'implementer', stories: ['S-1'] }),
+    evt('retro.entry', { kind: 'k', target: 't', proposed_as_diffs: true }),
+  ]);
+  assert.deepEqual(nearMisses, [], 'improvisation is not a typo');
+  assert.deepEqual([...unread.entries()].sort(), [['retro.entry.proposed_as_diffs', 1], ['spawn.stories', 1]]);
+});
+
+test("the evidence gate's own four keys are known, not findings", () => {
+  // It writes these on every SubagentStop. If they were unknown, every install
+  // running the gate would carry a permanent finding for using Tyran normally.
+  const { unread, nearMisses } = unreadDataKeys([
+    evt('gate', { kind: 'evidence', result: 'pass', signals: ['tap-count'], code: 'X', would_be: 'deny', initiative_inferred_from: 2 }),
+  ]);
+  assert.deepEqual(nearMisses, []);
+  assert.deepEqual([...unread.keys()], []);
+});
+
+test('free-form event types have no unread keys at all', () => {
+  // `init.created` and `plan.accepted` are kept WHOLESALE by the fold, so
+  // there is no such thing as a key it does not read. Declaring that is
+  // honest; testing every key against a list would invent findings.
+  assert.equal(DATA_KNOWN['init.created'], null);
+  const { unread } = unreadDataKeys([evt('init.created', { hardware: 'M4', boundaries: 'none' })]);
+  assert.deepEqual([...unread.keys()], []);
+});
+
+test('one edit apart, and never two', () => {
+  // MUTANT: allow distance 2. `note` and `next` are both real keys two edits
+  // apart, and the check would start inventing typos in correct journals —
+  // into a finding that fails the check.
+  assert.equal(isOneEditApart('next_step', 'next_steps'), true, 'deletion');
+  assert.equal(isOneEditApart('evidencer', 'evidence'), true, 'insertion');
+  assert.equal(isOneEditApart('evidenca', 'evidence'), true, 'substitution');
+  assert.equal(isOneEditApart('note', 'next'), false, 'two edits is not a typo');
+  assert.equal(isOneEditApart('ticket', 'ticket'), false, 'a key is not a misspelling of itself');
+  assert.equal(isOneEditApart('agent', 'sha'), false);
+});
+
+test('short keys are exempt, because almost anything is one edit from them', () => {
+  const { nearMisses } = unreadDataKeys([evt('merge', { ticket: 'T-1', sha: 'abc', shb: 'x' })]);
+  assert.deepEqual(nearMisses, [], 'a three-letter key is not evidence of anything');
+});
+
+test('a hostile or absent data object is not a crash', () => {
+  // The journal is a file a human can edit; every reader here has to survive
+  // a shape nobody anticipated rather than take the whole report down.
+  const { unread, nearMisses } = unreadDataKeys([
+    evt('spawn', null), evt('spawn', ['a']), evt('spawn', 'x'), { ev: 'spawn' }, null, evt('not-an-event', { x: 1 }),
+  ]);
+  assert.deepEqual([...unread.keys()], []);
+  assert.deepEqual(nearMisses, []);
+});
+
+test("Tyran's OWN writers produce no unread keys", () => {
+  // MUTANT: drop `ask`/`via`/`occurrences` from DATA_KNOWN. Every install that
+  // has ever answered an operator question or promoted a rule would then have
+  // doctor report its own normal operation back at it — which is precisely the
+  // nagging this design was shaped to avoid, arriving from inside the house.
+  //
+  // Built from the REAL writer rather than a hand-copied literal: a list
+  // written here would agree with DATA_KNOWN by construction and prove nothing
+  // about answer.mjs (ADR-21).
+  const ask = { init: 'demo', kind: 'Q-1', ticket: 'T-1' };
+  const { decision, gate } = eventsFor(ask, { mode: 'operator', text: 'em dash' }, 'D-3');
+  const { unread, nearMisses } = unreadDataKeys([
+    { ...decision, ts: '2026-07-26T09:00:00.000Z', data: { ...decision.data, id: 'D-3' } },
+    { ...gate, ts: '2026-07-26T09:00:01.000Z' },
+    // mistakes.mjs, recording a promoted rule.
+    evt('decision', { id: 'D-4', text: 'promoted', signature: 'sig', occurrences: 3, path: 'CLAUDE.md' }),
+  ]);
+  assert.deepEqual([...unread.keys()], [], 'a key Tyran itself writes is not an unread key');
+  assert.deepEqual(nearMisses, []);
 });

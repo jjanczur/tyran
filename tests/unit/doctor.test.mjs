@@ -27,6 +27,7 @@ import {
   severityFor,
   DEFAULT_STALE_HOURS,
   runHookChecks,
+  mistakesFindings,
 } from '../../scripts/doctor.mjs';
 import {
   DEFAULT_PLUGIN_ROOT,
@@ -34,6 +35,7 @@ import {
   hookSeverityFor,
 } from '../../scripts/hooks-check.mjs';
 import { append } from '../../scripts/journal.mjs';
+import { gitRunner } from '../../scripts/scan-repo.mjs';
 
 const DOCTOR = fileURLToPath(new URL('../../scripts/doctor.mjs', import.meta.url));
 const PROJECT = fileURLToPath(new URL('../../scripts/project.mjs', import.meta.url));
@@ -1638,6 +1640,8 @@ const EXPECTED_SEVERITY = {
   'journal-invalid': 'error',
   'journal-truncated': 'warning',
   'journal-warning': 'warning',
+  'journal-key-near-miss': 'warning',
+  'journal-key-unread': 'info',
   'journal-lock-present': 'warning',
   'journal-init-mismatch': 'error',
   'journal-cross-init-pairing': 'error',
@@ -1693,6 +1697,7 @@ const EXPECTED_SEVERITY = {
   'limit-telemetry-missing': 'warning',
   'mistakes-unreadable': 'warning',
   'mistakes-repeat-unpromoted': 'info',
+  'mistakes-file-missing': 'info',
   'claude-md-fence-missing': 'info',
 };
 
@@ -2007,4 +2012,67 @@ test('a hostile journal cannot put invisible characters in the doctor report', (
   // The findings must still SAY something — a report that is clean because it
   // is empty would pass the assertion above and protect nobody.
   assert.ok(result.findings.length > 0, 'premise: this journal produces findings');
+});
+
+// --- an absent MISTAKES.md: opt-out, or never offered? -------------------
+
+/**
+ * The same runner doctor builds for itself. Imported rather than stubbed: the
+ * behaviour under test is precisely what git answers, and a fake that returns
+ * what the test expects would prove only that the test agrees with itself.
+ */
+const gitRunnerFor = (dir) => gitRunner(dir);
+
+/** A real git repo with one commit, so `git log` can answer about a path. */
+function gitRepo({ withMistakes = false, thenDelete = false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-mistakes-'));
+  const git = (cmd) => execSync(`git ${cmd}`, { cwd: dir, stdio: 'ignore' });
+  git('init -q');
+  git('config user.email t@example.com');
+  git('config user.name Test');
+  writeFileSync(join(dir, 'README.md'), '# repo\n');
+  if (withMistakes) writeFileSync(join(dir, 'MISTAKES.md'), '# Mistakes\n');
+  git('add -A');
+  git('commit -q -m first');
+  if (thenDelete) {
+    rmSync(join(dir, 'MISTAKES.md'));
+    git('add -A');
+    git('commit -q -m "delete the ledger"');
+  }
+  return dir;
+}
+
+test('a MISTAKES.md that was DELETED stays silent — that is the opt-out', () => {
+  // MUTANT: report absence without asking git. The file's absence is the
+  // documented way to decline the ledger, and a tool that nags about a file
+  // you deliberately removed is a tool you switch off — which would cost the
+  // gates it sits next to, not just this check.
+  const dir = gitRepo({ withMistakes: true, thenDelete: true });
+  const { findings, checked } = mistakesFindings(dir, gitRunnerFor(dir));
+  assert.deepEqual(findings, []);
+  assert.match(checked, /IS the opt-out/);
+});
+
+test('a MISTAKES.md git has NEVER seen is an offer, at info', () => {
+  // The other half of the same absence: an install made before the ledger
+  // existed never declined anything, because nobody ever offered.
+  const dir = gitRepo({ withMistakes: false });
+  const { findings } = mistakesFindings(dir, gitRunnerFor(dir));
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].code, 'mistakes-file-missing');
+  assert.equal(severityFor(findings[0].code), 'info', 'nothing is broken — an offer, not a defect');
+  assert.match(findings[0].fix, /--ensure-policy/, 'the remedy has to be runnable');
+  assert.doesNotMatch(findings[0].fix, /MISTAKES\.md['"]?\s*$/, 'and it names no protected path');
+});
+
+test('where git cannot answer, absence says NOTHING rather than guessing', () => {
+  // MUTANT: treat an empty `git log` as "never existed". `run` returns '' both
+  // when git says nothing and when there is no git at all, and those need
+  // opposite conclusions — guessing here nags precisely the operator who
+  // already opted out.
+  const bare = mkdtempSync(join(tmpdir(), 'tyran-nogit-'));
+  assert.deepEqual(mistakesFindings(bare, gitRunnerFor(bare)).findings, []);
+  assert.match(mistakesFindings(bare, gitRunnerFor(bare)).checked, /no git here/);
+  // and with no runner at all — the pre-existing signature — it is silent too
+  assert.deepEqual(mistakesFindings(bare).findings, []);
 });

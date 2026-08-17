@@ -60,6 +60,76 @@ count beside it — the agents are still counted and still in the strip, but an
 open spawn and live work are not the same fact and the tile was asserting the
 second from the first.
 
+### The two findings doctor could only ever report
+
+`state-legacy-initiatives-dir` shipped with a remedy that read "relocate the
+contents by hand, one initiative directory at a time". That is advice, not a
+remedy, and the installs carrying the finding are by definition the ones
+nobody has touched since 0.1.8. `scripts/migrate.mjs` does the move.
+
+It is explicit and never automatic, because it MOVES an append-only history
+rather than seeding a file that does not exist yet — the same reason it is not
+a step inside setup. It previews by default and does nothing until asked twice.
+It never overwrites: a name that already exists under `state/` is a conflict,
+reported and skipped and left untouched on **both** sides, because merging two
+directories that share a name is a decision only the operator can make and
+making it silently would destroy the evidence needed to make it correctly. It
+never deletes anything it did not itself empty. It is idempotent, and it exits
+1 while any conflict stands, so an automated caller can tell "done" from "done
+except for the part that mattered".
+
+**`mistakes-file-missing`** (`info`) splits an absence that used to be one
+thing. Deleting `MISTAKES.md` is the documented opt-out and still produces no
+finding at all — a tool that nags about a file you deliberately removed is a
+tool you switch off, and that would cost the gates sitting next to it. But an
+install created before the ledger existed never declined anything; nobody
+offered. Git is the only witness that can tell those apart, so the finding
+fires only where git can answer AND has never seen the file. Where there is no
+repository, or no git, it says nothing rather than guessing — a guess there
+nags precisely the operator who already opted out.
+
+Neither is an alarm, but for different reasons.
+`state-legacy-initiatives-dir` stays a `warning` — a legacy layout genuinely
+hides initiative files from every mechanical consumer — and what changed is
+that it finally has a remedy rather than a paragraph of advice.
+`mistakes-file-missing` is `info` because nothing is broken at all: it is an
+offer, and the only absence it will ever break silence about is the one
+nobody chose.
+
+### Accept-then-ignore, ended without nagging
+
+`append` accepts any key inside `data` and always will: *"data may always
+carry extra keys"* is a promise the envelope makes, the evidence gate relies
+on it for four of its own, and turning it into a rule would fail every journal
+ever written the moment they were re-validated. So this is a report, never a
+refusal — and it is deliberately not the whole report.
+
+Measured on one real install: **130 distinct (event, key) pairs across 39
+initiatives**, and the long tail of that is deliberate annotation —
+`init.created.hardware`, `retro.entry.proposed_as_diffs`, `spawn.stories`.
+Naming all of it as findings would report the extension mechanism working as
+designed, on every healthy repo, and doctor's own severity notes already argue
+where that ends: a check that is red during normal operation is a check people
+learn to skip — and this one sits next to the gates.
+
+The defect hiding in that tail is narrower and worth a warning each.
+**`journal-key-near-miss`** reports a key one edit from the key consumers
+actually read: `next_step` for `next_steps` is accepted, never read, and never
+reported, so the resume surface is empty while the agent that wrote it
+believes it recorded something. Distance one and nothing looser — at two,
+`note` matches `next` and the check starts inventing typos in correct
+journals. Keys of three characters or fewer are exempt for the same reason.
+
+**`journal-key-unread`** (`info`) counts and names the rest, so nothing is
+dropped (ADR-19 correction 1) and "recorded" stays distinguishable from
+"recorded AND read" — without turning a documented contract into 130 rows of
+alarm.
+
+`DATA_KNOWN` in `journal.mjs` is the map of what each event type's consumers
+read, and it sits next to `DATA_REQUIRED` because both answer "what is in
+`data`". It is descriptive: an incomplete entry can only under-report, never
+invent a finding.
+
 ## 0.1.30 — 2026-08-17
 
 The first release built on an outside contribution. It fixes a spend ledger

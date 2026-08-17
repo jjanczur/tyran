@@ -46,6 +46,7 @@ import {
   tail,
   hoursBetween,
   spawnStaleness,
+  unreadDataKeys,
   DEFAULT_STALE_HOURS,
 } from './journal.mjs';
 import {
@@ -236,6 +237,16 @@ export const SEVERITY_BY_CODE = Object.freeze(
     // red during normal operation is a check people learn to skip.
     'mistakes-unreadable': 'warning',
     'mistakes-repeat-unpromoted': 'info',
+    // `info`, and it fires only where git proves the file NEVER existed —
+    // a deletion is the documented opt-out and stays silent. See
+    // `absentMistakes` for why the two need telling apart at all.
+    'mistakes-file-missing': 'info',
+    // Data keys nothing reads. The near miss is a WARNING because it is silent
+    // data loss and a healthy journal has none; the plain count is `info`
+    // because extra keys are what the envelope promises, and a warning per
+    // improvised key would be red on every healthy repo.
+    'journal-key-near-miss': 'warning',
+    'journal-key-unread': 'info',
     'claude-md-fence-missing': 'info',
     // overnight mode
     'limit-pause-active': 'info',
@@ -531,6 +542,7 @@ function checkInitiative(stateDir, name, { now, staleHours }) {
     }
   };
   guard('journal integrity', () => journalIntegrity(journalPath, at, read));
+  guard('data keys nothing reads', () => unreadKeyFindings(at, events));
   guard('one initiative per file', () => initiativeScope(journalPath, at, name, events));
   guard('open spawns', () => spawnFindings(journalPath, at, name, events, reference, staleHours));
   guard('operator asks', () => askFindings(journalPath, at, read, reference));
@@ -710,6 +722,61 @@ function closeSpawnHint(journalPath, init, agent) {
   return String(agent).startsWith('-')
     ? `node scripts/journal.mjs close-spawn ${sq(journalPath)} --reason "<why>" ${sq(slug)} -- ${sq(agent)}`
     : `node scripts/journal.mjs close-spawn ${sq(journalPath)} ${sq(slug)} ${sq(agent)} --reason "<why>"`;
+}
+
+/** How many unread keys are named before the rest are counted instead. */
+const MAX_NAMED_KEYS = 12;
+
+/**
+ * Data keys nothing reads — the end of accept-then-ignore, minus the nagging.
+ *
+ * `append` accepts any key by design, and it must: `data may always carry
+ * extra keys` is the envelope's promise, the evidence gate writes four of its
+ * own, and turning it into a rule would fail every journal ever written. So
+ * this is a REPORT, never a refusal, and it splits into two sentences because
+ * the two situations are not the same failure.
+ *
+ * A NEAR MISS is the defect: `next_step` for `next_steps` is accepted,
+ * ignored, and leaves the resume surface empty while the agent that wrote it
+ * believes it recorded something. That is worth a warning each, because it is
+ * silent data loss and a healthy journal has none.
+ *
+ * Everything else is the contract working. Measured on one real install: 130
+ * distinct (event, key) pairs across 39 initiatives, nearly all of it
+ * deliberate annotation. Those are COUNTED — never dropped, ADR-19 correction
+ * 1 — at `info`, in one line, because a warning per improvised key would go
+ * red on every healthy repo and a check that is red during normal operation is
+ * a check people learn to skip.
+ */
+function unreadKeyFindings(at, events) {
+  const { unread, nearMisses } = unreadDataKeys(events);
+  const findings = nearMisses.map((m) =>
+    finding(
+      'journal-key-near-miss',
+      at,
+      `${m.count} ${show(m.ev)} event(s) carry \`${show(m.key)}\`, one edit from \`${show(m.meant)}\`, which is ` +
+        'the key consumers actually read. A misspelled key is accepted, never read, and never reported — ' +
+        'the writer believes it recorded something and nothing did',
+      `node scripts/journal.mjs query ${sq(at)} --ev ${sq(m.ev)}   # then correct the writer; the journal is append-only, so past events keep the typo`,
+    ),
+  );
+  // Named minus the near-misses: those already have a finding of their own,
+  // and listing them twice would read as twice as many problems.
+  const rest = [...unread.keys()].filter((id) => !nearMisses.some((m) => `${m.ev}.${m.key}` === id)).sort();
+  if (rest.length > 0) {
+    const shown = rest.slice(0, MAX_NAMED_KEYS).map((id) => `${id} x${unread.get(id)}`).join(', ');
+    findings.push(
+      finding(
+        'journal-key-unread',
+        at,
+        `${rest.length} data key(s) that no consumer reads: ${show(shown)}` +
+          (rest.length > MAX_NAMED_KEYS ? ` (+${rest.length - MAX_NAMED_KEYS} more)` : '') +
+          '. Extra keys are legal and this is not a defect — it is what the envelope promises. Stated so ' +
+          'that "recorded" and "recorded AND read" stay distinguishable',
+      ),
+    );
+  }
+  return findings;
 }
 
 /** How long a self-reported `blocked` may stand before it is a finding. */
@@ -1302,9 +1369,56 @@ export function trackedLeaseFiles(run, tyranDirName = '.tyran') {
  * owned by `mistakes.mjs`, the same discipline doctor already follows for
  * `validateKnowledge` and `pairSpawns` (ADR-18).
  */
-export function mistakesFindings(repoRoot) {
+
+/**
+ * Absence, split into the two situations that look identical on disk.
+ *
+ * Deleting the file is the documented opt-out and it stays silent — a tool
+ * that nags about a file you deliberately removed is a tool you disable, and
+ * that argument has not changed. But an install created before this ledger
+ * existed never made that choice: there is nothing to opt out of, nobody was
+ * ever offered the file, and silence there is not respect for a decision, it
+ * is a feature the operator has never heard of.
+ *
+ * Git is the only witness that can tell the two apart. A file with history is
+ * one somebody had and removed; a file with no history in a repo git can read
+ * never existed. When git cannot answer at all — no repository, no git on the
+ * PATH — this says NOTHING, because a guess here would nag exactly the
+ * operator who already opted out.
+ *
+ * `info`, never a warning: nothing is broken, and the check exists to make an
+ * offer rather than to report a defect.
+ */
+function absentMistakes(repoRoot, path, run) {
+  const checked = `${MISTAKES_FILE}: absent`;
+  if (run === null) return { findings: [], checked };
+  // The same probe `untrackedTyranDir` uses, for the same reason: `run`
+  // returns '' for "git said nothing" and for "git is not here", and those
+  // need opposite conclusions.
+  if (run(['rev-parse', '--is-inside-work-tree']).trim() !== 'true') {
+    return { findings: [], checked: `${checked} (no git here to say whether it ever existed)` };
+  }
+  const history = run(['log', '--max-count=1', '--format=%H', '--', MISTAKES_FILE]).trim();
+  if (history !== '') {
+    return { findings: [], checked: `${checked} — deleted deliberately, which IS the opt-out` };
+  }
+  return {
+    findings: [
+      finding(
+        'mistakes-file-missing',
+        show(path),
+        `no ${MISTAKES_FILE}, and git has never seen one — this repository predates the incident ledger ` +
+          'rather than having opted out of it. Nothing is broken; the ledger is what turns a mistake that ' +
+          'happened three times into a rule that stops the fourth',
+        `node scripts/scan-repo.mjs --dir ${sq(repoRoot)} --ensure-policy   # seeds it from the shipped template; deleting it again is the opt-out, and this will not put it back on its own`,
+      ),
+    ],
+    checked: `${checked} — never existed`,
+  };
+}
+export function mistakesFindings(repoRoot, run = null) {
   const path = join(repoRoot, MISTAKES_FILE);
-  if (!existsSync(path)) return { findings: [], checked: `${MISTAKES_FILE}: absent` };
+  if (!existsSync(path)) return absentMistakes(repoRoot, path, run);
 
   let parsed;
   try {
@@ -1669,13 +1783,18 @@ export function runStateChecks({ dir = '.tyran', now = null, staleHours = DEFAUL
         'legacy layout — initiative files (PLAN.md, NOTES.md, RETRO.md, locks/) live under ' +
           'state/<initiative>/ since 0.1.9. Mechanical consumers read only state/, so anything ' +
           'kept here is invisible to the projections, the retrospective and the session summary',
-        `ls -la ${sq(legacyDir)}   # relocate the contents by hand, one initiative directory at a time, into ${sq(join(dir, 'state'))} — see https://jjanczur.github.io/tyran/journal/`,
+        // Was "relocate the contents by hand, one initiative directory at a
+        // time" — which is advice, not a remedy, on the one class of install
+        // that by definition nobody has touched since 0.1.8. The script says
+        // what it WOULD move until asked twice, never overwrites, and never
+        // deletes anything it did not empty.
+        `node scripts/migrate.mjs --dir ${sq(dir)}   # what it would move; add --apply to move it`,
       ),
     );
   }
   checked.push(`initiatives/ (legacy): ${isDirectory(legacyDir) ? 'PRESENT' : 'absent'}`);
 
-  const mistakes = mistakesFindings(repoRoot);
+  const mistakes = mistakesFindings(repoRoot, gitRun);
   findings.push(...mistakes.findings);
   checked.push(mistakes.checked);
 

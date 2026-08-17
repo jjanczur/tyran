@@ -129,7 +129,14 @@ export const DATA_KNOWN = Object.freeze({
   // that has ever answered a question or run a retrospective report its own
   // normal operation back at itself.
   decision: Object.freeze(['id', 'text', 'ask', 'ticket', 'signature', 'occurrences', 'path']),
-  finding: Object.freeze(['area', 'claim', 'proof', 'id', 'ticket', 'confidence']),
+  // `command`/`exit_code` are the finding's proof as a POINTER rather than a
+  // copy: the command that produced the claim, and what it exited with. The
+  // prompts asked for this before the schema had anywhere to put it —
+  // `agents/implementer.md` tells an implementer to journal each dead
+  // hypothesis "with the command output that killed it", and the verifier's
+  // whole report is `command · exit code · counts`. Without these keys that
+  // lands inside `proof` as prose, where nothing can query it.
+  finding: Object.freeze(['area', 'claim', 'proof', 'command', 'exit_code', 'id', 'ticket', 'confidence']),
   // The expiry spellings doctor reads, plus the human description agents
   // attach. Measured across every journal on a real machine, agents wrote
   // `expiry` 33 times, `purpose` 28, `story` 21, `text` 21 — none of them
@@ -229,6 +236,15 @@ export const CAPPED_DATA_KEYS = Object.freeze({
   detail: 2000,
   claim: 2000,
   proof: 2000,
+  // A finding's `command` is capped an order of magnitude tighter than the
+  // prose keys, and the number is measured rather than chosen: across
+  // `skills/`, `docs/`, `agents/`, CONTRIBUTING.md and CLAUDE.md this repo
+  // documents 86 shell commands — median 74 codepoints, p90 88, longest 123.
+  // 500 is four times the longest real command, so no genuine pipeline is
+  // refused; and it is far too small to hold pasted OUTPUT, which is the
+  // thing this key exists to keep out. A command is a pointer to evidence.
+  // Paste the output into the report, not into the journal.
+  command: 500,
   // The ask fields. They reach BOARD.md, board.html and the answer sheet, so
   // an uncapped one is a document-sized cell in three artefacts at once.
   question: 2000,

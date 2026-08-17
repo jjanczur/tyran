@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 112 unit tests
+`scripts/doctor.mjs --state` · 114 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -48,6 +48,7 @@ possible to change one and keep the suite green.
 | `journal-warning` | warning | a `validateJournal` warning doctor does not have a more specific code for |
 | `journal-key-near-miss` | warning | a `data` key one edit from the key consumers actually read (`next_step` for `next_steps`). Accepted at append, never read, never reported — the writer believes it recorded something and nothing did. A healthy journal has none, which is why this is a warning |
 | `journal-key-unread` | info | `data` keys no consumer reads, counted and named. NOT a defect: `data` may always carry extra keys, and the tail of this is deliberate annotation. Stated so that "recorded" and "recorded AND read" stay distinguishable |
+| `finding-no-command` | info | `finding` events whose proof is prose alone — no `command` to re-run. A finding produced by reading code legitimately has none, which is why this is stated rather than refused. Info and not warning because the keys are newer than every finding already written, and a check that goes red on upgrade day is one people learn to skip |
 | `journal-init-mismatch` | error | events carry an `init` that is not the directory name |
 | `journal-cross-init-pairing` | error | a `report` from one initiative closed a `spawn` from another |
 | `journal-mixed-initiatives` | warning | more than one `init` in one file (the contract is one initiative, one file) |

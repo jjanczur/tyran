@@ -38,7 +38,9 @@ commits and anything written to disk are in English.**
      thing you are about to write; if it exists, report it as a corrected
      premise instead of duplicating it. Durable discoveries worth another
      agent's time go into the journal as `finding` events (`area` + `claim`
-     are required, plus its `proof`) — not only into prose.
+     are required, plus its `proof`) — not only into prose. When you found it
+     by RUNNING something, add `command` and `exit_code`: a command the next
+     agent can re-run outlives a sentence about what you saw.
    - **Verify the handoff's premises in the code.** A stale path, a wrong
      assignment, a function that no longer exists — correct it and report the
      correction EXPLICITLY instead of executing blindly. Premises about DATA
@@ -59,7 +61,8 @@ commits and anything written to disk are in English.**
    - **Two refuted hypotheses is the timebox.** When two named root-cause
      hypotheses have both been disproven and you do not have a third, stop:
      signal `blocked`, write what you RULED OUT into the journal as a
-     `finding` — each dead hypothesis with the command output that killed it —
+     `finding` — each dead hypothesis with the `command` that killed it and its
+     `exit_code`, the output itself in your report —
      and report back. The ruled-out list IS the deliverable: the conductor
      re-routes the story with more reasoning or a stronger tier, and that
      agent starts where you stopped instead of at the wall. Handing back

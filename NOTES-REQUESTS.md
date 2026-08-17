@@ -483,11 +483,31 @@ Recorded because the list has only ever lived in a conversation.
 2. **Knowledge consolidation.** `scripts/knowledge.mjs` has `auditEntries`;
    nothing emits a consolidated file. The retro step is the producer that does
    not exist. **M.**
-3. **Findings carrying the output of the command that produced them.** A
-   `finding` has `claim` + `proof`; `proof` is prose. Measured: 34 findings in
-   388 journals, median proof length short. The ask is for the raw command
-   output, which is a payload-size question the byte-compared projection makes
-   non-trivial. **S–M.**
+3. ~~**Findings carrying the output of the command that produced them.**~~
+   SHIPPED 0.1.41, by recording the COMMAND rather than its output. Three
+   reasons the original framing was the expensive one: a stored output is a
+   snapshot that rots and can never be re-checked, while a command can be
+   re-run by anyone who doubts the claim; what the ask actually wanted was
+   proof that a command ran at all, which is the command and its exit code,
+   not the bytes; and the payload question turned out not to exist — the
+   cross board already carries findings as a COUNT (`board.mjs`), pinned by
+   *"findings are POINTED AT, never copied into the payload"*, and the
+   per-initiative `board.json` carries none. Neither byte-compared artefact
+   changed; only `STATE.md` grew two columns. `command` is capped at 500
+   codepoints against a measured 86 documented commands (median 74, longest
+   123) — wide enough for any real pipeline, too narrow to smuggle output
+   into a committed file. Findings with no command are STATED by doctor
+   (`finding-no-command`, info) and never refused: reading code is a
+   legitimate way to find something.
+   - **Still unbuilt: verifying that the command actually ran.** The recorded
+     command is the agent's word, so this inherits the evidence gate's own
+     limit — it blocks silence, not forgery. Ground truth exists and is
+     platform-written: `SubagentStop` carries `agent_transcript_path` and
+     `PreToolUse` carries `transcript_path` (`HOOK-CONTRACT-MEASURED.md` §9,
+     §17), and `cost.mjs` already discovers transcript directories. A gate
+     could refuse a finding naming a command absent from the transcript.
+     Deferred deliberately: it needs a new gate, and the recording half is
+     worth having on its own first. **M.**
 4. ~~**STEP-0 live cloud probe** and **the credential-gate template asking for
    the SSM parameter NAME**.~~ SHIPPED 0.1.36. Both landed in
    `skills/run/SKILL.md`: cloud access is exercised rather than inferred, on

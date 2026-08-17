@@ -121,7 +121,7 @@ catch.
 | Checkpoint | the last `checkpoint` event (+ `plan.accepted`, and the last event of any type) |
 | Agents | `spawn`, closed by the next `report` for the same agent name — or by a `checkpoint` whose `phase` is `closed`; the Last signal column is the agent's latest `progress` event, shown on running rows only |
 | Open blockages | `progress` with `state: blocked` — cleared by the same agent's next movement signal and by `report`/`review`/`merge` |
-| Findings | `finding` events, in journal order |
+| Findings | `finding` events, in journal order — with the `command` and `exit_code` behind each claim, where one was recorded |
 | Ledger | `ticket.created`, `ticket.status` (a lane override that never moves the percent, and never invents a ticket — one naming an id no other event created is ignored, loudly), `spawn`, `report`, `review`, `merge` |
 | Gates | `gate` — the latest event per `kind`, plus the last REFUSAL that kind ever recorded |
 | Leases | `lease.acquired` / `lease.released` |

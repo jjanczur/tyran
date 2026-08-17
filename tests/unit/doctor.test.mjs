@@ -908,6 +908,55 @@ test('the expiry spelling agents actually use is the one doctor reads', () => {
   }
 });
 
+test('a finding whose proof is prose alone is STATED, and one with a command is not', () => {
+  // The point of the pair is the second half. A check that fires on every
+  // finding is a check that says nothing: it has to go quiet the moment the
+  // finding carries what it asked for, or the info line is just noise with a
+  // code attached.
+  //
+  // MUTANT 1: report every finding — the ratio stops distinguishing "someone
+  // ran something" from "someone wrote a sentence", which is the whole job.
+  // MUTANT 2: raise it to `warning`. Every install predates these keys, so
+  // upgrade day turns red on work that was correct when it was done.
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'finding', { id: 'F-1', area: 'a', claim: 'prose only', proof: 'I looked' }),
+    ev('2026-07-26T09:01:00.000Z', 'finding', {
+      id: 'F-2', area: 'a', claim: 'measured', proof: '1 failing',
+      command: 'node --test tests/unit/journal.test.mjs', exit_code: 1,
+    }),
+    ev('2026-07-26T09:02:00.000Z', 'checkpoint', { phase: 'x', next_steps: [] }),
+  ]);
+  regenerate(journal);
+  const result = runStateChecks({ dir });
+  const found = byCode(result, 'finding-no-command');
+  assert.equal(found.length, 1, 'one finding, not one per event');
+  assert.equal(found[0].severity, 'info', 'a check that goes red on upgrade day gets skipped');
+  assert.match(found[0].message, /1 of 2 finding/, found[0].message);
+  assert.match(found[0].message, /F-1/, 'the bare finding is named');
+  assert.ok(!found[0].message.includes('F-2'), 'the finding that carried a command must not be listed');
+  // The new keys are READ, not merely tolerated — without DATA_KNOWN they
+  // would come back as improvisation from the very schema that asked for them.
+  assert.equal(byCode(result, 'journal-key-unread').length, 0, 'command/exit_code are known keys');
+  assert.equal(byCode(result, 'journal-key-near-miss').length, 0, 'neither reads as a typo');
+});
+
+test('a journal whose findings all carry a command raises nothing at all', () => {
+  const root = repo();
+  const dir = scaffold(root);
+  const journal = journalPathFor(dir);
+  writeJournal(journal, [
+    ev('2026-07-26T09:00:00.000Z', 'finding', {
+      id: 'F-1', area: 'a', claim: 'c', command: 'node --test x', exit_code: 0,
+    }),
+    ev('2026-07-26T09:02:00.000Z', 'checkpoint', { phase: 'x', next_steps: [] }),
+  ]);
+  regenerate(journal);
+  assert.deepEqual(byCode(runStateChecks({ dir }), 'finding-no-command'), []);
+});
+
 test('a release by a non-holder is raised from journal.tail(), leaving the lease open', () => {
   const root = repo();
   const dir = scaffold(root);
@@ -1688,6 +1737,7 @@ const EXPECTED_SEVERITY = {
   'journal-invalid': 'error',
   'journal-truncated': 'warning',
   'journal-warning': 'warning',
+  'finding-no-command': 'info',
   'journal-key-near-miss': 'warning',
   'journal-key-unread': 'info',
   'journal-lock-present': 'warning',

@@ -63,7 +63,9 @@ sentence is a claim about evidence.
 2. **Run your OWN verification.** Do not believe the author's report — an
    author's report with no raw command output you reject on sight, without
    reading further. Run the tests yourself; for UI, drive the browser yourself
-   through `browser-check`. Paste what you got, with counts.
+   through `browser-check`. Paste what you got, with counts. A `finding` you
+   journal carries the `command` and `exit_code` behind it, so the next reader
+   re-runs your evidence instead of trusting your sentence about it.
    - **Signal ONLY a blockage that genuinely stops the review** — a `progress`
      event with `state: "blocked"` (then `"unblocked"`) to the main checkout's
      journal, path from the handoff. Nothing else: your lease IS your

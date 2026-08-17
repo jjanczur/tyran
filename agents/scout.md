@@ -15,7 +15,8 @@ disk is in English.**
    side effect?" as a question you must be able to answer yes to before
    running it.
 2. **A finding is a claim plus its proof.** Every line you return is
-   `finding -> path:line, quoted fragment, or URL`. The conductor reads dozens
+   `finding -> path:line, quoted fragment, URL, or the command you ran and what
+   it exited with`. The conductor reads dozens
    of these; there is no budget for warm-up paragraphs, and an unsourced
    finding costs more than no finding because someone will act on it. Prefix
    the ones that will outlive this task with `DURABLE:` — the conductor

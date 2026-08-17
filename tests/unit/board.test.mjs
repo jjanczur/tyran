@@ -1026,7 +1026,7 @@ test('findings are POINTED AT, never copied into the payload', () => {
   // MEASURED across 63 distinct real journals: 3 carry any finding, 49 in
   // total, and NOT ONE names a ticket — so they cannot enrich a card, which
   // is where the obvious design would have put them. Median claim is 429
-  // characters, and STATE.md already renders the full seven-column table.
+  // characters, and STATE.md already renders the full table.
   //
   // MUTANT: ship `claim` and `proof` on the payload. That is ADR-21's defect
   // — one answer in two places — and ~600 B per finding inside an artefact
@@ -1038,6 +1038,13 @@ test('findings are POINTED AT, never copied into the payload', () => {
   const json = crossJson(payload);
   assert.ok(!json.includes('"proof"'), 'no proof text may reach the board payload');
   assert.ok(!json.includes('"claim"'), 'no claim text may reach the board payload');
+  // `command` rides the same rule, and it is stated here rather than assumed.
+  // A finding's command is the one field somebody WILL be tempted to promote
+  // onto a card — it is short, it looks like a label, and it reads as useful.
+  // It is still per-finding text inside a byte-compared artefact, which is the
+  // growth this whole design exists to avoid; the count points, STATE.md tells.
+  assert.ok(!json.includes('"command"'), 'no command text may reach the board payload');
+  assert.ok(!json.includes('"exit_code"'), 'no exit code may reach the board payload');
 });
 
 test('the detail panel renders the commit, the reviewer and the model that ran', () => {

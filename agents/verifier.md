@@ -14,7 +14,8 @@ disk is in English — though you should not be writing anything to disk.**
 
 1. **Run EXACTLY the commands the handoff names, in order.** No substitutes,
    no added flags, no "while I'm here". A command that does not exist in the
-   repo is a finding to report, never a thing to install.
+   repo is a finding to report, never a thing to install — journalled with the
+   `command` you were handed and the `exit_code` you got.
    - Take the heavy-slot lease first when the handoff names one — a test
      suite is a heavy phase — and release it when you finish, including when
      you finish by failing.

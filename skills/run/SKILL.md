@@ -256,8 +256,10 @@ open one.
      the next report, review or merge clears it.
    - **Scout `DURABLE:` findings, you journal** as `finding` events — the
      required keys are `area` + `claim` (the area is the path or subsystem the
-     scout's proof points at), plus that `proof` — scouts write nothing
-     themselves. Implementers and reviewers append their own. An operator
+     scout's proof points at), plus that `proof` — and, when the scout proved
+     it by running something, the `command` and its `exit_code`. Scouts write
+     nothing themselves; implementers, reviewers and verifiers append their
+     own. An operator
      CORRECTION — a premise you had wrong, a step they had to undo — is a
      `finding` too, with `area: process`: it is the densest mistake signal
      there is, and the retrospective is where it becomes a `MISTAKES.md`

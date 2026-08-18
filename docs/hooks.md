@@ -237,6 +237,29 @@ stack, and anything that could move the shell in a way that model cannot
 follow — `eval`, `source`, `. FILE`, `cd -`, a path needing expansion — is a
 refusal rather than an assumption.
 
+### The same scan in CI
+
+Tyran writes no workflow files, so nothing it installs can ever ask you for a
+license. If you want the same scan on the server, install the same binary. The
+license prompt people hit comes from `gitleaks/gitleaks-action`, a separate
+wrapper that demands a paid `GITLEAKS_LICENSE` from every organization-owned
+repository; the scanner underneath it is MIT and demands nothing.
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0        # `gitleaks git` walks history — a shallow clone scans one commit
+- run: |
+    npx --yes @jjanczur/tyran ensure-gitleaks
+    echo "$HOME/.tyran/bin" >> "$GITHUB_PATH"
+- run: gitleaks git --redact --no-banner .
+```
+
+That is the version and the digest pinned above, so the server and the hook
+scan with one scanner rather than two that drift apart. `--redact` matters on
+a public runner: a real finding otherwise prints the secret into a log anyone
+can read.
+
 ### What is scanned
 
 | the command | what is scanned |

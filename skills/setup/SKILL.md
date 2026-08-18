@@ -248,6 +248,26 @@ agent that runs `git add -A` on a story branch sweeps the untracked `.tyran/`
 into that branch, and a four-way parallel run ends with four conflicting
 copies of the config. Stage explicit paths until this commit exists.
 
+## 6b. Say that `boundaries:` exists, once, and do not sell it
+
+The scan writes the block at its strict setting. Tell the operator, in one or
+two sentences, that `.tyran/config.yaml` has a `boundaries:` block and that
+`preset: open` relaxes all five at once — files outside the repo, credential
+files, their own path rules, the deployment class on `git push`, and the
+permission prompt. The Settings tab edits it, and every move toward the loose
+value asks for a confirmation.
+
+Say the floor in the same breath, because it is what makes the offer safe to
+make: secret scanning at commit and push, the enforcement hooks,
+`.claude/settings.json` and `.tyran/STOP` are unreachable from it at any
+setting.
+
+**Do not recommend a value, and do not ask which they want.** Strict is
+already written and already correct; this is a pointer for the operator who
+comes back later having hit a refusal they did not want, not a decision to
+extract during setup. An agent that talks somebody into opening a boundary
+during onboarding is the failure this step exists to avoid.
+
 ## 7. Offer overnight mode — and say plainly what the operator must do
 
 Overnight mode (https://jjanczur.github.io/tyran/overnight/) pauses autonomous work near the

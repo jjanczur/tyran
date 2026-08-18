@@ -24,6 +24,7 @@ failing open applies here, and this gate inherits its runtime from it.
 | **path classes** AUTO / GATED / KERNEL | `.tyran/policies/autonomy.yaml` | whether a file-writing tool call may proceed |
 | **the deployment class** P1 / P2 / P3 | `.tyran/config.yaml`, `autonomy:` | how far a `git push` may reach |
 | **credential-shaped reads** | built in, no configuration | whether a file may be read into the model's context |
+| **how far all three are turned DOWN** | `.tyran/config.yaml`, `boundaries:` | whether each of the rows above is enforced at all |
 
 ## The matrix
 
@@ -266,13 +267,55 @@ finds by itself is a boundary it learns to prefer.
    nothing infers a raise, and that a raise is a diff in a committed file. A
    repo that wants the mechanism sets the rule back to `GATED` in
    `.tyran/policies/autonomy.yaml`, which is a KERNEL file and therefore a
-   decision only a human can make — in either direction.
+   decision only a human can make — in either direction. **`boundaries:` lives
+   in the same file and inherits the same limit**: an agent can turn this
+   gate's own refusals down. One entry rather than two, because it is one fact
+   — a class `AUTO` file decides how far the gate reaches — and the answer to
+   it is the floor in "Turning the gate down" below, which no setting in that
+   file can move.
 7. **Only the argv of `git push` is modelled**, not every publishing command.
    `gh release create` and friends are the secrets gate's business; the
    deployment class does not see them.
 8. **Multiple pushes in one command line** are each evaluated, but the
    deployment class always comes from the **session** root's config, not from
    the repository the command walked into.
+
+## Turning the gate down
+
+Everything above is what this gate does at its strict setting, which is what it
+did before `boundaries:` existed and what it still does for every repo that
+does not mention the block. [`configuration.md`](../configuration/#boundaries--giving-agents-more-room)
+is the reference; this is what changes *here*.
+
+| flag | what stops being refused |
+|---|---|
+| `outside_repo: allow` | the "outside the repository" row of the matrix, for **every** actor — the row becomes pass rather than deny |
+| `credentials: allow` | the credential-shaped read rule, on `Read`, `Grep`, and in the text of a shell command |
+| `path_classes: allow` | `verdictForClass` is not consulted: a rule-derived `GATED` or `KERNEL` passes |
+| `push: allow` | the whole deployment-class analysis is skipped, refspec and alias refusals included — with no destination left to judge, refusing a command for being unreadable to a check that is off is noise |
+| `prompts: skip` | nothing. It changes what a PASS *means*: the gate emits `permissionDecision: "allow"` instead of silence, which auto-approves the call and skips the platform's own prompt |
+
+**The floor, checked before any flag.** `BOUNDARY_FLOOR_GLOBS` is
+`SHELL_PROTECTED_GLOBS` plus `.tyran/STOP` — `hooks/**`,
+`.tyran/policies/**`, `.claude/settings.json`, `.claude/settings.local.json`
+and the brake. No value of any flag reaches them, and `path_classes: allow`
+consults the floor before it consults the flag. This does **not** change what a
+policy file may say: the asymmetry named above stays exactly as it was, because
+this closes a new door rather than reopening an old one.
+
+**`prompts: skip` cannot approve what another gate refuses.** Measured rather
+than arranged between siblings: `deny` from any hook beats `allow` from another
+(`hooks/HOOK-CONTRACT-MEASURED.md` §4). So the secrets gate still refuses a
+commit or push carrying a key, and this gate's own denials are returned
+untouched — the rewrite lives in one place, `handle()`, and only ever acts on a
+verdict that was already PASS. A `PolicyFailure` is not rewritten either: a
+gate that could not complete its check must not auto-approve, whatever the
+config says.
+
+**Every unreadable answer is strict.** A missing config, an unparseable one, an
+oversized one and a value outside the schema all resolve to every boundary ON.
+That is ADR-22's own argument applied to the knob that turns ADR-22 down — the
+file saying "relax" has to be readable before anything relaxes.
 
 ## The shell is not a way around this gate
 
@@ -463,15 +506,24 @@ choice, measured on this machine (12 runs each, median / slowest):
 
 | call | median | slowest |
 |---|---|---|
-| a tool naming no path (`WebFetch`) | 47 ms | 82 ms |
-| a write outside the governed namespace | 49 ms | 68 ms |
-| a write refused inside it | 50 ms | 53 ms |
-| a read that passes | 45 ms | 60 ms |
-| a `Bash` call with no push | 42 ms | 59 ms |
+| a tool naming no path (`WebFetch`) | 39 ms | 42 ms |
+| a write outside the governed namespace | 39 ms | 44 ms |
+| a write refused inside it | 39 ms | 59 ms |
+| a read that passes | 42 ms | 113 ms |
+| a `Bash` call with no push | 45 ms | 64 ms |
 
 Almost all of it is Node process startup, and none of it approaches the 4 s
 internal deadline or the 8 s registered timeout. A `git push` costs more,
 because it runs one or two `git symbolic-ref` calls, each with its own budget.
+
+**Re-measured for `boundaries:` in 0.1.43**, because that block made the gate
+read `.tyran/config.yaml` on paths where it previously read nothing — every
+tool call now resolves it, and a passing call resolves it twice, once in
+`decide` and once in `handle`. The numbers above are the new ones and they did
+not move: a second small read disappears into process startup. A per-process
+cache was tried and removed — it saved nothing measurable and left module state
+that outlived the call, which is the wrong trade for the file that decides
+whether a refusal happens.
 
 ## Failure is refusal
 

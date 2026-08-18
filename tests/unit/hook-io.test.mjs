@@ -24,6 +24,7 @@ import {
   readStdin,
   refusalPayload,
   askPayload,
+  allowPayload,
   resolveEvent,
   runGate,
   runProbe,
@@ -277,7 +278,10 @@ test('failure mode: oversized stdin is refused rather than buffered', async () =
 });
 
 test('failure mode: the handler returns something unrecognised -> refusal', async () => {
-  for (const verdict of [undefined, null, 'allow', 42, { decision: 'allow' }, {}]) {
+  // `{ decision: 'allow' }` is deliberately NOT in this list any more: since
+  // 0.1.43 it is a recognised, explicit auto-approval. The bare string 'allow'
+  // stays, because arriving at approval by accident is the thing being pinned.
+  for (const verdict of [undefined, null, 'allow', 42, { decision: 'allowed' }, {}]) {
     const io = fakeIo(inputFor('PreToolUse'));
     await runGate({ event: 'PreToolUse', deadlineMs: 500, io, handler: () => verdict });
     const payload = soleOutput(io);
@@ -390,17 +394,53 @@ test('no objection is silence, never permissionDecision:"allow"', async () => {
   assert.deepEqual(soleOutput(io), {});
 });
 
-test('nothing this runtime can emit ever auto-approves a tool call', async () => {
+test('auto-approval is reachable only by asking for it, never by arriving at it', async () => {
   // `allow` is not "the gate is satisfied", it is "skip the permission
-  // prompt". A secrets gate that emitted it would be silently approving
-  // every command it did not object to.
-  const seen = [];
-  for (const verdict of [PASS, { decision: 'pass' }, { decision: 'deny', reason: 'no' }]) {
+  // prompt". A secrets gate that emitted it would be silently approving every
+  // command it did not object to. Since 0.1.43 the runtime CAN emit it — for
+  // one gate, when an operator sets `boundaries.prompts: skip` — so the
+  // invariant is no longer "it is unreachable" but "nothing reaches it by
+  // accident". That is the version worth pinning, and it is strictly harder.
+  const quiet = [];
+  for (const verdict of [PASS, { decision: 'pass' }, { decision: 'deny', reason: 'no' }, { decision: 'ask', reason: 'you decide' }]) {
     const io = fakeIo(inputFor('PreToolUse'));
     await runGate({ event: 'PreToolUse', deadlineMs: 500, io, handler: () => verdict });
-    seen.push(io.out[0]);
+    quiet.push(io.out[0]);
   }
-  for (const raw of seen) assert.doesNotMatch(raw, /"allow"/);
+  for (const raw of quiet) assert.doesNotMatch(raw, /"allow"/);
+
+  // Every FAILURE mode still refuses. This is the list that must never shrink.
+  const failures = [
+    ['throws', () => { throw new Error('boom'); }],
+    ['returns undefined', () => undefined],
+    ['returns a bare string', () => 'allow'],
+    ['returns an unknown decision', () => ({ decision: 'allowed' })],
+    ['overruns and then allows', async () => { await new Promise((r) => setTimeout(r, 60)); return { decision: 'allow', reason: 'too late' }; }],
+  ];
+  for (const [label, handler] of failures) {
+    const io = fakeIo(inputFor('PreToolUse'));
+    await runGate({ event: 'PreToolUse', deadlineMs: 25, io, handler });
+    assert.equal(soleOutput(io).hookSpecificOutput.permissionDecision, 'deny', label);
+  }
+
+  // And the one way through: an explicit, deliberate return.
+  const io = fakeIo(inputFor('PreToolUse'));
+  await runGate({ event: 'PreToolUse', deadlineMs: 500, io, handler: () => ({ decision: 'allow', reason: 'the operator opted in' }) });
+  const payload = soleOutput(io);
+  assert.equal(payload.hookSpecificOutput.permissionDecision, 'allow');
+  assert.equal(payload.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.match(payload.hookSpecificOutput.permissionDecisionReason, /opted in/);
+});
+
+test('allow is only expressible where the platform models permissionDecision', async () => {
+  // Same rule as `ask`: an approval nobody can render would degrade to
+  // silence, and on a Stop-shaped event silence is not the same answer.
+  assert.throws(() => allowPayload('SubagentStop', 'x'), /permissionDecision/);
+  assert.throws(() => allowPayload('Stop', 'x'), /permissionDecision/);
+  assert.throws(() => allowPayload('SessionStart', 'x'));
+  assert.deepEqual(allowPayload('PreToolUse', 'because'), {
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: 'because' },
+  });
 });
 
 test('the deadline discards a LATE verdict, whichever way the handler was late', async () => {

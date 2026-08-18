@@ -38,6 +38,9 @@ import { join } from 'node:path';
 import {
   ARTIFACT_CLASSES,
   AUTONOMY_CLASSES,
+  BOUNDARY_PRESETS,
+  BOUNDARY_PROMPTS,
+  BOUNDARY_VALUES,
   LIMITS_LONG_WAIT,
   LIMITS_MODES,
   MANDATORY_KERNEL_PATHS,
@@ -95,10 +98,110 @@ export const GROUPS = Object.freeze([
         path: ['autonomy'],
         label: 'Deployment autonomy',
         help: 'How far a finished piece of work may travel without you. The gate enforces this downward — it will not stop someone who edits this file from raising it, which is why the policy below decides who may.',
+        widening: {
+          scale: 'autonomy',
+          consequence:
+            'A higher deployment class lets finished work travel further without you — P2 reaches staging, P3 merges to the default branch.',
+        },
         ...choice(AUTONOMY_CLASSES, {
           P1: 'Branch only. Agents commit and push a branch; you open and merge the PR.',
           P2: 'Through to staging. Agents may merge and deploy to a non-production environment.',
           P3: 'Merge to main. Agents may land work on the default branch by themselves.',
+        }),
+      },
+    ],
+  },
+  {
+    id: 'boundaries',
+    title: 'What agents may touch',
+    blurb:
+      'How far the policy gate turns its refusals down. Everything here starts at the strict setting, and every move toward the looser one asks you to confirm it a second time. Four things are NOT on this screen because no setting reaches them: secret scanning at commit and push, the enforcement hooks themselves, the file that registers them, and the STOP brake.',
+    settings: [
+      {
+        id: 'boundaries.preset',
+        path: ['boundaries', 'preset'],
+        label: 'Preset',
+        help: 'The one switch. "Open" turns every boundary below to its loose setting at once — the closest thing Tyran has to running Claude Code with permissions skipped. Anything you set individually below wins over the preset.',
+        widening: {
+          scale: 'preset',
+          consequence:
+            'OPEN lets agents read your credentials, work outside this repository, write paths your own policy gates, push anywhere, and act without a permission prompt. Secret scanning and the gate\'s own files are unaffected.',
+        },
+        ...choice(BOUNDARY_PRESETS, {
+          strict: 'Every boundary on. This is what Tyran has always done.',
+          open: 'Every boundary below turned down at once.',
+        }),
+      },
+      {
+        id: 'boundaries.outside_repo',
+        path: ['boundaries', 'outside_repo'],
+        label: 'Files outside this repository',
+        help: 'Today a path outside the repo root is refused for every agent. Allowing it lets them read and write anywhere on this machine — another project, your home directory, system files.',
+        widening: {
+          scale: 'boundary',
+          consequence: 'Agents will be able to write files anywhere on this machine, not only inside this repository.',
+        },
+        ...choice(BOUNDARY_VALUES, {
+          refuse: 'Agents stay inside this repository.',
+          allow: 'Agents may read and write anywhere on this machine.',
+        }),
+      },
+      {
+        id: 'boundaries.credentials',
+        path: ['boundaries', 'credentials'],
+        label: 'Credential files',
+        help: 'Today .env files, private keys, ~/.ssh, ~/.aws and their relatives are refused before they can reach the model — a transcript is storage. Allowing it also removes the false refusal where a word merely ENDING in .key or .pem is treated as a file.',
+        widening: {
+          scale: 'boundary',
+          consequence:
+            'Agents will be able to read your secrets into the conversation. What stops those bytes being COMMITTED or PUSHED is the secrets gate, which this setting does not reach.',
+        },
+        ...choice(BOUNDARY_VALUES, {
+          refuse: 'Credential-shaped files never enter the conversation.',
+          allow: 'Agents may read .env files, keys and credential stores.',
+        }),
+      },
+      {
+        id: 'boundaries.path_classes',
+        path: ['boundaries', 'path_classes'],
+        label: 'Your own path rules',
+        help: 'The AUTO / GATED / KERNEL rules in the policy below. Allowing this makes them advisory: a subagent may write a path you gated. The four paths that protect the gate itself stay refused whatever this says.',
+        widening: {
+          scale: 'boundary',
+          consequence: 'The GATED and KERNEL rules in your own policy stop being enforced for writes.',
+        },
+        ...choice(BOUNDARY_VALUES, {
+          refuse: 'The classes in your policy are enforced.',
+          allow: 'Agents may write paths your policy gates.',
+        }),
+      },
+      {
+        id: 'boundaries.push',
+        path: ['boundaries', 'push'],
+        label: 'Where work may be pushed',
+        help: 'Turns off the deployment-class check on git push entirely, including the rules that gate the pushes nothing can undo — a force push to main, a deleted remote branch, a mirror push.',
+        widening: {
+          scale: 'boundary',
+          consequence:
+            'The deployment class stops being checked. Agents may force-push, delete remote branches and mirror-push, none of which can be undone.',
+        },
+        ...choice(BOUNDARY_VALUES, {
+          refuse: 'Pushes are checked against the deployment autonomy above.',
+          allow: 'Any push is allowed, including the irreversible ones.',
+        }),
+      },
+      {
+        id: 'boundaries.prompts',
+        path: ['boundaries', 'prompts'],
+        label: 'Permission prompts',
+        help: 'Whether Claude Code still asks you before a tool call this gate has no objection to. "Skip" auto-approves those calls, which is what people mean by skipping permissions — a refusal from any gate still wins, so this cannot approve something another gate denied.',
+        widening: {
+          scale: 'prompts',
+          consequence: 'Claude Code will stop asking before it edits files or runs commands that no gate objects to.',
+        },
+        ...choice(BOUNDARY_PROMPTS, {
+          ask: 'Claude Code prompts you as it normally would.',
+          skip: 'Calls no gate objects to are approved without asking.',
         }),
       },
     ],
@@ -246,6 +349,11 @@ const BY_ID = new Map(GROUPS.flatMap((g) => g.settings.map((s) => [s.id, s])));
 const LOOSER_FIRST = Object.freeze({
   class: Object.freeze(['AUTO', 'GATED', 'KERNEL']),
   autonomy: Object.freeze(['P3', 'P2', 'P1']),
+  // The `boundaries:` block. Each of these turns a REFUSAL off, so the
+  // direction that needs the second act is the one that removes a check.
+  boundary: Object.freeze([...BOUNDARY_VALUES].reverse()),
+  prompts: Object.freeze([...BOUNDARY_PROMPTS].reverse()),
+  preset: Object.freeze([...BOUNDARY_PRESETS].reverse()),
 });
 
 function widens(scale, before, after) {
@@ -462,9 +570,12 @@ export function applySetting(tyranDir, id, value, confirm = null) {
     );
   }
   const next = coerce(setting, value);
-  if (id === 'autonomy') {
-    requireConfirm('autonomy', before, next, confirm,
-      'A higher deployment class lets finished work travel further without you — P2 reaches staging, P3 merges to the default branch.');
+  // Driven by the catalogue rather than by a list of ids here. The `autonomy`
+  // check used to be an `if (id === ...)`, and every knob added beside it since
+  // would have had to remember to extend that line — which is exactly how a
+  // boundary-loosening control ships with no confirmation at all.
+  if (setting.widening) {
+    requireConfirm(setting.widening.scale, before, next, confirm, setting.widening.consequence);
   }
 
   let text;

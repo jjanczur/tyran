@@ -17,6 +17,28 @@ its own boundary. Read [the policy gate](policy-gate.md) for where each of
 those stops — including the one place the autonomy class itself is not
 protected as strongly as it reads.
 
+**How do I let Claude Code touch everything, like skipping permissions?**
+
+Set one key in `.tyran/config.yaml`, or flip it on the dashboard's Settings
+tab:
+
+```yaml
+boundaries:
+  preset: open
+```
+
+That relaxes all five of Tyran's boundaries at once — files outside the repo,
+credential files, your own path rules, the deployment class on `git push`, and
+the permission prompt itself. `prompts: skip` is the piece people mean by
+"skip permissions": tool calls no gate objects to are auto-approved.
+
+Four things it does **not** reach, whatever you set: secret scanning at commit
+and push, the enforcement hooks, `.claude/settings.json`, and `.tyran/STOP`.
+A commit carrying a key is still refused, and that is mechanism rather than
+politeness — `deny` from any hook beats `allow` from another. You can also open
+one door at a time; the full table is in
+[configuration](configuration.md#boundaries--giving-agents-more-room).
+
 **How do I stop it mid-run?**
 `echo "reason" > .tyran/STOP`. The conductor checks before every spawn and
 every merge, halts, and reports where it got to. Delete the file to resume.

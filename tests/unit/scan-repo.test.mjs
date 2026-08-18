@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,7 +33,7 @@ import {
   plainQuestion,
 } from '../../scripts/scan-repo.mjs';
 import { parse } from '../../scripts/yaml-lite.mjs';
-import { validateConfig, validatePolicy } from '../../scripts/schema.mjs';
+import { BOUNDARIES_STRICT, boundariesOf, relaxedBoundaries, validateConfig, validatePolicy } from '../../scripts/schema.mjs';
 
 function repo(files = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tyran-scan-'));
@@ -611,4 +611,36 @@ test('scanRepo carries the plain question alongside the machine one', () => {
   const scan = scanRepo(d, { run: fakeGit({}) });
   assert.ok(Array.isArray(scan.questions), 'the machine contract is untouched');
   assert.equal(scan.plain.recommended, scan.config.autonomy.value, 'the two must never disagree');
+});
+
+test('a scanned config carries the boundaries block, all of it strict', () => {
+  // Not decoration: the Settings tab patches keys that already exist and will
+  // not invent them, so an absent block is a dashboard section nobody can use
+  // — the same reason `limits:` is written out in full.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-scan-boundaries-'));
+  try {
+    const result = scanRepo(dir);
+    assert.deepEqual(result.config.boundaries, {
+      preset: 'strict', outside_repo: 'refuse', credentials: 'refuse', path_classes: 'refuse', push: 'refuse', prompts: 'ask',
+    });
+    const rendered = parse(renderConfig(result.config));
+    assert.deepEqual(validateConfig(rendered), []);
+    assert.deepEqual(boundariesOf(rendered), BOUNDARIES_STRICT);
+    assert.deepEqual(relaxedBoundaries(boundariesOf(rendered)), [], 'a fresh scan relaxes nothing');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('nothing a scanner can see infers an open boundary', () => {
+  // The one inference this feature must never make. A repo is not "the kind of
+  // repo that wants its credentials readable"; a person decides that.
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-scan-boundaries2-'));
+  try {
+    writeFileSync(join(dir, '.env'), 'SECRET=x\n');
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'vitest run' } }));
+    assert.deepEqual(boundariesOf(parse(renderConfig(scanRepo(dir).config))), BOUNDARIES_STRICT);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -191,6 +191,13 @@ It checks Node, installs the plugin, installs the secrets scanner the write
 gate needs, and prints the prompt to paste after you restart — which runs
 setup and opens the dashboard in your browser.
 
+Tyran refuses some things by default — reading a `.env`, writing outside the
+repository, pushing past your autonomy class. If you would rather it did not,
+`boundaries: {preset: open}` in `.tyran/config.yaml` relaxes all five at once,
+and the dashboard's Settings tab has the switch. Secret scanning at commit and
+push is not one of the five and cannot be turned off from there. See
+[configuration](https://jjanczur.github.io/tyran/configuration/).
+
 Or do it by hand, inside Claude Code:
 
 ```text
@@ -322,7 +329,7 @@ enforces the cap (3868 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1620 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1646 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 
@@ -334,7 +341,7 @@ Everything below also reads as a site, with search and rendered diagrams:
 | [Getting started](https://jjanczur.github.io/tyran/getting-started/) | install, first run, the command line, updating |
 | [Architecture](https://jjanczur.github.io/tyran/architecture/) | the four failures, the three layers, the hooks, the principles, the roadmap |
 | [Skills and agents](https://jjanczur.github.io/tyran/skills/) · [the roster](https://jjanczur.github.io/tyran/agents/) | what each one assumes and who invokes it; the tier and effort table, the `.tyran/STOP` brake |
-| [Configuration](https://jjanczur.github.io/tyran/configuration/) | `.tyran/config.yaml`, cost profiles, the rate card, autonomy classes |
+| [Configuration](https://jjanczur.github.io/tyran/configuration/) | `.tyran/config.yaml`, cost profiles, the rate card, autonomy classes, `boundaries:` |
 | [Self-improvement](https://jjanczur.github.io/tyran/self-improvement/) | how Tyran learns your repo, and its guardrails |
 | [Journal](https://jjanczur.github.io/tyran/journal/) · [projections](https://jjanczur.github.io/tyran/projections/) | the append-only event schema, and what is generated from it |
 | [The board](https://jjanczur.github.io/tyran/board/) · [the spend ledger](https://jjanczur.github.io/tyran/cost/) | lanes, answering a question, and what a run cost |

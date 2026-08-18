@@ -440,7 +440,7 @@ What it edits, with a sentence of prose on every knob:
 
 | | |
 |---|---|
-| `.tyran/config.yaml` | cost profile · deployment autonomy · the four model tiers · validation commands · shared zones · the whole `limits:` block |
+| `.tyran/config.yaml` | cost profile · deployment autonomy · the four model tiers · validation commands · shared zones · the whole `boundaries:` block · the whole `limits:` block |
 | `.tyran/policies/autonomy.yaml` | the `default` class, and the class of any existing rule |
 
 **One line moves.** The file is not round-tripped through a serializer —
@@ -472,7 +472,9 @@ move — `.claude/settings.json` ("anything that can edit it can switch every
 gate off"), `.tyran/STOP` ("a loop that can clear its own stop signal has
 none"). A dropdown treats those like any other choice, so:
 
-- **moving a class toward AUTO**, or **raising `autonomy`** (P1 → P2 → P3), is
+- **moving a class toward AUTO**, **raising `autonomy`** (P1 → P2 → P3), or **turning any
+  `boundaries:` flag toward its loose value** (including `preset: open` and
+  `prompts: skip`) is
   refused on the first request. The refusal quotes the rule's own `reason:`
   and names a confirmation token; the page turns that into one extra
   **Yes — loosen it** press, and the second request carries the token.

@@ -1794,6 +1794,8 @@ const EXPECTED_SEVERITY = {
   'config-missing': 'info',
   'config-invalid': 'error',
   'config-unreadable': 'error',
+  'boundaries-relaxed': 'warning',
+  'boundaries-absent': 'info',
   'knowledge-invalid': 'error',
   'knowledge-duplicate-id': 'error',
   'knowledge-unreadable': 'error',
@@ -2260,4 +2262,41 @@ test('no git, or no runner, is not a worktree finding', () => {
 test('already-prunable worktrees are counted and named', () => {
   const { findings } = worktreeFindings('/repo', fakeWorktreeGit(wt(WORKTREE_CEILING + 3, { prunable: true })));
   assert.match(findings[0].message, /already prunable/);
+});
+
+test('a relaxed boundary is reported, and a strict one is silent', () => {
+  // The point of the finding: relaxing a boundary REMOVES refusals, so it is
+  // the one setting whose effect is that nothing in a session mentions it.
+  const strict = runStateChecks({ dir: scaffold(repo()) });
+  assert.equal(byCode(strict, 'boundaries-relaxed').length, 0);
+  assert.equal(byCode(strict, 'boundaries-absent').length, 0, 'the shipped template carries the block');
+
+  const dir = scaffold(repo());
+  const config = readFileSync(join(dir, 'config.yaml'), 'utf8').replace(
+    /\nboundaries:\n(  \w+: \w+\n)+/,
+    '\nboundaries:\n  preset: open\n',
+  );
+  writeFileSync(join(dir, 'config.yaml'), config);
+  const result = runStateChecks({ dir });
+  const found = byCode(result, 'boundaries-relaxed');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+  // It names WHICH ones, and says what it does not reach.
+  for (const flag of ['outside_repo', 'credentials', 'path_classes', 'push', 'prompts']) {
+    assert.match(found[0].message, new RegExp(flag));
+  }
+  assert.match(found[0].message, /Secret scanning/);
+});
+
+test('a config written before boundaries existed is info, and says why it matters', () => {
+  const dir = scaffold(repo());
+  const config = readFileSync(join(dir, 'config.yaml'), 'utf8').replace(/\nboundaries:\n(  \w+: \w+\n)+/, '\n');
+  writeFileSync(join(dir, 'config.yaml'), config);
+  const result = runStateChecks({ dir });
+  const found = byCode(result, 'boundaries-absent');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'info');
+  // Absent means STRICT, so nothing is loose and nothing is reported as loose.
+  assert.equal(byCode(result, 'boundaries-relaxed').length, 0);
+  assert.equal(result.ok, true);
 });

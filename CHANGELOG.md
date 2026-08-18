@@ -1,5 +1,111 @@
 # Changelog
 
+## 0.1.43 — 2026-08-18
+
+### One switch that opens the gate, and four things it cannot reach
+
+Tyran refuses things a less-technical operator cannot reason about: a `.env`
+read, a path outside the repository, a `GATED` write from a subagent, a push
+past the deployment class. Every one of those refusals is defensible and every
+one of them is a wall, and until now there was no way to turn any of it down.
+The knobs that existed — `autonomy:` and `main_writable_paths:` — are narrow,
+and neither is the switch people were asking for.
+
+`boundaries:` in `.tyran/config.yaml` is that switch. Five flags and a preset:
+
+```yaml
+boundaries:
+  preset: open
+```
+
+`outside_repo` stops refusing paths outside the repo, for **every** actor
+rather than the main thread only — which is the difference between this and
+`main_writable_paths:`, and it is deliberate: a flag that says agents may work
+outside the repository is useless if it excludes the agent that does the work.
+`credentials` lets `.env` and friends be read on `Read`, `Grep` and in shell
+text. `path_classes` makes your own `GATED`/`KERNEL` rules advisory for writes.
+`push` skips the deployment-class analysis whole — refspec and alias refusals
+included, because with no destination left to judge, refusing a command for
+being unreadable to a check that is switched off is noise, not safety.
+`prompts: skip` is the one people mean by "skip permissions".
+
+**An explicit key beats the preset in both directions**, so `preset: open` with
+`credentials: refuse` is a repo that wants room to work but not its own keys
+read, and `preset: strict` with `outside_repo: allow` is one door.
+
+### `permissionDecision: "allow"` became sayable, and stayed unreachable by accident
+
+`prompts: skip` needed something the hook runtime deliberately did not have.
+The old invariant was *"there is no way to emit `allow` from this runtime, and
+a test pins that"* — sound, because `allow` does not mean "this gate is
+satisfied", it means "approve this call and skip the prompt", and a gate
+emitting it for everything it did not object to would be approving the session.
+
+The invariant is now narrower and strictly harder to hold: **`PASS` never
+becomes `allow`, and no failure mode does either.** Auto-approval requires a
+handler to return `{decision: 'allow'}` on purpose. A throw, a timeout, an
+overrun budget, a malformed input and an unrecognised verdict are all still
+refusals, and the test that used to assert unreachability now asserts that
+list — including the case that actually bites, a handler that overruns and
+*then* returns an approval, whose verdict is discarded.
+
+In the gate it is one line in one place. `handle()` rewrites a verdict only
+when it was already `PASS`; a `deny`, an `ask` and a `PolicyFailure` are
+returned untouched. A gate that could not complete its check must not
+auto-approve, whatever the config says.
+
+### The floor, which is the part that makes the rest safe to ship
+
+`.tyran/config.yaml` is class `AUTO`, so an agent can widen these itself. That
+is the trade `autonomy:` already made and it is recorded as one declared limit
+rather than two, because it is one fact. What makes it acceptable is that the
+floor is mechanical:
+
+- **Secret scanning is untouched.** `gitleaks` runs from the secrets gate, a
+  different hook that never learns the word `boundaries`, and `deny` from any
+  hook beats `allow` from another. Pinned twice: a source assertion that the
+  file never reads the block, and a real scan — a repo configured as
+  permissively as the schema allows still refuses a commit carrying a private
+  key, with coverage verified.
+- **`BOUNDARY_FLOOR_GLOBS`** is `SHELL_PROTECTED_GLOBS` plus `.tyran/STOP`, and
+  `path_classes: allow` consults the floor *before* the flag. The enforcement
+  hooks, the policy that classifies them, the hook registry, and the operator's
+  brake. A flag the loop can use to clear its own stop signal is not a flag.
+  This changes nothing about what a policy file may say — it closes a new door
+  rather than reopening an old one.
+- **Every unreadable answer is strict.** A missing config, an unparseable one,
+  an oversized one, and any value the schema rejects all resolve to every
+  boundary ON. `credentials: yes` is not `allow`. This is `limitsOf`'s doctrine
+  with the sign flipped: an out-of-range limit falls back to a default, but a
+  security flag must never *relax* on input nobody can read.
+
+### On the dashboard, with the confirmation it already knew how to ask for
+
+The Settings tab has a "What agents may touch" section with all six controls.
+Loosening any of them demands the same second, deliberate act that raising
+`autonomy` does, and the token is the new value itself rather than a boolean,
+so a caller cannot satisfy it by sending `confirm: true` alongside whatever
+value it liked. Tightening is one click, always.
+
+That took deleting something rather than adding it: `applySetting` had an
+`if (id === 'autonomy')` special case, and every knob added beside it would
+have had to remember to extend that line — which is exactly how a
+boundary-loosening control ships with no confirmation at all. The catalogue
+carries a `widening` descriptor now and the check reads it.
+
+The block is written out in full by `scan-repo.mjs` and in
+`templates/config.yaml`, at its strict values, for the same reason `limits:` is:
+`yaml-patch` refuses to invent a key, so an absent block is a section of the
+dashboard nobody can use. `doctor` reports `boundaries-absent` (info) for a
+config written before this release, and `boundaries-relaxed` (warning) whenever
+anything is loose — naming which flags. Relaxing a boundary removes refusals,
+so nothing else in a session will ever mention it again.
+
+Documented on both surfaces: `configuration` carries the reference and the
+cost, `policy-gate` gains "Turning the gate down" and extends declared limit 6,
+`hooks` restates the approval contract, `board` covers the new controls, and
+`faq` answers it in the words somebody would actually search for.
+
 ## 0.1.42 — 2026-08-18
 
 ### The board stopped throwing you off the page you were reading

@@ -116,10 +116,14 @@ await main(() =>
 
 Rules the runtime enforces for you:
 
-- **you cannot approve.** `PASS` means "no objection" and emits `{}`. There is
-  deliberately no way to emit `permissionDecision: "allow"`, which does not
-  mean "satisfied" — it **auto-approves the call and skips the permission
-  prompt**;
+- **you cannot approve by accident.** `PASS` means "no objection" and emits
+  `{}`. `permissionDecision: "allow"` does not mean "satisfied" — it
+  **auto-approves the call and skips the permission prompt** — so it is
+  reachable only from a handler that returns `{decision: 'allow'}` on purpose,
+  which one gate does only when a repo sets `boundaries.prompts: skip`
+  ([policy-gate](../policy-gate/#turning-the-gate-down)). `PASS` never becomes
+  `allow`, and no failure path does either: see the next bullet, which is the
+  half that matters;
 - **you cannot crash into an approval.** Any throw, malformed input, missing
   dependency or unrecognised return value becomes a refusal naming the error
   class;

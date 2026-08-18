@@ -33,7 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve, dirname, extname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, stringify } from './yaml-lite.mjs';
-import { validatePolicy } from './schema.mjs';
+import { BOUNDARIES_STRICT, validatePolicy } from './schema.mjs';
 import { escapeInvisible } from './invisible.mjs';
 import { handleArgs } from './cli-args.mjs';
 
@@ -356,6 +356,15 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
     tiers: { cheap: 'haiku', work: 'sonnet', deep: 'opus', top: 'fable' },
     validation,
     shared_zones: [],
+    // Every boundary ON, written out in full for the same reason `limits:` is
+    // below: the Settings tab patches keys that exist and refuses to invent
+    // them, so an absent block is a section of the dashboard nobody can use.
+    //
+    // Nothing here is inferred and nothing here is ever inferred. A scanner
+    // that could conclude "this repo looks like it wants its credentials
+    // readable" is a scanner that opens a boundary on evidence, and the
+    // evidence for opening one is a person deciding to.
+    boundaries: { preset: 'strict', ...BOUNDARIES_STRICT },
     // Written out in full, every value at its shipped default, with the
     // feature OFF. Nothing here enables anything — `mode: 'off'` is the same
     // inert state as omitting the block entirely.
@@ -547,6 +556,13 @@ export function renderConfig(config) {
     '# one does not reach `git worktree add` — agents then run there with no\n' +
     '# autonomy class at all, which is the boundary silently missing exactly\n' +
     '# where the most agents run.\n' +
+    '#\n' +
+    '# GIVING AGENTS MORE ROOM: `boundaries:` below is the one place the policy\n' +
+    '# gate can be turned down. `preset: open` relaxes all five at once — the\n' +
+    '# closest thing to running with permissions skipped. Secret scanning at\n' +
+    '# commit and push, the enforcement hooks, `.claude/settings.json` and\n' +
+    '# `.tyran/STOP` are NOT reachable from it, whatever it is set to.\n' +
+    '# See docs/configuration.md.\n' +
     '#\n' +
     '# Validate:  node scripts/schema.mjs validate config .tyran/config.yaml\n' +
     '# Resolve a role to a model:  node scripts/tiers.mjs --role reviewer\n' +

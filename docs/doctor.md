@@ -1,6 +1,6 @@
 # Doctor reference
 
-`scripts/doctor.mjs --state` · 115 unit tests
+`scripts/doctor.mjs --state` · 117 unit tests
 
 Doctor **diagnoses, it never repairs.** Every finding carries a severity, a
 location and a command you can paste.
@@ -78,6 +78,8 @@ possible to change one and keep the suite green.
 | `projection-failed` | error | rendering the projection threw |
 | `board-absent` | info | no `BOARD.md` / `board.json` yet — every install older than the board feature; regenerating the projections creates them |
 | `config-missing` | info | the repo has not been set up (yet) |
+| `boundaries-absent` | info | no `boundaries:` block, so the Settings tab cannot edit one (strict still applies) |
+| `boundaries-relaxed` | warning | a `boundaries:` flag is turned down, so the gate no longer refuses what it covers |
 | `tyran-dir-untracked` | warning | nothing under `.tyran/` is tracked by git — worktrees get no config and no policy, so agents run there with no autonomy class at all |
 | `policy-missing` | error | `.tyran/` exists with no `policies/autonomy.yaml` under it — the policy gate fails closed on this state, so every write in the repo is refused until the file is there |
 | `config-invalid` · `knowledge-invalid` · `policy-invalid` | error | a schema validator rejected the file, with its exact field path |

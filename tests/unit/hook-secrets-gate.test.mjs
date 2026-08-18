@@ -1658,3 +1658,39 @@ test('the lexer stays quote-BLIND, because a quote-aware one swallows a push', (
   assert.ok(segments.length >= 2, 'the `;` must remain a separator despite the apostrophe');
   assert.ok(planCommand(command, '/r').needsScan, 'the push must stay visible');
 });
+
+// ═════════════════════════════════ boundaries never reach this gate
+
+test('this gate does not read boundaries: at all', () => {
+  // The structural half of the guarantee, and the cheap one to keep true.
+  // `boundaries:` relaxes the POLICY gate; secret scanning is a different hook
+  // with a different registration, and the way it stays unreachable is that
+  // this file never learns the word.
+  const source = readFileSync(SCRIPT, 'utf8');
+  assert.doesNotMatch(source, /\bboundaries\b/, 'secrets-gate.mjs must not consult the boundaries block');
+  assert.doesNotMatch(source, /boundariesOf/);
+});
+
+test('a commit carrying a secret is refused under the most open config there is', { skip: NEEDS_SCANNER }, () => {
+  // The behavioural half. Not "we chose not to wire it up" — a repo configured
+  // as permissively as the schema allows, scanned for real, still refused.
+  const dir = repo('tyran-gate-open-');
+  mkdirSync(join(dir, '.tyran', 'policies'), { recursive: true });
+  writeFileSync(
+    join(dir, '.tyran', 'config.yaml'),
+    'profile: balanced\nautonomy: P3\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\n' +
+      'boundaries:\n  preset: open\n  outside_repo: allow\n  credentials: allow\n' +
+      '  path_classes: allow\n  push: allow\n  prompts: skip\n',
+  );
+  writeFileSync(join(dir, 'leak.txt'), fakeSecret());
+  git(dir, 'add', 'leak.txt');
+
+  const decision = runGateScript('git commit -m "add config"', dir);
+  assert.equal(decision.hookSpecificOutput.permissionDecision, 'deny');
+  const reason = decision.hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /secret-shaped finding/);
+  // It actually SCANNED — a refusal for some other reason would pass the
+  // assertion above while proving nothing about the scanner.
+  assert.match(reason, /coverage verified/);
+  assert.match(reason, /private-key/);
+});

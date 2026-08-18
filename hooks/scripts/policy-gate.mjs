@@ -84,6 +84,7 @@ import {
 } from './secrets-gate.mjs';
 import {
   MANDATORY_KERNEL_PATHS,
+  boundariesOf,
   classifyPath,
   globMatches,
   normalizePath,
@@ -552,6 +553,50 @@ export async function loadDeployClass(root) {
     );
   }
   return value;
+}
+
+/**
+ * How far this repo has turned the gate down (`boundaries:` in config.yaml).
+ *
+ * Fail-closed at every step, which for THIS loader means something different
+ * from the others in this file: a missing config, an unreadable one, a
+ * malformed one and a typo in a value all resolve to STRICT, because every
+ * failure here would otherwise remove a refusal. `loadDeployClass` refuses
+ * outright when it cannot read the class; this one cannot, because it runs on
+ * every tool call including the ones in a repo that never adopted Tyran — so
+ * its safe answer is "every boundary on", not an error.
+ *
+ * The resolution rule itself is NOT spelled here. `boundariesOf` in
+ * schema.mjs is the one implementation, shared with doctor and the Settings
+ * tab, because three spellings of one rule is the defect ADR-21 names and this
+ * rule decides whether a refusal happens at all.
+ */
+export async function loadBoundaries(root) {
+  // NOT memoized, deliberately. A process-lifetime cache keyed on the root
+  // would be correct in production — one process per tool call — and it was
+  // tried; what it actually bought was sub-millisecond, and what it cost was
+  // module state that survives between calls in every caller that is not the
+  // platform. The first thing it broke was a test reusing one root for two
+  // configs, which is precisely the shape of "the gate answered from a config
+  // that is no longer on disk". A second small read is the cheaper answer.
+  let text = null;
+  for (const candidate of [root, mainWorktreeOf(root)].filter((r) => r !== null)) {
+    try {
+      text = await readBounded(join(candidate, CONFIG_PATH), 'the Tyran config');
+    } catch {
+      // An unreadable or oversized config is a refusal for the callers that
+      // need a VALUE out of it. Here it is simply "no relaxations", which is
+      // the strictest answer available and never the reason a call proceeds.
+      return boundariesOf(null);
+    }
+    if (text !== null) break;
+  }
+  if (text === null) return boundariesOf(null);
+  try {
+    return boundariesOf(parse(text));
+  } catch {
+    return boundariesOf(null);
+  }
 }
 
 /**
@@ -1067,7 +1112,9 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
   // modes must keep the hard deny — see verdictForClass's matrix.
   const askable = actor === 'main' && field(input, 'permission_mode') === 'acceptEdits';
 
-  if (toolName === 'Bash') return await decideBash({ input, toolInput, root, runner, budget });
+  const boundaries = await loadBoundaries(root);
+
+  if (toolName === 'Bash') return await decideBash({ input, toolInput, root, runner, budget, boundaries });
 
   const targets = pathTargets(toolInput);
   const isWriteTool = typeof toolName === 'string' && WRITE_TOOLS.includes(toolName);
@@ -1101,6 +1148,7 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
       // exact inversion of this file's own argument that two spellings of one
       // location must not resolve to two classes. The cost of skipping it is
       // higher here than on the write path, not lower.
+      if (boundaries.credentials === 'allow') continue;
       const resolved = canonicalDeepest(target);
       const hits = [...new Set([...secretReadRules(target), ...secretReadRules(resolved)])];
       if (hits.length === 0) continue;
@@ -1159,6 +1207,12 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     // exempts those built-in locations; `main_writable_paths` in config.yaml adds
     // operator-chosen ones. Both are MAIN-thread only: a subagent still falls
     // through to KERNEL.
+    // `outside_repo: allow` is the ONE relaxation that is not actor-split.
+    // The narrow exemptions below stay main-thread-only because they are
+    // guesses about the harness; this one is an operator saying, in writing,
+    // that agents may work outside this repository — and a subagent is the
+    // actor that does the work.
+    if (normalized === null && boundaries.outside_repo === 'allow') continue;
     if (normalized === null && actor === 'main') {
       if (harnessWritable(target, env)) continue;
       if (mainWritable === undefined) mainWritable = await loadMainWritablePaths(root);
@@ -1180,7 +1234,14 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     if (normalized !== null && decidingRule(policy, normalized) === null && !isGoverned(normalized)) {
       continue;
     }
-    const verdict = verdictForClass(cls, unsupervised, askable);
+    // The floor is consulted BEFORE the flag, so no ordering of settings can
+    // reach the files that enforce every other boundary.
+    const relaxClasses =
+      boundaries.path_classes === 'allow' &&
+      normalized !== null &&
+      boundaryFloorGlobFor(normalized) === null &&
+      protectedGlobFor(normalized) === null;
+    const verdict = relaxClasses ? 'pass' : verdictForClass(cls, unsupervised, askable);
 
     // ADR-21, applied as a check rather than as a refactor: the rule this
     // refusal names and the class the resolver returned must agree. They are
@@ -1383,6 +1444,38 @@ export const SHELL_PROTECTED_GLOBS = Object.freeze([
   '.claude/settings.json',
   '.claude/settings.local.json',
 ]);
+
+/**
+ * Paths no `boundaries:` setting can reach, checked before `path_classes` is
+ * consulted.
+ *
+ * `SHELL_PROTECTED_GLOBS` is already "the files that switch every gate off":
+ * the enforcement hooks, the policy that classifies them, and the settings
+ * file that registers them. `.tyran/STOP` joins them here for a reason of the
+ * same kind rather than the same shape — it is the operator's brake, and a
+ * flag the loop can use to clear its own stop signal is not a flag, it is the
+ * end of the boundary.
+ *
+ * Note what this does NOT do: it does not change what a policy file may say.
+ * A user can still classify `.claude/settings.json` however they like; what
+ * they cannot do is reach it by turning `path_classes` down, which is a new
+ * door and is therefore closed on the way in.
+ *
+ * It lives HERE, below `SHELL_PROTECTED_GLOBS` rather than beside the loader
+ * that motivates it, because a `const` that reads another `const` declared
+ * later in the file throws on import — which is the whole gate failing to load
+ * rather than one check misbehaving.
+ */
+export const BOUNDARY_FLOOR_GLOBS = Object.freeze([...SHELL_PROTECTED_GLOBS, '.tyran/STOP']);
+
+/** The floor glob covering this path, or null. */
+export function boundaryFloorGlobFor(normalized) {
+  if (normalized === null || normalized === undefined) return null;
+  for (const glob of BOUNDARY_FLOOR_GLOBS) {
+    if (globMatches(glob, normalized)) return glob;
+  }
+  return null;
+}
 
 /** The shell-protected glob covering this path, or null. */
 export function shellProtectedGlobFor(normalized) {
@@ -1756,7 +1849,7 @@ export function shellPathFindings(command, startDir, root) {
 }
 
 /** The refusal for a protected path named in a shell command. */
-function refuseShellPaths(findings, command = '') {
+function refuseShellPaths(findings, command = '', allowCredentials = false) {
   const credentials = findings.filter((f) => f.kind === 'credential');
   const kernel = findings.filter((f) => f.kind === 'kernel');
   // The credential the finding list never saw, because it sat where a message
@@ -1765,7 +1858,7 @@ function refuseShellPaths(findings, command = '') {
   // out loud, because otherwise this refusal would offer the "rewrite it as a
   // read-only command" way forward for a line whose problem is the secret in it.
   // A refusal that states the wrong reason is worse than one that states none.
-  const hidden = credentials.length === 0 ? rawCredentialWords(command) : [];
+  const hidden = credentials.length === 0 && allowCredentials !== true ? rawCredentialWords(command) : [];
   // True when the PATHS were all in the readable class, so the command itself
   // is the only reason this is a refusal. Worth saying: the reader is one
   // rewrite away from an allowed call, and a refusal with no reachable way
@@ -1831,7 +1924,7 @@ function refuseShellPaths(findings, command = '') {
   return { decision: 'deny', reason: lines.join('\n') };
 }
 
-async function decideBash({ input, toolInput, root, runner, budget }) {
+async function decideBash({ input, toolInput, root, runner, budget, boundaries }) {
   const command = field(toolInput, 'command');
   if (typeof command !== 'string') {
     return {
@@ -1851,11 +1944,28 @@ async function decideBash({ input, toolInput, root, runner, budget }) {
   // "the model was refused a Read and reached for Bash in the next call", and a
   // check that only runs once a policy loads is a check an unconfigured repo
   // does not have.
-  const findings = shellPathFindings(command, startDir, root);
+  // `credentials: allow` drops the CREDENTIAL findings and nothing else. A
+  // kernel finding is a path that protects the gate, and no setting reaches
+  // those — which is why this filters the list rather than skipping the call.
+  const findings = shellPathFindings(command, startDir, root).filter(
+    (f) => !(f.kind === 'credential' && boundaries.credentials === 'allow'),
+  );
   // The exemption SKIPS this refusal; it does not return PASS. A `git log` that
   // names a protected path still travels the deployment class and every other
   // check below, exactly as `git log` on any other path does.
-  if (findings.length > 0 && !shellReadExempt(findings, command)) return refuseShellPaths(findings, command);
+  if (findings.length > 0 && !shellReadExempt(findings, command)) {
+    return refuseShellPaths(findings, command, boundaries.credentials === 'allow');
+  }
+
+  // `push: allow` skips the whole push analysis, not just the verdict at the
+  // end of it. The refusals in between — an alias, a refspec the shell would
+  // rewrite, a remote whose default branch cannot be read — all exist to stop
+  // the gate GUESSING a destination it is about to judge. With nothing to
+  // judge there is nothing to guess, and keeping them would refuse commands
+  // for being unreadable to a check that is switched off.
+  //
+  // The path rules above still ran. This is the deployment class only.
+  if (boundaries.push === 'allow') return PASS;
 
   const plan = planCommand(command, startDir);
   const pushes = plan.targets.filter((t) => t.scanPush === true && Array.isArray(t.pushArgv));
@@ -2039,10 +2149,32 @@ const DEPLOY_REMEDY = Object.freeze(Object.assign(Object.create(null), {
     'What to do instead: push to a branch of your own and open a pull request from it.',
 }));
 
-/** Turn a PolicyFailure into the refusal it always has to be. */
+/**
+ * Turn a PolicyFailure into the refusal it always has to be — and, when the
+ * operator asked for it, turn "no objection" into an auto-approval.
+ *
+ * ONE place, deliberately, rather than a branch at every `return PASS`. The
+ * property that has to hold is "a deny or an ask is never rewritten", and here
+ * that is a single readable line instead of a claim about a dozen return
+ * sites. The catch below is unchanged: a PolicyFailure is still a refusal, and
+ * `boundaries` is not consulted on that path at all — a gate that could not
+ * complete its check must not auto-approve, whatever the config says.
+ */
 export async function handle({ input, runner, startedAt, env }) {
   try {
-    return await decide({ input, runner, startedAt, env });
+    const verdict = await decide({ input, runner, startedAt, env });
+    const isPass = verdict === PASS || (verdict !== null && typeof verdict === 'object' && verdict.decision === 'pass');
+    if (!isPass) return verdict;
+    const boundaries = await loadBoundaries(repoRootOf(input, env ?? process.env));
+    if (boundaries.prompts !== 'skip') return verdict;
+    return {
+      decision: 'allow',
+      reason:
+        'tyran policy-gate: approved without asking. This repository sets `boundaries.prompts: skip` ' +
+        'in .tyran/config.yaml, so a tool call no gate objects to is auto-approved.\n' +
+        'What this does NOT reach: a refusal from any other gate still wins, so secret scanning at ' +
+        'commit and push is unaffected, and so are the paths that protect the gates themselves.',
+    };
   } catch (err) {
     if (err instanceof PolicyFailure) {
       return {

@@ -61,7 +61,15 @@ import {
   PROGRESS_FILE,
   STATE_FILE,
 } from './project.mjs';
-import { classifyPath, normalizePath, validateFile, knowledgeWarnings, MANDATORY_KERNEL_PATHS } from './schema.mjs';
+import {
+  boundariesOf,
+  classifyPath,
+  normalizePath,
+  relaxedBoundaries,
+  validateFile,
+  knowledgeWarnings,
+  MANDATORY_KERNEL_PATHS,
+} from './schema.mjs';
 import { auditEntries, loadEntries as loadKnowledgeEntries } from './knowledge.mjs';
 import { readPlatformUsage } from './usage-source.mjs';
 import { gitRunner } from './scan-repo.mjs';
@@ -204,6 +212,11 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'config-missing': 'info',
     'config-invalid': 'error',
     'config-unreadable': 'error',
+    // Not an error: an operator chose this. `warning` because it is the one
+    // setting whose whole effect is that refusals stop being printed, so
+    // nothing else will ever tell you it is on.
+    'boundaries-relaxed': 'warning',
+    'boundaries-absent': 'info',
     'knowledge-invalid': 'error',
     'knowledge-duplicate-id': 'error',
     'knowledge-unreadable': 'error',
@@ -1913,6 +1926,40 @@ export function runStateChecks({
       ),
     );
     checked.push('config.yaml: absent');
+  }
+
+  // How open this repo is, STATED rather than left to be discovered. A relaxed
+  // boundary is not a defect — somebody chose it — but it is the one setting
+  // whose effect is that refusals stop appearing, so nothing else in a session
+  // will ever mention it. An operator who inherits a repo, or comes back to one
+  // after a month, finds out here or not at all.
+  if (configDoc !== null) {
+    const relaxed = relaxedBoundaries(boundariesOf(configDoc));
+    if (relaxed.length > 0) {
+      findings.push(
+        finding(
+          'boundaries-relaxed',
+          show(configPath),
+          `boundaries: ${relaxed.join(', ')} ${relaxed.length === 1 ? 'is' : 'are'} turned down, so the policy gate ` +
+            'no longer refuses what they cover. Secret scanning at commit and push, the enforcement hooks, ' +
+            '.claude/settings.json and .tyran/STOP are unaffected — no setting reaches those',
+          `node scripts/schema.mjs validate config ${sq(configPath)}   # then edit boundaries: to tighten`,
+        ),
+      );
+    }
+    checked.push(`boundaries: ${relaxed.length === 0 ? 'all strict' : `relaxed (${relaxed.join(', ')})`}`);
+    if (!('boundaries' in configDoc)) {
+      findings.push(
+        finding(
+          'boundaries-absent',
+          show(configPath),
+          'no boundaries: block — the strict default applies, which is correct, but the Settings tab patches ' +
+            'keys that already exist and will not invent them, so that whole section of the dashboard is ' +
+            'unusable in this repo',
+          `node scripts/scan-repo.mjs --write ${sq(configPath)}   # rewrites the config with the block in it`,
+        ),
+      );
+    }
   }
 
   const gitRun = run ?? gitRunner(repoRoot);

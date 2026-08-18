@@ -416,3 +416,71 @@ test('an apply hands back the text it read, so a caller can compare and swap', (
     f.cleanup();
   }
 });
+
+test('the boundaries knobs are on the screen, and every choice validates', () => {
+  const f = fixture();
+  try {
+    const s = readSettings(f.tyran);
+    const group = s.groups.find((g) => g.id === 'boundaries');
+    assert.ok(group, 'the Settings tab has a boundaries section');
+    assert.deepEqual(
+      group.settings.map((x) => x.id),
+      ['boundaries.preset', 'boundaries.outside_repo', 'boundaries.credentials', 'boundaries.path_classes', 'boundaries.push', 'boundaries.prompts'],
+    );
+    // Every knob reads a value out of the shipped template, or the control
+    // renders and cannot be used: yaml-patch refuses a key not already there.
+    assert.ok(group.settings.every((x) => x.present === true));
+    assert.equal(group.settings.find((x) => x.id === 'boundaries.preset').value, 'strict');
+
+    // ADR-21 again: the offered choices must be the ones validateConfig takes.
+    for (const setting of group.settings) {
+      const key = setting.id.split('.')[1];
+      for (const choice of setting.choices) {
+        assert.deepEqual(
+          validateConfig({ ...parse(readFileSync(join(f.tyran, 'config.yaml'), 'utf8')), boundaries: { [key]: choice.value } }),
+          [],
+          `${setting.id} = ${choice.value} is a value the validator accepts`,
+        );
+      }
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('every boundary knob loosens only through a second, deliberate act', () => {
+  // MUTANT: drop `widening` from any boundaries entry in GROUPS, or restore
+  // the `if (id === 'autonomy')` special case in applySetting.
+  const f = fixture();
+  try {
+    const loosen = [
+      ['boundaries.preset', 'open'],
+      ['boundaries.outside_repo', 'allow'],
+      ['boundaries.credentials', 'allow'],
+      ['boundaries.path_classes', 'allow'],
+      ['boundaries.push', 'allow'],
+      ['boundaries.prompts', 'skip'],
+    ];
+    for (const [id, value] of loosen) {
+      assert.throws(() => applySetting(f.tyran, id, value), (err) => {
+        assert.ok(err instanceof SettingsError, `${id} refuses without a confirmation`);
+        assert.equal(err.widens, true);
+        // The token is the new VALUE, never a boolean: a caller cannot satisfy
+        // it by sending `confirm: true` alongside whatever value it liked.
+        assert.equal(err.confirm_with, value);
+        return true;
+      });
+      // ...and goes through when the operator answers with that exact token.
+      const applied = write(f.tyran, applySetting(f.tyran, id, value, value));
+      assert.equal(applied.after, value);
+    }
+    // Tightening is one click, always. Friction on making a boundary STRICTER
+    // is how you teach people to stop making boundaries stricter.
+    for (const [id, value] of [['boundaries.preset', 'strict'], ['boundaries.credentials', 'refuse'], ['boundaries.prompts', 'ask']]) {
+      const applied = write(f.tyran, applySetting(f.tyran, id, value));
+      assert.equal(applied.after, value);
+    }
+  } finally {
+    f.cleanup();
+  }
+});

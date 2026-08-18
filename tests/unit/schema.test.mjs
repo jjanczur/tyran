@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url';
 import {
   validateConfig,
   limitsOf,
+  boundariesOf,
+  relaxedBoundaries,
+  BOUNDARIES_STRICT,
+  BOUNDARY_FLAGS,
+  BOUNDARY_KEYS,
   pricingOf,
   validateKnowledge,
   supersededIds,
@@ -636,4 +641,72 @@ test('pricingOf drops a model the validator would reject rather than half-pricin
   assert.deepEqual(Object.keys(resolved.models), ['good']);
   assert.equal(pricingOf({}).rate_card, null);
   assert.deepEqual(Object.keys(pricingOf({}).models), []);
+});
+
+// ------------------------------------------------------------- boundaries
+
+test('boundaries: accepts the shipped shape and rejects everything else', () => {
+  assert.deepEqual(validateConfig({ ...minimalConfig(), boundaries: { preset: 'open' } }), []);
+  assert.deepEqual(
+    validateConfig({
+      ...minimalConfig(),
+      boundaries: { preset: 'strict', outside_repo: 'allow', credentials: 'refuse', path_classes: 'allow', push: 'refuse', prompts: 'skip' },
+    }),
+    [],
+  );
+  assert.ok(validateConfig({ ...minimalConfig(), boundaries: 'open' }).some((e) => e.includes('must be a mapping')));
+  assert.ok(validateConfig({ ...minimalConfig(), boundaries: { preset: 'wide' } }).some((e) => e.includes('boundaries.preset')));
+  assert.ok(validateConfig({ ...minimalConfig(), boundaries: { credentials: 'yes' } }).some((e) => e.includes('boundaries.credentials')));
+  assert.ok(validateConfig({ ...minimalConfig(), boundaries: { prompts: 'never' } }).some((e) => e.includes('boundaries.prompts')));
+  assert.ok(validateConfig({ ...minimalConfig(), boundaries: { secrets: 'allow' } }).some((e) => e.includes('boundaries.secrets: unknown key')));
+});
+
+test('boundariesOf: absent means strict, and so does anything unreadable', () => {
+  assert.deepEqual(boundariesOf(null), BOUNDARIES_STRICT);
+  assert.deepEqual(boundariesOf({}), BOUNDARIES_STRICT);
+  assert.deepEqual(boundariesOf({ boundaries: {} }), BOUNDARIES_STRICT);
+  // The direction that matters. `limitsOf` treats an out-of-range value as
+  // absent so a DEFAULT applies; here the same rule has to mean "never relax
+  // on input nobody can read", because the loose value removes a refusal.
+  assert.deepEqual(boundariesOf({ boundaries: { credentials: 'yes', push: true, prompts: 1 } }), BOUNDARIES_STRICT);
+  assert.deepEqual(boundariesOf({ boundaries: { preset: 'wide-open' } }), BOUNDARIES_STRICT);
+});
+
+test('boundariesOf: the preset expands, and an explicit key beats it both ways', () => {
+  const open = boundariesOf({ boundaries: { preset: 'open' } });
+  assert.deepEqual(open, { outside_repo: 'allow', credentials: 'allow', path_classes: 'allow', push: 'allow', prompts: 'skip' });
+
+  // A repo that wants everything except its own keys.
+  assert.equal(boundariesOf({ boundaries: { preset: 'open', credentials: 'refuse' } }).credentials, 'refuse');
+  assert.equal(boundariesOf({ boundaries: { preset: 'open', prompts: 'ask' } }).prompts, 'ask');
+  // And the other direction: one door open in an otherwise strict repo.
+  assert.equal(boundariesOf({ boundaries: { preset: 'strict', outside_repo: 'allow' } }).outside_repo, 'allow');
+  assert.equal(boundariesOf({ boundaries: { outside_repo: 'allow' } }).credentials, 'refuse');
+});
+
+test('boundariesOf: the result is frozen, so no caller can widen it after the fact', () => {
+  const b = boundariesOf({ boundaries: { preset: 'strict' } });
+  assert.throws(() => {
+    'use strict';
+    b.credentials = 'allow';
+  });
+});
+
+test('relaxedBoundaries names exactly what is loose', () => {
+  assert.deepEqual(relaxedBoundaries(boundariesOf(null)), []);
+  assert.deepEqual(relaxedBoundaries(boundariesOf({ boundaries: { preset: 'open' } })).sort(), [
+    'credentials', 'outside_repo', 'path_classes', 'prompts', 'push',
+  ]);
+  assert.deepEqual(relaxedBoundaries(boundariesOf({ boundaries: { push: 'allow' } })), ['push']);
+});
+
+test('every boundary key the validator accepts is one boundariesOf resolves', () => {
+  // The two lists are written in different places and would drift silently:
+  // a key the validator allows but the resolver ignores is a setting that
+  // does nothing, with a green suite.
+  for (const flag of BOUNDARY_FLAGS) {
+    assert.equal(boundariesOf({ boundaries: { [flag]: 'allow' } })[flag], 'allow', `${flag} is resolved`);
+  }
+  assert.deepEqual([...BOUNDARY_KEYS].sort(), ['preset', ...BOUNDARY_FLAGS, 'prompts'].sort());
+  assert.deepEqual(Object.keys(BOUNDARIES_STRICT).sort(), [...BOUNDARY_FLAGS, 'prompts'].sort());
 });

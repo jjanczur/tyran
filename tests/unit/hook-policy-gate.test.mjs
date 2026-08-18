@@ -429,10 +429,20 @@ test('ADR-22: the real script emits SILENCE for a pass, never `allow`', () => {
   const root = adopted();
   const payload = runScript(writeInput(join(root, '.tyran/knowledge/facts.yaml'), { agentId: 'a1' }), root);
   assert.deepEqual(payload, {});
-  // Mechanical, not aspirational: the string cannot appear in the source.
+
+  // Mechanical, not aspirational. Since 0.1.43 the gate CAN produce an
+  // approval, so the blanket "the string cannot appear" is gone — and what
+  // replaces it is narrower rather than weaker, because a blanket ban on a
+  // word stops meaning anything the moment the word is legal once.
   const source = readFileSync(SCRIPT, 'utf8');
-  assert.equal(/permissionDecision/.test(source), false, 'the gate must never spell a decision itself');
-  assert.equal(/['"]allow['"]/.test(source), false);
+  // Still true, and still the important half: the platform's field is
+  // hook-io's to spell. A gate composing its own payload is a gate that can
+  // get the shape wrong in a direction nobody notices.
+  assert.equal(/permissionDecision/.test(source), false, 'the gate must never spell a platform decision itself');
+  // Exactly ONE site produces an approval, and it is the one guarded by the
+  // operator's own setting. Two would mean a second route nobody reviewed.
+  assert.equal((source.match(/decision: 'allow'/g) ?? []).length, 1);
+  assert.match(source, /boundaries\.prompts !== 'skip'/);
 });
 
 test('a repository with no .tyran/ at all is left alone — the declared boundary', async () => {
@@ -2177,4 +2187,140 @@ test('the declared cost of the narrowing is bounded by ssh-directory', () => {
   // becoming a surprise.
   assert.deepEqual(secretReadRules('id_deploy'), [], 'the loss is real and this pins it');
   assert.ok(secretReadRules('/home/x/.ssh/id_deploy').includes('ssh-directory'));
+});
+
+// ═══════════════════════════════════════════════════════════ boundaries
+
+const CONFIG_BASE = 'profile: balanced\nautonomy: P1\ntiers:\n  top: a\n  work: b\n  cheap: c\n';
+/** A repo whose config carries `boundaries:` — `flags` is the block body. */
+const withBoundaries = (flags) => adopted({ config: `${CONFIG_BASE}boundaries:\n${flags}` });
+const OPEN = withBoundaries('  preset: open\n');
+const STRICT = withBoundaries('  preset: strict\n');
+
+test('boundaries: strict is exactly what the gate did before the block existed', async () => {
+  // The regression that matters most: adding a knob must not move the default.
+  const legacy = adopted();
+  for (const root of [legacy, STRICT]) {
+    assert.equal((await askRead(root, '.env')).decision, 'deny');
+    assert.equal((await askWrite(root, '/etc/hosts', { agentId: 'a1' })).decision, 'deny');
+    assert.equal((await askWrite(root, '.claude/agents/x.md', { agentId: 'a1' })).decision, 'deny');
+    assert.equal(await askWrite(root, 'src/app.ts', { agentId: 'a1' }), PASS);
+  }
+});
+
+test('boundaries.credentials: allow lets a credential file be read, on every surface', async () => {
+  const root = withBoundaries('  credentials: allow\n');
+  assert.equal(await askRead(root, '.env'), PASS);
+  assert.equal(await askRead(root, 'id_rsa'), PASS);
+  assert.equal(await askRead(root, '.env', { tool: 'Grep' }), PASS);
+  assert.equal(await ask(bashInput(`cat ${join(root, '.env')}`, root), root), PASS);
+  // A subagent too: this is not an actor-split rule.
+  assert.equal(await askRead(root, '.env', { agentId: 'a1' }), PASS);
+  // And it is the ONLY thing that moved.
+  assert.equal((await askWrite(root, '/etc/hosts', { agentId: 'a1' })).decision, 'deny');
+});
+
+test('boundaries.outside_repo: allow reaches a SUBAGENT, unlike main_writable_paths', async () => {
+  // `main_writable_paths` is deliberately main-thread only. This flag is an
+  // operator saying agents may work outside the repo, and the subagent is the
+  // actor that does the work — so the actor split would make it useless.
+  const root = withBoundaries('  outside_repo: allow\n');
+  assert.equal(await askWrite(root, '/tmp/tyran-probe/x.txt', { agentId: 'a1' }), PASS);
+  assert.equal(await askWrite(root, '/tmp/tyran-probe/x.txt'), PASS);
+  assert.equal((await askRead(root, '.env')).decision, 'deny', 'credentials are a different flag');
+});
+
+test('boundaries.path_classes: allow relaxes YOUR rules and never the gate’s own', async () => {
+  const root = withBoundaries('  path_classes: allow\n');
+  // GATED for a subagent, and KERNEL from the shipped template, both relax...
+  assert.equal(await askWrite(root, '.claude/agents/x.md', { agentId: 'a1' }), PASS);
+  assert.equal(await askWrite(root, 'CLAUDE.md', { agentId: 'a1' }), PASS);
+  // ...and the floor does not.
+  for (const path of ['hooks/scripts/policy-gate.mjs', '.tyran/policies/autonomy.yaml', '.claude/settings.json', '.claude/settings.local.json', '.tyran/STOP']) {
+    assert.equal((await askWrite(root, path, { agentId: 'a1' })).decision, 'deny', `${path} is below the floor`);
+  }
+});
+
+test('boundaries.push: allow drops the deployment class and nothing above it', async () => {
+  const root = withBoundaries('  push: allow\n');
+  for (const command of [
+    'git push origin main',
+    'git push --all',
+    'git push --mirror',
+    'git push --force-with-lease origin main',
+    'git push origin --delete release',
+    'git -c alias.zz=push zz origin main',
+  ]) {
+    assert.equal(await ask(bashInput(command, root), root), PASS, command);
+  }
+  // The path rules ran first and still refuse.
+  assert.equal((await ask(bashInput(`cat ${join(root, '.env')}`, root), root)).decision, 'deny');
+  assert.equal((await ask(bashInput(`echo x > ${join(root, '.claude/settings.json')}`, root), root)).decision, 'deny');
+});
+
+test('preset: open relaxes all five, and the floor is untouched by every one of them', async () => {
+  // Under `open`, `prompts: skip` comes with it, so "no objection" arrives as
+  // an explicit approval rather than as silence. That IS the preset working.
+  for (const target of [() => askRead(OPEN, '.env'), () => askWrite(OPEN, '/etc/hosts', { agentId: 'a1' }), () => askWrite(OPEN, '.claude/agents/x.md', { agentId: 'a1' })]) {
+    assert.equal((await target()).decision, 'allow');
+  }
+  for (const path of ['hooks/scripts/policy-gate.mjs', '.tyran/policies/autonomy.yaml', '.claude/settings.json', '.tyran/STOP']) {
+    const refusal = await askWrite(OPEN, path, { agentId: 'a1' });
+    assert.equal(refusal.decision, 'deny', path);
+  }
+});
+
+test('an explicit key beats the preset, in both directions', async () => {
+  const guarded = withBoundaries('  preset: open\n  credentials: refuse\n  prompts: ask\n');
+  assert.equal((await askRead(guarded, '.env')).decision, 'deny');
+  assert.equal(await askWrite(guarded, '/etc/hosts', { agentId: 'a1' }), PASS);
+
+  const oneDoor = withBoundaries('  preset: strict\n  outside_repo: allow\n');
+  assert.equal(await askWrite(oneDoor, '/etc/hosts', { agentId: 'a1' }), PASS);
+  assert.equal((await askRead(oneDoor, '.env')).decision, 'deny');
+});
+
+test('a boundaries value the schema rejects is STRICT, never a relaxation', async () => {
+  // Direction of error. `limitsOf` treats a bad value as absent so a default
+  // applies; here "absent" has to mean the refusal stays.
+  for (const flags of ['  credentials: yes\n', '  preset: wide-open\n', '  prompts: never\n', '  credentials: true\n']) {
+    const root = withBoundaries(flags);
+    assert.equal((await askRead(root, '.env')).decision, 'deny', flags);
+  }
+});
+
+test('boundaries.prompts: skip auto-approves, and cannot rewrite a refusal', async () => {
+  const root = withBoundaries('  prompts: skip\n');
+  // A call the gate has no objection to is APPROVED rather than passed.
+  const approved = await askWrite(root, 'src/app.ts', { agentId: 'a1' });
+  assert.equal(approved.decision, 'allow');
+  assert.match(approved.reason, /boundaries\.prompts: skip/);
+  // Everything the gate does object to is untouched — including under `open`.
+  assert.equal((await askRead(root, '.env')).decision, 'deny');
+  assert.equal((await askWrite(OPEN, 'hooks/scripts/policy-gate.mjs', { agentId: 'a1' })).decision, 'deny');
+  // And a GATED ask stays an ask rather than becoming an approval.
+  const asked = await askWrite(root, '.claude/agents/x.md', { mode: 'acceptEdits' });
+  assert.equal(asked.decision, 'ask');
+});
+
+test('prompts: skip reaches the platform as a real allow payload', async () => {
+  // Through the REAL script and the REAL runtime, because the payload shape is
+  // the whole feature: `{}` would leave the prompt on the screen.
+  const root = withBoundaries('  prompts: skip\n');
+  const payload = runScript(writeInput(join(root, 'src/app.ts'), { agentId: 'a1' }), root);
+  assert.equal(verdictOf(payload), 'allow');
+  assert.equal(payload.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.ok(typeof payload.hookSpecificOutput.permissionDecisionReason === 'string');
+});
+
+test('a broken config is strict, and a broken POLICY still refuses under open', async () => {
+  // The gate must never read "I could not parse the config" as "everything is
+  // allowed" — the whole ADR-22 argument, applied to the knob that turns ADR-22
+  // off. A config that does not parse cannot be the thing that opens the gate.
+  const broken = adopted({ config: 'profile: balanced\nautonomy: P1\ntiers:\n  bad: >-\n    block scalar\n' });
+  assert.equal((await askRead(broken, '.env')).decision, 'deny');
+
+  const noPolicy = adopted({ policy: 'rules: []\n', config: `${CONFIG_BASE}boundaries:\n  preset: open\n` });
+  const refusal = await askWrite(noPolicy, 'src/app.ts', { agentId: 'a1' });
+  assert.equal(refusal.decision, 'deny', 'an invalid policy refuses whatever boundaries says');
 });

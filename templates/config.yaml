@@ -43,6 +43,34 @@ validation:
 # Files multiple agents may touch: append-only, serialized by the conductor.
 shared_zones: []
 
+# How far the policy gate turns its refusals DOWN. Every value here is the
+# strict one, which is what Tyran did before this block existed — nothing is
+# relaxed by having it in the file, only made editable from the Settings tab.
+#
+#   preset: strict | open   one switch. `open` sets all five below at once and
+#                           is the closest thing to running with permissions
+#                           skipped. Anything you set explicitly wins over it.
+#   outside_repo            refuse | allow — files outside this repository
+#   credentials             refuse | allow — .env, keys, ~/.ssh, ~/.aws
+#   path_classes            refuse | allow — the GATED/KERNEL rules you wrote
+#   push                    refuse | allow — the deployment class on git push
+#   prompts                 ask | skip     — skip Claude Code's own prompts
+#
+# FOUR THINGS NO SETTING HERE REACHES, whatever it says: secret scanning at
+# commit and push, the enforcement hooks, `.claude/settings.json`, and
+# `.tyran/STOP`. A refusal from any gate still wins over an auto-approval.
+#
+# This file is class AUTO, so an agent can widen these itself — the same trade
+# `autonomy:` above already makes, and the reason the four exceptions are
+# mechanical rather than a matter of policy. See docs/policy-gate.md.
+boundaries:
+  preset: strict
+  outside_repo: refuse
+  credentials: refuse
+  path_classes: refuse
+  push: refuse
+  prompts: ask
+
 # Overnight mode — pause autonomous work near the subscription usage limits
 # and resume after the window resets (https://jjanczur.github.io/tyran/overnight/). Requires the
 # operator-installed statusline helper (scripts/statusline.mjs), which is the

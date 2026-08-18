@@ -34,6 +34,35 @@ export const TIER_KEYS = Object.freeze(['cheap', 'work', 'deep', 'top']);
 export const ARTIFACT_CLASSES = Object.freeze(['AUTO', 'GATED', 'KERNEL']);
 export const KNOWLEDGE_KINDS = Object.freeze(['fact', 'convention', 'gotcha', 'command', 'decision']);
 
+/**
+ * `boundaries:` — how far down the policy gate's refusals may be turned.
+ *
+ * One block, because the alternative measured badly on real installs: an
+ * operator who wants agents to read a neighbouring project's files has no
+ * business learning what `main_writable_paths` is, and the answer to "let it
+ * do everything" must not be five unrelated edits in four files.
+ *
+ * Every flag is spelled the same way — the strict value first, so a reader
+ * scanning the list knows which column is the default without consulting a
+ * table. `prompts` is the odd one because it is not a refusal knob at all: it
+ * decides whether a call this gate has NO objection to still renders the
+ * platform's own permission prompt.
+ */
+export const BOUNDARY_PRESETS = Object.freeze(['strict', 'open']);
+export const BOUNDARY_VALUES = Object.freeze(['refuse', 'allow']);
+export const BOUNDARY_PROMPTS = Object.freeze(['ask', 'skip']);
+/** The four refusal flags, in the order they are documented. */
+export const BOUNDARY_FLAGS = Object.freeze(['outside_repo', 'credentials', 'path_classes', 'push']);
+/** Every key legal inside the block. */
+export const BOUNDARY_KEYS = Object.freeze(['preset', ...BOUNDARY_FLAGS, 'prompts']);
+/** What each preset resolves to before per-key overrides are applied. */
+const BOUNDARY_BY_PRESET = Object.freeze({
+  strict: Object.freeze({ outside_repo: 'refuse', credentials: 'refuse', path_classes: 'refuse', push: 'refuse', prompts: 'ask' }),
+  open: Object.freeze({ outside_repo: 'allow', credentials: 'allow', path_classes: 'allow', push: 'allow', prompts: 'skip' }),
+});
+/** The safe answer, used for an absent block and for every value the schema rejects. */
+export const BOUNDARIES_STRICT = BOUNDARY_BY_PRESET.strict;
+
 const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim() !== '';
 
@@ -69,7 +98,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'limits', 'pricing', 'spend', 'board'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'boundaries', 'limits', 'pricing', 'spend', 'board'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -143,6 +172,30 @@ export function validateConfig(doc) {
       doc.main_writable_paths.forEach((p, i) => {
         if (!isNonEmptyString(p)) errors.push(`main_writable_paths[${i}]: must be a non-empty path glob`);
       });
+    }
+  }
+
+  // How far the policy gate's refusals may be turned down. Optional; absent
+  // means strict, which is what every install had before this block existed.
+  // Operator-written policy, never scanner-inferred — no provenance wrapper.
+  if ('boundaries' in doc) {
+    if (!isPlainObject(doc.boundaries)) errors.push('boundaries: must be a mapping');
+    else {
+      const boundaries = doc.boundaries;
+      if ('preset' in boundaries && !BOUNDARY_PRESETS.includes(boundaries.preset)) {
+        errors.push(`boundaries.preset: must be one of ${BOUNDARY_PRESETS.join(' | ')}`);
+      }
+      for (const flag of BOUNDARY_FLAGS) {
+        if (flag in boundaries && !BOUNDARY_VALUES.includes(boundaries[flag])) {
+          errors.push(`boundaries.${flag}: must be one of ${BOUNDARY_VALUES.join(' | ')}`);
+        }
+      }
+      if ('prompts' in boundaries && !BOUNDARY_PROMPTS.includes(boundaries.prompts)) {
+        errors.push(`boundaries.prompts: must be one of ${BOUNDARY_PROMPTS.join(' | ')}`);
+      }
+      for (const key of Object.keys(boundaries)) {
+        if (!BOUNDARY_KEYS.includes(key)) errors.push(`boundaries.${key}: unknown key`);
+      }
     }
   }
 
@@ -311,6 +364,40 @@ export function boardSettings(doc) {
     write: typeof board.write === 'boolean' ? board.write : BOARD_DEFAULTS.write,
     open: typeof board.open === 'boolean' ? board.open : BOARD_DEFAULTS.open,
   };
+}
+
+/**
+ * The boundaries block with the preset expanded and overrides applied — the
+ * ONE place the resolution rule lives, called by the policy gate, doctor, the
+ * Settings tab and anything else that needs to know how open this repo is.
+ *
+ * Two properties, and both are the security-critical direction of `limitsOf`'s
+ * doctrine rather than a copy of it:
+ *
+ *  - an absent block is STRICT, so every install written before this existed
+ *    keeps exactly the behaviour it had;
+ *  - a value the validator rejects is treated as absent, which for a knob
+ *    whose looser setting removes a refusal means it must never RELAX on
+ *    input nobody can read. `credentials: yes` is not `allow`, and guessing
+ *    that it is would open the secret-read rule on a typo.
+ *
+ * An explicit key beats the preset, in both directions: `preset: open` with
+ * `credentials: refuse` is a repo that wants everything except its own keys.
+ */
+export function boundariesOf(doc) {
+  const raw = isPlainObject(doc) && isPlainObject(doc.boundaries) ? doc.boundaries : {};
+  const base = BOUNDARY_BY_PRESET[raw.preset] ?? BOUNDARIES_STRICT;
+  const resolved = { ...base };
+  for (const flag of BOUNDARY_FLAGS) {
+    if (BOUNDARY_VALUES.includes(raw[flag])) resolved[flag] = raw[flag];
+  }
+  if (BOUNDARY_PROMPTS.includes(raw.prompts)) resolved.prompts = raw.prompts;
+  return Object.freeze(resolved);
+}
+
+/** Which flags are looser than strict — what a doctor finding and the board report. */
+export function relaxedBoundaries(resolved) {
+  return Object.keys(BOUNDARIES_STRICT).filter((key) => resolved[key] !== BOUNDARIES_STRICT[key]);
 }
 
 export const LIMITS_MODES = Object.freeze(['off', 'warn', 'pause']);

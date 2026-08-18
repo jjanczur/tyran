@@ -34,6 +34,13 @@ validation:
   confidence: 0.9
   needs_confirmation: false
 shared_zones: []
+boundaries:
+  preset: open
+  outside_repo: allow
+  credentials: allow
+  path_classes: allow
+  push: allow
+  prompts: skip
 limits:
   mode: 'off'
   pause_at_percent: 97

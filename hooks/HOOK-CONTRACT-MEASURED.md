@@ -112,7 +112,12 @@ did not object to would be quietly approving the whole session. `deny` from
 any hook wins over `allow` from another, but that is no comfort when ours is
 the only hook.
 
-This runtime has no way to emit it. "No objection" is `{}`.
+"No objection" is `{}`, and it always will be. Since 0.1.43 the runtime CAN
+emit `allow`, from `allowPayload`, reached only by a handler returning
+`{decision: 'allow'}` on purpose — the policy gate does so when a repo sets
+`boundaries.prompts: skip`. No failure path reaches it: a throw, a timeout, an
+overrun budget, a malformed input and an unrecognised verdict are all still
+refusals. The sentence above is why that distinction is the whole design.
 
 ## 5. Matcher syntax — one predicate for every event
 

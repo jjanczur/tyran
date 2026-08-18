@@ -15,7 +15,8 @@ reviewable, written by `/tyran:setup` and editable by hand.
 
 **Or from the board.** `npx @jjanczur/tyran board --serve --write` puts the
 cost profile, the deployment autonomy, the four model tiers, the validation
-commands, the shared zones and the whole `limits:` block on a screen, each with
+commands, the shared zones, the whole `boundaries:` block and the whole
+`limits:` block on a screen, each with
 a sentence explaining what it does, and writes your change back into this file
 one line at a time with the comments intact — the autonomy policy too.
 `pricing:` and `main_writable_paths:` stay hand edits. See
@@ -53,6 +54,14 @@ main_writable_paths:       # OPTIONAL. Out-of-repo paths the MAIN thread may
                            # `~` expands to home; globs are the usual `*`/`**`.
                            # Never widens what a SUBAGENT may do — the gate
                            # enforces the actor split; this only lists paths.
+
+boundaries:                # OPTIONAL. How far the policy gate turns its
+  preset: strict           # refusals DOWN. Absent = strict = what Tyran has
+  outside_repo: refuse     # always done. `preset: open` sets all five at once.
+  credentials: refuse      # An explicit key beats the preset, both ways.
+  path_classes: refuse     # Four things NO value here reaches: secret scanning
+  push: refuse             # at commit and push, the enforcement hooks,
+  prompts: ask             # .claude/settings.json, and .tyran/STOP.
 
 limits:                    # OPTIONAL. Overnight mode (see the Overnight page):
   mode: 'off'              # off | warn | pause — quoted, bare off is YAML false
@@ -241,6 +250,74 @@ than the convention, set the `.tyran/config.yaml` rule in
 `.tyran/policies/autonomy.yaml` to `GATED` — it is a one-word edit, and
 [policy gate](../policy-gate/) lists what GATED does and does not guarantee.
 </Limit>
+
+## Boundaries — giving agents more room
+
+`autonomy:` above decides how far finished work travels. `boundaries:` decides
+what agents may **touch** while they make it, and it is the one place the
+policy gate can be turned down at all.
+
+Every value ships at its strict setting, which is exactly what Tyran did before
+the block existed. Nothing changes by having it in your file — it is written
+out in full so [the Settings tab](../board/#settings) can edit it, because that
+screen patches keys that already exist and deliberately will not invent them.
+
+| key | strict | loose | what the loose value gives up |
+|---|---|---|---|
+| `outside_repo` | `refuse` | `allow` | a path outside the repository stops being refused, for **every** agent — not only the main thread, which is the narrower thing `main_writable_paths:` already does |
+| `credentials` | `refuse` | `allow` | `.env`, private keys, `~/.ssh`, `~/.aws` and their relatives can be read into the conversation, on `Read`, `Grep` and in a shell command |
+| `path_classes` | `refuse` | `allow` | the `GATED` and `KERNEL` rules in **your own** policy stop being enforced for writes |
+| `push` | `refuse` | `allow` | the deployment class is not checked at all, including the pushes nothing can undo — `--mirror`, a force push to the default branch, a deleted remote branch |
+| `prompts` | `ask` | `skip` | Claude Code stops prompting for calls no gate objects to. This is the one that people mean by "skip permissions" |
+
+`preset:` sets all five at once. `strict` is the default; `open` is the loose
+column, top to bottom:
+
+```yaml
+boundaries:
+  preset: open
+```
+
+An explicit key beats the preset **in both directions**, so a repo that wants
+room to work but not its own keys read is four lines:
+
+```yaml
+boundaries:
+  preset: open
+  credentials: refuse
+```
+
+### What `open` never reaches
+
+Named as a list rather than implied, because "everything" needs a floor and
+this block lives in a file agents can write:
+
+1. **Secret scanning.** `gitleaks` runs from the
+   [secrets gate](../hooks/#the-secrets-gate-and-exactly-where-it-stops), a different hook that never reads
+   this block, and a `deny` from any hook beats an `allow` from another. A
+   commit or push carrying a key is refused under `preset: open` with
+   `prompts: skip`, and a test pins exactly that.
+2. **`hooks/**` and `.tyran/policies/**`.** The enforcement scripts and the
+   policy that classifies them.
+3. **`.claude/settings.json`, `.claude/settings.local.json` and
+   `.tyran/STOP`.** The hook registry and your brake. A flag the loop can use
+   to clear its own stop signal is not a flag.
+4. The control-character guard, the evidence gate and the usage gate, none of
+   which read this block either.
+
+### The cost, stated rather than implied
+
+`.tyran/config.yaml` is class `AUTO` in the shipped policy, so **an agent can
+widen these itself** — the same trade `autonomy:` already makes, and the reason
+the four exceptions above are mechanical rather than a matter of anyone's good
+behaviour. What holds regardless: nothing in this block lets a session switch a
+gate off, edit the hook registry, clear `.tyran/STOP`, or publish a secret.
+
+A value the validator rejects resolves to **strict**, never to the loose side.
+`credentials: yes` is not `allow` — guessing that it was would open the secret
+rule on a typo. `node scripts/doctor.mjs --state` reports `boundaries-relaxed`
+whenever anything is loose, because relaxing a boundary removes refusals, and
+nothing else in a session will ever mention it again.
 
 ## Self-improvement boundaries (`.tyran/policies/autonomy.yaml`)
 

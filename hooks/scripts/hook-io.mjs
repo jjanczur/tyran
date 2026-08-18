@@ -210,6 +210,43 @@ export function askPayload(event, reason) {
   };
 }
 
+/**
+ * The allow payload for `event` — an explicit AUTO-APPROVAL.
+ *
+ * This is the one output in this file that makes a tool call happen without
+ * the platform asking anybody. It exists because an operator asked for exactly
+ * that and set `boundaries.prompts: skip` in their own config, and it is
+ * reachable ONLY from a handler that returns `{decision: 'allow'}` on purpose.
+ *
+ * Read the invariant carefully, because it is narrower than it looks and the
+ * narrowness is the whole safety argument: NO failure mode reaches this
+ * function. A throw, a timeout, a malformed input, an unrecognised return
+ * value and an overrun budget all still become refusals, exactly as before.
+ * What changed is that "allow" is now SAYABLE, not that anything says it by
+ * accident — which is the property `PASS` below is about.
+ *
+ * A refusal from any other hook still wins: `deny` beats `allow` across
+ * hooks (measured — HOOK-CONTRACT-MEASURED.md §4). So this cannot approve a
+ * command the secrets gate refuses, and that is not politeness between gates,
+ * it is the platform's own precedence.
+ */
+export function allowPayload(event, reason) {
+  const meta = EVENTS[event];
+  if (meta === undefined || meta.refusal === null) {
+    throw new GateOnProbeEventError(String(event));
+  }
+  if (meta.refusal !== 'permissionDecision') {
+    throw new Error(`"allow" is only expressible where the platform models permissionDecision, not on ${String(event)}`);
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: event,
+      permissionDecision: 'allow',
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
 /** The context-injection payload for `event`, or `{}` where it accepts none. */
 export function contextPayload(event, additionalContext) {
   const meta = EVENTS[event];
@@ -225,8 +262,16 @@ export function contextPayload(event, additionalContext) {
  * gate is satisfied", it means "approve this tool call and skip the
  * permission prompt". A gate whose only job is to look for secrets would
  * then be silently auto-approving every command it happened not to object
- * to. There is no way to emit `allow` from this runtime, and a test pins
- * that.
+ * to.
+ *
+ * `allowPayload` above CAN emit it, and the distinction between the two is
+ * the safety property, so state it as a rule rather than as a fact about
+ * today's callers: **`PASS` never becomes `allow`, and no failure mode ever
+ * does.** Auto-approval requires a handler to return `{decision: 'allow'}`
+ * deliberately, which one gate does only when an operator wrote
+ * `boundaries.prompts: skip` in their own config. Tests pin both halves —
+ * that PASS emits `{}`, and that a throw, a timeout, a malformed input and an
+ * unrecognised return value all still refuse.
  */
 export const PASS = Object.freeze({ decision: 'pass' });
 
@@ -486,11 +531,13 @@ function refusalText({ errorClass, message, fix }) {
  *     platform's timeout kills the process and DISCARDS its output, so a
  *     gate that is merely slow is a gate that approves.
  *
- * `handler(input)` returns `PASS`, `{ decision: 'deny', reason }` or —
- * on events that model permissionDecision — `{ decision: 'ask', reason }`,
- * which renders the user's own prompt for exactly this call. Anything else
- * is treated as a bug and refuses — an unrecognised return value must not
- * be able to mean "allow".
+ * `handler(input)` returns `PASS`, `{ decision: 'deny', reason }` or — on
+ * events that model permissionDecision — `{ decision: 'ask', reason }`, which
+ * renders the user's own prompt for exactly this call, or
+ * `{ decision: 'allow', reason }`, which AUTO-APPROVES it and skips that
+ * prompt. Anything else is treated as a bug and refuses — an unrecognised
+ * return value must not be able to mean "allow", which is why allow has to be
+ * spelled out and cannot be arrived at.
  *
  * ## What the deadline does and does not promise
  *
@@ -721,8 +768,19 @@ export async function runGate({ event, handler, deadlineMs, io = defaultIo() }) 
         emit(payload);
         return;
       }
+      if (verdict !== null && typeof verdict === 'object' && verdict.decision === 'allow') {
+        // Deliberate auto-approval. Reached only from an explicit handler
+        // return; every ending that is not one — throw, timeout, overrun,
+        // malformed input, unrecognised verdict — is still a refusal.
+        const { payload } = clampPayload(
+          (reason) => allowPayload(outEvent, reason),
+          sanitizeForOutput(String(verdict.reason ?? 'allowed without a stated reason')),
+        );
+        emit(payload);
+        return;
+      }
       throw new Error(
-        `handler returned ${JSON.stringify(verdict)}; expected PASS or { decision: 'deny' | 'ask', reason }`,
+        `handler returned ${JSON.stringify(verdict)}; expected PASS or { decision: 'deny' | 'ask' | 'allow', reason }`,
       );
     } catch (err) {
       refuse(outEvent, describeError(err));

@@ -455,11 +455,46 @@ export function validateKnowledge(doc) {
     if ('applies_to' in entry && !Array.isArray(entry.applies_to)) {
       errors.push(`${at}.applies_to: must be a list of path globs`);
     }
-    if ('supersedes' in entry && !isNonEmptyString(entry.supersedes)) {
-      errors.push(`${at}.supersedes: must be an entry id`);
+    // A LIST as well as a scalar, because consolidation is many-to-one by
+    // definition: a merged entry that could retire only one predecessor
+    // cannot express the merge it was written to record. The scalar form
+    // stays legal — every entry written before this read as one id.
+    if ('supersedes' in entry) {
+      const ids = entry.supersedes;
+      if (isNonEmptyString(ids)) {
+        if (ids === entry.id) errors.push(`${at}.supersedes: an entry cannot supersede itself`);
+      } else if (Array.isArray(ids)) {
+        if (ids.length === 0) {
+          errors.push(`${at}.supersedes: must name at least one entry id`);
+        }
+        ids.forEach((id, j) => {
+          if (!isNonEmptyString(id)) errors.push(`${at}.supersedes[${j}]: must be an entry id`);
+          else if (id === entry.id) errors.push(`${at}.supersedes[${j}]: an entry cannot supersede itself`);
+        });
+      } else {
+        errors.push(`${at}.supersedes: must be an entry id, or a list of entry ids`);
+      }
     }
   });
   return errors;
+}
+
+/**
+ * The ids an entry retires, whatever spelling it used. One home for the
+ * string-or-list branch: `selectEntries` and `auditEntries` both need it, and
+ * a second hand-rolled `Array.isArray` check is how the two would drift into
+ * disagreeing about which entries a brief may carry.
+ *
+ * Self-supersede is a validator error rather than something callers filter,
+ * so this never has to defend against the one-entry cycle. A MUTUAL pair
+ * (A→B, B→A) still validates and is reported by `knowledge.mjs audit` — a
+ * cheap named line beats teaching the selector graph theory.
+ */
+export function supersededIds(entry) {
+  const ids = entry?.supersedes;
+  if (typeof ids === 'string') return ids.trim() === '' ? [] : [ids];
+  if (Array.isArray(ids)) return ids.filter((id) => typeof id === 'string' && id.trim() !== '');
+  return [];
 }
 
 /**

@@ -131,16 +131,43 @@ same number as `knowledge-store-unreachable`.
 
 It is a MEASUREMENT and never an edit. Which of two overlapping entries is the
 true one is a judgement, and a script that guessed would delete exactly the
-detail the store exists to hold.
+detail the store exists to hold. That has not changed: nothing scores text
+similarity, and no tool picks a winner.
 
-**Nothing merges overlapping entries yet**, and this page said otherwise until
-0.1.35 — it promised a retrospective step writing a new file for you to
-review, and `knowledge.mjs audit` printed the same promise in its own output.
-No such step exists in `skills/retro/SKILL.md` or `agents/retro.md`. What the
-retrospective really does to this store is **counter upkeep**: it folds each
-report's knowledge-brief verdicts into the entries' counters, retires an entry
-the counters have written off, and splits one `doctor --state` flags as
-`knowledge-entry-oversized`. Merging two overlapping entries is still yours.
+**What the store gained is a way to record the judgement without paying for
+it.** A merge is an **append**: write the entry that states the fact once,
+give it a `supersedes:` naming every id it replaces, and touch nothing else.
+`knowledge.mjs brief` drops any entry named by another entry's `supersedes`,
+so the replaced ones stop reaching handoffs immediately — while keeping their
+bytes, their provenance and the counters they earned over months, because no
+file holding them was edited.
+
+That shape is the whole safety argument. A bad merge is not a lost history to
+be prevented by review; it is one file to delete, after which every entry it
+retired comes back whole. The `audit` reports the reclaimable total —
+superseded entries cost nothing in any brief, so deleting them is a `git rm`
+whenever you feel like it, and never a tool.
+
+The one mechanical failure is a `supersedes` naming an id that is not in the
+store: the retirement silently does not happen, so the old entry keeps
+competing *and* the new one adds to the total. `audit` names those, and
+`doctor --state` counts live and superseded separately so its number still
+reconciles against the files on disk.
+
+Retirement without a replacement is the other half, and it now runs on
+evidence rather than taste. `audit` lists the entries whose counters have
+written them off — reported wrong more often than helpful, or delivered three
+times or more and never once reported helpful. An entry delivered *once* is
+never a candidate: that is absence of evidence, not evidence. And if no entry
+in the store carries a non-zero counter at all, the audit says so plainly —
+the fold at retro close is not happening, which is a more useful finding than
+any list it could print instead.
+
+This page promised a consolidation step that did not exist until 0.1.35
+corrected it, and `knowledge.mjs audit` printed the same promise in its own
+output. It may describe one now because `selectEntries` genuinely suppresses a
+superseded id — a guard test asserts that by running a brief, not by grepping
+for a function name.
 
 ## Where a lesson lands: four stores, four questions
 

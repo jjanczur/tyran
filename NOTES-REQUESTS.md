@@ -480,9 +480,23 @@ Recorded because the list has only ever lived in a conversation.
    answer. Needs a new event or a `decision` with no gate, plus dismissible
    and restorable state, which is per-operator and therefore machine-local
    (`localStorage`, like `moved`) rather than journalled. **M.**
-2. **Knowledge consolidation.** `scripts/knowledge.mjs` has `auditEntries`;
-   nothing emits a consolidated file. The retro step is the producer that does
-   not exist. **M.**
+2. ~~**Knowledge consolidation.**~~ FIXED on `main`; ships with the next
+   release. Not as "emit a consolidated file" — the producer that did not
+   exist turned out to be the wrong shape to build. `supersedes` was already
+   in the schema and read by nothing; making `selectEntries` honour it turns a
+   merge into an APPEND, so the entry that says it better names the ones it
+   replaces and no existing file is touched. The replaced entries keep the
+   counters they earned over months and stop reaching briefs, and a merge you
+   got wrong costs one deleted file. `supersedes` had to widen to a list first
+   — as a scalar an N→1 merge is not expressible, which is why nothing was
+   ever built on it. What was deliberately NOT built: text-similarity scoring
+   (deciding two entries say the same thing is a judgement, and the retro
+   reads the store anyway) and a proposal verifier (its conservation checks
+   guard a lossy merge that appending does not perform). The counters got
+   their first reader in the same pass, since three surfaces already told an
+   agent to retire on evidence nothing computed. One finding code came with it
+   — `knowledge-duplicate-id`, for a cross-file collision that made doctor
+   report a healthy store while every brief exited 1.
 3. ~~**Findings carrying the output of the command that produced them.**~~
    SHIPPED 0.1.41, by recording the COMMAND rather than its output. Three
    reasons the original framing was the expensive one: a stored output is a

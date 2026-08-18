@@ -11,6 +11,7 @@ import {
   limitsOf,
   pricingOf,
   validateKnowledge,
+  supersededIds,
   knowledgeWarnings,
   KNOWLEDGE_ENTRY_MAX_CHARS,
   validatePolicy,
@@ -173,6 +174,48 @@ test('validates usage counters and optional fields', () => {
 
 test('requires entries to be a list', () => {
   assert.ok(validateKnowledge({}).some((e) => e.includes('entries')));
+});
+
+test('supersedes accepts a LIST, because a merge is many-to-one by definition', () => {
+  // MUTANT: keep `supersedes` a scalar. Consolidation then cannot be
+  // expressed at all — a merged entry could retire exactly one predecessor,
+  // so merging three overlapping entries would leave two of them live and
+  // still competing for the same brief budget.
+  assert.deepEqual(validateKnowledge({ entries: [knowledgeEntry({ supersedes: ['K-0', 'K-9'] })] }), []);
+  // the scalar spelling stays legal — every entry written before this used it
+  assert.deepEqual(validateKnowledge({ entries: [knowledgeEntry({ supersedes: 'K-0' })] }), []);
+});
+
+test('supersedes rejects an empty list, a non-string member, and a wrong type', () => {
+  // An empty list is a merge that names nothing: it reads as "this replaces
+  // something" while retiring no entry at all.
+  assert.ok(validateKnowledge({ entries: [knowledgeEntry({ supersedes: [] })] }).some((e) => e.includes('supersedes')));
+  assert.ok(validateKnowledge({ entries: [knowledgeEntry({ supersedes: [''] })] }).some((e) => e.includes('supersedes[0]')));
+  assert.ok(validateKnowledge({ entries: [knowledgeEntry({ supersedes: [7] })] }).some((e) => e.includes('supersedes[0]')));
+  assert.ok(validateKnowledge({ entries: [knowledgeEntry({ supersedes: 12 })] }).some((e) => e.includes('supersedes')));
+});
+
+test('an entry cannot supersede itself, in either spelling', () => {
+  // MUTANT: allow it. `selectEntries` builds one flat set of superseded ids,
+  // so a self-reference hides the very entry that carries it — the store
+  // silently loses a live fact and the file still validates. Caught here, at
+  // the only layer that can see the id and its own supersedes together.
+  const id = knowledgeEntry().id;
+  for (const spelling of [id, [id]]) {
+    const errors = validateKnowledge({ entries: [knowledgeEntry({ supersedes: spelling })] });
+    assert.ok(errors.some((e) => /cannot supersede itself/.test(e)), `self-supersede allowed as ${JSON.stringify(spelling)}`);
+  }
+});
+
+test('supersededIds normalises both spellings, so no caller re-implements the branch', () => {
+  assert.deepEqual(supersededIds({ supersedes: 'K-1' }), ['K-1']);
+  assert.deepEqual(supersededIds({ supersedes: ['K-1', 'K-2'] }), ['K-1', 'K-2']);
+  // absent, blank and junk all mean "retires nothing" rather than throwing:
+  // this runs inside the selector on every brief.
+  assert.deepEqual(supersededIds({}), []);
+  assert.deepEqual(supersededIds({ supersedes: '  ' }), []);
+  assert.deepEqual(supersededIds({ supersedes: ['K-1', 7, ''] }), ['K-1']);
+  assert.deepEqual(supersededIds(undefined), []);
 });
 
 test('knowledgeWarnings flags an oversized entry without touching the error contract', () => {

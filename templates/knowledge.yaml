@@ -6,6 +6,11 @@
 #
 # kind: fact | convention | gotcha | command | decision
 #
+# To merge two entries that say one thing, APPEND a third that states it once
+# and carries `supersedes: [K-3, K-7]`. The named entries drop out of every
+# brief while keeping their bytes and counters, so deleting the new file
+# brings them back. Never edit or delete the originals to merge them.
+#
 # Validate:  node scripts/schema.mjs validate knowledge .tyran/knowledge/*.yaml
 
 entries:

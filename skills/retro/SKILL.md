@@ -66,6 +66,32 @@ here, at close, in the one place licensed to write these files. Keep entries
 under the size `doctor --state` warns about (`knowledge-entry-oversized`,
 4 000 codepoints); an oversized entry crowds every brief it matches.
 
+**Then consolidate — by APPENDING, never by editing.** Read the audit:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/knowledge.mjs" audit --dir .tyran/knowledge
+```
+
+It names the retirement candidates the counters have written off, and — if it
+says no entry carries counter evidence — that the fold above is not actually
+happening, which is the finding to act on first.
+
+Deciding that two entries say the same thing is YOUR judgement; no script
+scores it. Recording that decision is mechanical: write a **new** file,
+`.tyran/knowledge/<slug>-merged.yaml`, whose entry states the fact once and
+carries `supersedes:` naming every id it replaces, plus the union of their
+`provenance`. **Do not touch the files holding the originals.** They keep
+their bytes and the counters they earned over months, and stop reaching briefs
+because `supersedes` retires them at read time. An entry the counters have
+written off with nothing to replace it is a plain deletion — git holds the
+bytes, and the counters are the argument.
+
+Re-run the audit. Superseded should be up, `live` down, reachability up, and
+**dangling zero** — a `supersedes` naming an id that is not in the store means
+the retirement silently did not happen and the merge only made the store
+bigger. Undo, if the merge was wrong, is deleting that one file: every entry
+it retired comes back whole.
+
 Write what a competent newcomer would get wrong, not what the code already
 says. "The test suite takes 9 minutes, so do not run it per file" is worth an
 entry. "This is a Next.js app" is not: the next agent can see that.

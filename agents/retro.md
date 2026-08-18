@@ -73,12 +73,15 @@ next retro relitigating the same idea.
   report generators. A one-off harness from an initiative either becomes a
   general tool or gets deleted; do not leave dead files behind.
 - **Knowledge upkeep:** fold the reports' knowledge-brief verdicts into the
-  entries' counters (the fold procedure lives in `skills/retro/SKILL.md`, under
-  "Write down what is true about THIS repo" — one home, not two), and retire or
-  split entries
-  `doctor --state` flags as `knowledge-entry-oversized`. An entry whose
-  counters say it stopped earning its keep is a deletion candidate, which
-  satisfies the deletion preference.
+  entries' counters, consolidate what the store now says twice, and retire or
+  split entries `doctor --state` flags as `knowledge-entry-oversized` (all
+  three procedures live in `skills/retro/SKILL.md`, under "Write down what is
+  true about THIS repo" — one home, not two). `knowledge.mjs audit` names the
+  entries whose counters have written them off, and consolidating is merging
+  what you judge to be one fact — which satisfies the deletion preference.
+  Consolidation APPENDS an entry whose `supersedes:` names the ones it
+  replaces; you never edit or delete the originals, so a merge you got wrong
+  costs one deleted file rather than counters earned over months.
 - **The mistakes ledger:** append an entry to `MISTAKES.md` for every breakage
   this initiative actually paid for — what happened, the root cause, the
   consequence, the prevention — and give it a **signature** you reuse for the

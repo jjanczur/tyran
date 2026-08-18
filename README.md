@@ -57,7 +57,10 @@ asking you to describe it. After every initiative the team runs a retrospective
 on itself, and what it changes is Tyran, never your product code. The same
 failure three times becomes knowledge pasted into every matching handoff; five
 times and it becomes a rule in your `CLAUDE.md`, carrying the dates that earned
-it. Most retros correctly change nothing.
+it. That knowledge does not only grow: entries the counters have written off
+are retired on evidence, and two that say one thing are merged by appending a
+third that supersedes both — the originals stay on disk, so an unwanted merge
+is one file to delete. Most retros correctly change nothing.
 
 All of it lands on one page — a **board**: what every agent is doing right now,
 which questions are waiting on you (answer them there and the run carries on),
@@ -319,7 +322,7 @@ enforces the cap (3868 of 5000 characters). What each one assumes, when it
 fires and who invokes it, is in
 [skills and agents](https://jjanczur.github.io/tyran/skills/); the prompts
 themselves are in [`skills/`](skills/) and [`agents/`](agents/). Behind all of
-it: 1592 unit tests, run with `node --test "tests/**/*.test.mjs"`.
+it: 1612 unit tests, run with `node --test "tests/**/*.test.mjs"`.
 
 ## Documentation
 

@@ -205,6 +205,7 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'config-invalid': 'error',
     'config-unreadable': 'error',
     'knowledge-invalid': 'error',
+    'knowledge-duplicate-id': 'error',
     'knowledge-unreadable': 'error',
     'knowledge-not-a-directory': 'warning',
     'knowledge-entry-oversized': 'warning',
@@ -738,6 +739,49 @@ function closeSpawnHint(journalPath, init, agent) {
 }
 
 /**
+ * The same entry id in two files.
+ *
+ * `validateKnowledge` allocates its `seen` set per DOCUMENT and runs once per
+ * file, so only the loop that assembles the whole store can see this — which
+ * is `loadEntries`, and it reports it through the channel `brief` and `audit`
+ * already refuse on. Doctor has to ask separately, or it reports "healthy"
+ * about a store no brief will read.
+ *
+ * It matters more since `supersedes` became the retirement mechanism: that
+ * field names an id, and an ambiguous one retires whichever entry the loop
+ * reached first.
+ */
+function knowledgeDuplicateIds(knowledgeDir) {
+  let invalid;
+  try {
+    if (!isDirectory(knowledgeDir)) return [];
+    ({ invalid } = loadKnowledgeEntries(knowledgeDir));
+  } catch {
+    return [];
+  }
+  const findings = [];
+  for (const { file, errors } of invalid ?? []) {
+    for (const error of errors) {
+      // Only the collisions: a file that fails its SCHEMA is already reported
+      // by `checkSchemaFile`, and saying it twice is the defect this repo
+      // names ADR-21.
+      if (!/^duplicate id /.test(String(error))) continue;
+      findings.push(
+        finding(
+          'knowledge-duplicate-id',
+          show(file),
+          `${error} — ids must be unique across the whole store, not merely within one file. ` +
+            '`knowledge.mjs brief` refuses a store that does not validate, so every handoff ' +
+            'that asks for a brief gets nothing until one of the two is renamed',
+          `node scripts/knowledge.mjs audit --dir ${sq(knowledgeDir)}   # names both files`,
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
+/**
  * Is the knowledge store actually READABLE, as a whole?
  *
  * Every failure returns [] rather than throwing: this is advisory, it runs
@@ -763,14 +807,23 @@ function knowledgeReachability(knowledgeDir) {
       ? ''
       : ` ${stuck.length} of them cannot appear in ANY brief even alone (widest: ` +
         `${show(stuck[0].id)} at ${stuck[0].cost}), so no budget a caller passes will reach them.`;
+  // The denominator is LIVE entries, because `reachable` is measured over
+  // them — pairing it with the on-disk total would print "1 of 3 can reach a
+  // brief; 0 cannot", which does not add up. The superseded count is named
+  // separately so the two numbers still reconcile against the files on disk
+  // rather than looking like entries that went missing.
+  const retired =
+    report.superseded === 0
+      ? ''
+      : ` (${report.entries} on disk; ${report.superseded} superseded and deliberately retired)`;
   return [
     finding(
       'knowledge-store-unreachable',
       show(knowledgeDir),
-      `${report.reachable} of ${report.entries} knowledge entries can reach one brief at the ` +
-        `${report.budget}-codepoint budget; ${report.unreachable} cannot.${detail} The store is written ` +
-        'by every retrospective and read through that budget, so what does not fit is not merely ' +
-        'crowded — it reaches nobody',
+      `${report.reachable} of ${report.live} live knowledge entries can reach one brief at the ` +
+        `${report.budget}-codepoint budget; ${report.unreachable} cannot${retired}.${detail} The store ` +
+        'is written by every retrospective and read through that budget, so what does not fit is not ' +
+        'merely crowded — it reaches nobody',
       `node scripts/knowledge.mjs audit --dir ${sq(knowledgeDir)}   # the full list, widest first`,
     ),
   ];
@@ -1896,6 +1949,12 @@ export function runStateChecks({
       );
     }
   }
+  // A duplicate id ACROSS files, which no per-file check can see: the
+  // validator allocates its id set per document. `knowledge.mjs brief`
+  // refuses the whole store over this, so without a finding here doctor would
+  // report a healthy repo while every handoff's brief exited 1 — a gate that
+  // cannot fire is exactly what this command exists to catch.
+  findings.push(...knowledgeDuplicateIds(join(dir, 'knowledge')));
   checked.push(`knowledge/: ${knowledge.files.length} file(s)`);
   // The AGGREGATE, which the per-entry warning above cannot show.
   //

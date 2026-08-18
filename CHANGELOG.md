@@ -1,6 +1,92 @@
 # Changelog
 
-## 0.1.41 — 2026-08-17
+## 0.1.41 — 2026-08-18
+
+### The knowledge store can now shrink, and nothing is destroyed to do it
+
+`.tyran/knowledge/` only ever grew. `knowledge.mjs audit` measured the damage
+and said, in its own output, that nothing merges overlapping entries — true
+since 0.1.35 corrected the three surfaces that had promised otherwise.
+
+The producer everyone was waiting for turned out to be the wrong thing to
+build. **`supersedes` was already in the schema, already documented, and read
+by nothing.** Making `selectEntries` honour it turns a merge into an *append*:
+write the entry that states the fact once, name the ones it replaces, touch
+nothing else. The replaced entries stop reaching briefs immediately and keep
+their bytes, their provenance and the counters they earned over months —
+because no file holding them was edited.
+
+That shape is the whole safety argument, and it is why no verifier shipped
+alongside. A bad merge is not a lost history to be prevented by review; it is
+one file to delete, after which every retired entry comes back whole.
+Conservation checks — counters summed, provenance carried across — guard a
+*lossy* merge that appending does not perform, and they cannot express the
+risk that actually exists: the merged sentence dropping the important half.
+Certifying the arithmetic while the meaning evaporates is the expensive kind
+of false assurance.
+
+**`supersedes` had to widen to a list first**, and that is probably why nothing
+was ever built on it: as a scalar, a merged entry could retire exactly one
+predecessor, so an N→1 merge — which is what consolidation *is* — could not be
+written down at all. An entry may not supersede itself (the validator refuses
+it; a flat suppression set would otherwise hide the entry carrying the
+reference), and a mutually superseding pair hides both, so `audit` names those
+rather than teaching the selector graph theory.
+
+**No script decides which entries say the same thing.** That is a judgement and
+it stays the retrospective's — text-similarity scoring was considered and cut,
+because on a store this size the agent adjudicating the candidates reads them
+better than a token score dominated by shared vocabulary. The line that fell
+out is worth keeping: *a script may count a judgement already recorded; it may
+not perform one.*
+
+Which is what licensed the other half. `used`/`helpful`/`outdated_reports` are
+report verdicts — recorded judgements — and three surfaces already instructed
+an agent to retire entries on their evidence while **nothing computed it**: the
+same unimplemented-promise defect as 0.1.35, one field over. `audit` now names
+the candidates: reported wrong more often than helpful, or delivered three
+times or more and never once helpful. An entry delivered *once* is never a
+candidate; that is absence of evidence, not evidence.
+
+The most useful line it prints is the degenerate one. The counters are
+maintained only by a model hand-editing YAML at retro close, so if that fold is
+not happening every entry reads `helpful: 0` and the rule would flag the entire
+store — confidently, on nothing. A store with no counter evidence now reports
+**that** instead, and flags nothing. Evidence is asked of the whole store
+rather than the live part, or consolidating the one counter-bearing entry away
+would flip the report to "the fold is not happening" — a strong claim, and
+false.
+
+Also: a duplicate entry id **across two files** went undetected, because the
+validator allocates its id set per document and runs per file. It matters more
+now that `supersedes` names an id — an ambiguous one retires whichever entry
+the loop reached first. `loadEntries` refuses it through the channel `brief`
+and `audit` already treat as loud.
+
+That refusal is why it also earns a doctor finding, `knowledge-duplicate-id`
+(error). The intent had been to add none — an overlap or staleness backlog is
+a judgement queue rather than a malfunction, and would be red on every mature
+store forever, which is the shape people learn to skip. A duplicate id is the
+opposite: never red on a healthy store, and a genuine break. Without it doctor
+reported a **healthy** repo whose every handoff got no brief at all, since
+`brief` exits 1 on a store that does not validate. A gate that cannot fire is
+the thing `doctor --state` exists to catch, so it could hardly be the thing it
+stayed quiet about.
+
+`doctor --state` counts live and superseded separately; pairing a
+live-only reachability with an on-disk total would have printed "1 of 3 can
+reach a brief; 0 cannot".
+
+Both guard tests from 0.1.35 were **retuned, not removed**. The one banning
+`/consolidat/i` from the audit was a proxy that expires the moment the step
+exists, so it now asserts the property directly: the audit may describe the
+mechanism only while a brief genuinely stops delivering a superseded entry —
+checked by running a brief, not by grepping for a function name. The one
+gating doc prose on an unimplemented feature had an escape hatch by design;
+letting it fall silent would have traded a real guard for none, so it now
+asserts the two self-improvement surfaces agree line for line. The original
+defect was never that the claim existed — it was that one claim lived in three
+places and drifted.
 
 ### A finding names the command behind it, not a sentence about one
 

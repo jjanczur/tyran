@@ -78,7 +78,7 @@ export const COMMANDS = {
   ],
   knowledge: [
     'knowledge.mjs',
-    'Select the knowledge entries that apply to a set of paths and print a paste-ready brief for a handoff.',
+    'Brief the knowledge entries that apply to a set of paths, or audit the store for what no brief can reach.',
   ],
   mistakes: [
     'mistakes.mjs',

@@ -303,9 +303,9 @@ round-trip can never change what a file means.
 | `text` | yes | the rule, in one sentence |
 | `confidence` | yes | 0–1; later retros raise or lower it |
 | `provenance[]` | yes | `{source, reference}` — where it was learned |
-| `used` / `helpful` / `outdated_reports` | no | counters; entries that stop earning their keep get retired |
+| `used` / `helpful` / `outdated_reports` | no | counters; `knowledge.mjs audit` names the entries they have written off |
 | `applies_to[]` | no | path globs this entry is scoped to |
-| `supersedes` | no | id of the entry this one replaces |
+| `supersedes` | no | id, **or list of ids**, this entry replaces; each one stops reaching briefs while staying on disk with its counters |
 
 `provenance[]` entries need both `source` (where it was learned) and
 `reference` (which run, file or commit proves it).
@@ -325,6 +325,15 @@ The budget is why entry size matters: `doctor --state` warns
 characters, because one document-sized entry crowds out every other entry a
 brief would have carried. Keep an entry a fact; put the essay in `docs/` and
 the pointer here.
+
+`supersedes` is how the store stops growing without anything being destroyed.
+Merging two entries means writing a **third** in a new file, naming both in
+its `supersedes`, and leaving the originals alone — they drop out of every
+brief while keeping their counters, and deleting the new file brings them
+back. An entry may not supersede itself, and a `supersedes` naming an id that
+is not in the store is reported by `knowledge.mjs audit`, because that
+retirement silently did not happen. See
+[self-improvement](../self-improvement/).
 
 Lease files (`state/*/locks/`) are runtime, not history: `/tyran:setup` seeds
 `.tyran/.gitignore` to keep them out of git, and `doctor --state` warns

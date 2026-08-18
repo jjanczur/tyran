@@ -783,6 +783,32 @@ test('an oversized knowledge entry is a warning on a file that still validates',
   assert.doesNotMatch(oversized[0].fix ?? '', /\brm\b|\bmv\b|>\s*\S/);
 });
 
+test('the same entry id in two files is an error doctor raises on its own', () => {
+  // MUTANT: rely on the per-file schema check. `validateKnowledge` allocates
+  // its `seen` set per DOCUMENT, so a cross-file collision passes every
+  // per-file check — while `knowledge.mjs brief` refuses the whole store over
+  // it. Without this finding, doctor reports a healthy repo whose every
+  // handoff gets no brief at all, which is precisely the "gate that cannot
+  // fire" this command exists to catch.
+  const root = repo();
+  const dir = scaffold(root, { knowledge: false });
+  mkdirSync(join(dir, 'knowledge'), { recursive: true });
+  const entry = (where) =>
+    `entries:\n  - id: K-1\n    kind: fact\n    text: 'defined in ${where}'\n    confidence: 0.5\n` +
+    `    provenance:\n      - source: 'test'\n        reference: 'test'\n`;
+  writeFileSync(join(dir, 'knowledge', 'a.yaml'), entry('a'));
+  writeFileSync(join(dir, 'knowledge', 'b.yaml'), entry('b'));
+  const result = runStateChecks({ dir });
+  const dupes = byCode(result, 'knowledge-duplicate-id');
+  assert.equal(dupes.length, 1);
+  assert.equal(dupes[0].severity, 'error');
+  assert.match(dupes[0].message, /K-1/);
+  assert.match(dupes[0].message, /a\.yaml/, 'the finding must name the file it collides with');
+  // A file that merely fails its own schema is reported by checkSchemaFile;
+  // saying it twice here would be three spellings of one answer.
+  assert.deepEqual(byCode(result, 'knowledge-invalid'), []);
+});
+
 // -------------------------------------------------------- one init per file
 
 test('events from a foreign initiative are an error naming the directory contract', () => {
@@ -1769,6 +1795,7 @@ const EXPECTED_SEVERITY = {
   'config-invalid': 'error',
   'config-unreadable': 'error',
   'knowledge-invalid': 'error',
+  'knowledge-duplicate-id': 'error',
   'knowledge-unreadable': 'error',
   'knowledge-not-a-directory': 'warning',
   'knowledge-entry-oversized': 'warning',

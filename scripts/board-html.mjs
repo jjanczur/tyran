@@ -134,6 +134,22 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .file{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;font-size:.76rem}
 .file .fname{color:var(--steel-bright);font-family:var(--mono);font-weight:600;min-width:6rem}
 .file code{color:var(--muted);font-size:.72rem;word-break:break-all}
+/* On an initiative the name is a button that opens the file; on a ticket it is
+   still a plain span. Underlined rather than boxed: it sits in a list of paths
+   and a row of buttons there would read as a toolbar. */
+.file button.fname{background:transparent;border:0;padding:0;font-size:inherit;cursor:pointer;
+  text-align:left;text-decoration:underline;text-underline-offset:.18em}
+.file button.fname:hover{color:var(--brass-bright)}
+.file button.fname:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.docview{margin-top:.5rem}
+.dochead{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.3rem}
+/* The document, as TEXT. It is agent-written markdown rendered by nothing —
+   pre-wrap so a long line folds instead of pushing the page sideways, and a
+   ceiling so a 2000-line NOTES.md scrolls inside the panel rather than
+   burying the board under it. */
+pre.doc{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;
+  padding:.7rem .85rem;font-family:var(--mono);font-size:.74rem;line-height:1.5;color:var(--text);
+  white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto;margin:0}
 
 /* ---- what actually ran on a ticket ---- */
 .runs{width:100%;border-collapse:collapse;margin-top:.3rem;font-size:.74rem;display:block;overflow-x:auto}
@@ -184,6 +200,20 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .reply textarea:disabled{opacity:.55;cursor:not-allowed}
 .reply .acts{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
 .reply .hint{font-size:.75rem;color:var(--muted);margin-top:.3rem}
+/* Folded shut on a board that can answer in the page, opened by the settings
+   fetch on one that cannot. The summary is a sentence, not a chevron with a
+   noun: what is behind it is a route, not a section. */
+.howbox{margin:.3rem 0 .8rem}
+.howbox>summary{cursor:pointer;font-size:.76rem;color:var(--muted);list-style:none;padding:.2rem 0}
+.howbox>summary::-webkit-details-marker{display:none}
+/* The marker is written as a CHARACTER, not a CSS escape: this whole
+   stylesheet lives inside a template literal, where a backslash-2 escape is
+   read by JavaScript first and rejected as an octal one, taking the module
+   down before any CSS exists. */
+.howbox>summary::before{content:"▸ ";color:var(--steel)}
+.howbox[open]>summary::before{content:"▾ "}
+.howbox>summary:hover{color:var(--text)}
+.howbox>summary:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
 pre.how{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;padding:.7rem .85rem;font-family:var(--mono);font-size:.76rem;color:var(--text);overflow-x:auto;margin:.4rem 0 .7rem}
 pre.how .c{color:var(--muted)}
 
@@ -203,11 +233,23 @@ pre.how .c{color:var(--muted)}
 .comp .s-cache_write_1h{background:var(--ink)}
 /* ---- initiatives ---- */
 .inits{display:flex;flex-direction:column;gap:.3rem;margin:.5rem 0}
+/* A button, because selecting one opens its detail — the same interaction the
+   lane cards have. The reset is the whole point of the first three
+   declarations: a button inherits neither the page font nor its colour. */
 .initrow{display:grid;grid-template-columns:minmax(0,1.6fr) 5rem auto minmax(0,1fr);
-  gap:.6rem;align-items:center;padding:.35rem .5rem;border-radius:4px}
+  gap:.6rem;align-items:center;padding:.35rem .5rem;border-radius:4px;
+  font:inherit;color:inherit;background:transparent;border:1px solid transparent;
+  width:100%;text-align:left;cursor:pointer}
+.initrow:hover{border-color:var(--hairline);background:var(--bg-raised)}
+.initrow:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.initrow[aria-pressed="true"]{border-color:var(--brass-edge);background:var(--brass-low)}
 /* An initiative nobody can move without the operator is the one thing on this
    section worth catching an eye. */
 .initrow.waiting{background:color-mix(in srgb,var(--brass) 12%,transparent)}
+/* Finished work is CONTEXT, not news: it keeps its row and its numbers and
+   stops competing for attention with the initiatives that are still running. */
+.initrow.finished .il,.initrow.finished .iv{color:var(--muted)}
+.initrow .iw.done{color:var(--sage);font-weight:600}
 .initrow .il{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .initrow .islug{color:var(--muted);margin-left:.4rem;font-size:.85em}
 .initrow .ib{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
@@ -404,6 +446,14 @@ if (data.schema !== 1) {
     ['spend', 'Spend', null],
     ['settings', 'Settings', null],
   ];
+  // The open tab lives in the URL fragment, and that is not cosmetic. Tab
+  // state was a local variable while this page reloads itself every 30
+  // seconds, so an operator reading Spend was thrown back to Overview twice a
+  // minute — the page contradicting its own reason to be left open.
+  //
+  // replaceState, never an assignment to location.hash: assigning pushes a
+  // history entry, and one entry per reload means the Back button walks
+  // backwards through half an hour of refreshes instead of leaving the page.
   var select = function (key) {
     for (var i = 0; i < TABS.length; i += 1) {
       var k = TABS[i][0];
@@ -411,6 +461,9 @@ if (data.schema !== 1) {
       buttons[k].setAttribute('aria-selected', on ? 'true' : 'false');
       panels[k].hidden = !on;
     }
+    try {
+      history.replaceState(null, '', '#' + key);
+    } catch (e) { /* a restorable tab is a nicety; never let it take the page down */ }
   };
   TABS.forEach(function (spec) {
     var b = el('button', null, spec[1]);
@@ -614,21 +667,141 @@ if (data.schema !== 1) {
   // "Waiting" is the initiative's own count of open operator questions. The
   // idle time is computed HERE, from last_ts, because the payload is
   // byte-compared and reads no clock — the same split the agent strip uses.
+  // Reading an initiative's own documents, which were paths you copied into an
+  // editor and nothing else. SERVED, never embedded, for the same reason spend
+  // is: one NOTES.md runs to tens of kilobytes and board.json is a committed,
+  // byte-compared artefact.
+  //
+  // The request names an initiative and a FILE NAME, never a path - the server
+  // matches that name against its own fixed list (see board.mjs), so no URL
+  // this page can build reaches a file Tyran did not already agree to show.
+  // The markdown is rendered as TEXT in a pre, deliberately not parsed: these
+  // documents are written by agents, and the rule this whole page keeps is
+  // that nothing from that side ever becomes markup.
+  var loadDoc = function (init, file, view) {
+    clear(view);
+    view.appendChild(el('div', 'hint', 'reading ' + file.name + '…'));
+    fetch('doc.json?init=' + encodeURIComponent(init) + '&name=' + encodeURIComponent(file.name),
+      { headers: { accept: 'application/json' } })
+      .then(function (r) { return r.json().then(function (p) { return { ok: r.ok, payload: p }; }); })
+      .then(function (res) {
+        clear(view);
+        var payload = res.payload || {};
+        if (!res.ok) {
+          view.appendChild(el('div', 'setnote bad', String(payload.error || 'this file could not be read')));
+          return;
+        }
+        var head = el('div', 'dochead');
+        head.appendChild(el('span', 'fname', file.name));
+        head.appendChild(el('code', null, payload.path));
+        var close = el('button', 'sbtn', 'Close');
+        close.setAttribute('type', 'button');
+        close.addEventListener('click', function () { clear(view); });
+        head.appendChild(close);
+        view.appendChild(head);
+        var pre = el('pre', 'doc');
+        pre.textContent = payload.text;
+        view.appendChild(pre);
+        if (payload.truncated === true) {
+          view.appendChild(el('div', 'hint',
+            'Shown to ' + payload.bytes + ' bytes and cut there — open ' + payload.path + ' for the rest.'));
+        }
+      })
+      .catch(function () {
+        clear(view);
+        view.appendChild(el('div', 'setnote bad',
+          'This board is not being served, so it cannot read files. Start one with: npx @jjanczur/tyran board --dir .tyran --serve'));
+      });
+  };
+
   var inits = Array.isArray(data.initiatives) ? data.initiatives : [];
   if (inits.length > 0) {
-    var stalled = inits.filter(function (i) { return i.waiting > 0; }).sort(function (a, b) {
+    // Finished is a fact the journal STATES, never one inferred from a
+    // percentage: a checkpoint whose phase is the reserved word closed. See
+    // board.mjs for why that event and no other.
+    var isClosed = function (i) { return typeof i.closed === 'string' && i.closed !== ''; };
+    // A finished initiative blocks nobody, so its leftover questions are moot
+    // and it stays out of the nag. Its own row still reports them.
+    var stalled = inits.filter(function (i) { return i.waiting > 0 && !isClosed(i); }).sort(function (a, b) {
       return (ageMsOf(b.last_ts) || 0) - (ageMsOf(a.last_ts) || 0);
     });
+    var finished = inits.filter(isClosed);
     ov.appendChild(el('h2', null, 'Initiatives'));
     if (stalled.length > 0) {
       ov.appendChild(el('div', 'hint',
         stalled.length + ' of ' + inits.length + ' are waiting on an answer from you. ' +
         'Longest-waiting first — an initiative with an open question does not move until it is answered.'));
     }
+    if (finished.length > 0) {
+      ov.appendChild(el('div', 'hint',
+        finished.length + ' finished, sorted last. Finished means a checkpoint declared the initiative closed; it ' +
+        'is not a claim that anything was deployed, which no journal event records. An initiative sitting at 100% ' +
+        'without that checkpoint is work that stopped, not work that ended.'));
+    }
+    // Selecting an initiative, which was the one thing on this page you could
+    // read and not open. Deliberately the ticket detail's shape and place:
+    // same interaction, same corner of the screen, nothing new to learn.
+    var initDetail = el('div');
+    var initSelected = null;
+    var showInit = function (i, button) {
+      if (initSelected) initSelected.setAttribute('aria-pressed', 'false');
+      initSelected = button;
+      button.setAttribute('aria-pressed', 'true');
+      clear(initDetail);
+      var box = el('div', 'detail');
+      box.appendChild(el('div', 'dt', i.title || i.name));
+      var dl = el('dl');
+      var irow = function (k, v) {
+        if (v === null || v === undefined || v === '') return;
+        dl.appendChild(el('dt', null, k));
+        dl.appendChild(el('dd', null, v));
+      };
+      irow('directory', i.name);
+      irow('state', isClosed(i)
+        ? 'finished — a checkpoint closed it ' + ago(i.closed) + ' (' + i.closed + ')'
+        : 'open' + (i.phase ? ' · phase ' + i.phase : ' · no phase recorded'));
+      irow('tickets', i.merged + ' of ' + i.tickets + ' merged ('
+        + (typeof i.percent === 'number' ? i.percent : 0) + '%)');
+      irow('waiting on you', i.waiting > 0
+        ? i.waiting + ' question(s) — the "Waiting on you" tab answers them' : null);
+      irow('findings', i.findings > 0 ? i.findings + ' — STATE.md carries the table' : null);
+      irow('last event', i.last_ts ? ago(i.last_ts) + ' (' + i.last_ts + ')' : null);
+      box.appendChild(dl);
+      // The documents this initiative ACTUALLY has, listed by the server after
+      // an existsSync - never a fixed list of what a well-run initiative ought
+      // to contain. A named file that is not there is the same lie as a
+      // missing one, in the other direction.
+      var docs = (data.files || {})[i.name] || [];
+      if (docs.length === 0) {
+        box.appendChild(el('div', 'hint',
+          'No PLAN.md, NOTES.md, RETRO.md, STATE.md or PROGRESS.md beside this journal — those five are what the board can open.'));
+      } else {
+        box.appendChild(el('div', 'dt', 'Files'));
+        var view = el('div', 'docview');
+        var list = el('div', 'files');
+        docs.forEach(function (f) {
+          var line = el('div', 'file');
+          var open = el('button', 'fname', f.name);
+          open.setAttribute('type', 'button');
+          open.addEventListener('click', function () { loadDoc(i.name, f, view); });
+          line.appendChild(open);
+          line.appendChild(el('code', null, f.path));
+          list.appendChild(line);
+        });
+        box.appendChild(list);
+        box.appendChild(view);
+      }
+      initDetail.appendChild(box);
+    };
     var table = el('div', 'inits');
-    var ordered = stalled.concat(inits.filter(function (i) { return !(i.waiting > 0); }));
+    var ordered = stalled
+      .concat(inits.filter(function (i) { return !(i.waiting > 0) && !isClosed(i); }))
+      .concat(finished);
     ordered.forEach(function (i) {
-      var row = el('div', i.waiting > 0 ? 'initrow waiting' : 'initrow');
+      var row = el('button', 'initrow'
+        + (isClosed(i) ? ' finished' : i.waiting > 0 ? ' waiting' : ''));
+      row.setAttribute('type', 'button');
+      row.setAttribute('aria-pressed', 'false');
       // The TITLE, which the journal has carried all along while this page
       // showed a directory slug.
       var label = el('div', 'il');
@@ -643,16 +816,20 @@ if (data.schema !== 1) {
       var counts = i.merged + '/' + i.tickets + ' merged';
       // Named only when there is something to name. A findings count of zero
       // on every row is noise that teaches the eye to skip the column.
-      if (i.findings > 0) counts += ' \u00b7 ' + i.findings + ' finding' + (i.findings === 1 ? '' : 's');
+      if (i.findings > 0) counts += ' · ' + i.findings + ' finding' + (i.findings === 1 ? '' : 's');
       row.appendChild(el('div', 'iv', counts));
       var age = ageMsOf(i.last_ts);
-      row.appendChild(el('div', i.waiting > 0 ? 'iw warn' : 'iw',
-        i.waiting > 0
-          ? i.waiting + ' waiting on you \u00b7 quiet ' + ago(i.last_ts)
-          : (age === null ? '' : 'last moved ' + ago(i.last_ts))));
+      row.appendChild(el('div', isClosed(i) ? 'iw done' : i.waiting > 0 ? 'iw warn' : 'iw',
+        isClosed(i)
+          ? 'FINISHED · closed ' + ago(i.closed)
+          : i.waiting > 0
+            ? i.waiting + ' waiting on you · quiet ' + ago(i.last_ts)
+            : (age === null ? '' : 'last moved ' + ago(i.last_ts))));
+      row.addEventListener('click', function () { showInit(i, row); });
       table.appendChild(row);
     });
     ov.appendChild(table);
+    ov.appendChild(initDetail);
   }
 
   ov.appendChild(el('h2', null, 'Agents'));
@@ -902,19 +1079,37 @@ if (data.schema !== 1) {
     [].forEach.call(lanesWrap.children, function (box) { shown += box.tyranApply(q); });
     filterCount.textContent = q === '' ? '' : shown + ' of ' + allCards.length + ' ticket(s)';
   };
-  filterInput.addEventListener('input', applyFilter);
+  filterInput.addEventListener('input', function () {
+    applyFilter();
+    // The same rule every other input on this page follows: a reload must not
+    // eat what you are in the middle of typing. Re-armed the moment the box is
+    // empty again, because the Board is one of the two views that has to stay
+    // live — a filter left holding the timer would freeze it for the night.
+    // Wrapped, not passed: both helpers are defined further down, and
+    // addEventListener with undefined is a silent no-op rather than an error.
+    if (filterInput.value.trim() === '') armRefresh(); else holdRefresh();
+  });
   bd.appendChild(lanesWrap);
   bd.appendChild(detail);
 
   // ---- questions --------------------------------------------------------
   var qs = panels.questions;
   qs.appendChild(el('div', 'hint', 'Every question here is a gate in the journal, and it stays open until you close it. Blank takes the recorded default and is still written down as your decision; a single dash leaves it for next time.'));
+  // The terminal route, folded shut. It is the ONLY way to answer on a board
+  // opened over file:// or served without --write, so it can never be removed
+  // — but on a writable board it is three commands the operator does not need,
+  // printed above the questions, which is where the eye lands first. So it
+  // opens itself exactly when it is the answer: the settings fetch below finds
+  // out whether this board can write, and a board that cannot gets it open.
+  var howBox = el('details', 'howbox');
+  howBox.appendChild(el('summary', null, 'Answer from the terminal instead'));
   var how = el('pre', 'how');
   how.textContent =
     'npx @jjanczur/tyran answer render --dir .tyran   # writes .tyran/state/ANSWERS.md\\n' +
     '$EDITOR .tyran/state/ANSWERS.md                  # fill the answer: lines\\n' +
     'npx @jjanczur/tyran answer apply --dir .tyran    # closes what you answered';
-  qs.appendChild(how);
+  howBox.appendChild(how);
+  qs.appendChild(howBox);
   if (asks.length === 0) qs.appendChild(el('div', 'empty', 'nothing — the agents have what they need'));
 
   // Answering from the page. The three commands above still work and stay
@@ -928,9 +1123,14 @@ if (data.schema !== 1) {
   var replyBox = function (a, hasDefault) {
     var box = el('div', 'reply');
     var input = el('textarea');
-    input.placeholder = hasDefault
+    // The shortcut is named where the cursor already is. "Answer" IS the send
+    // button and always was, but a labelled verb beside a text box reads as a
+    // mode switch rather than as send, and an operator who types an answer and
+    // presses Enter gets a newline with nothing to say why.
+    input.placeholder = (hasDefault
       ? 'Your answer, in your own words \\u2014 or use the default button.'
-      : 'Your answer, in your own words. There is no recorded default for this one.';
+      : 'Your answer, in your own words. There is no recorded default for this one.')
+      + ' \\u2318/Ctrl+Enter sends.';
     var acts = el('div', 'acts');
     var send = el('button', 'sbtn', 'Answer');
     send.setAttribute('type', 'button');
@@ -969,7 +1169,8 @@ if (data.schema !== 1) {
           + ': ' + p.recorded + ' \\u00b7 decision ' + p.decision + ' \\u2014 reload to refresh the board';
       });
     };
-    send.addEventListener('click', function () {
+    var attempt = function () {
+      if (input.disabled) return;
       if (input.value.trim() === '') {
         status.className = 'sstat bad';
         status.textContent = hasDefault
@@ -978,6 +1179,20 @@ if (data.schema !== 1) {
         return;
       }
       submit(input.value);
+    };
+    send.addEventListener('click', attempt);
+    // Enter ALONE must not send, and the modifier is not decoration. This is a
+    // textarea because an operator explaining a decision writes sentences, and
+    // what it sends is appended to a journal that can never take it back — a
+    // question closed by a stray keystroke is a decision nobody made. The
+    // keyCode fallback is for a browser that reports no key on a dead-key
+    // layout; a duplicate hit is harmless because the handler is idempotent
+    // once the field disables itself.
+    input.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'Enter' || e.keyCode === 13)) {
+        e.preventDefault();
+        attempt();
+      }
     });
     if (useDefault) useDefault.addEventListener('click', function () { submit(''); });
 
@@ -1629,13 +1844,20 @@ if (data.schema !== 1) {
     stBody.appendChild(pol);
   };
 
-  // Leaving this tab re-arms the refresh, entering it stops it. A page that
+  // Leaving these tabs re-arms the refresh, entering one stops it. A page that
   // reloads under an open select is a page that loses the change you were
-  // halfway through making, and the board has three other tabs that want to
-  // stay live.
+  // halfway through making.
+  //
+  // Spend joined Settings for a different reason: nothing on it is live. It is
+  // one fetch of a report over transcripts, and reloading the page under a
+  // reader who is comparing two rows of a cost table re-runs that scan to
+  // redraw numbers that did not move. Overview and Board are the two views
+  // that must NOT be held — a stale board overnight is the failure this page
+  // exists to prevent.
+  var HELD_TABS = { settings: true, spend: true };
   Object.keys(buttons).forEach(function (key) {
     buttons[key].addEventListener('click', function () {
-      if (key === 'settings') holdRefresh(); else armRefresh();
+      if (HELD_TABS[key] === true) holdRefresh(); else armRefresh();
     });
   });
 
@@ -1672,6 +1894,11 @@ if (data.schema !== 1) {
   fetch('settings.json', { headers: { accept: 'application/json' } })
     .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(String(r.status))); })
     .then(function (payload) {
+      // A read-only board cannot post an answer, so the terminal commands stop
+      // being a footnote and become the instruction — opened here rather than
+      // guessed at render time, because whether this board may write is a fact
+      // only the server has.
+      if (payload.writable !== true) howBox.open = true;
       if (payload.schema !== 1) {
         clear(stBody);
         stBody.appendChild(el('div', 'setnote bad', 'Settings were served in a format this page does not know (schema ' +
@@ -1692,13 +1919,31 @@ if (data.schema !== 1) {
       }
     })
     .catch(function () {
+      // No server at all — file://, or a copy on a docs site. Nothing on this
+      // page can write, so the terminal route is the only one there is. Set
+      // BEFORE the file:// return, which is silent on purpose.
+      howBox.open = true;
       if (String(location.protocol) === 'file:') return;
       clear(stBody);
       stBody.appendChild(el('div', 'setnote bad',
         'Settings could not be read: the board server did not answer. They are served, never embedded \\u2014 start it with: npx @jjanczur/tyran board --dir .tyran --serve --write'));
     });
 
-  select('overview');
+  // An unknown fragment is not worth a message: someone hand-edited the URL,
+  // or a later Tyran renamed a tab. hasOwnProperty rather than a truth test on
+  // the lookup, so a fragment spelling "constructor" cannot select a prototype.
+  var tabFromHash = function () {
+    var wanted = String(location.hash || '').replace(/^#/, '');
+    return Object.prototype.hasOwnProperty.call(panels, wanted) ? wanted : 'overview';
+  };
+  select(tabFromHash());
+  // Changing only the fragment of a URL is a SAME-DOCUMENT navigation: the
+  // browser fires this and reloads nothing, so without it a link to #board —
+  // or an operator editing the address bar on the page they already have open
+  // — moved the URL and left the page on whatever tab it was showing.
+  // Measured in a real browser; it is the half of fragment routing that is
+  // invisible until someone tries it.
+  window.addEventListener('hashchange', function () { select(tabFromHash()); });
 
   var foot = el('footer');
   foot.appendChild(el('div', null, 'GENERATED by tyran scripts/board.mjs — do not edit. Reloads itself every 30 s unless you are editing; ages are computed in this browser.'));

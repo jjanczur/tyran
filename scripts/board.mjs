@@ -35,7 +35,7 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { readJournal } from './journal.mjs';
+import { isClosingPhase, readJournal } from './journal.mjs';
 import {
   BOARD_FILE,
   BOARD_JSON_FILE,
@@ -48,7 +48,7 @@ import {
   writeAllAtomic,
   writeAtomic,
 } from './project.mjs';
-import { jsonEscapeInvisible } from './invisible.mjs';
+import { escapeInvisible, jsonEscapeInvisible } from './invisible.mjs';
 import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, WINDOWS, costJson, costReport } from './cost.mjs';
 import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
@@ -225,10 +225,12 @@ export function readInitiativeBoards(tyranDir) {
  * rather than embedded. Relative is also the more useful form — it is what
  * the reader pastes, from the repo root, into an editor.
  *
- * Nothing is served from here: `--serve` derives a filesystem path from no
- * URL at all, which is worth more than a clickable link. The one route that
- * writes — Settings, behind `--write` — reaches two fixed files named in
- * `settings.mjs` and takes a KEY from the request, never a path.
+ * These five ARE served, since 0.1.42, by `readInitiativeDoc` below — and the
+ * promise this comment has always made survives it intact: `--serve` still
+ * derives a filesystem path from no URL at all. The route takes a NAME and
+ * matches it against the list above, exactly as the one route that writes —
+ * Settings, behind `--write` — reaches two fixed files named in `settings.mjs`
+ * by taking a KEY from the request and never a path.
  */
 export const INITIATIVE_FILES = Object.freeze(['PLAN.md', 'NOTES.md', 'RETRO.md', 'STATE.md', 'PROGRESS.md']);
 
@@ -239,6 +241,89 @@ export function initiativeFiles(tyranDir, name) {
     name: file,
     path: join(shown, file),
   }));
+}
+
+/**
+ * How much of one document travels to the page, in CODEPOINTS.
+ *
+ * Codepoints and not bytes because the cut is applied to a decoded string:
+ * slicing a UTF-8 buffer at a fixed offset lands inside a character often
+ * enough, and hands the reader a replacement mark that was never in the file.
+ *
+ * A cap at all because this route reads whatever grew beside a journal, and a
+ * NOTES.md three weeks into an initiative is not a thing to push through one
+ * response. The panel says it was cut and names the path holding the rest.
+ */
+export const MAX_DOC_CHARS = 200_000;
+
+/**
+ * One initiative document, for the page's file viewer.
+ *
+ * TWO CLOSED SETS AND NO PATH ARITHMETIC — that is the whole security story,
+ * and it is why the comment on `initiativeFiles` above ("nothing is served
+ * from here") could be revisited rather than merely broken. `name` must equal
+ * a member of `INITIATIVE_FILES`, and `init` must equal a directory that
+ * `state/` actually contains, compared against the very listing the board
+ * folds. Nothing from the request is joined into a path until it has matched
+ * one of those two lists, so `..`, an absolute path, a NUL and a name that
+ * differs only by case are all rejected by never becoming candidates — not by
+ * a filter someone has to keep ahead of the next trick.
+ *
+ * The text is invisible-ESCAPED, like every other journal-side value that
+ * reaches a human (invisible.mjs): these documents are written by agents out
+ * of reports about foreign repositories, and the reader is looking at them on
+ * a page instead of in the editor that would have shown the same bytes.
+ *
+ * Nothing is echoed back on a refusal. A message naming what was asked for is
+ * a message carrying attacker-chosen text into the operator's browser, and
+ * naming the five files it DOES serve is more useful anyway.
+ */
+export function readInitiativeDoc(tyranDir, init, name) {
+  if (!INITIATIVE_FILES.includes(name)) {
+    return { ok: false, status: 400, error: `this board serves only: ${INITIATIVE_FILES.join(', ')}` };
+  }
+  const stateDir = join(tyranDir, 'state');
+  let names;
+  try {
+    names = readdirSync(stateDir);
+  } catch (err) {
+    return { ok: false, status: 503, error: `${err?.code ?? 'unreadable'} reading the state directory` };
+  }
+  if (!names.includes(init)) {
+    return { ok: false, status: 404, error: 'no initiative by that name in this board' };
+  }
+  const file = join(stateDir, init, name);
+  let raw;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (err) {
+    // ENOENT here is ordinary: `initiativeFiles` listed what existed when the
+    // page was rendered, and an initiative that has since been archived is a
+    // fact to report rather than a failure.
+    return {
+      ok: false,
+      status: err?.code === 'ENOENT' ? 404 : 503,
+      error: err?.code === 'ENOENT'
+        ? `${name} is not beside that journal — the board lists what exists when it renders, so reload it`
+        : `${err?.code ?? 'unreadable'} reading ${name}`,
+    };
+  }
+  const chars = [...raw];
+  const truncated = chars.length > MAX_DOC_CHARS;
+  return {
+    ok: true,
+    status: 200,
+    schema: 1,
+    init,
+    name,
+    // Repo-relative, the same form `initiativeFiles` records and for the same
+    // reason: it is what the reader pastes into an editor, and it names no
+    // home directory.
+    path: join(basename(resolve(tyranDir)), 'state', init, name),
+    truncated,
+    chars: truncated ? MAX_DOC_CHARS : chars.length,
+    text: escapeInvisible(truncated ? chars.slice(0, MAX_DOC_CHARS).join('') : raw),
+  };
 }
 
 /** Pure merge of per-initiative boards into the one payload. */
@@ -297,6 +382,28 @@ export function crossBoard({ initiatives, errors, warned = [], stop = null }) {
       // caller assembling one by hand need not have every collection. A
       // missing array must read as "none", never take the board down.
       findings: (state.findings ?? []).length,
+      // FINISHED and ABANDONED read identically on a percentage bar, and they
+      // are the opposite situation: one is work that ended, the other is work
+      // that stopped. The board had no way to tell them apart — measured, it
+      // is the same 63 journals where 43 sat on an unanswered question and 6
+      // were genuinely done.
+      //
+      // A checkpoint whose phase is the reserved word `closed` is the ONLY
+      // event that declares an initiative over (journal.mjs), which is already
+      // what closes its still-open spawns — so this hangs on that same fact
+      // rather than inventing a second rule for "finished" (ADR-21). The
+      // TIMESTAMP, not a boolean: "closed 9 days ago" is the reading, and the
+      // page ages it in the reader's browser like every other time here.
+      //
+      // `phase` travels beside it because an initiative that is NOT closed
+      // still has its own word for where it is, and the per-initiative
+      // board.json has carried that word all along while the cross board
+      // showed a percentage and nothing else.
+      //
+      // NOT deployment: nothing in the closed event set records a deploy, so
+      // the board must not imply one. This says the initiative was wound up.
+      phase: state.checkpoint?.phase ?? null,
+      closed: isClosingPhase(state.checkpoint?.phase) ? state.checkpoint.ts : null,
       last_ts: state.lastTs,
     });
     if (state.lastTs !== null && (asOf === null || state.lastTs > asOf)) asOf = state.lastTs;
@@ -895,6 +1002,27 @@ function main() {
         }
         if (req.url === '/settings.json') {
           sendJson(res, 200, { ...readSettings(dir), writable: flags.write });
+          return;
+        }
+        // An initiative's own documents, which the board could name and not
+        // open. A GET behind the same Host pin as everything else, and NOT
+        // behind `--write`: reading a PLAN.md is what this whole page does,
+        // and the flag draws its line at changing the repository.
+        //
+        // The route takes an initiative and a FILE NAME. It takes no path,
+        // because a route that takes a path is a route whose safety is a
+        // filter — see readInitiativeDoc for the two closed sets that replace
+        // one. The old comment on `initiativeFiles` said this board derives a
+        // filesystem path from no URL at all; it still does not.
+        if (req.url.startsWith('/doc.json?') || req.url === '/doc.json') {
+          const q = new URLSearchParams(req.url.slice(req.url.indexOf('?') + 1));
+          const doc = readInitiativeDoc(dir, String(q.get('init') ?? ''), String(q.get('name') ?? ''));
+          if (doc.ok !== true) {
+            sendJson(res, doc.status, { ok: false, error: doc.error });
+            return;
+          }
+          const { ok, status, ...payload } = doc;
+          sendJson(res, 200, payload);
           return;
         }
         if (req.url === '/settings/config' || req.url === '/settings/policy' || req.url === '/answer') {

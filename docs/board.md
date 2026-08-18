@@ -101,10 +101,17 @@ closed, and `apply` refuses the whole file rather than appending a duplicate.
 ### Or answer it on the page
 
 With the board served `--write`, every question in the **Waiting on you** tab
-carries a box. Type an answer and press **Answer**; on a question that has a
-recorded default, press **Take the default** instead. The three commands above
-still work and stay printed on the tab — the box is a convenience, and a board
-opened over `file://` or without `--write` has to leave you somewhere to go.
+carries a box. Type an answer and press **Answer** — or **⌘/Ctrl+Enter**, which
+the placeholder names, because a labelled verb next to a text box does not read
+as send. Bare **Enter** deliberately does not send: answers are sentences, the
+box is a textarea for that reason, and what it sends is appended to a journal
+that can never take it back. On a question with a recorded default, press **Take
+the default** instead.
+
+The three commands above still work, and the tab still carries them — folded
+into *"Answer from the terminal instead"*, and opened automatically on a board
+that cannot answer in the page (read-only, or `file://`), where they are not a
+footnote but the only route there is.
 
 The request carries exactly two things: **which** ask, and your words.
 Everything else — the question, the recorded default, the ticket, the gate id —
@@ -120,11 +127,20 @@ type to know:
 
 | | |
 |---|---|
-| **decision · a default is recorded** | saying nothing has a safe outcome. You may take the recommendation and move on. |
+| **decision · a default is recorded** | saying nothing has a safe outcome. You may take the default and move on. |
 | **blocking · no safe default** | nobody recorded a fallback, so this one waits for you. |
 
 It is the same distinction that already makes the answer sheet sort
 no-default-first.
+
+**A default and a recommendation are not the same field**, and the buttons
+behave differently because of it. The **default** is what happens if you say
+nothing: *Take the default* submits blank, and the server writes the recorded
+value verbatim as your decision, marked `(default accepted)`. The
+**recommendation** is what the asking agent thinks you should do: *Use the
+recommendation* fills the box and submits nothing, so the wording stays yours to
+edit. When the two read alike on a card, that is the asking agent having written
+one sentence into both fields.
 
 ## Opening it
 
@@ -198,13 +214,28 @@ reloading itself every 30 seconds — on a timer the page can stop, not a
 parses the tag and removing the tag afterwards does not cancel it. A reload
 nothing can stop would destroy a half-typed answer or model name, so the
 timer is held while you are editing and re-armed when you leave.
+
+**What the reload must not cost you.** The open tab lives in the URL fragment
+(`#spend`, `#board`), so a refresh returns to the tab you were reading rather
+than to Overview — which is what it used to do, twice a minute, to anyone who
+left the page on Spend. It is `replaceState`, not an assignment to
+`location.hash`: the latter pushes a history entry per reload, and Back then
+walks through half an hour of refreshes instead of leaving the page. The
+fragment is also a link — `#questions` opens the queue directly, on a page
+already open as well as on a cold load. Three things hold the timer outright:
+typing in an answer box, the **Settings** tab, and the **Spend** tab, whose
+numbers are one scan of your transcripts and do not move on their own. The lane
+filter holds it while it has text and releases it when cleared. **Overview** and
+**Board** are never held — a board that silently stopped updating at midnight is
+the exact failure this page exists to prevent.
 The artefact itself never reads a clock —
 "as of" is the newest event timestamp, which keeps `--check` valid for the
 HTML too; the only clock is the viewer's own browser, which ages the agent
 strip.
 
-One scroll was answering four different questions at once, so each has a tab,
-and the page opens on Overview:
+One scroll was answering four different questions at once, so each has a tab.
+With no fragment in the URL — or one no tab answers to — the page opens on
+Overview:
 
 | tab | what it answers |
 |---|---|
@@ -224,6 +255,31 @@ the ticket, the board's own annotation, and — once the spend fetch has landed
 — that ticket's tokens and cost. The card stays a summary. What does not fit
 goes into the panel rather than into a wider card, which is what a grid of
 lanes cannot afford.
+
+**An initiative row is a button too**, and selecting one opens the same kind of
+panel under the list: its directory, its state, tickets merged, findings, when
+it last moved, and the documents it actually has. Selecting a document reads it
+from the server and shows it in the panel — as text, never parsed, because these
+files are written by agents out of reports about other repositories.
+
+The route behind that is `GET /doc.json?init=…&name=…`, and it takes **no path**.
+`name` must equal a member of a fixed five (`PLAN.md`, `NOTES.md`, `RETRO.md`,
+`STATE.md`, `PROGRESS.md`) and `init` must equal a directory `state/` actually
+contains — nothing from the request is joined into a path until it has matched
+one of those two lists, so traversal is refused by never being a candidate
+rather than by a filter. Content is invisible-escaped like every other
+journal-side value that reaches a human, and capped at 200 000 codepoints with
+the cut declared. Reading is not behind `--write`: that flag draws its line at
+changing the repository.
+
+**Finished is a fact, not a percentage.** A row says `FINISHED` when a
+`checkpoint` declared the initiative's phase `closed` — the same event that
+closes its still-open spawns, and the only one in the closed set that ends an
+initiative. Finished rows sort last and drop out of the "waiting on you" count.
+Note what it does not claim: **no journal event records a deployment**, so the
+board never says one happened. An initiative sitting at 100% with no closing
+checkpoint is work that stopped, not work that ended — and telling those two
+apart is the whole point of the flag.
 
 The panel also carries the two facts the **lane could only imply** and an
 **Execution** table:
@@ -276,8 +332,9 @@ node scripts/board.mjs --dir .tyran --serve --transcripts <dir>   # ... and Spen
 ```
 
 `--serve` binds `127.0.0.1` only, re-renders per request, and never derives a
-filesystem path from a URL; `--write` adds the [Settings](#settings) routes and
-nothing else, and refuses on its own (`--write` without `--serve` or `--detach`
+filesystem path from a URL — including `/doc.json`, which takes an initiative
+and a file NAME and matches both against fixed lists; `--write` adds the
+[Settings](#settings) routes and nothing else, and refuses on its own (`--write` without `--serve` or `--detach`
 is a usage error, not a silent no-op). `--transcripts <dir>` is the same
 refusal, for the same reason: it means something only to `/cost.json`, which
 only exists under a server. Repeatable, and it overrides `spend.transcript_dirs` in

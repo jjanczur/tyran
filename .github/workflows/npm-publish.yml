@@ -20,25 +20,33 @@ name: Publish to npm
 # release step that drifts — the same argument this project makes about every
 # rule that has no mechanism behind it.
 #
-# `release: published` stays, so cutting a GitHub release by hand still works
-# and still publishes. The two triggers are idempotent in the only way that
-# matters: npm refuses a version that already exists, so whichever fires second
-# fails loudly instead of publishing something different under the same number.
+# `release: published` USED TO BE A TRIGGER HERE, and its removal is the whole
+# point of the `release` job below. The two triggers were kept idempotent by
+# npm refusing a duplicate version — whichever fired second failed loudly
+# instead of publishing something different under the same number — and that
+# argument turned out to be too small. npm refusing a DUPLICATE version is not
+# npm refusing an OLD one. Measured: GitHub releases were created for sixteen
+# historical tags in one batch, each fired this workflow, and four of those
+# versions had never reached npm at all — so they published cleanly and every
+# one of them took the `latest` dist-tag on the way past. For about a minute
+# `npm i @jjanczur/tyran` served 0.1.2. The dist-tag step below was the fix:
+# `latest` is earned by being the highest version on the registry, not by being
+# the most recent thing this workflow happened to run.
 #
-# That last sentence used to be the whole safety argument, and it was too
-# small. npm refusing a DUPLICATE version is not npm refusing an OLD one.
-# Measured: GitHub releases were created for sixteen historical tags in one
-# batch, each fired this workflow, and four of those versions had never
-# reached npm at all — so they published cleanly and every one of them took
-# the `latest` dist-tag on the way past. For about a minute
-# `npm i @jjanczur/tyran` served 0.1.2. The dist-tag step below is the fix:
-# `latest` is earned by being the highest version on the registry, not by
-# being the most recent thing this workflow happened to run.
+# Now that CI cuts the release itself, a release is an OUTPUT of the tag push
+# rather than a second way to start one, and a trigger on it would be a second
+# spelling of one act — the defect this repository names ADR-21. The manual
+# recovery path it used to serve is `workflow_dispatch` with `dry_run: false`,
+# which was always the better door for it: it says what it does.
+#
+# The release step this replaces was a human one, and it drifted exactly as
+# this file's own history predicts. Releases stopped at 0.1.29 while eleven
+# more versions shipped; 0.1.41 was merged and never tagged at all, so npm
+# served 0.1.40 while main carried two versions past it. A release step a
+# human has to remember is a release step that drifts.
 on:
   push:
     tags: ['v*']
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -119,7 +127,86 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Publish
-        if: github.event_name == 'release' || inputs.dry_run == false
+        # A tag push satisfies this too, and not by accident: `inputs.dry_run`
+        # is null on a push event, GitHub coerces null and false alike to 0,
+        # and the comparison holds. Spelled out because a reader who assumes
+        # strict equality concludes this workflow cannot publish from a tag —
+        # which is the path every release actually takes.
+        if: inputs.dry_run == false
         run: npm publish --provenance --access public --tag "${{ steps.disttag.outputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The GitHub release, cut from the tag that just published.
+  #
+  # AFTER `publish`, never beside it: a release announces a version people can
+  # install, and one that appears while npm has nothing under that number is an
+  # announcement of something that does not exist. `needs:` makes the ordering
+  # a fact rather than a race.
+  #
+  # This creating a release does NOT re-enter this workflow, and that would be
+  # true even if the `release: published` trigger above had been kept: GitHub
+  # does not start workflow runs from events raised with the default
+  # GITHUB_TOKEN, precisely so automation cannot recurse. It is removed anyway,
+  # because a guarantee that rests on which token happened to be used is a
+  # guarantee that breaks the day someone swaps in a PAT.
+  release:
+    needs: publish
+    # Not on a dispatch: a manual run is a re-publish or a dry run, and neither
+    # is a new release to announce.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      # The only job here that writes anything to the repository, and this is
+      # the one line that lets it.
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: The notes are the changelog entry, or there is no release
+        # Read from CHANGELOG.md rather than generated from commit subjects.
+        # Every entry in that file is written to be read by a person deciding
+        # whether to upgrade, and a list of commit subjects is not that.
+        #
+        # A missing section FAILS the job on purpose. The alternative is a
+        # release with empty notes, which is worse than a red mark: it looks
+        # finished. npm already has the version by this point, so this failure
+        # costs an announcement, never a publish.
+        id: notes
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # `index($0, pre) == 1` is a literal prefix test, not a regex: the
+          # version is full of dots, and a dot in an awk pattern matches any
+          # character — so 0.1.4 would match the 0.1.42 heading.
+          awk -v pre="## $VERSION " '
+            index($0, pre) == 1 { inside = 1; next }
+            inside && index($0, "## ") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no '## $VERSION ' section — write the entry, then re-run this job."
+            exit 1
+          fi
+          # The title follows the convention the existing releases already use:
+          # the version, then the first heading of its entry, which is the one
+          # sentence that says what the release is about.
+          HEAD=$(awk 'index($0, "### ") == 1 { sub(/^### /, ""); print; exit }' notes.md)
+          echo "title=$VERSION${HEAD:+ — $HEAD}" >> "$GITHUB_OUTPUT"
+          echo "notes: $(wc -l < notes.md) lines, title: $VERSION${HEAD:+ — $HEAD}"
+
+      - name: Create it, or leave the one that is already there alone
+        # Idempotent because a tag can be re-pushed and this job re-run, and
+        # overwriting notes someone edited by hand is not this job's business.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists — left untouched"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "${{ steps.notes.outputs.title }}" \
+            --notes-file notes.md \
+            --verify-tag

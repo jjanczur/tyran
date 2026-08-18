@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.1.42 — 2026-08-18
+
+### The board stopped throwing you off the page you were reading
+
+Six defects, all reported by an operator using the board rather than found by
+a test, and every one of them a place where the page knew something and did
+not act on it.
+
+**The tab lived in a local variable.** The page reloads itself every 30
+seconds; tab state did not survive that, so anyone reading Spend was returned
+to Overview twice a minute. The open tab now travels in the URL fragment, which
+also makes `#questions` a link you can send someone. `replaceState`, not an
+assignment to `location.hash` — the latter pushes a history entry per reload,
+and Back then walks backwards through half an hour of refreshes instead of
+leaving the page. A `hashchange` listener answers the other half: changing only
+the fragment is a same-document navigation that reloads nothing, so without it
+a deep link into an already-open page moved the URL and nothing else. That half
+is invisible to source reading and was found in a browser.
+
+**Spend now holds the refresh timer, as Settings already did.** Nothing on it
+is live: it is one scan of your transcripts, and reloading under a reader
+comparing two rows re-runs the scan to redraw numbers that did not move. The
+lane filter holds it too, and releases when cleared. Overview and Board are
+never held — a board that quietly stopped updating at midnight is the failure
+this page exists to prevent.
+
+**An initiative row is a button now.** It was the one thing on the page you
+could read and not open. Selecting one opens the ticket detail's own shape:
+directory, state, tickets merged, findings, when it last moved — and the
+documents beside its journal, which the board has listed as paths since it
+learned to list them and could not show.
+
+`GET /doc.json?init=…&name=…` serves those five files, and it takes **no path**.
+`name` must equal a member of `INITIATIVE_FILES`; `init` must equal a directory
+`state/` actually contains. Nothing from the request is joined into a path
+until it has matched one of those two lists, so traversal is refused by never
+being a candidate rather than by a filter someone has to keep ahead of. The
+text is invisible-escaped like every other journal-side value that reaches a
+human, capped at 200 000 codepoints, and rendered by nothing — these documents
+are agent-written, out of reports about other repositories. Reading is not
+behind `--write`: that flag draws its line at changing the repository.
+
+**Finished and abandoned stopped looking identical.** A percentage cannot tell
+them apart, and the board had nothing else — measured across 63 real journals,
+43 sat on an unanswered question and 6 were genuinely done. A `checkpoint`
+whose phase is the reserved word `closed` is the only event that ends an
+initiative, and it already closes that initiative's open spawns; the row now
+says `FINISHED`, carries the timestamp, sorts last and leaves the "waiting on
+you" count. It is deliberately **not** a deployment claim: no event in the
+closed set records a deploy, so the board does not imply one.
+
+**The answer box grew the keystroke everyone tried.** ⌘/Ctrl+Enter sends, and
+the placeholder says so — "Answer" was always the send button, but a labelled
+verb beside a text box reads as a mode switch. Bare Enter still inserts a
+newline, on purpose: answers are sentences, which is why the field is a
+textarea, and what it sends is appended to a journal that can never take it
+back.
+
+**And the three `npx answer` commands folded away.** They are the only route on
+a read-only board or one opened over `file://`, so they cannot be removed — but
+above the questions on a writable board they were three commands you never need
+in the place the eye lands first. They now sit behind "Answer from the terminal
+instead", and open themselves on the boards where they are the answer, decided
+by the `writable` flag the settings fetch already returned.
+
+Documented on both surfaces, including the difference the page never explained:
+a **default** is what happens if you say nothing (blank is recorded verbatim as
+your decision), a **recommendation** is what the asking agent thinks you should
+do (it fills the box and submits nothing).
+
 ## 0.1.41 — 2026-08-18
 
 ### The knowledge store can now shrink, and nothing is destroyed to do it

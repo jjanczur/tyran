@@ -24,10 +24,12 @@ import { fileURLToPath } from 'node:url';
 import {
   BOARD_HTML_FILE,
   MAX_INITIATIVES,
+  MAX_DOC_CHARS,
   MAX_LOGGED_ERRORS,
   crossBoard,
   crossJson,
   readInitiativeBoards,
+  readInitiativeDoc,
   renderAll,
   renderCrossMd,
   openInBrowser,
@@ -251,7 +253,55 @@ test('the page is four tabs, opens on Overview, and carries the queue count in i
   assert.match(html, /\['spend', 'Spend', null\]/);
   assert.match(html, /el\('span', 'count', '\(' \+ spec\[2\] \+ '\)'\)/, 'the count must reach the tab label');
   assert.match(html, /panels\[k\]\.hidden = !on;/, 'an unselected tab must be hidden, not merely unstyled');
-  assert.match(html, /^\s*select\('overview'\);$/m, 'the page must open on Overview');
+  // Overview is now the FALLBACK rather than an unconditional opening move —
+  // the tab travels in the fragment (see the test below) — and a page reached
+  // with no fragment, or with one no tab answers to, must still open here.
+  assert.match(
+    html,
+    /hasOwnProperty\.call\(panels, wanted\) \? wanted : 'overview';/,
+    'an absent or unknown fragment must fall back to Overview',
+  );
+});
+
+test('the open tab travels in the URL, because the page reloads itself under the reader', () => {
+  // MUTANT 1: drop the replaceState and let `select` keep tab state in memory
+  // only. Every 30-second reload then throws the reader from Spend or
+  // Settings back to Overview — measured on a real board, and the reason this
+  // exists: the page whose whole pitch is that you can leave it open was
+  // resetting twice a minute.
+  // MUTANT 2: swap replaceState for `location.hash = key`. The tab is
+  // restored, and the Back button now walks backwards through one history
+  // entry per refresh instead of leaving the page.
+  // MUTANT 3: read the fragment with `panels[wanted]` instead of
+  // hasOwnProperty. A URL ending in a fragment spelling "constructor" then
+  // selects an inherited property and the page throws while rendering.
+  const html = demoHtml();
+  assert.match(html, /history\.replaceState\(null, '', '#' \+ key\);/, 'the tab must be written to the fragment');
+  assert.ok(!/location\.hash = /.test(html), 'assigning location.hash pushes a history entry per reload');
+  assert.match(html, /var wanted = String\(location\.hash \|\| ''\)\.replace\(\/\^#\/, ''\);/);
+  assert.match(html, /Object\.prototype\.hasOwnProperty\.call\(panels, wanted\)/);
+  // MUTANT 4: drop the hashchange listener. Changing only the fragment is a
+  // SAME-DOCUMENT navigation — nothing reloads — so a link to #board, or an
+  // operator editing the address bar on the page they already have open,
+  // moves the URL and leaves the page where it was. Found in a browser,
+  // because no source reading shows it.
+  assert.match(html, /window\.addEventListener\('hashchange', function \(\) \{ select\(tabFromHash\(\)\); \}\);/);
+});
+
+test('Spend and Settings hold the refresh; Overview and Board must not', () => {
+  // MUTANT 1: drop `spend` from HELD_TABS. The cost tab then re-runs its
+  // transcript scan under a reader comparing two rows, to redraw numbers that
+  // did not move.
+  // MUTANT 2: add `board` or `overview`. That is the failure this page exists
+  // to prevent — an operator asleep in front of a board that stopped updating
+  // at midnight cannot tell it from a fleet that stopped working.
+  const html = demoHtml();
+  assert.match(html, /var HELD_TABS = \{ settings: true, spend: true \};/);
+  assert.match(html, /if \(HELD_TABS\[key\] === true\) holdRefresh\(\); else armRefresh\(\);/);
+  // The lane filter is typing too, and it died on every reload like the
+  // answer boxes used to. Re-armed when empty, or a filter left in the box
+  // freezes the one view that has to stay live.
+  assert.match(html, /if \(filterInput\.value\.trim\(\) === ''\) armRefresh\(\); else holdRefresh\(\);/);
 });
 
 test('a lane card is a button that presses, so the detail panel has something to hang off', () => {
@@ -286,6 +336,44 @@ test('the questions tab prints the three commands that close a question', () => 
   // and the answer words, because a blank line is a recorded decision and
   // reads as one only if the page says so before it is typed
   assert.match(html, /Blank takes the recorded default and is still written down as your decision; a single dash leaves it for next time\./);
+});
+
+test('the terminal commands fold away on a board that can answer, and open on one that cannot', () => {
+  // MUTANT 1: render the pre unwrapped again. Three commands an operator with
+  // a writable board never needs then sit above the questions, which is where
+  // the eye lands first — reported as "npx commands without any context".
+  // MUTANT 2: keep the details but drop the two lines that open it. A
+  // read-only board, or one opened over file://, then HIDES the only route
+  // that can close a question there, which is strictly worse than printing it
+  // unconditionally ever was.
+  const html = demoHtml();
+  assert.match(html, /var howBox = el\('details', 'howbox'\);/);
+  assert.match(html, /el\('summary', null, 'Answer from the terminal instead'\)/);
+  assert.ok(!/howBox\.open = true;\s*\n\s*qs\.appendChild/.test(html), 'it must not start open');
+  // opened by the fact only the server has, on both branches: served
+  // read-only, and not served at all
+  assert.match(html, /if \(payload\.writable !== true\) howBox\.open = true;/);
+  assert.match(html, /howBox\.open = true;\n\s*if \(String\(location\.protocol\) === 'file:'\) return;/);
+});
+
+test('a modifier plus Enter sends an answer, and Enter alone does not', () => {
+  // MUTANT 1: delete the keydown listener. "Answer" is then the only way to
+  // send, and an operator who types a sentence and presses Enter gets a
+  // newline with nothing on the page to say why — reported as "there is no
+  // send button".
+  // MUTANT 2: drop the metaKey/ctrlKey test and send on bare Enter. This is a
+  // textarea because answers are sentences, and what it sends is appended to
+  // a journal that can never take it back: a gate closed by a stray keystroke
+  // is a decision nobody made.
+  const html = demoHtml();
+  assert.match(html, /input\.addEventListener\('keydown', function \(e\) \{/);
+  assert.match(html, /if \(\(e\.metaKey \|\| e\.ctrlKey\) && \(e\.key === 'Enter' \|\| e\.keyCode === 13\)\) \{/);
+  assert.match(html, /e\.preventDefault\(\);\n\s*attempt\(\);/);
+  // one code path, not two: the button and the shortcut must refuse an empty
+  // box in the same words
+  assert.match(html, /send\.addEventListener\('click', attempt\);/);
+  // and the shortcut is named where the cursor already is
+  assert.match(html, /Ctrl\+Enter sends\./);
 });
 
 test('the palette is the muted one, saturation on edges rather than on whole fills', () => {
@@ -438,6 +526,65 @@ test('the drill-down lists the initiative files that exist, and invents none', (
 
   const bare = crossBoard(readInitiativeBoards(tree({ demo: demo() })));
   assert.deepEqual(bare.files, {}, 'no files on disk, no files claimed');
+});
+
+test('a document is reached by TWO CLOSED SETS, never by a path from the URL', () => {
+  // The reason this route could be added at all. `initiativeFiles` has said
+  // since it was written that the board derives a filesystem path from no URL,
+  // and that promise is kept by never joining request text into a path until
+  // it has matched a fixed list — the traversal cases below are refused
+  // because they are never candidates, not because a filter caught them.
+  //
+  // MUTANT: accept any `name` and join it. Every one of these then reads a
+  // file outside the initiative, from a server the operator left running.
+  const dir = tree({ demo: demo() });
+  writeFileSync(join(dir, 'state', 'demo', 'PLAN.md'), '# plan\n');
+  writeFileSync(join(dir, 'secret.txt'), 'not yours\n');
+
+  for (const name of ['../../secret.txt', '../secret.txt', '/etc/passwd', 'plan.md', 'PLAN.md ', '', 'journal.jsonl']) {
+    const out = readInitiativeDoc(dir, 'demo', name);
+    assert.equal(out.ok, false, `${JSON.stringify(name)} must be refused`);
+    assert.equal(out.status, 400);
+    assert.match(out.error, /this board serves only: PLAN\.md, NOTES\.md/);
+  }
+  for (const init of ['..', '../..', 'demo/../demo', 'nope', '']) {
+    const out = readInitiativeDoc(dir, init, 'PLAN.md');
+    assert.equal(out.ok, false, `initiative ${JSON.stringify(init)} must be refused`);
+    assert.equal(out.status, 404);
+  }
+  // Nothing the caller sent is echoed back: a refusal naming what was asked
+  // for carries attacker-chosen text into the operator's browser.
+  assert.ok(!readInitiativeDoc(dir, '<script>', 'PLAN.md').error.includes('<script>'));
+
+  const ok = readInitiativeDoc(dir, 'demo', 'PLAN.md');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.text, '# plan\n');
+  // Repo-relative, the form `initiativeFiles` already records: an absolute
+  // path names a home directory and a username.
+  assert.match(ok.path, /^[^/]+\/state\/demo\/PLAN\.md$/);
+});
+
+test('a document is invisible-escaped and capped, like every value that reaches a human', () => {
+  // MUTANT 1: return the file raw. These documents are written by agents out
+  // of reports about FOREIGN repositories, and the reader is looking at them
+  // on a page rather than in the editor that would show the same bytes — the
+  // exact asymmetry invisible.mjs was written to end.
+  // MUTANT 2: slice a Buffer instead of codepoints. The cut then lands inside
+  // a character and the panel shows a replacement mark that was never there.
+  const dir = tree({ demo: demo() });
+  writeFileSync(join(dir, 'state', 'demo', 'NOTES.md'), `bidi ${String.fromCodePoint(0x202e)} here\n`);
+  const escaped = readInitiativeDoc(dir, 'demo', 'NOTES.md');
+  assert.ok(!escaped.text.includes(String.fromCodePoint(0x202e)), 'a bidi override must not reach the page');
+  assert.match(escaped.text, /<U\+202E>/);
+  assert.equal(escaped.truncated, false);
+
+  // One astral character per position, so a byte-wise cut would be visible.
+  writeFileSync(join(dir, 'state', 'demo', 'PROGRESS.md'), '🙂'.repeat(MAX_DOC_CHARS + 10));
+  const cut = readInitiativeDoc(dir, 'demo', 'PROGRESS.md');
+  assert.equal(cut.truncated, true);
+  assert.equal(cut.chars, MAX_DOC_CHARS);
+  assert.equal([...cut.text].length, MAX_DOC_CHARS, 'the cut is counted in codepoints, not UTF-16 units');
+  assert.ok(!cut.text.includes('�'), 'no character may be cut in half');
 });
 
 test('over the ceiling the SERVED page is readable prose, not a 500 it re-fetches every 30 s', () => {
@@ -1008,6 +1155,48 @@ test('the page renders the initiative rows and names what is waiting', () => {
   assert.match(html, /data\.initiatives/, 'the client must read the initiatives rows');
   assert.match(html, /waiting on you/, 'the stalled count must be spelled out, not implied by a colour');
   assert.match(html, /initrow/);
+});
+
+test('a closing checkpoint marks an initiative finished; a percentage never does', () => {
+  // MUTANT 1: derive `closed` from percent === 100. Work that stopped and
+  // work that ended then read identically, which is the state the operator
+  // reported: 100% on a row nobody could tell apart from an abandoned one.
+  // MUTANT 2: set the flag on any checkpoint. Every initiative that ever
+  // recorded a phase is then "finished" the moment it starts.
+  const closing = demo() + JSON.stringify({
+    ts: '2026-07-27T10:00:00.000Z',
+    ev: 'checkpoint',
+    init: 'demo',
+    actor: 'conductor',
+    data: { phase: 'Closed', next_steps: ['none'] },
+  }) + '\n';
+  const open = crossBoard(readInitiativeBoards(tree({ demo: demo() }))).initiatives[0];
+  assert.equal(open.closed, null, 'an initiative with no closing checkpoint is not finished');
+  assert.equal(typeof open.phase, 'string', 'its phase still travels — an open initiative has a word for where it is');
+
+  const done = crossBoard(readInitiativeBoards(tree({ demo: closing }))).initiatives[0];
+  // The TIMESTAMP, not a boolean: "closed 9 days ago" is the reading, and the
+  // page ages it in the reader's browser like every other time on the page.
+  assert.equal(done.closed, '2026-07-27T10:00:00.000Z');
+  // Case-insensitive and trimmed, because a human writes this phase by hand —
+  // the rule is journal.mjs's, imported rather than restated here.
+  assert.equal(done.phase, 'Closed');
+});
+
+test('an initiative row is a button, and finished ones say so and sort last', () => {
+  // MUTANT 1: render the rows as divs again. The one thing on this page an
+  // operator could read and not open stays unopenable — reported verbatim:
+  // "I can't open tickets and initiatives to read details".
+  // MUTANT 2: drop the finished branch from the ordering. Completed work then
+  // competes for the top of the section with the initiatives still running.
+  const html = demoHtml();
+  assert.match(html, /var row = el\('button', 'initrow'/, 'a row must be a real button, not a clickable div');
+  assert.match(html, /row\.addEventListener\('click', function \(\) \{ showInit\(i, row\); \}\);/);
+  assert.match(html, /\.concat\(finished\);/, 'finished initiatives sort last');
+  assert.match(html, /'FINISHED · closed ' \+ ago\(i\.closed\)/);
+  // and the board must not overclaim: nothing in the closed event set records
+  // a deployment, so the page may not imply one
+  assert.match(html, /is not a claim that anything was deployed/);
 });
 
 test('an ask offers its recommendation as one click, not as text to retype', () => {

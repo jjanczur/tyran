@@ -104,12 +104,17 @@ closed, and `apply` refuses the whole file rather than appending a duplicate.
 ### Or answer it on the page
 
 With the board served `--write`, every question in the **Waiting on you** tab
-carries a box. Type an answer and press **Answer** — or **⌘/Ctrl+Enter**, which
-the placeholder names, because a labelled verb next to a text box does not read
-as send. Bare **Enter** deliberately does not send: answers are sentences, the
-box is a textarea for that reason, and what it sends is appended to a journal
-that can never take it back. On a question with a recorded default, press **Take
-the default** instead.
+carries a chat-style composer: the two canned moves — **⭐ Use the
+recommendation** and **Take the default** — as chips above, the field and a
+round send button on one line, and **Enter** sends (Shift+Enter for a new
+line). The modifier rule this box used to enforce was retired by the operator
+on 2026-08-19; what survives of it is the empty-input guard, so a stray Enter
+on a blank box still sends nothing. Every question also wears a wait chip —
+how long it has been standing, turning red after a day — and its recorded
+DEFAULT line in bold, because "what happens if I never answer" is the
+sentence the queue is scanned by. A ticket sitting in the
+**waiting-operator** lane embeds the same composer in its own detail panel,
+so answering never requires switching tabs.
 
 The three commands above still work, and the tab still carries them — folded
 into *"Answer from the terminal instead"*, and opened automatically on a board
@@ -237,9 +242,13 @@ The artefact itself never reads a clock —
 HTML too; the only clock is the viewer's own browser, which ages the agent
 strip.
 
-One scroll was answering four different questions at once, so each has a tab.
-With no fragment in the URL — or one no tab answers to — the page opens on
-Overview:
+One scroll was answering four different questions at once, so each has a tab
+(each label leads with one emoji, which is what the eye finds first; the word
+stays the identifier). With no fragment in the URL — or one no tab answers to
+— the page opens on Overview. The masthead links to the people behind the
+project and carries a three-state theme switch — **System / Light / Dark** —
+light and dark renderings of one warm palette, following the OS until you
+choose, the choice stored per browser and applied before first paint:
 
 | tab | what it answers |
 |---|---|
@@ -256,15 +265,22 @@ question they do not answer.
 Every lane card is a `<button>` carrying `aria-pressed`, and selecting one
 opens a detail panel under the lanes: the lane, the initiative, the agents on
 the ticket, the board's own annotation, and — once the spend fetch has landed
-— that ticket's tokens and cost. The card stays a summary. What does not fit
-goes into the panel rather than into a wider card, which is what a grid of
-lanes cannot afford.
+— that ticket's tokens and cost. The panel also tells the ticket's own story:
+a **timeline** of its lifecycle facts (spawned, reported, reviewed, merged —
+oldest first, with the merge sha one click from the clipboard), the
+initiative's documents openable in place, and jump buttons to the blocking
+question on the Waiting tab and to Spend. The card stays a summary. What does
+not fit goes into the panel rather than into a wider card, which is what a
+grid of lanes cannot afford.
 
 **An initiative row is a button too**, and selecting one opens the same kind of
 panel under the list: its directory, its state, tickets merged, findings, when
 it last moved, and the documents it actually has. Selecting a document reads it
-from the server and shows it in the panel — as text, never parsed, because these
-files are written by agents out of reports about other repositories.
+from the server and renders it in the panel — headings, lists and code blocks,
+built with `createElement`/`textContent` only. These files are written by
+agents out of reports about other repositories, so structure is all they are
+allowed to become: nothing in a document turns into a link, an image, raw
+HTML or anything that runs — a URL stays a string you can read and copy.
 
 The route behind that is `GET /doc.json?init=…&name=…`, and it takes **no path**.
 `name` must equal a member of a fixed five (`PLAN.md`, `NOTES.md`, `RETRO.md`,
@@ -436,7 +452,11 @@ a board left running is reachable by anything on the machine, and the
 difference between reading that and editing the autonomy policy through it is
 the difference this flag exists to make.
 
-What it edits, with a sentence of prose on every knob:
+What it edits, with a sentence of prose on every knob — and, folded under
+each row, a **"What does this change?"** explainer: what the setting is, what
+changing it does, how it lands on Tyran, and (where loosening is possible)
+what loosening costs, stated before the confirm dialog restates it as a
+question:
 
 | | |
 |---|---|

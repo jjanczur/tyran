@@ -353,7 +353,12 @@ test('schedule forwards --prompt and --cmd to the watcher it spawns', async () =
   );
   chmodSync(stub, 0o755);
 
-  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ resume_at: new Date(Date.now() + 2000).toISOString() })));
+  // Eight seconds, not two: the assert below wants the watcher still WAITING
+  // when `schedule` returns, and on a loaded 8-core laptop the spawn itself
+  // costs ~3 s — a 2 s resume_at let the watcher fire and finish first, and
+  // the test read 'done' where it asserted 'waiting'. Measured 2026-08-19;
+  // CI never saw it because CI runners return in under a second.
+  writeFileSync(join(dir, MARKER_RELPATH), JSON.stringify(marker({ resume_at: new Date(Date.now() + 8000).toISOString() })));
   const r = run(['schedule', '--dir', dir, '--cmd', stub, '--prompt', 'SENTINEL-PROMPT', '--chunk-ms', '100', '--backoff-ms', '10']);
   assert.equal(r.code, 0, r.stderr);
   const state = JSON.parse(readFileSync(join(dir, RESUME_STATE_RELPATH), 'utf8'));

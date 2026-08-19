@@ -376,7 +376,10 @@ test('the shipped policy template classifies the kernel paths it must', () => {
     assert.ok(rule, `template must classify ${required}`);
     assert.equal(rule.class, 'KERNEL');
   }
-  assert.equal(doc.default, 'GATED');
+  // AUTO since 0.1.44 (operator-decided 2026-08-19). Pinned so flipping the
+  // shipped default — in either direction — turns a test red instead of
+  // being a one-word diff nobody notices in review.
+  assert.equal(doc.default, 'AUTO');
 });
 
 test('the shipped template puts .tyran/config.yaml in AUTO, and says what that costs', () => {

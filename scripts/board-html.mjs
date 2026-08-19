@@ -30,7 +30,10 @@ import { COST_SCHEMA } from './cost.mjs';
  * version (operator-decided 2026-08-14: "a bit too flashy"), which filled
  * whole bars and whole cards at full saturation. Saturation is now spent on
  * text, edges and 3px rails; every large fill is a muted tone of the same
- * hue. System font stacks, no web fonts, dark only.
+ * hue. System font stacks, no web fonts. Two palettes since 2026-08-19
+ * (operator-decided: "daj dark mode i light mode"): the same warm families
+ * in a light and a dark rendering, following the OS by default with an
+ * explicit override stored per browser — see THEME_SCRIPT.
  *
  * ## Safety
  *
@@ -46,29 +49,72 @@ import { COST_SCHEMA } from './cost.mjs';
  * allowed, because it runs in the viewer's browser, not in the artifact.
  */
 
-const CSS = `
-:root{
-  /* Warm near-black ground, unchanged in role. The accents below are the
-     change: the first version filled whole bars and whole cards at full
-     saturation, which reads as an alarm rather than as information. Colour is
-     now spent on small things — text, edges, a 3px rail — and every large
-     fill drops to a muted tone of the same hue. */
+/*
+ * The dark palette, once. It is interpolated into the stylesheet TWICE —
+ * under the prefers-color-scheme media query for readers who never chose,
+ * and under [data-theme="dark"] for readers who did — because the two
+ * selectors cannot be combined and a palette maintained in two places is
+ * the drift ADR-21 names. The warm near-black ground is unchanged in role;
+ * --muted was raised from #8f8779 (5.4:1 on the ground, and it carries most
+ * of the small mono text on the page) to 7:1, operator-reported as hard to
+ * read on 2026-08-19.
+ */
+const DARK_TOKENS = `
   --bg:#141210;--bg-raised:#1c1a16;--bg-sunken:#100e0c;
-  --text:#cec7ba;--heading:#ece5d7;--muted:#8f8779;
+  --text:#d3ccbf;--heading:#ece5d7;--muted:#a49c8c;
   --hairline:#332e27;--hairline-soft:#26221d;
   --brass:#a8863c;--brass-bright:#cfae63;--brass-low:#221c11;--brass-edge:#5d4c22;
   --steel:#7d9ea9;--steel-bright:#9dbcc6;--steel-low:#17242a;--steel-edge:#3a545d;
   --clay:#c07a70;--clay-bright:#d9998f;--clay-low:#2a1a18;--clay-edge:#5a3430;
   --sage:#88a06a;--sage-bright:#a3ba86;
+  color-scheme:dark;`;
+
+const CSS = `
+:root{
+  /* The LIGHT rendering of the same families: warm paper instead of warm
+     near-black, every accent darkened until it reads at 4.5:1 or better on
+     the ground. The role vocabulary is unchanged — -low is still the quiet
+     fill, -bright is still the emphasised text tone, -edge the border — so
+     every rule below works in both palettes without knowing which one is
+     live. Colour is still spent on small things — text, edges, a 3px rail —
+     never on whole cards. */
+  --bg:#f4efe6;--bg-raised:#fbf8f1;--bg-sunken:#ebe4d5;
+  --text:#3d372b;--heading:#231e15;--muted:#6b6252;
+  --hairline:#d7cdba;--hairline-soft:#e3dbc9;
+  --brass:#7e6023;--brass-bright:#6d5316;--brass-low:#efe6cb;--brass-edge:#c8b173;
+  --steel:#41666f;--steel-bright:#2f505c;--steel-low:#dde8ea;--steel-edge:#93b1b8;
+  --clay:#a34a3d;--clay-bright:#88392d;--clay-low:#f2ded7;--clay-edge:#d19c8f;
+  --sage:#5d7440;--sage-bright:#4a6030;
   --display:ui-serif,'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,'Times New Roman',serif;
   --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
-  --radius:0.6rem;color-scheme:dark;
+  --radius:0.6rem;color-scheme:light;
+}
+/* Three theme states, not two. No stored choice: the OS decides, via this
+   media query. A stored choice: data-theme lands on <html> before first
+   paint (THEME_SCRIPT) and wins in both directions — the :not() guard is
+   what lets an explicit "light" beat a dark OS. */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){${DARK_TOKENS}
+  }
+}
+:root[data-theme="dark"]{${DARK_TOKENS}
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:1rem;line-height:1.55;-webkit-font-smoothing:antialiased;padding:1.25rem}
 main{max-width:70rem;margin:0 auto}
 h1{font-family:var(--display);color:var(--heading);font-size:1.5rem;margin:0 0 .2rem;font-weight:600}
+/* ---- masthead: title left, the person links and the theme switch right ---- */
+.tophead{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap}
+.topside{display:flex;flex-direction:column;align-items:flex-end;gap:.4rem}
+.toplinks{display:flex;gap:.75rem;font-size:.74rem}
+.toplinks a{color:var(--muted);text-decoration:none;border-bottom:1px solid transparent;padding-bottom:.05rem}
+.toplinks a:hover{color:var(--brass-bright);border-bottom-color:var(--brass-edge)}
+.toplinks a:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.theme{display:flex;gap:.25rem}
+.theme button{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;background:var(--bg-raised);color:var(--muted);border:1px solid var(--hairline);border-radius:.3rem;padding:.16rem .5rem;cursor:pointer}
+.theme button[aria-pressed="true"]{background:var(--brass-low);border-color:var(--brass-edge);color:var(--brass-bright)}
+.theme button:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
 h2{font-family:var(--display);color:var(--heading);font-size:1.02rem;margin:1.4rem 0 .5rem;border-bottom:1px solid var(--hairline-soft);padding-bottom:.3rem;font-weight:600}
 h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0 .2rem;font-weight:650}
 .meta{color:var(--muted);font-family:var(--mono);font-size:.78rem}
@@ -89,7 +135,13 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 /* ---- tiles ---- */
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));gap:.55rem;margin:.5rem 0 .2rem}
 .stile{background:var(--bg-raised);border:1px solid var(--hairline);border-radius:.5rem;padding:.6rem .8rem}
-.stile .lbl{display:block;font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+/* A tile is a BUTTON since 2026-08-19: each headline number is also the way
+   to the place that explains it. The reset matters — a button inherits
+   neither the page font nor left alignment. */
+button.stile{font:inherit;font-family:var(--font);color:var(--text);text-align:left;cursor:pointer;width:100%;display:block}
+button.stile:hover{border-color:var(--steel-edge)}
+button.stile:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.stile .lbl{display:block;font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
 .stile .big{display:block;font-family:var(--mono);font-size:1.3rem;color:var(--heading);font-variant-numeric:tabular-nums;line-height:1.3}
 .stile .sub{display:block;font-family:var(--mono);font-size:.68rem;color:var(--muted)}
 .stile.lead{border-color:var(--brass-edge)}
@@ -101,6 +153,9 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .agents{display:flex;flex-wrap:wrap;gap:.45rem}
 .agent{background:var(--bg-raised);border:1px solid var(--hairline);border-left:3px solid var(--steel-edge);border-radius:.45rem;padding:.42rem .65rem;font-family:var(--mono);font-size:.76rem;min-width:15rem}
 .agent .name{color:var(--steel-bright);font-weight:600}
+/* The dot answers "is this alive" from across the room; the age lines below
+   still answer "how alive" up close. Same class vocabulary, one glyph. */
+.dot{font-size:.62rem;margin-right:.28rem;vertical-align:.06rem}
 .agent .age-fresh{color:var(--sage)}
 .agent .age-warm{color:var(--brass-bright)}
 .agent .age-cold{color:var(--clay)}
@@ -122,7 +177,7 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .moved{background:var(--brass-low);border:1px solid var(--brass-edge);border-radius:var(--radius);padding:.5rem .75rem;margin:.6rem 0;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;color:var(--brass-bright);font-size:.85rem}
 .markseen{background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.4rem;padding:.25rem .6rem;font:inherit;font-size:.78rem;cursor:pointer}
 .markseen:hover{border-color:var(--brass-edge);color:var(--brass-bright)}
-.card .movedtag{display:inline-block;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);border-radius:.3rem;padding:0 .3rem;font-size:.65rem;margin-left:.3rem;letter-spacing:.04em}
+.card .movedtag{display:inline-block;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);border-radius:.3rem;padding:0 .3rem;font-size:.68rem;margin-left:.3rem;letter-spacing:.04em}
 
 /* ---- filter ---- */
 .filter{display:flex;gap:.6rem;align-items:center;margin:.5rem 0 .7rem}
@@ -134,22 +189,17 @@ h3{font-family:var(--font);color:var(--heading);font-size:.85rem;margin:1.1rem 0
 .file{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;font-size:.76rem}
 .file .fname{color:var(--steel-bright);font-family:var(--mono);font-weight:600;min-width:6rem}
 .file code{color:var(--muted);font-size:.72rem;word-break:break-all}
-/* On an initiative the name is a button that opens the file; on a ticket it is
-   still a plain span. Underlined rather than boxed: it sits in a list of paths
-   and a row of buttons there would read as a toolbar. */
+/* The name is a button that opens the file, on initiatives and tickets both.
+   Underlined rather than boxed: it sits in a list of paths and a row of
+   buttons there would read as a toolbar. */
 .file button.fname{background:transparent;border:0;padding:0;font-size:inherit;cursor:pointer;
   text-align:left;text-decoration:underline;text-underline-offset:.18em}
 .file button.fname:hover{color:var(--brass-bright)}
 .file button.fname:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
 .docview{margin-top:.5rem}
 .dochead{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.3rem}
-/* The document, as TEXT. It is agent-written markdown rendered by nothing —
-   pre-wrap so a long line folds instead of pushing the page sideways, and a
-   ceiling so a 2000-line NOTES.md scrolls inside the panel rather than
-   burying the board under it. */
-pre.doc{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;
-  padding:.7rem .85rem;font-family:var(--mono);font-size:.74rem;line-height:1.5;color:var(--text);
-  white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto;margin:0}
+/* The document itself is rendered by renderMarkdown into .docmd (defined with
+   the other detail styles): structure, never active markup. */
 
 /* ---- what actually ran on a ticket ---- */
 .runs{width:100%;border-collapse:collapse;margin-top:.3rem;font-size:.74rem;display:block;overflow-x:auto}
@@ -194,12 +244,49 @@ pre.doc{background:var(--bg-sunken);border:1px solid var(--hairline);border-radi
 .ask .kindtag{display:inline-block;font-family:var(--mono);font-size:.63rem;letter-spacing:.06em;text-transform:uppercase;border-radius:.25rem;padding:.1rem .4rem;margin-bottom:.35rem}
 .ask .kindtag.blocking{background:var(--clay-low);color:var(--clay-bright);border:1px solid var(--clay-edge)}
 .ask .kindtag.decision{background:var(--steel-low);color:var(--steel-bright);border:1px solid var(--steel-edge)}
+/* How long the question has been standing, as a pill beside the kind tag.
+   Brass while it is ordinary, clay after a day — the same two-tone reading
+   the agent ages use, computed in the reader's browser for the same reason. */
+.waitchip{display:inline-block;font-family:var(--mono);font-size:.7rem;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);border-radius:999px;padding:.08rem .55rem;margin-left:.45rem;vertical-align:.08rem}
+.waitchip.long{background:var(--clay-low);color:var(--clay-bright);border-color:var(--clay-edge)}
+/* The two lines an operator decides from. The recommendation and the default
+   were dl rows styled like "ticket" and "since", and the answer to "what
+   happens if I ignore this" — the most load-bearing sentence on the page —
+   rendered at the same weight as a slug. */
+.ask .row.defrow{font-weight:600;color:var(--heading)}
+.ask .row.defrow .label{color:var(--clay)}
 .reply{margin-top:.6rem;border-top:1px solid var(--brass-edge);padding-top:.55rem}
-.reply textarea{display:block;width:100%;font-family:var(--font);font-size:.86rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.35rem;padding:.4rem .55rem;min-height:3.4rem;resize:vertical}
+/* A chat composer, not a form (operator-decided 2026-08-19): the field and a
+   round send sit on one line, the two canned moves are chips above it, and
+   Enter sends. The textarea still grows for an operator writing sentences. */
+.composer{display:flex;gap:.45rem;align-items:flex-end}
+.reply textarea{display:block;width:100%;font-family:var(--font);font-size:.86rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.55rem;padding:.45rem .6rem;min-height:2.6rem;resize:vertical}
 .reply textarea:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
 .reply textarea:disabled{opacity:.55;cursor:not-allowed}
-.reply .acts{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
+.sendbtn{flex:0 0 auto;width:2.3rem;height:2.3rem;border-radius:50%;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);font-size:1rem;line-height:1;cursor:pointer}
+.sendbtn:hover:not(:disabled){background:var(--brass-edge)}
+.sendbtn:disabled{opacity:.5;cursor:not-allowed}
+.sendbtn:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.reply .acts{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:.1rem 0 .4rem}
 .reply .hint{font-size:.75rem;color:var(--muted);margin-top:.3rem}
+/* ---- a ticket's own history, oldest first ---- */
+.tl{margin:.45rem 0 0;font-size:.78rem}
+.tl .tlr{display:flex;gap:.55rem;padding:.16rem 0;border-top:1px dashed var(--hairline-soft);align-items:baseline}
+.tl .tlt{color:var(--muted);font-family:var(--mono);min-width:6.5rem;white-space:nowrap}
+.copysha{font-family:var(--mono);font-size:.68rem;background:var(--steel-low);color:var(--steel-bright);border:1px solid var(--steel-edge);border-radius:.3rem;padding:.06rem .4rem;cursor:pointer}
+.copysha:hover{background:var(--steel-edge)}
+.jumps{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
+/* ---- initiative documents, rendered ---- */
+.docmd{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;padding:.7rem .95rem;font-size:.82rem;line-height:1.6;color:var(--text);max-height:32rem;overflow:auto}
+.docmd .md-h{color:var(--heading);font-weight:700;margin:.7rem 0 .25rem}
+.docmd .md-h.l1{font-size:.98rem}
+.docmd .md-h.l2{font-size:.9rem}
+.docmd .md-h.l3{font-size:.84rem}
+.docmd p{margin:.3rem 0}
+.docmd ul{margin:.25rem 0 .45rem 1.2rem;padding:0}
+.docmd li{margin:.12rem 0}
+.docmd pre{background:var(--bg-raised);border:1px solid var(--hairline-soft);border-radius:.35rem;padding:.5rem .65rem;font-family:var(--mono);font-size:.74rem;overflow-x:auto;margin:.35rem 0;white-space:pre-wrap;word-break:break-word}
+.docmd .md-table{font-family:var(--mono);font-size:.74rem;white-space:pre-wrap;word-break:break-word;margin:.1rem 0}
 /* Folded shut on a board that can answer in the page, opened by the settings
    fetch on one that cannot. The summary is a sentence, not a chevron with a
    noun: what is behind it is a route, not a section. */
@@ -224,13 +311,15 @@ pre.how .c{color:var(--muted)}
 .toggle button[aria-pressed="true"]{background:var(--brass-low);border-color:var(--brass-edge);color:var(--brass-bright)}
 .toggle button:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
 .comp{display:flex;height:1.35rem;border:1px solid var(--hairline);border-radius:.3rem;overflow:hidden;margin-top:.5rem}
-.comp span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.63rem;color:var(--bg);font-weight:700;white-space:nowrap;overflow:hidden}
+.comp span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.66rem;color:var(--bg);font-weight:700;white-space:nowrap;overflow:hidden}
 .comp .s-cache_read{background:var(--brass)}
 .comp .s-cache_write{background:var(--steel)}
 /* The 1-hour write is its own segment because it is its own PRICE — 2x base
    input against the 5-minute write's 1.25x. Without a distinct colour the
-   most expensive caching decision on the page is invisible. */
-.comp .s-cache_write_1h{background:var(--ink)}
+   most expensive caching decision on the page is invisible. --heading, not a
+   fifth family: it referenced an undefined --ink for months and rendered as
+   nothing, which is the bug being fixed here. */
+.comp .s-cache_write_1h{background:var(--heading)}
 /* ---- initiatives ---- */
 .inits{display:flex;flex-direction:column;gap:.3rem;margin:.5rem 0}
 /* A button, because selecting one opens its detail — the same interaction the
@@ -252,7 +341,7 @@ pre.how .c{color:var(--muted)}
 .initrow .iw.done{color:var(--sage);font-weight:600}
 .initrow .il{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .initrow .islug{color:var(--muted);margin-left:.4rem;font-size:.85em}
-.initrow .ib{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.initrow .ib{height:6px;background:var(--hairline);border-radius:3px;overflow:hidden}
 .initrow .ib i{display:block;height:100%;background:var(--sage)}
 .initrow .iv,.initrow .iw{color:var(--muted);font-size:.9em;white-space:nowrap}
 .initrow .iw.warn{color:var(--brass);font-weight:600}
@@ -263,7 +352,7 @@ pre.how .c{color:var(--muted)}
 .day{flex:1 0 6px;min-width:6px;height:100%;display:flex;align-items:flex-end}
 .day i{display:block;width:100%;background:var(--brass);border-radius:1px 1px 0 0}
 /* Outside the chosen window: context, not absence. */
-.day.out i{background:var(--line)}
+.day.out i{background:var(--hairline)}
 .comp .s-output{background:var(--sage)}
 .comp .s-input{background:var(--muted)}
 .compkey{display:flex;flex-wrap:wrap;gap:.85rem;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.3rem}
@@ -295,6 +384,16 @@ pre.how .c{color:var(--muted)}
 .srow select:focus-visible,.srow input:focus-visible,.srow textarea:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
 .srow select:disabled,.srow input:disabled,.srow textarea:disabled{opacity:.55;cursor:not-allowed}
 .srow .shelp{font-size:.8rem;color:var(--muted);line-height:1.6;margin-top:.35rem;max-width:52rem}
+.sexplain{margin-top:.35rem;max-width:52rem}
+.sexplain>summary{cursor:pointer;font-size:.78rem;color:var(--steel);list-style:none;padding:.15rem 0}
+.sexplain>summary::-webkit-details-marker{display:none}
+/* Character, not CSS escape — same reason as .howbox above. */
+.sexplain>summary::before{content:"▸ ";color:var(--steel)}
+.sexplain[open]>summary::before{content:"▾ "}
+.sexplain>summary:hover{color:var(--text)}
+.sexplain>summary:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.sexline{font-size:.8rem;line-height:1.6;margin:.25rem 0;padding-left:.6rem;border-left:2px solid var(--hairline)}
+.sexline b{color:var(--heading);font-weight:600}
 .srow .schoice{font-size:.8rem;color:var(--text);line-height:1.6;margin-top:.3rem;padding-left:.6rem;border-left:2px solid var(--steel-edge)}
 .sstat{font-family:var(--mono);font-size:.75rem;line-height:1.7;margin-top:.35rem;color:var(--muted);word-break:break-word;white-space:pre-wrap}
 .sstat.ok{color:var(--sage-bright)}
@@ -311,6 +410,12 @@ pre.how .c{color:var(--muted)}
 .rule .sstat{grid-column:1 / -1}
 .caveat{color:var(--muted);font-size:.76rem;margin-top:.5rem;max-width:52rem}
 footer{margin-top:2rem;color:var(--muted);font-size:.72rem;border-top:1px solid var(--hairline-soft);padding-top:.6rem}
+footer .made{margin-bottom:.3rem;font-size:.78rem}
+footer .made a{color:var(--brass-bright);text-decoration:none}
+footer .made a:hover{text-decoration:underline;text-underline-offset:.18em}
+/* The one non-brass mark on the page, matching the docs site's own footer:
+   a gold heart would read as decoration. */
+footer .heart{color:#c1442e}
 `;
 
 /**
@@ -424,11 +529,62 @@ if (data.schema !== 1) {
   }
 
   var app = document.getElementById('app');
-  var head = el('div');
-  head.appendChild(el('h1', null, 'Tyran board'));
-  head.appendChild(el('div', 'meta',
+  var head = el('div', 'tophead');
+  var brand = el('div');
+  brand.appendChild(el('h1', null, 'Tyran board'));
+  brand.appendChild(el('div', 'meta',
     (totals.initiatives || 0) + ' initiative(s) · ' + (totals.merged || 0) + '/' + (totals.tickets || 0) +
     ' tickets merged (' + (totals.percent || 0) + '%) · as of ' + (data.as_of || 'unknown')));
+  head.appendChild(brand);
+  var topside = el('div', 'topside');
+  var toplinks = el('div', 'toplinks');
+  [['janczura.com', 'https://janczura.com/en/'],
+   ['LinkedIn', 'https://linkedin.com/in/jacekjanczura'],
+   ['GitHub', 'https://github.com/jjanczur/tyran']].forEach(function (pair) {
+    var link = el('a', null, pair[0]);
+    link.href = pair[1];
+    link.target = '_blank';
+    link.rel = 'noopener';
+    toplinks.appendChild(link);
+  });
+  topside.appendChild(toplinks);
+  // Three states, and "system" is a real one rather than the absence of the
+  // other two: it clears the stored choice so the OS decides again, which is
+  // the only way back once an override exists. The head script already
+  // applied the stored theme before first paint; this control only has to
+  // mirror it and move it.
+  var THEME_KEY = 'tyran-board-theme';
+  var themeRow = el('div', 'theme');
+  themeRow.setAttribute('role', 'group');
+  themeRow.setAttribute('aria-label', 'colour theme');
+  var themeButtons = {};
+  var storedTheme = function () {
+    try {
+      var t = localStorage.getItem(THEME_KEY);
+      return t === 'light' || t === 'dark' ? t : 'system';
+    } catch (e) { return 'system'; }
+  };
+  var applyTheme = function (mode) {
+    try {
+      if (mode === 'system') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, mode);
+    } catch (e) { /* a stored theme is a nicety; never let it take the page down */ }
+    if (mode === 'light' || mode === 'dark') document.documentElement.setAttribute('data-theme', mode);
+    else document.documentElement.removeAttribute('data-theme');
+    Object.keys(themeButtons).forEach(function (k) {
+      themeButtons[k].setAttribute('aria-pressed', k === mode ? 'true' : 'false');
+    });
+  };
+  [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].forEach(function (pair) {
+    var b = el('button', null, pair[1]);
+    b.setAttribute('type', 'button');
+    b.setAttribute('aria-pressed', storedTheme() === pair[0] ? 'true' : 'false');
+    b.addEventListener('click', function () { applyTheme(pair[0]); });
+    themeButtons[pair[0]] = b;
+    themeRow.appendChild(b);
+  });
+  topside.appendChild(themeRow);
+  head.appendChild(topside);
   app.appendChild(head);
 
   // ---- tabs -------------------------------------------------------------
@@ -439,12 +595,15 @@ if (data.schema !== 1) {
   tabbar.setAttribute('role', 'tablist');
   var panels = {};
   var buttons = {};
+  // One emoji per label (operator-decided 2026-08-19, borrowed from a board
+  // the operator found more scannable): the glyph is what the eye finds, the
+  // word is still the identifier.
   var TABS = [
-    ['overview', 'Overview', null],
-    ['board', 'Board', null],
-    ['questions', 'Waiting on you', asks.length],
-    ['spend', 'Spend', null],
-    ['settings', 'Settings', null],
+    ['overview', '📊 Overview', null],
+    ['board', '🗂 Board', null],
+    ['questions', '❓ Waiting on you', asks.length],
+    ['spend', '💸 Spend', null],
+    ['settings', '⚙️ Settings', null],
   ];
   // The open tab lives in the URL fragment, and that is not cosmetic. Tab
   // state was a local variable while this page reloads itself every 30
@@ -480,8 +639,15 @@ if (data.schema !== 1) {
   app.appendChild(tabbar);
   TABS.forEach(function (spec) { app.appendChild(panels[spec[0]]); });
 
-  var tile = function (label, big, sub, cls) {
-    var box = el('div', cls ? 'stile ' + cls : 'stile');
+  // A tile with a destination is a button; one without stays a div. The
+  // headline numbers were the one thing on the page you could read and not
+  // follow — every count now goes where its explanation lives.
+  var tile = function (label, big, sub, cls, go) {
+    var box = el(go ? 'button' : 'div', cls ? 'stile ' + cls : 'stile');
+    if (go) {
+      box.setAttribute('type', 'button');
+      box.addEventListener('click', go);
+    }
     box.appendChild(el('span', 'lbl', label));
     box.appendChild(el('span', 'big', big));
     box.appendChild(el('span', 'sub', sub));
@@ -512,6 +678,15 @@ if (data.schema !== 1) {
     if (ms < 172800000) return Math.round(ms / 3600000) + ' h ago';
     return Math.round(ms / 86400000) + ' d ago';
   };
+  // A duration, not an age: "waiting 2 h 15 min" on a question chip. Two
+  // units, never three — past two days the minutes are noise.
+  var durText = function (ms) {
+    var m = Math.floor(ms / 60000);
+    if (m < 60) return m + ' min';
+    var h = Math.floor(m / 60);
+    if (h < 48) return h + ' h ' + (m % 60) + ' min';
+    return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+  };
 
   var fmtTokens = function (n) {
     if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B';
@@ -532,7 +707,14 @@ if (data.schema !== 1) {
     if (agents.length === 0) strip.appendChild(el('div', 'empty', 'none running'));
     agents.forEach(function (a) {
       var chip = el('div', 'agent' + (a.stale ? ' stale' : ''));
-      chip.appendChild(el('div', 'name', a.agent + (a.role ? ' · ' + a.role : '')));
+      // The dot reads freshness off the strongest signal available — evidence
+      // beats a bare progress ping beats spawn time — the same precedence the
+      // server sorts the strip by.
+      var dotMs = ageMsOf(a.last_evidence || a.last_signal || a.since);
+      var nameRow = el('div', 'name');
+      nameRow.appendChild(el('span', 'dot ' + ageClass(dotMs), '●'));
+      nameRow.appendChild(el('span', null, a.agent + (a.role ? ' · ' + a.role : '')));
+      chip.appendChild(nameRow);
       chip.appendChild(el('div', null, (a.init ? a.init + ' · ' : '') + (a.ticket || 'no ticket') + ' · ' + a.state));
       // NOT the same statement as the age lines below, and the wording keeps
       // them apart on purpose. Those are wall-clock: "how long since it spoke,
@@ -601,7 +783,8 @@ if (data.schema !== 1) {
   var laneCount = function (name) { return (lanes[name] || []).length; };
   var ovTiles = el('div', 'tiles');
   ovTiles.appendChild(tile('waiting on you', String(asks.length),
-    asks.length === 0 ? 'nothing blocked on a decision' : 'answer them on the next tab', asks.length > 0 ? 'lead' : null));
+    asks.length === 0 ? 'nothing blocked on a decision' : 'answer them on the next tab', asks.length > 0 ? 'lead' : null,
+    function () { select('questions'); }));
   // The headline number is the LIVE one. "Agents running" counted every open
   // spawn, so an initiative abandoned a week ago reported a busy fleet; the
   // stale ones are still counted, still listed in the strip, and now said out
@@ -611,15 +794,17 @@ if (data.schema !== 1) {
     staleCount > 0
       ? staleCount + ' more stale · across ' + (totals.initiatives || 0) + ' initiative(s)'
       : 'across ' + (totals.initiatives || 0) + ' initiative(s)',
-    staleCount > 0 ? 'lead' : null));
+    staleCount > 0 ? 'lead' : null,
+    function () { select('overview'); if (agentsHeading) agentsHeading.scrollIntoView({ behavior: 'smooth' }); }));
   // An initiative with no tickets used to read "0% · 0 of 0 merged", which is
   // exactly what a fully stalled one reads. Nothing-started and
   // nothing-finished are different situations and deserve different words.
   ovTiles.appendChild((totals.tickets || 0) === 0
     ? tile('progress', '—', (totals.initiatives || 0) === 0
         ? 'no initiatives yet — run /tyran to start one'
-        : 'no tickets declared yet')
-    : tile('progress', (totals.percent || 0) + '%', (totals.merged || 0) + ' of ' + totals.tickets + ' merged'));
+        : 'no tickets declared yet', null, function () { select('board'); })
+    : tile('progress', (totals.percent || 0) + '%', (totals.merged || 0) + ' of ' + totals.tickets + ' merged',
+        null, function () { select('board'); }));
   // Counted by the server, from the lanes AND the agents. Counting lanes here
   // read zero while an agent chip on the same screen said "blocked", because a
   // ticket parked by an override leaves no card in the blocked lane.
@@ -628,7 +813,8 @@ if (data.schema !== 1) {
     : laneCount('blocked') + laneCount('changes-requested') + blockedAgents;
   ovTiles.appendChild(tile('needs a human', String(stuck),
     laneCount('blocked') + ' blocked · ' + laneCount('changes-requested') + ' changes requested · '
-      + blockedAgents + ' agent(s) blocked', stuck > 0 ? 'warn' : null));
+      + blockedAgents + ' agent(s) blocked', stuck > 0 ? 'warn' : null,
+    function () { select('board'); }));
   ov.appendChild(ovTiles);
 
   // The bar only appears once there IS a baseline: on a first visit nothing
@@ -675,9 +861,86 @@ if (data.schema !== 1) {
   // The request names an initiative and a FILE NAME, never a path - the server
   // matches that name against its own fixed list (see board.mjs), so no URL
   // this page can build reaches a file Tyran did not already agree to show.
-  // The markdown is rendered as TEXT in a pre, deliberately not parsed: these
-  // documents are written by agents, and the rule this whole page keeps is
-  // that nothing from that side ever becomes markup.
+  //
+  // The markdown is rendered STRUCTURALLY and nothing more. The rule this
+  // page keeps had to be restated when the <pre> went away (operator-decided
+  // 2026-08-19: the documents should read as documents): agent-written text
+  // may become headings, lists and code blocks — inert structure, every
+  // character still landing through textContent — but it never becomes an
+  // anchor, an image, raw HTML or anything that runs or navigates. A URL in
+  // a document stays a string you can read and copy, not a link you can be
+  // sent down.
+  //
+  // The backtick appears only as \\u0060: this whole script is one template
+  // literal, and a literal backtick anywhere inside it — even in a regex —
+  // terminates the template and takes the module down.
+  var mdInline = function (node, text) {
+    var re = /(\\u0060[^\\u0060]+\\u0060)|(\\*\\*[^*]+\\*\\*)|(\\*[^*]+\\*)/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) node.appendChild(document.createTextNode(show(text.slice(last, m.index))));
+      var token = m[0];
+      if (m[1]) node.appendChild(el('code', null, token.slice(1, -1)));
+      else if (m[2]) node.appendChild(el('b', null, token.slice(2, -2)));
+      else node.appendChild(el('i', null, token.slice(1, -1)));
+      last = m.index + token.length;
+    }
+    if (last < text.length) node.appendChild(document.createTextNode(show(text.slice(last))));
+  };
+  var renderMarkdown = function (text) {
+    var root = el('div', 'docmd');
+    var lines = String(text).split('\\n');
+    var i = 0;
+    var list = null;
+    var para = null;
+    var closeBlocks = function () { list = null; para = null; };
+    while (i < lines.length) {
+      var line = lines[i];
+      if (/^\\s*\\u0060\\u0060\\u0060/.test(line)) {
+        closeBlocks();
+        var code = [];
+        i += 1;
+        while (i < lines.length && !/^\\s*\\u0060\\u0060\\u0060/.test(lines[i])) { code.push(lines[i]); i += 1; }
+        i += 1;
+        root.appendChild(el('pre', null, code.join('\\n')));
+        continue;
+      }
+      var h = line.match(/^(#{1,6})\\s+(.*)$/);
+      if (h) {
+        closeBlocks();
+        var hd = el('div', 'md-h l' + (h[1].length > 3 ? 3 : h[1].length));
+        mdInline(hd, h[2]);
+        root.appendChild(hd);
+        i += 1;
+        continue;
+      }
+      var item = line.match(/^\\s*(?:[-*+]|\\d+[.)])\\s+(.*)$/);
+      if (item) {
+        para = null;
+        if (!list) { list = el('ul'); root.appendChild(list); }
+        var li = el('li');
+        mdInline(li, item[1]);
+        list.appendChild(li);
+        i += 1;
+        continue;
+      }
+      if (/^\\s*\\|/.test(line)) {
+        // A table row stays one mono line: pipes that still line up beat a
+        // table half-parsed.
+        closeBlocks();
+        root.appendChild(el('div', 'md-table', line));
+        i += 1;
+        continue;
+      }
+      if (line.trim() === '') { closeBlocks(); i += 1; continue; }
+      if (!para) { para = el('p'); root.appendChild(para); }
+      else para.appendChild(document.createTextNode(' '));
+      mdInline(para, line);
+      i += 1;
+    }
+    return root;
+  };
   var loadDoc = function (init, file, view) {
     clear(view);
     view.appendChild(el('div', 'hint', 'reading ' + file.name + '…'));
@@ -699,9 +962,7 @@ if (data.schema !== 1) {
         close.addEventListener('click', function () { clear(view); });
         head.appendChild(close);
         view.appendChild(head);
-        var pre = el('pre', 'doc');
-        pre.textContent = payload.text;
-        view.appendChild(pre);
+        view.appendChild(renderMarkdown(payload.text));
         if (payload.truncated === true) {
           view.appendChild(el('div', 'hint',
             'Shown to ' + payload.bytes + ' bytes and cut there — open ' + payload.path + ' for the rest.'));
@@ -726,7 +987,7 @@ if (data.schema !== 1) {
       return (ageMsOf(b.last_ts) || 0) - (ageMsOf(a.last_ts) || 0);
     });
     var finished = inits.filter(isClosed);
-    ov.appendChild(el('h2', null, 'Initiatives'));
+    ov.appendChild(el('h2', null, '🧭 Initiatives'));
     if (stalled.length > 0) {
       ov.appendChild(el('div', 'hint',
         stalled.length + ' of ' + inits.length + ' are waiting on an answer from you. ' +
@@ -832,7 +1093,8 @@ if (data.schema !== 1) {
     ov.appendChild(initDetail);
   }
 
-  ov.appendChild(el('h2', null, 'Agents'));
+  var agentsHeading = el('h2', null, '🤖 Agents');
+  ov.appendChild(agentsHeading);
   // Named, not implied by the order: the strip is sorted stalest-first by the
   // server, and a reader who does not know that reads the first chip as the
   // newest one.
@@ -845,7 +1107,7 @@ if (data.schema !== 1) {
   // never omit: a missing card is indistinguishable from an initiative with
   // no work, which is the "all is well" reading the board exists to prevent.
   if (errors.length > 0) {
-    ov.appendChild(el('h2', null, 'Unreadable (' + errors.length + ')'));
+    ov.appendChild(el('h2', null, '🚨 Unreadable (' + errors.length + ')'));
     errors.forEach(function (e) {
       ov.appendChild(el('div', 'paused', 'UNREADABLE — ' + e.name + ': ' + e.error));
     });
@@ -857,7 +1119,7 @@ if (data.schema !== 1) {
   var logged = data.errors_logged || [];
   if (logged.length > 0) {
     var total = data.errors_logged_total || logged.length;
-    ov.appendChild(el('h2', null, 'Errors logged (' + total + ')'));
+    ov.appendChild(el('h2', null, '🚨 Errors logged (' + total + ')'));
     ov.appendChild(el('div', 'hint', 'Agents recorded these as failures. Newest first. An error carrying no ticket belongs to the initiative rather than to any one card, which is why it appears here and in no lane.'));
     logged.forEach(function (e) {
       var text = (e.class || 'error') + (e.detail ? ': ' + e.detail : '')
@@ -876,7 +1138,7 @@ if (data.schema !== 1) {
   if (warned.length > 0) {
     var warnCount = 0;
     warned.forEach(function (d) { warnCount += d.warnings.length; });
-    ov.appendChild(el('h2', null, 'Warnings (' + warnCount + ')'));
+    ov.appendChild(el('h2', null, '⚠️ Warnings (' + warnCount + ')'));
     ov.appendChild(el('div', 'hint', 'These initiatives rendered. What follows is what the fold could not account for — a skipped line is missing from every lane above, and a lease released by a non-holder is still open.'));
     warned.forEach(function (d) {
       d.warnings.forEach(function (w) {
@@ -966,22 +1228,102 @@ if (data.schema !== 1) {
       });
       box.appendChild(tbl);
     }
+    // The ticket's own history, oldest first, assembled from the lifecycle
+    // facts the payload already carries — spawn, report, review, merge. The
+    // execution table above answers "what did it cost and on which model";
+    // this answers "what happened, in what order", which is the reading a
+    // stuck or bounced ticket is opened for.
+    var tl = [];
+    runs.forEach(function (r) {
+      if (r.started) tl.push({ ts: r.started, text: r.agent + (r.role ? ' (' + r.role + ')' : '') + ' spawned' + (r.model ? ' on ' + r.model : '') });
+      if (r.ended) tl.push({ ts: r.ended, text: r.agent + ' reported' + (r.verdict ? ': ' + r.verdict : '') });
+    });
+    if (card.review && card.review.ts) {
+      tl.push({ ts: card.review.ts, text: 'review: ' + (card.review.verdict || 'no verdict') + (card.review.by ? ' by ' + card.review.by : '') });
+    }
+    if (card.merge && card.merge.ts) {
+      tl.push({ ts: card.merge.ts, text: 'merged' + (card.merge.mode ? ' (' + card.merge.mode + ')' : ''), sha: card.merge.sha || null });
+    }
+    tl.sort(function (x, y) { return Date.parse(x.ts) - Date.parse(y.ts); });
+    if (tl.length > 0) {
+      box.appendChild(el('div', 'dt', 'Timeline'));
+      var tlBox = el('div', 'tl');
+      tl.forEach(function (evt) {
+        var trow = el('div', 'tlr');
+        trow.appendChild(el('span', 'tlt', ago(evt.ts)));
+        trow.appendChild(el('span', null, evt.text));
+        if (evt.sha) {
+          trow.appendChild(el('code', null, evt.sha));
+          var cp = el('button', 'copysha', 'copy sha');
+          cp.setAttribute('type', 'button');
+          cp.addEventListener('click', function () {
+            // Clipboard access can be refused outright (file://, an old
+            // browser); the fallback is showing the sha, which is what the
+            // button was saving you from selecting by hand.
+            try {
+              navigator.clipboard.writeText(evt.sha).then(
+                function () { cp.textContent = 'copied \\u2713'; },
+                function () { cp.textContent = evt.sha; });
+            } catch (e) { cp.textContent = evt.sha; }
+          });
+          trow.appendChild(cp);
+        }
+        tlBox.appendChild(trow);
+      });
+      box.appendChild(tlBox);
+    }
+    // Answering where you clicked. A ticket standing in waiting-operator IS
+    // an open question, so the composer comes to the card instead of the
+    // operator being sent to the Waiting tab to find the same question again.
+    var openHere = asks.filter(function (q) {
+      return (q.ticket || '') === (card.id || '') && (q.init || '') === (card.init || '');
+    });
+    if (lane === 'waiting-operator' && openHere.length > 0) {
+      openHere.forEach(function (q) {
+        box.appendChild(el('div', 'dt', '\\u2753 ' + (q.question || 'gate ' + q.kind)));
+        box.appendChild(replyBox(q, q.default !== null && q.default !== undefined));
+      });
+    }
     // The files this initiative ACTUALLY has, listed by the server after an
     // existsSync — never a fixed list of what a well-run initiative ought to
-    // contain. Paths, not links: the board serves three URLs and derives a
-    // filesystem path from none of them, which is worth more than a click.
+    // contain. Buttons since 2026-08-19, exactly like the initiative rows:
+    // "which plan does this ticket serve" was a path you copied into an
+    // editor, from a page that already knows how to open it.
     var docs = (data.files || {})[card.init] || [];
     if (docs.length > 0) {
       box.appendChild(el('div', 'dt', 'Files'));
+      var view = el('div', 'docview');
       var list = el('div', 'files');
       docs.forEach(function (f) {
         var line = el('div', 'file');
-        line.appendChild(el('span', 'fname', f.name));
+        var open = el('button', 'fname', f.name);
+        open.setAttribute('type', 'button');
+        open.addEventListener('click', function () { loadDoc(card.init, f, view); });
+        line.appendChild(open);
         line.appendChild(el('code', null, f.path));
         list.appendChild(line);
       });
       box.appendChild(list);
+      box.appendChild(view);
     }
+    // Where to go from here — only the jumps this ticket can actually make.
+    var jumps = el('div', 'jumps');
+    if (openHere.length > 0) {
+      var toAsk = el('button', 'sbtn', 'Open in Waiting tab');
+      toAsk.setAttribute('type', 'button');
+      toAsk.addEventListener('click', function () {
+        select('questions');
+        if (openHere[0].tyranCard) openHere[0].tyranCard.scrollIntoView({ behavior: 'smooth' });
+      });
+      jumps.appendChild(toAsk);
+    }
+    if (cost && (cost.by_ticket || []).some(function (r) { return r.ticket === card.id; })) {
+      var toSpend = el('button', 'sbtn', 'Spend for this ticket');
+      toSpend.setAttribute('type', 'button');
+      toSpend.addEventListener('click', function () { select('spend'); });
+      jumps.appendChild(toSpend);
+    }
+    if (jumps.childNodes.length > 0) box.appendChild(jumps);
     detail.appendChild(box);
   };
   // A filter, because ten lanes across dozens of initiatives is a pile.
@@ -1053,7 +1395,7 @@ if (data.schema !== 1) {
       // event on the ticket, and only a human knows whether that is a stall or
       // a long test run.
       if (STALLABLE.indexOf(lane) !== -1 && c.since) {
-        button.appendChild(el('span', 'note ' + ageClass(ageMsOf(c.since)), 'no event ' + ago(c.since).replace(/ ago$/, '')));
+        button.appendChild(el('span', 'note ' + ageClass(ageMsOf(c.since)), '● no event ' + ago(c.since).replace(/ ago$/, '')));
       }
       button.addEventListener('click', function () { showDetail(c, lane, button); });
       box.appendChild(button);
@@ -1123,17 +1465,18 @@ if (data.schema !== 1) {
   var replyBox = function (a, hasDefault) {
     var box = el('div', 'reply');
     var input = el('textarea');
-    // The shortcut is named where the cursor already is. "Answer" IS the send
-    // button and always was, but a labelled verb beside a text box reads as a
-    // mode switch rather than as send, and an operator who types an answer and
-    // presses Enter gets a newline with nothing to say why.
+    // The shortcut is named where the cursor already is. The round arrow IS
+    // the send button; Enter is the same statement made from the keyboard.
     input.placeholder = (hasDefault
-      ? 'Your answer, in your own words \\u2014 or use the default button.'
+      ? 'Your answer, in your own words \\u2014 or use the default chip.'
       : 'Your answer, in your own words. There is no recorded default for this one.')
-      + ' \\u2318/Ctrl+Enter sends.';
+      + ' Enter sends; Shift+Enter for a new line.';
+    input.setAttribute('rows', '1');
     var acts = el('div', 'acts');
-    var send = el('button', 'sbtn', 'Answer');
+    var send = el('button', 'sendbtn', '\\u27A4');
     send.setAttribute('type', 'button');
+    send.setAttribute('aria-label', 'Send answer');
+    send.title = 'Send \\u00b7 Enter';
     var useDefault = hasDefault ? el('button', 'sbtn', 'Take the default') : null;
     if (useDefault) useDefault.setAttribute('type', 'button');
     // The recommendation was already shown, as TEXT, and the only way to
@@ -1142,7 +1485,7 @@ if (data.schema !== 1) {
     // page: the agent has said what it thinks should happen and the human is
     // asked to transcribe it. This fills the box instead of submitting, so
     // the wording stays editable and the answer is still deliberate.
-    var useRec = a.recommendation ? el('button', 'sbtn', 'Use the recommendation') : null;
+    var useRec = a.recommendation ? el('button', 'sbtn', '\\u2B50 Use the recommendation') : null;
     if (useRec) {
       useRec.setAttribute('type', 'button');
       useRec.addEventListener('click', function () {
@@ -1155,6 +1498,8 @@ if (data.schema !== 1) {
 
     var submit = function (text) {
       [send, useDefault].forEach(function (b) { if (b) b.disabled = true; });
+      status.className = 'sstat';
+      status.textContent = 'sending\\u2026';
       post('/answer', { init: a.init, kind: a.kind, answer: text }, status, function (ok) {
         if (!ok) {
           [send, useDefault].forEach(function (b) { if (b) b.disabled = false; });
@@ -1165,7 +1510,7 @@ if (data.schema !== 1) {
         // with a live box invites answering it twice.
         input.disabled = true;
       }, function (p) {
-        return (p.mode === 'default' ? 'answered with the recorded default' : 'answered')
+        return 'sent \\u2713 ' + (p.mode === 'default' ? 'answered with the recorded default' : 'answered')
           + ': ' + p.recorded + ' \\u00b7 decision ' + p.decision + ' \\u2014 reload to refresh the board';
       });
     };
@@ -1181,15 +1526,17 @@ if (data.schema !== 1) {
       submit(input.value);
     };
     send.addEventListener('click', attempt);
-    // Enter ALONE must not send, and the modifier is not decoration. This is a
-    // textarea because an operator explaining a decision writes sentences, and
-    // what it sends is appended to a journal that can never take it back — a
-    // question closed by a stray keystroke is a decision nobody made. The
+    // Enter sends; Shift+Enter is the newline (operator-decided 2026-08-19:
+    // the box should answer like a chat). The earlier rule — modifier
+    // required, because the journal can never take an answer back — is
+    // retired deliberately, not forgotten: the empty-input guard in attempt()
+    // still means a stray Enter on a blank box sends nothing, and an answer
+    // with text in it is what the operator typed, not an accident. The
     // keyCode fallback is for a browser that reports no key on a dead-key
     // layout; a duplicate hit is harmless because the handler is idempotent
     // once the field disables itself.
     input.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'Enter' || e.keyCode === 13)) {
+      if (!e.shiftKey && (e.key === 'Enter' || e.keyCode === 13)) {
         e.preventDefault();
         attempt();
       }
@@ -1206,17 +1553,25 @@ if (data.schema !== 1) {
     // reload with nothing to show for it.
     input.addEventListener('input', function () { holdRefresh(); });
 
-    box.appendChild(input);
-    acts.appendChild(send);
+    // Chips first, then the composer row: the canned moves read as choices
+    // ABOVE the field, the way a chat offers suggested replies.
     if (useRec) acts.appendChild(useRec);
     if (useDefault) acts.appendChild(useDefault);
-    box.appendChild(acts);
+    if (useRec || useDefault) box.appendChild(acts);
+    var composer = el('div', 'composer');
+    composer.appendChild(input);
+    composer.appendChild(send);
+    box.appendChild(composer);
     box.appendChild(status);
     box.appendChild(el('div', 'hint', 'Answering writes a decision and closes the gate in ' + a.init + '\\u2019s journal. Needs the board started with --write.'));
     return box;
   };
   asks.forEach(function (a) {
     var card = el('div', 'ask');
+    // The element rides on the ask itself so a ticket's detail panel can
+    // scroll the Waiting tab to exactly this card — the jump is a reference,
+    // never a second lookup that could drift.
+    a.tyranCard = card;
     // The one distinction that changes what an operator does about it, and it
     // costs no new event type to say: an ask WITH a recorded default is a
     // decision you may leave to the recommendation, and an ask without one is
@@ -1225,8 +1580,14 @@ if (data.schema !== 1) {
     var hasDefault = a.default !== null && a.default !== undefined;
     card.appendChild(el('span', 'kindtag ' + (hasDefault ? 'decision' : 'blocking'),
       hasDefault ? 'decision \\u00b7 a default is recorded' : 'blocking \\u00b7 no safe default'));
+    // How long it has been standing, beside the kind — the number that turns
+    // "a question exists" into "a question has waited a day". Clay after 24h.
+    var waitMs = ageMsOf(a.since);
+    if (waitMs !== null) {
+      card.appendChild(el('span', 'waitchip' + (waitMs >= 86400000 ? ' long' : ''), 'waiting ' + durText(waitMs)));
+    }
     card.appendChild(el('div', 'q', a.question || '(no question recorded — gate ' + a.kind + ')'));
-    [['answer with', a.kind], ['recommendation', a.recommendation], ['default', a.default],
+    [['answer with', a.kind], ['⭐ recommendation', a.recommendation],
      ['blocks', a.blocks && a.blocks.count > 0 ? a.blocks.count + ' ticket(s): ' + a.blocks.ids.join(', ') : null],
      ['ticket', a.ticket], ['initiative', a.init], ['since', a.since]].forEach(function (pair) {
       if (pair[1] === null || pair[1] === undefined) return;
@@ -1235,6 +1596,15 @@ if (data.schema !== 1) {
       row.appendChild(el('span', null, pair[1]));
       card.appendChild(row);
     });
+    // The default gets its own row and its own weight: it is the answer to
+    // "what happens if I never come back to this", which is the sentence an
+    // operator scanning fourteen questions actually decides with.
+    if (hasDefault) {
+      var defRow = el('div', 'row defrow');
+      defRow.appendChild(el('span', 'label', 'default \\u2014 if you don\\u2019t answer'));
+      defRow.appendChild(el('span', null, a.default));
+      card.appendChild(defRow);
+    }
     card.appendChild(replyBox(a, hasDefault));
     qs.appendChild(card);
   });
@@ -1759,6 +2129,29 @@ if (data.schema !== 1) {
 
     if (choiceNote) bodyCell.appendChild(choiceNote);
     bodyCell.appendChild(el('div', 'shelp', setting.help));
+    // The long answer, folded shut (operator-asked 2026-08-19: every setting
+    // should say what it means, what changes, and how it lands on Tyran).
+    // Three labelled sentences, plus the widening cost when there is one —
+    // stated HERE, before the confirm dialog restates it as a question.
+    if (setting.explain) {
+      var why = el('details', 'sexplain');
+      why.appendChild(el('summary', null, 'What does this change?'));
+      [['What it is', setting.explain.what],
+       ['If you change it', setting.explain.changes],
+       ['How it lands on Tyran', setting.explain.effect],
+       ['Loosening it means', setting.widens]].forEach(function (pair) {
+        if (!pair[1]) return;
+        var line = el('div', 'sexline');
+        line.appendChild(el('b', null, pair[0] + ': '));
+        line.appendChild(el('span', null, pair[1]));
+        why.appendChild(line);
+      });
+      // An open explainer must not be yanked shut by the 30-second reload
+      // mid-read; the held tab already stops the timer, this is for the
+      // reader who opened it from a fresh load.
+      why.addEventListener('toggle', function () { if (why.open) holdRefresh(); });
+      bodyCell.appendChild(why);
+    }
     bodyCell.appendChild(status);
     return row;
   };
@@ -1946,10 +2339,41 @@ if (data.schema !== 1) {
   window.addEventListener('hashchange', function () { select(tabFromHash()); });
 
   var foot = el('footer');
+  // The same sentence the docs site signs off with, links and the one red
+  // heart included — the board is the surface an operator actually lives on.
+  var made = el('div', 'made');
+  made.appendChild(el('span', null, 'From Berlin with '));
+  made.appendChild(el('span', 'heart', '♥'));
+  made.appendChild(el('span', null, ' by two buddies \\u2014 '));
+  var madeSite = el('a', null, 'Jacek');
+  madeSite.href = 'https://janczura.com/en/';
+  madeSite.target = '_blank';
+  madeSite.rel = 'noopener';
+  made.appendChild(madeSite);
+  made.appendChild(el('span', null, ' ('));
+  var madeLi = el('a', null, 'LinkedIn');
+  madeLi.href = 'https://linkedin.com/in/jacekjanczura';
+  madeLi.target = '_blank';
+  madeLi.rel = 'noopener';
+  made.appendChild(madeLi);
+  made.appendChild(el('span', null, ') and Piotr.'));
+  foot.appendChild(made);
   foot.appendChild(el('div', null, 'GENERATED by tyran scripts/board.mjs — do not edit. Reloads itself every 30 s unless you are editing; ages are computed in this browser.'));
   app.appendChild(foot);
 }
 `;
+
+/**
+ * Applies a stored theme override BEFORE first paint, in the head, so a
+ * dark-choosing operator on a light OS never sees the page flash light for a
+ * frame. Static bytes — it reads localStorage and nothing else, so it never
+ * threatens the byte-compare under --check. The main script only mirrors and
+ * moves the choice; this is what makes it visible on load.
+ */
+const THEME_SCRIPT =
+  '<script>(function () { try { var t = localStorage.getItem("tyran-board-theme");'
+  + ' if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);'
+  + ' } catch (e) {} })();</script>\n';
 
 /**
  * The page, from an already-serialized cross-board JSON string (the exact
@@ -1974,6 +2398,7 @@ export function renderBoardError(message) {
     '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     '<title>Tyran board — cannot render</title>\n' +
     `<style>${CSS}</style>\n` +
+    THEME_SCRIPT +
     '</head><body><main id="app"></main>\n' +
     `<script type="application/json" id="board-error">${data}</script>\n` +
     '<script>\n' +
@@ -2007,6 +2432,7 @@ export function renderBoardHtml(payloadJsonText) {
     '<meta name="tyran-refresh" content="30">\n' +
     '<title>Tyran board</title>\n' +
     `<style>${CSS}</style>\n` +
+    THEME_SCRIPT +
     '</head><body><main id="app"></main>\n' +
     `<script type="application/json" id="board-data">${embedded}</script>\n` +
     `<script>${CLIENT_JS}</script>\n` +

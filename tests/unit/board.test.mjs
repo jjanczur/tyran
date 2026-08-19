@@ -247,10 +247,10 @@ test('the page is four tabs, opens on Overview, and carries the queue count in i
   // waiting on them — the count in the label is the only thing that survives
   // being on another tab, and it is the board's whole reason to exist.
   const html = demoHtml();
-  assert.match(html, /\['overview', 'Overview', null\]/);
-  assert.match(html, /\['board', 'Board', null\]/);
-  assert.match(html, /\['questions', 'Waiting on you', asks\.length\]/, 'the queue label must count the open asks');
-  assert.match(html, /\['spend', 'Spend', null\]/);
+  assert.match(html, /\['overview', '📊 Overview', null\]/);
+  assert.match(html, /\['board', '🗂 Board', null\]/);
+  assert.match(html, /\['questions', '❓ Waiting on you', asks\.length\]/, 'the queue label must count the open asks');
+  assert.match(html, /\['spend', '💸 Spend', null\]/);
   assert.match(html, /el\('span', 'count', '\(' \+ spec\[2\] \+ '\)'\)/, 'the count must reach the tab label');
   assert.match(html, /panels\[k\]\.hidden = !on;/, 'an unselected tab must be hidden, not merely unstyled');
   // Overview is now the FALLBACK rather than an unconditional opening move —
@@ -356,24 +356,74 @@ test('the terminal commands fold away on a board that can answer, and open on on
   assert.match(html, /howBox\.open = true;\n\s*if \(String\(location\.protocol\) === 'file:'\) return;/);
 });
 
-test('a modifier plus Enter sends an answer, and Enter alone does not', () => {
-  // MUTANT 1: delete the keydown listener. "Answer" is then the only way to
-  // send, and an operator who types a sentence and presses Enter gets a
-  // newline with nothing on the page to say why — reported as "there is no
-  // send button".
-  // MUTANT 2: drop the metaKey/ctrlKey test and send on bare Enter. This is a
-  // textarea because answers are sentences, and what it sends is appended to
-  // a journal that can never take it back: a gate closed by a stray keystroke
-  // is a decision nobody made.
+test('Enter sends an answer, and Shift+Enter stays a newline', () => {
+  // MUTANT 1: delete the keydown listener. The round arrow is then the only
+  // way to send, and an operator who types a sentence and presses Enter gets
+  // a newline with nothing on the page to say why.
+  // MUTANT 2: drop the shiftKey guard and send on every Enter. Answers are
+  // sentences, and the second sentence starts with Shift+Enter.
+  //
+  // The earlier rule — modifier REQUIRED, because the journal can never take
+  // an answer back — was retired by the operator on 2026-08-19: the box
+  // should answer like a chat. What survives of it is the empty-input guard:
+  // a stray Enter on a blank box still sends nothing.
   const html = demoHtml();
   assert.match(html, /input\.addEventListener\('keydown', function \(e\) \{/);
-  assert.match(html, /if \(\(e\.metaKey \|\| e\.ctrlKey\) && \(e\.key === 'Enter' \|\| e\.keyCode === 13\)\) \{/);
+  assert.match(html, /if \(!e\.shiftKey && \(e\.key === 'Enter' \|\| e\.keyCode === 13\)\) \{/);
   assert.match(html, /e\.preventDefault\(\);\n\s*attempt\(\);/);
-  // one code path, not two: the button and the shortcut must refuse an empty
+  // one code path, not two: the button and the key must refuse an empty
   // box in the same words
   assert.match(html, /send\.addEventListener\('click', attempt\);/);
   // and the shortcut is named where the cursor already is
-  assert.match(html, /Ctrl\+Enter sends\./);
+  assert.match(html, /Enter sends; Shift\+Enter for a new line\./);
+});
+
+test('the composer is a chat: chips above, the field and a round send on one line', () => {
+  // MUTANT: fold the send back into a labelled "Answer" button under the
+  // box. The operator asked for a chat, and a chat is a field with an arrow.
+  const html = demoHtml();
+  assert.match(html, /el\('button', 'sendbtn', '\\u27A4'\)/, 'the send is the round arrow');
+  assert.match(html, /var composer = el\('div', 'composer'\);/);
+  const chipsAt = html.indexOf('if (useRec || useDefault) box.appendChild(acts);');
+  const composerAt = html.indexOf('box.appendChild(composer);');
+  assert.ok(chipsAt !== -1 && composerAt !== -1 && chipsAt < composerAt,
+    'the canned moves sit above the field, the way a chat offers replies');
+});
+
+test('a waiting-operator ticket answers in place and can jump to its question', () => {
+  // MUTANT 1: drop the openHere branch — the operator is sent to the Waiting
+  // tab to find the same question the card already named.
+  // MUTANT 2: drop tyranCard — the jump becomes a second lookup that drifts.
+  const html = demoHtml();
+  assert.match(html, /lane === 'waiting-operator' && openHere\.length > 0/);
+  assert.match(html, /replyBox\(q, q\.default !== null && q\.default !== undefined\)/);
+  assert.match(html, /Open in Waiting tab/);
+  assert.match(html, /a\.tyranCard = card;/);
+});
+
+test('a ticket detail carries its own timeline, oldest first, with the sha one click away', () => {
+  // The execution table answers "what did it cost"; the timeline answers
+  // "what happened, in what order" — the reading a bounced ticket is opened
+  // for. MUTANT: drop the sort — journal order is per-agent, not global.
+  const html = demoHtml();
+  assert.match(html, /' spawned' \+ \(r\.model \? ' on ' \+ r\.model : ''\)/);
+  assert.match(html, /'review: ' \+ \(card\.review\.verdict \|\| 'no verdict'\)/);
+  assert.match(html, /tl\.sort\(function \(x, y\) \{ return Date\.parse\(x\.ts\) - Date\.parse\(y\.ts\); \}\);/);
+  assert.match(html, /copy sha/);
+});
+
+test('initiative documents render as structure and never as active markup', () => {
+  // The rule the old <pre> enforced by rendering nothing survives the
+  // renderer: agent text may become headings, lists and code blocks, all via
+  // textContent — never an anchor, never innerHTML, and the backtick exists
+  // only as \u0060 because the whole client is one template literal.
+  const html = demoHtml();
+  assert.match(html, /renderMarkdown\(payload\.text\)/, 'the doc panel uses the renderer');
+  const md = html.slice(html.indexOf('var mdInline'), html.indexOf('var loadDoc'));
+  assert.ok(md.length > 100, 'the renderer exists between mdInline and loadDoc');
+  assert.ok(!md.includes("el('a'"), 'no anchors out of agent-written documents');
+  assert.ok(!md.includes('innerHTML'), 'no innerHTML in the renderer');
+  assert.ok(!md.includes(String.fromCharCode(96)), 'no literal backtick inside the client literal');
 });
 
 test('the palette is the muted one, saturation on edges rather than on whole fills', () => {
@@ -668,9 +718,57 @@ test('the client script actually parses, which nothing else in this suite proves
   // that quoted an identifier. Every other test here matches strings in the
   // rendered page and would happily match a page that cannot run.
   const html = demoHtml();
-  const js = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
+  // TWO plain script elements since the theme override: the pre-paint head
+  // script and the client. The JSON payload carries a type attribute, so a
+  // bare <script> match cannot pick it up. Both must parse; the size floor
+  // still proves the client is the last one.
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.equal(scripts.length, 2, 'the head theme script and the client, nothing else');
+  const js = scripts[scripts.length - 1];
   assert.ok(js.length > 1000, 'the client script is missing entirely');
-  assert.doesNotThrow(() => new Function(js), 'the page ships JavaScript that does not parse');
+  for (const s of scripts) {
+    assert.doesNotThrow(() => new Function(s), 'the page ships JavaScript that does not parse');
+  }
+});
+
+test('two palettes, three theme states, and the override lands before first paint', () => {
+  // MUTANT 1: drop the dark blocks. The board goes light-only and a dark OS
+  // gets a light page it never asked for.
+  // MUTANT 2: drop the :not() guard. An explicit "light" choice then loses
+  // to a dark OS and the toggle can never take the page light again.
+  // MUTANT 3: move the stored-theme read into the client script. The page
+  // paints light for a frame on every reload before snapping dark.
+  const html = demoHtml();
+  assert.match(html, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(html, /:root:not\(\[data-theme="light"\]\)/);
+  assert.match(html, /:root\[data-theme="dark"\]/);
+  const headEnd = html.indexOf('</head>');
+  const themeAt = html.indexOf('tyran-board-theme');
+  assert.ok(themeAt !== -1 && themeAt < headEnd, 'the stored theme applies in the head, before the body paints');
+  assert.match(html, /\[\['system', 'System'\], \['light', 'Light'\], \['dark', 'Dark'\]\]/, 'three states, system included');
+  assert.match(html, /localStorage\.removeItem\(THEME_KEY\)/, '"system" clears the override rather than storing a third value');
+});
+
+test('the footer signs the work and the masthead links to its people', () => {
+  // The docs site's sign-off, on the surface the operator actually lives on.
+  const html = demoHtml();
+  assert.match(html, /From Berlin with /);
+  assert.match(html, /janczura\.com\/en\//);
+  assert.match(html, /linkedin\.com\/in\/jacekjanczura/);
+  assert.match(html, /github\.com\/jjanczur\/tyran/);
+  assert.match(html, /GENERATED by tyran scripts\/board\.mjs/, 'the provenance line survives the attribution');
+});
+
+test('a question card says how long it has waited and what silence decides', () => {
+  // MUTANT 1: drop the wait chip — "a question exists" and "a question has
+  // waited a day" read identically again.
+  // MUTANT 2: fold the default back into the plain dl rows — the answer to
+  // "what happens if I never come back" renders at the weight of a slug.
+  const html = demoHtml();
+  assert.match(html, /'waiting ' \+ durText\(waitMs\)/);
+  assert.match(html, /waitMs >= 86400000 \? ' long' : ''/, 'a day of waiting changes the chip, not just the number');
+  assert.match(html, /'row defrow'/);
+  assert.match(html, /default \\u2014 if you don\\u2019t answer/);
 });
 
 test('the queue count reaches the browser tab, not only the tab strip', () => {
@@ -811,7 +909,7 @@ test('cards say how long they have stood still, on the lanes where that is the d
   // the STALLABLE branch — every string below still renders except this one.
   const html = demoHtml();
   assert.match(html, /STALLABLE/, 'the lane set exists');
-  assert.match(html, /'no event ' \+ ago\(c\.since\)/, 'the face carries the age');
+  assert.match(html, /'● no event ' \+ ago\(c\.since\)/, 'the face carries the age');
   assert.match(html, /row\('last event'/, 'and the detail panel carries the timestamp');
   // Backlog and ready must NOT be in it: an unstarted ticket is waiting its
   // turn, not stalling, and marking every one stale makes the mark worthless.

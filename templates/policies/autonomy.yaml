@@ -16,8 +16,17 @@
 #
 # Validate:  node scripts/schema.mjs validate policy .tyran/policies/autonomy.yaml
 
-# Applied when no rule matches. GATED means "ask me" — the safe answer.
-default: GATED
+# Applied when no rule matches. AUTO since 0.1.44 (operator-decided
+# 2026-08-19: the shipped defaults were stricter than a new install needs).
+# What this actually reaches is small: the gate is silent outside its
+# governed prefixes (`.tyran/`, `.claude/`, the hooks directory), so this
+# default was never what protected your source tree — it decided only the
+# paths under those prefixes that no rule below names. What it gives up:
+# an UNKNOWN file there — a new state file from a newer Tyran, a stray
+# `.claude/` helper — is now writable by a subagent instead of denied.
+# Every named rule below still applies, the KERNEL floors cannot be edited
+# away, and setting this back to GATED is one word in this file.
+default: AUTO
 
 rules:
   - path: .tyran/knowledge/**
@@ -41,11 +50,15 @@ rules:
   # 0.1.9 is `.tyran/state/<slug>/locks/`, covered by the `.tyran/state/**`
   # rule above; `doctor --state` reports a leftover `.tyran/initiatives/`
   # directory. The measured incident that produced this rule: leases matched
-  # NO rule, fell through to `default: GATED`, and `verdictForClass(GATED,
-  # unsupervised)` denies unconditionally — so no implementer in any repo
-  # could satisfy the take-your-own-lease protocol of iron rule 7, and the
-  # conductor had to write every lease itself, putting the record of who
-  # holds a resource in the one place rule 7 says it must not live: the lead.
+  # NO rule, fell through to the then-shipped `default: GATED`, and
+  # `verdictForClass(GATED, unsupervised)` denies unconditionally — so no
+  # implementer in any repo could satisfy the take-your-own-lease protocol of
+  # iron rule 7, and the conductor had to write every lease itself, putting
+  # the record of who holds a resource in the one place rule 7 says it must
+  # not live: the lead. The default is AUTO now, which closes that incident
+  # class by itself; the rule stays because an explicit reason beats a
+  # fall-through, and because an operator who tightens the default back to
+  # GATED must not resurrect the incident.
   - path: .tyran/initiatives/*/locks/**
     class: AUTO
     reason: legacy lease location for installs adopted at <= 0.1.8; GATED denies every subagent unconditionally, which makes the take-your-own-lease protocol of iron rule 7 unsatisfiable
@@ -66,9 +79,16 @@ rules:
     class: AUTO
     reason: mostly a description of this repo — validation commands, package manager, shared zones — and an agent that finds it wrong is what is best placed to correct it
 
+  # Was GATED ("overriding a core agent freezes it at the version it was
+  # copied from" — still true, still the cost). Relaxed with the default in
+  # 0.1.44: GATED denies a subagent unconditionally, so the retro agent —
+  # whose whole job includes maintaining these files — could only ever
+  # propose. The trade, stated because an unstated cost is a false
+  # guarantee: an agent can now freeze or degrade a core agent by writing
+  # here; the rollback is a git revert, and the freeze is doctor's to find.
   - path: .claude/agents/**
-    class: GATED
-    reason: overriding a core agent freezes it at the version it was copied from
+    class: AUTO
+    reason: agent definitions are the material the retro loop maintains; a bad write is one git revert, and an override that freezes a core agent is what doctor reports
 
   # Operator-owned prose, loaded into every session in this repository. The
   # gate is otherwise SILENT at the repo root — the governed prefixes are

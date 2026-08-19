@@ -190,17 +190,28 @@ const MATRIX = [
   // the dated legacy alias that installs adopted at <= 0.1.8 still rely on.
   { cls: 'AUTO (leases)', path: '.tyran/state/demo/locks/worktree-a.lease', supervised: 'pass', unsupervised: 'pass' },
   { cls: 'AUTO (leases, legacy)', path: '.tyran/initiatives/demo/locks/worktree-a.lease', supervised: 'pass', unsupervised: 'pass' },
-  { cls: 'GATED', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
+  // AUTO since 0.1.44, relaxed with the shipped default (operator-decided
+  // 2026-08-19). Kept as a row for the same reason as config.yaml above: if
+  // a subagent ever stops passing here, the template moved, and that should
+  // be a decision someone makes rather than a diff nobody notices. GATED
+  // semantics themselves stay pinned by CLAUDE.md below.
+  { cls: 'AUTO (agents)', path: '.claude/agents/reviewer.md', supervised: 'pass', unsupervised: 'pass' },
+  { cls: 'GATED', path: 'CLAUDE.md', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
   { cls: 'KERNEL', path: 'hooks/scripts/secrets-gate.mjs', supervised: 'deny', unsupervised: 'deny' },
   { cls: 'KERNEL', path: '.tyran/policies/autonomy.yaml', supervised: 'deny', unsupervised: 'deny' },
   // The unmatched row, which is TWO rows. Neither is a fall-through.
   //
   // Inside the governed namespace — Tyran's own artefacts, which the policy is
   // meant to enumerate — an unmatched path takes the policy's `default:`,
-  // GATED in the shipped template, and behaves exactly like the GATED rows.
-  { cls: 'default (GATED), governed', path: '.tyran/something-new.yaml', supervised: 'pass', unsupervised: 'deny', mainPromptsOff: 'ask' },
+  // AUTO in the shipped template since 0.1.44, so a state file a newer Tyran
+  // invents is writable rather than denied to every subagent (the incident
+  // class the legacy lease alias records).
+  { cls: 'default (AUTO), governed', path: '.tyran/something-new.yaml', supervised: 'pass', unsupervised: 'pass' },
   { cls: 'KERNEL (hook registry)', path: '.claude/settings.json', supervised: 'deny', unsupervised: 'deny' },
-  { cls: 'default (GATED), governed', path: 'hooks/notes.md', supervised: 'deny', unsupervised: 'deny' },
+  // Labelled by where it LANDS, not where it started: an unmatched path under
+  // hooks/ falls to the default like any other governed path, and then the
+  // mandatory KERNEL floor catches it before the default can matter.
+  { cls: 'KERNEL floor beats default', path: 'hooks/notes.md', supervised: 'deny', unsupervised: 'deny' },
   // Outside it the policy has nothing to say and the gate is silent. Measured
   // before choosing: with the other reading, 65 of 65 tracked files in this
   // repository match no rule, so an implementer subagent would be refused on
@@ -808,9 +819,11 @@ test('ADR-21: the shipped template is the policy these tests bind to', () => {
   // matrix above assumes, so drift in the template turns THIS red rather than
   // making the matrix quietly meaningless.
   const shipped = readFileSync(join(REPO_ROOT, 'templates', 'policies', 'autonomy.yaml'), 'utf8');
-  assert.match(shipped, /^default: GATED$/m);
+  assert.match(shipped, /^default: AUTO$/m);
   assert.match(shipped, /path: hooks\/\*\*\n\s+class: KERNEL/);
   assert.match(shipped, /path: \.tyran\/knowledge\/\*\*\n\s+class: AUTO/);
+  assert.match(shipped, /path: \.claude\/agents\/\*\*\n\s+class: AUTO/);
+  assert.match(shipped, /path: CLAUDE\.md\n\s+class: GATED/);
 });
 
 // ============================================= 6. READS, AND THE BOUNDARIES
@@ -948,10 +961,11 @@ test('BOUNDARY: what the Bash path rules do and do NOT reach', async () => {
   assert.equal(SHELL_DECLARED_MISSES.length >= 4, true);
   // The write refusal points at the shell honestly: it says what the shell
   // route does NOT check, rather than advertising it as a way through. Driven
-  // through `.claude/agents/**` — `.tyran/config.yaml` is AUTO in the shipped
-  // template now and produces no refusal to inspect.
+  // through `CLAUDE.md` — the last GATED rule in the shipped template, now
+  // that `.tyran/config.yaml` (0.1.19) and `.claude/agents/**` (0.1.44) have
+  // both been relaxed to AUTO and produce no refusal to inspect.
   const refusal = await handle({
-    input: writeInput(join(dir, '.claude/agents/reviewer.md'), { agentId: 'a1' }),
+    input: writeInput(join(dir, 'CLAUDE.md'), { agentId: 'a1' }),
     env: { CLAUDE_PROJECT_DIR: dir },
   });
   assert.match(refusal.reason, /outside what this gate checks for CLASSES/);
@@ -1430,10 +1444,11 @@ test('M17: an ABSOLUTE path is classified against THIS call\'s root', async () =
   // resolving against the wrong root makes an in-repo file look outside.
   assert.equal(await ask(writeInput(join(root, '.tyran/knowledge/a.yaml'), { agentId: 'a1' }), root), PASS);
   // and the class still comes from the policy, not from the path being long.
-  // This used to name `.tyran/config.yaml`, which the shipped template now
-  // classes AUTO — so the row needs a path the template still gates, or it
-  // stops distinguishing the mutant from the fix.
-  const denied = await ask(writeInput(join(root, '.claude/agents/reviewer.md'), { agentId: 'a1' }), root);
+  // This used to name `.tyran/config.yaml` (AUTO since 0.1.19), then
+  // `.claude/agents/**` (AUTO since 0.1.44) — the probe follows the last
+  // GATED rule in the shipped template, because it needs a path the policy
+  // still denies to a subagent or it stops distinguishing the mutant.
+  const denied = await ask(writeInput(join(root, 'CLAUDE.md'), { agentId: 'a1' }), root);
   assert.equal(denied.decision, 'deny');
 });
 
@@ -1628,7 +1643,15 @@ test('governed: the namespace boundary is where the decision changes, not the cl
   // restores the "refuse every write in the repository" behaviour that the
   // 65-of-65 measurement rejected; and dropping the `decidingRule === null`
   // half, which would silence paths an explicit rule DOES name.
-  const root = adopted();
+  //
+  // Driven with an explicit `default: GATED` policy rather than the shipped
+  // template: the template's default is AUTO since 0.1.44, under which an
+  // unmatched path passes on BOTH sides of the boundary and this test would
+  // stop seeing it. The mechanism being pinned is the namespace test, and it
+  // has to hold for every default an operator might set.
+  const root = adopted({
+    policy: 'default: GATED\nrules:\n  - path: hooks/**\n    class: KERNEL\n    reason: keep\n  - path: .tyran/policies/**\n    class: KERNEL\n    reason: keep\n',
+  });
   for (const [path, want] of [
     ['.tyran/anything.yaml', 'deny'],
     ['.claude/anything.json', 'deny'],
@@ -2136,17 +2159,18 @@ test('verdictForClass: GATED unsupervised is ask only when askable', () => {
 });
 
 test('GATED + main + bypassPermissions stays deny — an ask nobody renders must not degrade', async () => {
+  // CLAUDE.md: the last GATED rule in the shipped template since 0.1.44.
   const root = adopted();
-  const got = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'bypassPermissions' });
+  const got = await askWrite(root, 'CLAUDE.md', { mode: 'bypassPermissions' });
   assert.equal(got.decision, 'deny');
 });
 
 test('GATED + main + acceptEdits asks; a subagent in the same mode still gets deny', async () => {
   const root = adopted();
-  const got = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'acceptEdits' });
+  const got = await askWrite(root, 'CLAUDE.md', { mode: 'acceptEdits' });
   assert.equal(got.decision, 'ask');
   assert.match(got.reason, /approv/i);
-  const sub = await askWrite(root, '.claude/agents/reviewer.md', { mode: 'acceptEdits', agentId: 'a1' });
+  const sub = await askWrite(root, 'CLAUDE.md', { mode: 'acceptEdits', agentId: 'a1' });
   assert.equal(sub.decision, 'deny');
 });
 
@@ -2203,7 +2227,7 @@ test('boundaries: strict is exactly what the gate did before the block existed',
   for (const root of [legacy, STRICT]) {
     assert.equal((await askRead(root, '.env')).decision, 'deny');
     assert.equal((await askWrite(root, '/etc/hosts', { agentId: 'a1' })).decision, 'deny');
-    assert.equal((await askWrite(root, '.claude/agents/x.md', { agentId: 'a1' })).decision, 'deny');
+    assert.equal((await askWrite(root, 'CLAUDE.md', { agentId: 'a1' })).decision, 'deny');
     assert.equal(await askWrite(root, 'src/app.ts', { agentId: 'a1' }), PASS);
   }
 });
@@ -2299,7 +2323,7 @@ test('boundaries.prompts: skip auto-approves, and cannot rewrite a refusal', asy
   assert.equal((await askRead(root, '.env')).decision, 'deny');
   assert.equal((await askWrite(OPEN, 'hooks/scripts/policy-gate.mjs', { agentId: 'a1' })).decision, 'deny');
   // And a GATED ask stays an ask rather than becoming an approval.
-  const asked = await askWrite(root, '.claude/agents/x.md', { mode: 'acceptEdits' });
+  const asked = await askWrite(root, 'CLAUDE.md', { mode: 'acceptEdits' });
   assert.equal(asked.decision, 'ask');
 });
 

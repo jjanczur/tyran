@@ -548,3 +548,56 @@ Recorded because the list has only ever lived in a conversation.
 
 Archiving stays dropped (§ measured: 6 of 63 journals archivable, 43 blocked
 on an open gate). Skill retirement stays dropped: nothing is retirable today.
+
+## 13. Multi-harness support — PLANNED, not scheduled, 2026-08-19
+
+Recorded as a real initiative rather than a note:
+`.tyran/state/multi-harness-support/` — `PLAN.md` for what to do, `NOTES.md`
+for the research and every source URL, 12 tickets all parked.
+
+**Why it is now on the list at all.** `README.md` and
+`docs/architecture.md` both say Claude Code only, and that position rested on
+one load-bearing claim: only Claude Code can give a gate teeth. **That claim
+expired.** Cursor, GitHub Copilot, OpenAI Codex and Google Antigravity have
+each shipped a blocking `PreToolUse` hook that can refuse a tool call before it
+runs. The mechanisms-not-instructions thesis survives the port.
+
+**Why it is cheaper than it looks.** 19 of 29 scripts carry zero Claude
+references, and so do 5 of the 9 gate handlers — the state layer, the
+projections, the board and the policy classification are already portable.
+`bin/tyran.mjs` already ships them on npm *"for CI and terminals outside Claude
+Code"*, so any harness with a shell tool can drive the whole ledger today. The
+14 skills already satisfy the Agent Skills open standard that Cursor, Copilot,
+Codex and Antigravity all read from `.agents/skills/`. Copilot reads
+`.claude/settings.json` natively and Codex mirrors Claude's hook payload, so two
+of the four gate ports are close to free.
+
+**The three things that will bite, all recorded as findings in the journal.**
+
+1. **Cursor hooks fail OPEN unless `failClosed: true`.** Emitting a Cursor
+   config without the flag ships the exact defect `hook-io.mjs` was written
+   against — a control that looks like it works and cannot say no.
+2. **Codex will not run a hook until it is trusted by hash via `/hooks`.** An
+   untrusted gate is an absent gate, and nothing tells the user. Needs an
+   installer step and a doctor finding.
+3. **Antigravity has no `SubagentStop`**, so the evidence gate — the headline
+   mechanism — cannot be enforced there at all. Its plugin manifest also has no
+   `version` field, which breaks the release discipline this repo calls its most
+   expensive mistake.
+
+**The design in one line.** A single `scripts/harness.mjs` holding one frozen
+descriptor per harness, the only place a harness name may appear — the rule
+`tiers:` already holds for model names, for the same ADR-21 reason. Gates read a
+canonical payload and stop knowing the word `Bash`. A capability manifest drives
+a new board panel with three states — ENFORCED, ADVISORY, UNAVAILABLE — so a
+mechanism that is only prose under a given harness says so on every screen, and
+a surface with no data source is not rendered rather than rendered as zero.
+A row reads ENFORCED only once the gate has been **seen refusing**, never once
+it has merely been registered.
+
+**Sequencing is adopt-first.** Phase 1 (T-1..T-3) delivers most of Tyran to
+three more harnesses with no gate work at all and does not wait on the measured
+contracts. T-5 needs a HUMAN edit — `hooks/**` is KERNEL here, so an agent
+session cannot touch the runtime or the gates.
+
+**Not started, and deliberately so: this needs operator time, not agent time.**

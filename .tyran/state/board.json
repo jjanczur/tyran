@@ -1,0 +1,227 @@
+{
+  "schema": 1,
+  "as_of": "2026-08-19T13:57:40.792Z",
+  "totals": {
+    "initiatives": 1,
+    "agents": 0,
+    "agents_stale": 0,
+    "merged": 0,
+    "tickets": 12,
+    "percent": 0,
+    "blocked": 0
+  },
+  "stop": {
+    "stopped": false,
+    "reason": null
+  },
+  "paused": [],
+  "asks": [],
+  "initiatives": [
+    {
+      "name": "multi-harness-support",
+      "title": "Run Tyran under Cursor, Copilot, Codex and Antigravity",
+      "tickets": 12,
+      "merged": 0,
+      "percent": 0,
+      "waiting": 0,
+      "findings": 16,
+      "phase": "planned — not started",
+      "closed": null,
+      "last_ts": "2026-08-19T13:57:40.792Z"
+    }
+  ],
+  "agents": [],
+  "files": {
+    "multi-harness-support": [
+      {
+        "name": "PLAN.md",
+        "path": ".tyran/state/multi-harness-support/PLAN.md"
+      },
+      {
+        "name": "NOTES.md",
+        "path": ".tyran/state/multi-harness-support/NOTES.md"
+      },
+      {
+        "name": "STATE.md",
+        "path": ".tyran/state/multi-harness-support/STATE.md"
+      },
+      {
+        "name": "PROGRESS.md",
+        "path": ".tyran/state/multi-harness-support/PROGRESS.md"
+      }
+    ]
+  },
+  "lanes": {
+    "waiting-operator": [],
+    "paused-limit": [],
+    "blocked": [],
+    "changes-requested": [],
+    "in-review": [],
+    "in-progress": [],
+    "ready": [],
+    "backlog": [],
+    "parked": [
+      {
+        "id": "T-1",
+        "title": "Phase 1 — `tyran init --harness <name>`: generate skills, agents and the rules fence",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.380Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-2",
+        "title": "Phase 1 — detect the harness and record it in config.yaml with provenance",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.383Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-3",
+        "title": "Phase 1 — the board Harness panel: three states, never silence",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.384Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-4",
+        "title": "Phase 2 — scripts/harness.mjs: one frozen descriptor per harness",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.386Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-5",
+        "title": "Phase 2 — rewire the hook runtime and the nine gates onto canonical fields",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.387Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-6",
+        "title": "Phase 3 — Copilot and Codex gate adapters (the cheap wins, take them first)",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.388Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-7",
+        "title": "Phase 3 — Cursor gate adapter, the proving target, with failClosed: true",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.389Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-8",
+        "title": "Phase 3 — doctor --harness, and configured-but-unenforceable becomes an ERROR",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.390Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-9",
+        "title": "Phase 3 — per-harness telemetry: unavailable must never read as zero",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.392Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-10",
+        "title": "Phase 4 — measured hook contracts, one file per harness",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.396Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-11",
+        "title": "Phase 4 — Antigravity, last and least certain",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.397Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      },
+      {
+        "id": "T-12",
+        "title": "Phase 1-4 — documentation on both surfaces, and the claims that CI checks",
+        "agents": [],
+        "worked_by": [],
+        "since": "2026-08-19T13:56:15.398Z",
+        "report_text": null,
+        "review": null,
+        "merge": null,
+        "execution": [],
+        "annotation": "roadmap — planned, not scheduled. Resumed when the operator has the time this needs.",
+        "init": "multi-harness-support"
+      }
+    ],
+    "done": []
+  },
+  "errors_logged": [],
+  "errors_logged_total": 0,
+  "errors": [],
+  "warned": []
+}

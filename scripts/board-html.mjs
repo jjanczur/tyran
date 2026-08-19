@@ -2269,7 +2269,15 @@ if (data.schema !== 1) {
             (run.paused.used_percentage === null ? 'the threshold' : run.paused.used_percentage + '%') +
             '. Resumes ' + (run.paused.wait || 'later') + '.');
       }
-      if (run.watcher && run.watcher.alive === false) {
+      // A dead watcher is only news while something is waiting to be
+      // resumed. resume.json outlives its own cancellation — overnight
+      // cancel writes state 'cancelled' rather than deleting the file —
+      // so alive:false with no pause marker and no 'waiting' claim is a
+      // leftover, not a failure. Measured 2026-08-19 on a live board: the
+      // banner burned on a watcher cancelled the previous day, on a repo
+      // with overnight mode off and nothing paused at all.
+      var watcherMatters = run.paused !== null || (run.watcher && run.watcher.state === 'waiting');
+      if (watcherMatters && run.watcher && run.watcher.alive === false) {
         lines.push('The resume watcher is not running, so nothing will restart this by itself.');
       }
       if (run.usage && run.usage.stale === true) {

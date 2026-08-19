@@ -378,6 +378,19 @@ test('Enter sends an answer, and Shift+Enter stays a newline', () => {
   assert.match(html, /Enter sends; Shift\+Enter for a new line\./);
 });
 
+test('a dead watcher is only news while something is waiting to be resumed', () => {
+  // MUTANT: drop the watcherMatters guard and warn on every alive:false.
+  // resume.json outlives its own cancellation — `overnight cancel` writes
+  // {state:'cancelled'} rather than deleting — so the banner burned on a
+  // watcher cancelled the previous day, on a repo with overnight mode off
+  // and nothing paused (measured live, 2026-08-19). The warning must be
+  // gated on a pause marker existing or on the watcher's own 'waiting'
+  // claim; a cancelled leftover with neither says nothing.
+  const html = demoHtml();
+  assert.match(html, /var watcherMatters = run\.paused !== null \|\| \(run\.watcher && run\.watcher\.state === 'waiting'\);/);
+  assert.match(html, /if \(watcherMatters && run\.watcher && run\.watcher\.alive === false\) \{/);
+});
+
 test('the composer is a chat: chips above, the field and a round send on one line', () => {
   // MUTANT: fold the send back into a labelled "Answer" button under the
   // box. The operator asked for a chat, and a chat is a field with an arrow.

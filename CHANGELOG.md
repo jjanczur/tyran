@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.1.44 — 2026-08-19
+
+### The board follows your OS, and finally has a light mode
+
+The board was dark only, by declaration in its own docstring. It now ships
+two renderings of the same warm palette — light is the new default face,
+dark keeps its near-black ground — and follows `prefers-color-scheme` until
+you choose. A three-state switch (**System / Light / Dark**) sits in the
+masthead; the choice is stored per browser and applied in the `<head>`,
+before first paint, so a dark-choosing operator never sees a light flash.
+Dark got its contrast fixed while it was open: `--muted`, which carries most
+of the small mono text on the page, was measured at 5.4:1 and raised to
+6.9:1, and every text role in both palettes now clears WCAG 4.5:1 — computed,
+not eyeballed (the light `--brass` failed at 4.40 and was darkened until it
+did not). Two tokens that had never existed (`--ink`, `--line`) stopped
+silently resolving to nothing.
+
+Readability borrowed from a board the operator reads faster than this one:
+one emoji per tab and section label, green/amber/red freshness dots on agent
+chips and stalled cards, a **waiting-time chip** on every open question that
+turns clay after a day, and the recorded DEFAULT promoted from a dl row to a
+bold sentence — "what happens if I never answer" is what the queue is
+actually scanned by. The four headline tiles became buttons that go where
+their number is explained.
+
+### Answering is a chat now
+
+The reply box under each question is a composer: the two canned moves —
+**⭐ Use the recommendation**, **Take the default** — as chips above, the
+field and a round send on one line, and **Enter sends** (Shift+Enter keeps
+the newline). The modifier-required rule is retired by operator decision;
+the empty-input guard survives it, so a stray Enter on a blank box still
+sends nothing. A ticket standing in `waiting-operator` embeds the same
+composer in its own detail panel — answering never requires finding the
+question a second tab over.
+
+The ticket detail also grew a **timeline** — spawned, reported, reviewed,
+merged, oldest first, merge sha one click from the clipboard — assembled
+entirely from lifecycle facts the payload already carried. Initiative
+documents open from tickets as well as initiatives now, and they render as
+documents: headings, lists and code blocks through a renderer that builds
+structure with `createElement`/`textContent` only. The rule the old `<pre>`
+enforced survives restated — nothing out of an agent-written document
+becomes a link, an image, raw HTML or anything that runs.
+
+### Every setting explains itself before you touch it
+
+Each knob on the Settings tab folds open into **"What does this change?"**:
+what the setting is, what changing it does, how it lands on Tyran — and,
+where loosening is possible, what loosening costs, stated *before* the
+confirm dialog restates it as a question. The prose lives in the settings
+catalogue and travels through `settings.json`, so the terminal and the page
+read the same sentences.
+
+### The shipped policy template starts a step looser
+
+Operator-decided: new installs got more refusal than they needed. Two dials
+turn, in the template only — an installed policy is KERNEL and no update
+touches it:
+
+- `default: GATED` → `AUTO`. The gate is silent outside `.tyran/`,
+  `.claude/` and the hooks directory, so the default never protected your
+  source tree; it decided only the unnamed paths under those prefixes, where
+  an unknown file was denied to every subagent — the exact incident class
+  the legacy lease alias records.
+- `.claude/agents/**`: `GATED` → `AUTO`. GATED denies a subagent
+  unconditionally, so the retro loop could only ever propose changes to the
+  files it exists to maintain. The trade is stated in the rule's own reason.
+
+`boundaries:` still ships strict, the KERNEL floors are as unloosenable as
+ever, and tightening either dial back is one word in
+`.tyran/policies/autonomy.yaml`.
+
+### And the board signs its work
+
+The masthead links to [janczura.com](https://janczura.com/en/), LinkedIn and
+the GitHub repo; the footer says what the docs site already said — *From
+Berlin with ♥ by two buddies — Jacek and Piotr.*
+
 ## 0.1.43 — 2026-08-18
 
 ### One switch that opens the gate, and four things it cannot reach

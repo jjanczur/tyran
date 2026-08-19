@@ -324,7 +324,9 @@ test('loosening a boundary needs a second, deliberate confirmation', () => {
         return true;
       });
     }
-    // Same for the default, and for raising the deployment class.
+    // Same for the default — shipped as AUTO since 0.1.44, so tighten it
+    // first and pin that the way back DOWN still demands the confirmation.
+    write(f.tyran, applyPolicyClass(f.tyran, null, 'GATED'));
     assert.throws(() => applyPolicyClass(f.tyran, null, 'AUTO'), (err) => err.widens === true);
     assert.throws(() => applySetting(f.tyran, 'autonomy', 'P3'), (err) => {
       assert.equal(err.widens, true);

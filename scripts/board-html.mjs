@@ -81,7 +81,7 @@ const CSS = `
   --bg:#f4efe6;--bg-raised:#fbf8f1;--bg-sunken:#ebe4d5;
   --text:#3d372b;--heading:#231e15;--muted:#6b6252;
   --hairline:#d7cdba;--hairline-soft:#e3dbc9;
-  --brass:#8a6a26;--brass-bright:#6d5316;--brass-low:#efe6cb;--brass-edge:#c8b173;
+  --brass:#7e6023;--brass-bright:#6d5316;--brass-low:#efe6cb;--brass-edge:#c8b173;
   --steel:#41666f;--steel-bright:#2f505c;--steel-low:#dde8ea;--steel-edge:#93b1b8;
   --clay:#a34a3d;--clay-bright:#88392d;--clay-low:#f2ded7;--clay-edge:#d19c8f;
   --sage:#5d7440;--sage-bright:#4a6030;

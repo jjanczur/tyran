@@ -77,8 +77,8 @@ no ceiling is a preference rather than a limit:
 
 | Class | Examples | Who decides |
 |---|---|---|
-| **AUTO** | knowledge facts, rule tweaks, `.tyran/config.yaml`, new repo-specific skills (written to the [`skill-writing`](../skills/skill-writing/SKILL.md) standard, including its activation test) | retro commits autonomously; ledger entry; `git revert` rolls back |
-| **GATED** | new/changed hooks, agent overrides, budgets, deleting safety rules | retro proposes, you approve |
+| **AUTO** | knowledge facts, rule tweaks, `.tyran/config.yaml`, agent overrides (since 0.1.44), new repo-specific skills (written to the [`skill-writing`](../skills/skill-writing/SKILL.md) standard, including its activation test) | retro commits autonomously; ledger entry; `git revert` rolls back |
+| **GATED** | new/changed hooks, `CLAUDE.md`, budgets, deleting safety rules | retro proposes, you approve |
 | **KERNEL** | the enforcement hooks, the rollback mechanism, this classification itself | humans only, by hand |
 
 The classification is a file in your repo (`.tyran/policies/autonomy.yaml`)

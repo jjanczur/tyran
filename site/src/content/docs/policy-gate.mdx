@@ -38,7 +38,7 @@ never surface a permission prompt, and neither do a main loop's under
 | `AUTO` | pass | pass | pass |
 | `GATED` | pass — the platform's own permission prompt **is** the approval | **ask** — the gate summons the prompt itself | **deny** |
 | `KERNEL` | **deny** | **deny** | **deny** |
-| **no rule matches, inside `.tyran/` `.claude/` `hooks/`** | the policy's `default:` — `GATED` in the shipped template | |
+| **no rule matches, inside `.tyran/` `.claude/` `hooks/`** | the policy's `default:` — `AUTO` in the shipped template since 0.1.44 (it was `GATED`; tightening it back is one word in `.tyran/policies/autonomy.yaml`) | |
 | **no rule matches, anywhere else** | pass — see below | pass |
 | **outside the repository** | **deny** | **deny** |
 

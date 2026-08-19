@@ -323,9 +323,10 @@ nothing else in a session will ever mention it again.
 
 Three artifact classes, enforced by a `PreToolUse` hook on file paths:
 
-- **AUTO** — knowledge facts, rule tweaks, `.tyran/config.yaml`, repo-specific
-  skills (with a passing activation test): the retro agent commits these itself.
-- **GATED** — new/changed hooks, agent overrides, budget raises, deletion of
+- **AUTO** — knowledge facts, rule tweaks, `.tyran/config.yaml`, agent
+  overrides (since 0.1.44), repo-specific skills (with a passing activation
+  test): the retro agent commits these itself.
+- **GATED** — new/changed hooks, `CLAUDE.md`, budget raises, deletion of
   safety rules: proposed, you approve.
 - **KERNEL** — the enforcement hooks themselves, the rollback mechanism, and
   this very list: never touched autonomously.
@@ -419,7 +420,8 @@ Lease files (`state/*/locks/`) are runtime, not history: `/tyran:setup` seeds
 ### Policy precedence
 
 `policies/autonomy.yaml` needs an explicit `default:` class for paths no
-rule matches (`GATED` is the safe answer), and the **most specific matching
+rule matches (`GATED` is the strict answer; the shipped template says `AUTO`
+since 0.1.44), and the **most specific matching
 rule wins** — measured by glob length, ties resolved toward the stricter
 class. `**` spans path separators, `*` does not.
 

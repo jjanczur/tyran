@@ -84,11 +84,32 @@ const input = (extra = {}) => ({
   ...extra,
 });
 
+/**
+ * Where a spawned gate lands when the PAYLOAD does not say — deliberately a
+ * directory with no `.tyran/` in it.
+ *
+ * `resolveRepoRoot` (evidence-gate.mjs) tries `input.cwd`, then
+ * `CLAUDE_PROJECT_DIR`, then the PROCESS cwd. Every test below passes a temp
+ * repo in the payload, so the fallback is normally unreachable — except in the
+ * one test that feeds a malformed `cwd` on purpose to prove the edge refuses.
+ * There the third candidate wins, and inheriting the runner's cwd made that
+ * the Tyran checkout itself: the suite appended a REAL `gate` event to this
+ * repo's own committed journal, once per run. Latent and invisible for as long
+ * as this repo had no initiative on disk; a one-line spurious diff on every
+ * `node --test` from the moment it had one.
+ *
+ * Pinning the spawn cwd fixes it at the root rather than in the one test that
+ * happened to expose it, so no future test can reach the real journal through
+ * the same fallback.
+ */
+const NEUTRAL_CWD = mkdtempSync(join(tmpdir(), 'tyran-evidence-spawn-'));
+
 /** Run the real hook script the way the platform runs it. */
 function runScript(payload) {
   const r = spawnSync(process.execPath, [SCRIPT], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
+    cwd: NEUTRAL_CWD,
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }

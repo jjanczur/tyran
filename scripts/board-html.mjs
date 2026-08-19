@@ -384,6 +384,16 @@ pre.how .c{color:var(--muted)}
 .srow select:focus-visible,.srow input:focus-visible,.srow textarea:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
 .srow select:disabled,.srow input:disabled,.srow textarea:disabled{opacity:.55;cursor:not-allowed}
 .srow .shelp{font-size:.8rem;color:var(--muted);line-height:1.6;margin-top:.35rem;max-width:52rem}
+.sexplain{margin-top:.35rem;max-width:52rem}
+.sexplain>summary{cursor:pointer;font-size:.78rem;color:var(--steel);list-style:none;padding:.15rem 0}
+.sexplain>summary::-webkit-details-marker{display:none}
+/* Character, not CSS escape — same reason as .howbox above. */
+.sexplain>summary::before{content:"▸ ";color:var(--steel)}
+.sexplain[open]>summary::before{content:"▾ "}
+.sexplain>summary:hover{color:var(--text)}
+.sexplain>summary:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.sexline{font-size:.8rem;line-height:1.6;margin:.25rem 0;padding-left:.6rem;border-left:2px solid var(--hairline)}
+.sexline b{color:var(--heading);font-weight:600}
 .srow .schoice{font-size:.8rem;color:var(--text);line-height:1.6;margin-top:.3rem;padding-left:.6rem;border-left:2px solid var(--steel-edge)}
 .sstat{font-family:var(--mono);font-size:.75rem;line-height:1.7;margin-top:.35rem;color:var(--muted);word-break:break-word;white-space:pre-wrap}
 .sstat.ok{color:var(--sage-bright)}
@@ -2119,6 +2129,29 @@ if (data.schema !== 1) {
 
     if (choiceNote) bodyCell.appendChild(choiceNote);
     bodyCell.appendChild(el('div', 'shelp', setting.help));
+    // The long answer, folded shut (operator-asked 2026-08-19: every setting
+    // should say what it means, what changes, and how it lands on Tyran).
+    // Three labelled sentences, plus the widening cost when there is one —
+    // stated HERE, before the confirm dialog restates it as a question.
+    if (setting.explain) {
+      var why = el('details', 'sexplain');
+      why.appendChild(el('summary', null, 'What does this change?'));
+      [['What it is', setting.explain.what],
+       ['If you change it', setting.explain.changes],
+       ['How it lands on Tyran', setting.explain.effect],
+       ['Loosening it means', setting.widens]].forEach(function (pair) {
+        if (!pair[1]) return;
+        var line = el('div', 'sexline');
+        line.appendChild(el('b', null, pair[0] + ': '));
+        line.appendChild(el('span', null, pair[1]));
+        why.appendChild(line);
+      });
+      // An open explainer must not be yanked shut by the 30-second reload
+      // mid-read; the held tab already stops the timer, this is for the
+      // reader who opened it from a fresh load.
+      why.addEventListener('toggle', function () { if (why.open) holdRefresh(); });
+      bodyCell.appendChild(why);
+    }
     bodyCell.appendChild(status);
     return row;
   };

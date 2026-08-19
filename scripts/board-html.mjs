@@ -189,22 +189,17 @@ button.stile:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
 .file{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;font-size:.76rem}
 .file .fname{color:var(--steel-bright);font-family:var(--mono);font-weight:600;min-width:6rem}
 .file code{color:var(--muted);font-size:.72rem;word-break:break-all}
-/* On an initiative the name is a button that opens the file; on a ticket it is
-   still a plain span. Underlined rather than boxed: it sits in a list of paths
-   and a row of buttons there would read as a toolbar. */
+/* The name is a button that opens the file, on initiatives and tickets both.
+   Underlined rather than boxed: it sits in a list of paths and a row of
+   buttons there would read as a toolbar. */
 .file button.fname{background:transparent;border:0;padding:0;font-size:inherit;cursor:pointer;
   text-align:left;text-decoration:underline;text-underline-offset:.18em}
 .file button.fname:hover{color:var(--brass-bright)}
 .file button.fname:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
 .docview{margin-top:.5rem}
 .dochead{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.3rem}
-/* The document, as TEXT. It is agent-written markdown rendered by nothing —
-   pre-wrap so a long line folds instead of pushing the page sideways, and a
-   ceiling so a 2000-line NOTES.md scrolls inside the panel rather than
-   burying the board under it. */
-pre.doc{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;
-  padding:.7rem .85rem;font-family:var(--mono);font-size:.74rem;line-height:1.5;color:var(--text);
-  white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto;margin:0}
+/* The document itself is rendered by renderMarkdown into .docmd (defined with
+   the other detail styles): structure, never active markup. */
 
 /* ---- what actually ran on a ticket ---- */
 .runs{width:100%;border-collapse:collapse;margin-top:.3rem;font-size:.74rem;display:block;overflow-x:auto}
@@ -261,11 +256,37 @@ pre.doc{background:var(--bg-sunken);border:1px solid var(--hairline);border-radi
 .ask .row.defrow{font-weight:600;color:var(--heading)}
 .ask .row.defrow .label{color:var(--clay)}
 .reply{margin-top:.6rem;border-top:1px solid var(--brass-edge);padding-top:.55rem}
-.reply textarea{display:block;width:100%;font-family:var(--font);font-size:.86rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.35rem;padding:.4rem .55rem;min-height:3.4rem;resize:vertical}
+/* A chat composer, not a form (operator-decided 2026-08-19): the field and a
+   round send sit on one line, the two canned moves are chips above it, and
+   Enter sends. The textarea still grows for an operator writing sentences. */
+.composer{display:flex;gap:.45rem;align-items:flex-end}
+.reply textarea{display:block;width:100%;font-family:var(--font);font-size:.86rem;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:.55rem;padding:.45rem .6rem;min-height:2.6rem;resize:vertical}
 .reply textarea:focus-visible{outline:2px solid var(--steel);outline-offset:1px}
 .reply textarea:disabled{opacity:.55;cursor:not-allowed}
-.reply .acts{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.4rem}
+.sendbtn{flex:0 0 auto;width:2.3rem;height:2.3rem;border-radius:50%;background:var(--brass-low);color:var(--brass-bright);border:1px solid var(--brass-edge);font-size:1rem;line-height:1;cursor:pointer}
+.sendbtn:hover:not(:disabled){background:var(--brass-edge)}
+.sendbtn:disabled{opacity:.5;cursor:not-allowed}
+.sendbtn:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.reply .acts{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:.1rem 0 .4rem}
 .reply .hint{font-size:.75rem;color:var(--muted);margin-top:.3rem}
+/* ---- a ticket's own history, oldest first ---- */
+.tl{margin:.45rem 0 0;font-size:.78rem}
+.tl .tlr{display:flex;gap:.55rem;padding:.16rem 0;border-top:1px dashed var(--hairline-soft);align-items:baseline}
+.tl .tlt{color:var(--muted);font-family:var(--mono);min-width:6.5rem;white-space:nowrap}
+.copysha{font-family:var(--mono);font-size:.68rem;background:var(--steel-low);color:var(--steel-bright);border:1px solid var(--steel-edge);border-radius:.3rem;padding:.06rem .4rem;cursor:pointer}
+.copysha:hover{background:var(--steel-edge)}
+.jumps{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
+/* ---- initiative documents, rendered ---- */
+.docmd{background:var(--bg-sunken);border:1px solid var(--hairline);border-radius:.45rem;padding:.7rem .95rem;font-size:.82rem;line-height:1.6;color:var(--text);max-height:32rem;overflow:auto}
+.docmd .md-h{color:var(--heading);font-weight:700;margin:.7rem 0 .25rem}
+.docmd .md-h.l1{font-size:.98rem}
+.docmd .md-h.l2{font-size:.9rem}
+.docmd .md-h.l3{font-size:.84rem}
+.docmd p{margin:.3rem 0}
+.docmd ul{margin:.25rem 0 .45rem 1.2rem;padding:0}
+.docmd li{margin:.12rem 0}
+.docmd pre{background:var(--bg-raised);border:1px solid var(--hairline-soft);border-radius:.35rem;padding:.5rem .65rem;font-family:var(--mono);font-size:.74rem;overflow-x:auto;margin:.35rem 0;white-space:pre-wrap;word-break:break-word}
+.docmd .md-table{font-family:var(--mono);font-size:.74rem;white-space:pre-wrap;word-break:break-word;margin:.1rem 0}
 /* Folded shut on a board that can answer in the page, opened by the settings
    fetch on one that cannot. The summary is a sentence, not a chevron with a
    noun: what is behind it is a route, not a section. */
@@ -830,9 +851,86 @@ if (data.schema !== 1) {
   // The request names an initiative and a FILE NAME, never a path - the server
   // matches that name against its own fixed list (see board.mjs), so no URL
   // this page can build reaches a file Tyran did not already agree to show.
-  // The markdown is rendered as TEXT in a pre, deliberately not parsed: these
-  // documents are written by agents, and the rule this whole page keeps is
-  // that nothing from that side ever becomes markup.
+  //
+  // The markdown is rendered STRUCTURALLY and nothing more. The rule this
+  // page keeps had to be restated when the <pre> went away (operator-decided
+  // 2026-08-19: the documents should read as documents): agent-written text
+  // may become headings, lists and code blocks — inert structure, every
+  // character still landing through textContent — but it never becomes an
+  // anchor, an image, raw HTML or anything that runs or navigates. A URL in
+  // a document stays a string you can read and copy, not a link you can be
+  // sent down.
+  //
+  // The backtick appears only as \\u0060: this whole script is one template
+  // literal, and a literal backtick anywhere inside it — even in a regex —
+  // terminates the template and takes the module down.
+  var mdInline = function (node, text) {
+    var re = /(\\u0060[^\\u0060]+\\u0060)|(\\*\\*[^*]+\\*\\*)|(\\*[^*]+\\*)/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) node.appendChild(document.createTextNode(show(text.slice(last, m.index))));
+      var token = m[0];
+      if (m[1]) node.appendChild(el('code', null, token.slice(1, -1)));
+      else if (m[2]) node.appendChild(el('b', null, token.slice(2, -2)));
+      else node.appendChild(el('i', null, token.slice(1, -1)));
+      last = m.index + token.length;
+    }
+    if (last < text.length) node.appendChild(document.createTextNode(show(text.slice(last))));
+  };
+  var renderMarkdown = function (text) {
+    var root = el('div', 'docmd');
+    var lines = String(text).split('\\n');
+    var i = 0;
+    var list = null;
+    var para = null;
+    var closeBlocks = function () { list = null; para = null; };
+    while (i < lines.length) {
+      var line = lines[i];
+      if (/^\\s*\\u0060\\u0060\\u0060/.test(line)) {
+        closeBlocks();
+        var code = [];
+        i += 1;
+        while (i < lines.length && !/^\\s*\\u0060\\u0060\\u0060/.test(lines[i])) { code.push(lines[i]); i += 1; }
+        i += 1;
+        root.appendChild(el('pre', null, code.join('\\n')));
+        continue;
+      }
+      var h = line.match(/^(#{1,6})\\s+(.*)$/);
+      if (h) {
+        closeBlocks();
+        var hd = el('div', 'md-h l' + (h[1].length > 3 ? 3 : h[1].length));
+        mdInline(hd, h[2]);
+        root.appendChild(hd);
+        i += 1;
+        continue;
+      }
+      var item = line.match(/^\\s*(?:[-*+]|\\d+[.)])\\s+(.*)$/);
+      if (item) {
+        para = null;
+        if (!list) { list = el('ul'); root.appendChild(list); }
+        var li = el('li');
+        mdInline(li, item[1]);
+        list.appendChild(li);
+        i += 1;
+        continue;
+      }
+      if (/^\\s*\\|/.test(line)) {
+        // A table row stays one mono line: pipes that still line up beat a
+        // table half-parsed.
+        closeBlocks();
+        root.appendChild(el('div', 'md-table', line));
+        i += 1;
+        continue;
+      }
+      if (line.trim() === '') { closeBlocks(); i += 1; continue; }
+      if (!para) { para = el('p'); root.appendChild(para); }
+      else para.appendChild(document.createTextNode(' '));
+      mdInline(para, line);
+      i += 1;
+    }
+    return root;
+  };
   var loadDoc = function (init, file, view) {
     clear(view);
     view.appendChild(el('div', 'hint', 'reading ' + file.name + '…'));
@@ -854,9 +952,7 @@ if (data.schema !== 1) {
         close.addEventListener('click', function () { clear(view); });
         head.appendChild(close);
         view.appendChild(head);
-        var pre = el('pre', 'doc');
-        pre.textContent = payload.text;
-        view.appendChild(pre);
+        view.appendChild(renderMarkdown(payload.text));
         if (payload.truncated === true) {
           view.appendChild(el('div', 'hint',
             'Shown to ' + payload.bytes + ' bytes and cut there — open ' + payload.path + ' for the rest.'));
@@ -1122,22 +1218,102 @@ if (data.schema !== 1) {
       });
       box.appendChild(tbl);
     }
+    // The ticket's own history, oldest first, assembled from the lifecycle
+    // facts the payload already carries — spawn, report, review, merge. The
+    // execution table above answers "what did it cost and on which model";
+    // this answers "what happened, in what order", which is the reading a
+    // stuck or bounced ticket is opened for.
+    var tl = [];
+    runs.forEach(function (r) {
+      if (r.started) tl.push({ ts: r.started, text: r.agent + (r.role ? ' (' + r.role + ')' : '') + ' spawned' + (r.model ? ' on ' + r.model : '') });
+      if (r.ended) tl.push({ ts: r.ended, text: r.agent + ' reported' + (r.verdict ? ': ' + r.verdict : '') });
+    });
+    if (card.review && card.review.ts) {
+      tl.push({ ts: card.review.ts, text: 'review: ' + (card.review.verdict || 'no verdict') + (card.review.by ? ' by ' + card.review.by : '') });
+    }
+    if (card.merge && card.merge.ts) {
+      tl.push({ ts: card.merge.ts, text: 'merged' + (card.merge.mode ? ' (' + card.merge.mode + ')' : ''), sha: card.merge.sha || null });
+    }
+    tl.sort(function (x, y) { return Date.parse(x.ts) - Date.parse(y.ts); });
+    if (tl.length > 0) {
+      box.appendChild(el('div', 'dt', 'Timeline'));
+      var tlBox = el('div', 'tl');
+      tl.forEach(function (evt) {
+        var trow = el('div', 'tlr');
+        trow.appendChild(el('span', 'tlt', ago(evt.ts)));
+        trow.appendChild(el('span', null, evt.text));
+        if (evt.sha) {
+          trow.appendChild(el('code', null, evt.sha));
+          var cp = el('button', 'copysha', 'copy sha');
+          cp.setAttribute('type', 'button');
+          cp.addEventListener('click', function () {
+            // Clipboard access can be refused outright (file://, an old
+            // browser); the fallback is showing the sha, which is what the
+            // button was saving you from selecting by hand.
+            try {
+              navigator.clipboard.writeText(evt.sha).then(
+                function () { cp.textContent = 'copied \\u2713'; },
+                function () { cp.textContent = evt.sha; });
+            } catch (e) { cp.textContent = evt.sha; }
+          });
+          trow.appendChild(cp);
+        }
+        tlBox.appendChild(trow);
+      });
+      box.appendChild(tlBox);
+    }
+    // Answering where you clicked. A ticket standing in waiting-operator IS
+    // an open question, so the composer comes to the card instead of the
+    // operator being sent to the Waiting tab to find the same question again.
+    var openHere = asks.filter(function (q) {
+      return (q.ticket || '') === (card.id || '') && (q.init || '') === (card.init || '');
+    });
+    if (lane === 'waiting-operator' && openHere.length > 0) {
+      openHere.forEach(function (q) {
+        box.appendChild(el('div', 'dt', '\\u2753 ' + (q.question || 'gate ' + q.kind)));
+        box.appendChild(replyBox(q, q.default !== null && q.default !== undefined));
+      });
+    }
     // The files this initiative ACTUALLY has, listed by the server after an
     // existsSync — never a fixed list of what a well-run initiative ought to
-    // contain. Paths, not links: the board serves three URLs and derives a
-    // filesystem path from none of them, which is worth more than a click.
+    // contain. Buttons since 2026-08-19, exactly like the initiative rows:
+    // "which plan does this ticket serve" was a path you copied into an
+    // editor, from a page that already knows how to open it.
     var docs = (data.files || {})[card.init] || [];
     if (docs.length > 0) {
       box.appendChild(el('div', 'dt', 'Files'));
+      var view = el('div', 'docview');
       var list = el('div', 'files');
       docs.forEach(function (f) {
         var line = el('div', 'file');
-        line.appendChild(el('span', 'fname', f.name));
+        var open = el('button', 'fname', f.name);
+        open.setAttribute('type', 'button');
+        open.addEventListener('click', function () { loadDoc(card.init, f, view); });
+        line.appendChild(open);
         line.appendChild(el('code', null, f.path));
         list.appendChild(line);
       });
       box.appendChild(list);
+      box.appendChild(view);
     }
+    // Where to go from here — only the jumps this ticket can actually make.
+    var jumps = el('div', 'jumps');
+    if (openHere.length > 0) {
+      var toAsk = el('button', 'sbtn', 'Open in Waiting tab');
+      toAsk.setAttribute('type', 'button');
+      toAsk.addEventListener('click', function () {
+        select('questions');
+        if (openHere[0].tyranCard) openHere[0].tyranCard.scrollIntoView({ behavior: 'smooth' });
+      });
+      jumps.appendChild(toAsk);
+    }
+    if (cost && (cost.by_ticket || []).some(function (r) { return r.ticket === card.id; })) {
+      var toSpend = el('button', 'sbtn', 'Spend for this ticket');
+      toSpend.setAttribute('type', 'button');
+      toSpend.addEventListener('click', function () { select('spend'); });
+      jumps.appendChild(toSpend);
+    }
+    if (jumps.childNodes.length > 0) box.appendChild(jumps);
     detail.appendChild(box);
   };
   // A filter, because ten lanes across dozens of initiatives is a pile.
@@ -1279,17 +1455,18 @@ if (data.schema !== 1) {
   var replyBox = function (a, hasDefault) {
     var box = el('div', 'reply');
     var input = el('textarea');
-    // The shortcut is named where the cursor already is. "Answer" IS the send
-    // button and always was, but a labelled verb beside a text box reads as a
-    // mode switch rather than as send, and an operator who types an answer and
-    // presses Enter gets a newline with nothing to say why.
+    // The shortcut is named where the cursor already is. The round arrow IS
+    // the send button; Enter is the same statement made from the keyboard.
     input.placeholder = (hasDefault
-      ? 'Your answer, in your own words \\u2014 or use the default button.'
+      ? 'Your answer, in your own words \\u2014 or use the default chip.'
       : 'Your answer, in your own words. There is no recorded default for this one.')
-      + ' \\u2318/Ctrl+Enter sends.';
+      + ' Enter sends; Shift+Enter for a new line.';
+    input.setAttribute('rows', '1');
     var acts = el('div', 'acts');
-    var send = el('button', 'sbtn', 'Answer');
+    var send = el('button', 'sendbtn', '\\u27A4');
     send.setAttribute('type', 'button');
+    send.setAttribute('aria-label', 'Send answer');
+    send.title = 'Send \\u00b7 Enter';
     var useDefault = hasDefault ? el('button', 'sbtn', 'Take the default') : null;
     if (useDefault) useDefault.setAttribute('type', 'button');
     // The recommendation was already shown, as TEXT, and the only way to
@@ -1298,7 +1475,7 @@ if (data.schema !== 1) {
     // page: the agent has said what it thinks should happen and the human is
     // asked to transcribe it. This fills the box instead of submitting, so
     // the wording stays editable and the answer is still deliberate.
-    var useRec = a.recommendation ? el('button', 'sbtn', 'Use the recommendation') : null;
+    var useRec = a.recommendation ? el('button', 'sbtn', '\\u2B50 Use the recommendation') : null;
     if (useRec) {
       useRec.setAttribute('type', 'button');
       useRec.addEventListener('click', function () {
@@ -1311,6 +1488,8 @@ if (data.schema !== 1) {
 
     var submit = function (text) {
       [send, useDefault].forEach(function (b) { if (b) b.disabled = true; });
+      status.className = 'sstat';
+      status.textContent = 'sending\\u2026';
       post('/answer', { init: a.init, kind: a.kind, answer: text }, status, function (ok) {
         if (!ok) {
           [send, useDefault].forEach(function (b) { if (b) b.disabled = false; });
@@ -1321,7 +1500,7 @@ if (data.schema !== 1) {
         // with a live box invites answering it twice.
         input.disabled = true;
       }, function (p) {
-        return (p.mode === 'default' ? 'answered with the recorded default' : 'answered')
+        return 'sent \\u2713 ' + (p.mode === 'default' ? 'answered with the recorded default' : 'answered')
           + ': ' + p.recorded + ' \\u00b7 decision ' + p.decision + ' \\u2014 reload to refresh the board';
       });
     };
@@ -1337,15 +1516,17 @@ if (data.schema !== 1) {
       submit(input.value);
     };
     send.addEventListener('click', attempt);
-    // Enter ALONE must not send, and the modifier is not decoration. This is a
-    // textarea because an operator explaining a decision writes sentences, and
-    // what it sends is appended to a journal that can never take it back — a
-    // question closed by a stray keystroke is a decision nobody made. The
+    // Enter sends; Shift+Enter is the newline (operator-decided 2026-08-19:
+    // the box should answer like a chat). The earlier rule — modifier
+    // required, because the journal can never take an answer back — is
+    // retired deliberately, not forgotten: the empty-input guard in attempt()
+    // still means a stray Enter on a blank box sends nothing, and an answer
+    // with text in it is what the operator typed, not an accident. The
     // keyCode fallback is for a browser that reports no key on a dead-key
     // layout; a duplicate hit is harmless because the handler is idempotent
     // once the field disables itself.
     input.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'Enter' || e.keyCode === 13)) {
+      if (!e.shiftKey && (e.key === 'Enter' || e.keyCode === 13)) {
         e.preventDefault();
         attempt();
       }
@@ -1362,17 +1543,25 @@ if (data.schema !== 1) {
     // reload with nothing to show for it.
     input.addEventListener('input', function () { holdRefresh(); });
 
-    box.appendChild(input);
-    acts.appendChild(send);
+    // Chips first, then the composer row: the canned moves read as choices
+    // ABOVE the field, the way a chat offers suggested replies.
     if (useRec) acts.appendChild(useRec);
     if (useDefault) acts.appendChild(useDefault);
-    box.appendChild(acts);
+    if (useRec || useDefault) box.appendChild(acts);
+    var composer = el('div', 'composer');
+    composer.appendChild(input);
+    composer.appendChild(send);
+    box.appendChild(composer);
     box.appendChild(status);
     box.appendChild(el('div', 'hint', 'Answering writes a decision and closes the gate in ' + a.init + '\\u2019s journal. Needs the board started with --write.'));
     return box;
   };
   asks.forEach(function (a) {
     var card = el('div', 'ask');
+    // The element rides on the ask itself so a ticket's detail panel can
+    // scroll the Waiting tab to exactly this card — the jump is a reference,
+    // never a second lookup that could drift.
+    a.tyranCard = card;
     // The one distinction that changes what an operator does about it, and it
     // costs no new event type to say: an ask WITH a recorded default is a
     // decision you may leave to the recommendation, and an ask without one is

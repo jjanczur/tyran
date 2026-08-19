@@ -356,24 +356,74 @@ test('the terminal commands fold away on a board that can answer, and open on on
   assert.match(html, /howBox\.open = true;\n\s*if \(String\(location\.protocol\) === 'file:'\) return;/);
 });
 
-test('a modifier plus Enter sends an answer, and Enter alone does not', () => {
-  // MUTANT 1: delete the keydown listener. "Answer" is then the only way to
-  // send, and an operator who types a sentence and presses Enter gets a
-  // newline with nothing on the page to say why — reported as "there is no
-  // send button".
-  // MUTANT 2: drop the metaKey/ctrlKey test and send on bare Enter. This is a
-  // textarea because answers are sentences, and what it sends is appended to
-  // a journal that can never take it back: a gate closed by a stray keystroke
-  // is a decision nobody made.
+test('Enter sends an answer, and Shift+Enter stays a newline', () => {
+  // MUTANT 1: delete the keydown listener. The round arrow is then the only
+  // way to send, and an operator who types a sentence and presses Enter gets
+  // a newline with nothing on the page to say why.
+  // MUTANT 2: drop the shiftKey guard and send on every Enter. Answers are
+  // sentences, and the second sentence starts with Shift+Enter.
+  //
+  // The earlier rule — modifier REQUIRED, because the journal can never take
+  // an answer back — was retired by the operator on 2026-08-19: the box
+  // should answer like a chat. What survives of it is the empty-input guard:
+  // a stray Enter on a blank box still sends nothing.
   const html = demoHtml();
   assert.match(html, /input\.addEventListener\('keydown', function \(e\) \{/);
-  assert.match(html, /if \(\(e\.metaKey \|\| e\.ctrlKey\) && \(e\.key === 'Enter' \|\| e\.keyCode === 13\)\) \{/);
+  assert.match(html, /if \(!e\.shiftKey && \(e\.key === 'Enter' \|\| e\.keyCode === 13\)\) \{/);
   assert.match(html, /e\.preventDefault\(\);\n\s*attempt\(\);/);
-  // one code path, not two: the button and the shortcut must refuse an empty
+  // one code path, not two: the button and the key must refuse an empty
   // box in the same words
   assert.match(html, /send\.addEventListener\('click', attempt\);/);
   // and the shortcut is named where the cursor already is
-  assert.match(html, /Ctrl\+Enter sends\./);
+  assert.match(html, /Enter sends; Shift\+Enter for a new line\./);
+});
+
+test('the composer is a chat: chips above, the field and a round send on one line', () => {
+  // MUTANT: fold the send back into a labelled "Answer" button under the
+  // box. The operator asked for a chat, and a chat is a field with an arrow.
+  const html = demoHtml();
+  assert.match(html, /el\('button', 'sendbtn', '\\u27A4'\)/, 'the send is the round arrow');
+  assert.match(html, /var composer = el\('div', 'composer'\);/);
+  const chipsAt = html.indexOf('if (useRec || useDefault) box.appendChild(acts);');
+  const composerAt = html.indexOf('box.appendChild(composer);');
+  assert.ok(chipsAt !== -1 && composerAt !== -1 && chipsAt < composerAt,
+    'the canned moves sit above the field, the way a chat offers replies');
+});
+
+test('a waiting-operator ticket answers in place and can jump to its question', () => {
+  // MUTANT 1: drop the openHere branch — the operator is sent to the Waiting
+  // tab to find the same question the card already named.
+  // MUTANT 2: drop tyranCard — the jump becomes a second lookup that drifts.
+  const html = demoHtml();
+  assert.match(html, /lane === 'waiting-operator' && openHere\.length > 0/);
+  assert.match(html, /replyBox\(q, q\.default !== null && q\.default !== undefined\)/);
+  assert.match(html, /Open in Waiting tab/);
+  assert.match(html, /a\.tyranCard = card;/);
+});
+
+test('a ticket detail carries its own timeline, oldest first, with the sha one click away', () => {
+  // The execution table answers "what did it cost"; the timeline answers
+  // "what happened, in what order" — the reading a bounced ticket is opened
+  // for. MUTANT: drop the sort — journal order is per-agent, not global.
+  const html = demoHtml();
+  assert.match(html, /' spawned' \+ \(r\.model \? ' on ' \+ r\.model : ''\)/);
+  assert.match(html, /'review: ' \+ \(card\.review\.verdict \|\| 'no verdict'\)/);
+  assert.match(html, /tl\.sort\(function \(x, y\) \{ return Date\.parse\(x\.ts\) - Date\.parse\(y\.ts\); \}\);/);
+  assert.match(html, /copy sha/);
+});
+
+test('initiative documents render as structure and never as active markup', () => {
+  // The rule the old <pre> enforced by rendering nothing survives the
+  // renderer: agent text may become headings, lists and code blocks, all via
+  // textContent — never an anchor, never innerHTML, and the backtick exists
+  // only as \u0060 because the whole client is one template literal.
+  const html = demoHtml();
+  assert.match(html, /renderMarkdown\(payload\.text\)/, 'the doc panel uses the renderer');
+  const md = html.slice(html.indexOf('var mdInline'), html.indexOf('var loadDoc'));
+  assert.ok(md.length > 100, 'the renderer exists between mdInline and loadDoc');
+  assert.ok(!md.includes("el('a'"), 'no anchors out of agent-written documents');
+  assert.ok(!md.includes('innerHTML'), 'no innerHTML in the renderer');
+  assert.ok(!md.includes(String.fromCharCode(96)), 'no literal backtick inside the client literal');
 });
 
 test('the palette is the muted one, saturation on edges rather than on whole fills', () => {

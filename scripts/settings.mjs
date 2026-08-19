@@ -87,6 +87,11 @@ export const GROUPS = Object.freeze([
         path: ['profile'],
         label: 'Cost profile',
         help: 'How much verification each piece of work carries. The cheaper profiles skip review passes, not tests.',
+        explain: {
+          what: 'How many independent eyes look at a piece of work before it counts as done.',
+          changes: 'The number of review passes and agents the conductor spends per ticket — never whether tests run; those always do.',
+          effect: 'Eco finishes sooner and cheaper with tests as the only guard; full adds an independent review and the strongest tier on risky work, so mistakes are caught before you see them.',
+        },
         ...choice(PROFILES, {
           eco: 'Fewest agents and fewest review passes. Good for small, well-understood changes.',
           balanced: 'The default. Implementation plus an independent review on anything non-trivial.',
@@ -98,6 +103,11 @@ export const GROUPS = Object.freeze([
         path: ['autonomy'],
         label: 'Deployment autonomy',
         help: 'How far a finished piece of work may travel without you. The gate enforces this downward — it will not stop someone who edits this file from raising it, which is why the policy below decides who may.',
+        explain: {
+          what: 'The furthest a finished change may travel without a human touching it.',
+          changes: 'Which git pushes the gate allows: P1 stops at a feature branch, P2 reaches staging, P3 may land the default branch.',
+          effect: 'At P1 you merge every PR yourself; at P3 Tyran can finish a story end to end. Irreversible pushes — force, mirror, remote deletes — are refused at every level, including P3.',
+        },
         widening: {
           scale: 'autonomy',
           consequence:
@@ -122,6 +132,11 @@ export const GROUPS = Object.freeze([
         path: ['boundaries', 'preset'],
         label: 'Preset',
         help: 'The one switch. "Open" turns every boundary below to its loose setting at once — the closest thing Tyran has to running Claude Code with permissions skipped. Anything you set individually below wins over the preset.',
+        explain: {
+          what: 'The master position for every boundary in this group at once.',
+          changes: 'Flips outside-repo access, credential reads, your path rules, push checks and permission prompts together; any boundary you set individually below overrides it.',
+          effect: 'On "open", agents move without friction and without asking — the four things no setting reaches (secret scanning, the hooks, their registry, the STOP brake) still hold.',
+        },
         widening: {
           scale: 'preset',
           consequence:
@@ -137,6 +152,11 @@ export const GROUPS = Object.freeze([
         path: ['boundaries', 'outside_repo'],
         label: 'Files outside this repository',
         help: 'Today a path outside the repo root is refused for every agent. Allowing it lets them read and write anywhere on this machine — another project, your home directory, system files.',
+        explain: {
+          what: 'Whether an agent may touch any file that lives outside this repository’s root.',
+          changes: 'On "refuse", every read and write outside the repo is denied for every agent; on "allow", the whole machine is in reach.',
+          effect: 'The strictest boundary Tyran has: it is what makes "an agent went wrong" mean "inside this repo, revertable with git" rather than "anywhere on this computer".',
+        },
         widening: {
           scale: 'boundary',
           consequence: 'Agents will be able to write files anywhere on this machine, not only inside this repository.',
@@ -151,6 +171,11 @@ export const GROUPS = Object.freeze([
         path: ['boundaries', 'credentials'],
         label: 'Credential files',
         help: 'Today .env files, private keys, ~/.ssh, ~/.aws and their relatives are refused before they can reach the model — a transcript is storage. Allowing it also removes the false refusal where a word merely ENDING in .key or .pem is treated as a file.',
+        explain: {
+          what: 'Whether credential-shaped files — .env, private keys, ~/.ssh, ~/.aws — may be read into the conversation at all.',
+          changes: 'On "refuse" they are blocked before the model sees a byte; on "allow" agents can read them like any other file.',
+          effect: 'A transcript is storage, so a secret read once is a secret retained. What stops secrets being COMMITTED stays separate — the commit/push scan runs whatever this says.',
+        },
         widening: {
           scale: 'boundary',
           consequence:
@@ -166,6 +191,11 @@ export const GROUPS = Object.freeze([
         path: ['boundaries', 'path_classes'],
         label: 'Your own path rules',
         help: 'The AUTO / GATED / KERNEL rules in the policy below. Allowing this makes them advisory: a subagent may write a path you gated. The four paths that protect the gate itself stay refused whatever this says.',
+        explain: {
+          what: 'Whether the AUTO / GATED / KERNEL classes in the autonomy policy further down this page are enforced on writes.',
+          changes: 'On "allow" they become advisory: a subagent may write a path you gated, and only the four self-protecting paths still refuse.',
+          effect: 'Turning this off removes the distinction the policy exists to draw — everything an agent can reach becomes effectively AUTO.',
+        },
         widening: {
           scale: 'boundary',
           consequence: 'The GATED and KERNEL rules in your own policy stop being enforced for writes.',
@@ -180,6 +210,11 @@ export const GROUPS = Object.freeze([
         path: ['boundaries', 'push'],
         label: 'Where work may be pushed',
         help: 'Turns off the deployment-class check on git push entirely, including the rules that gate the pushes nothing can undo — a force push to main, a deleted remote branch, a mirror push.',
+        explain: {
+          what: 'Whether git pushes are checked against the deployment autonomy above at all.',
+          changes: 'On "allow", the branch rules AND the irreversible-operation rules stop applying — force pushes, mirror pushes and remote branch deletes included.',
+          effect: 'This is the only setting that can permit an operation git cannot undo. The deployment-autonomy dropdown above becomes decoration while this is loose.',
+        },
         widening: {
           scale: 'boundary',
           consequence:
@@ -195,6 +230,11 @@ export const GROUPS = Object.freeze([
         path: ['boundaries', 'prompts'],
         label: 'Permission prompts',
         help: 'Whether Claude Code still asks you before a tool call this gate has no objection to. "Skip" auto-approves those calls, which is what people mean by skipping permissions — a refusal from any gate still wins, so this cannot approve something another gate denied.',
+        explain: {
+          what: 'Whether Claude Code still shows its own permission dialog for calls this gate has already looked at and passed.',
+          changes: 'On "skip", those calls are auto-approved and the session flows without interruptions; refusals from any gate still refuse.',
+          effect: 'Pure convenience versus oversight: nothing becomes allowed that was not already, you just stop being the click between an allowed call and its execution.',
+        },
         widening: {
           scale: 'prompts',
           consequence: 'Claude Code will stop asking before it edits files or runs commands that no gate objects to.',
@@ -222,6 +262,16 @@ export const GROUPS = Object.freeze([
         deep: 'Root-cause diagnosis, hard implementation, risky review — where a wrong answer is expensive.',
         top: 'Security review, arbitration, final acceptance. The last word, used sparingly.',
       }[key],
+      explain: {
+        what: `The model id every agent spawned at the "${key}" tier runs on.`,
+        changes: 'Only which model answers when a skill or agent asks for this tier — roles and routing stay as they are.',
+        effect: {
+          cheap: 'A stronger model here buys nothing but cost: this tier exists for work where any competent model gives the same answer.',
+          work: 'This is most of your spend and most of your quality — the tier to adjust first when either is wrong.',
+          deep: 'Skimping here is where wrong answers get expensive: this tier is called exactly when the work is known to be hard.',
+          top: 'The tier trusted with the final word — used rarely enough that a strong model here costs little and vetoes a lot.',
+        }[key],
+      },
       placeholder: 'a model id or alias your CLI accepts',
     })),
   },
@@ -236,6 +286,11 @@ export const GROUPS = Object.freeze([
         label: 'Validation commands',
         kind: 'list',
         help: 'Run in order before any work is reported. Each must EXIT — a watch-mode test runner here hangs every agent you ever spawn, which is a real measured incident, not a hypothetical.',
+        explain: {
+          what: 'The commands that define "done" in this repository — every agent runs them before reporting any work.',
+          changes: 'What proof each ticket must carry: add a linter and every future ticket lints; remove the tests and nothing runs them.',
+          effect: 'This list is Tyran’s definition of working code. A command that never exits (watch mode) hangs every agent; a missing one means work ships unproven.',
+        },
         placeholder: 'npm test',
       },
       {
@@ -244,6 +299,11 @@ export const GROUPS = Object.freeze([
         label: 'Shared zones',
         kind: 'list',
         help: 'Files more than one agent may touch in parallel. Writes to these are append-only and serialized by the conductor, so two agents cannot clobber each other.',
+        explain: {
+          what: 'The files that several parallel agents are expected to touch at once — registries, barrel files, route tables.',
+          changes: 'Which paths the conductor serializes: writes there become append-only and take turns instead of racing.',
+          effect: 'A hot file missing from this list is the classic parallel-agent failure: two branches both "won" and one agent’s work silently vanished in the merge.',
+        },
         placeholder: 'src/registry.ts',
       },
     ],
@@ -264,6 +324,11 @@ export const GROUPS = Object.freeze([
           pause: 'Winds work down at the threshold, checkpoints it, and schedules the resume.',
         }),
         help: 'What happens as the usage window fills up.',
+        explain: {
+          what: 'Whether Tyran watches your subscription usage windows and acts before they run out.',
+          changes: 'Off ignores usage entirely; warn only reports it; pause winds running work down at the threshold, saves a checkpoint and schedules its own resume.',
+          effect: 'Pause is what makes overnight runs survivable: work stops at a clean seam instead of mid-edit when the platform cuts the session off.',
+        },
       },
       {
         id: 'limits.pause_at_percent',
@@ -274,6 +339,11 @@ export const GROUPS = Object.freeze([
         max: 100,
         unit: '%',
         help: 'How full the five-hour window must be before work winds down. The floor of 50 exists to catch 0.97 pasted where 97 belongs.',
+        explain: {
+          what: 'The fill level of the rolling five-hour usage window at which a pause begins.',
+          changes: 'Lower pauses earlier with margin to spare; higher squeezes more work out of each window at the risk of a hard platform cutoff.',
+          effect: 'The margin between this number and 100 is what the wind-down itself gets to spend — checkpointing costs tokens too.',
+        },
       },
       {
         id: 'limits.weekly_pause_at_percent',
@@ -284,6 +354,11 @@ export const GROUPS = Object.freeze([
         max: 100,
         unit: '%',
         help: 'The same threshold for the seven-day window. Hitting this one means a much longer wait.',
+        explain: {
+          what: 'The same pause threshold, for the seven-day usage window.',
+          changes: 'When the weekly window — not the five-hour one — is what stops work.',
+          effect: 'A weekly pause can mean days, not hours: this threshold decides how much of the week’s budget overnight work may consume before a human re-decides.',
+        },
       },
       {
         id: 'limits.wait_max_hours',
@@ -294,6 +369,11 @@ export const GROUPS = Object.freeze([
         max: 24,
         unit: 'h',
         help: 'A reset further away than this is a LONG pause: it gets announced rather than silently waited out. The weekly window can be days.',
+        explain: {
+          what: 'The longest gap Tyran will wait out silently before treating the pause as a long one.',
+          changes: 'Where the line between "quietly resume later" and "tell the operator" sits.',
+          effect: 'Below this, a pause is plumbing; above it, it is news — the setting decides which pauses you hear about.',
+        },
       },
       {
         id: 'limits.long_wait',
@@ -304,6 +384,11 @@ export const GROUPS = Object.freeze([
           resume: 'Schedule the resume anyway, however far out it is.',
         }),
         help: 'What the scheduler does when the reset is further away than the wait above.',
+        explain: {
+          what: 'The long-pause policy: hold for a human, or schedule the resume however far out it is.',
+          changes: 'Whether a days-away reset ends with Tyran waiting for you, or with Tyran waking itself when the window returns.',
+          effect: '"Resume" keeps an overnight programme moving across a weekly pause; "hold" guarantees a human looks at the situation before more budget is spent.',
+        },
       },
       {
         id: 'limits.resume_margin_minutes',
@@ -314,6 +399,11 @@ export const GROUPS = Object.freeze([
         max: 240,
         unit: 'min',
         help: 'How long after the window resets before work restarts. A little slack absorbs clock skew between your machine and the platform.',
+        explain: {
+          what: 'The slack between the platform’s window reset and Tyran restarting work.',
+          changes: 'How long after the reset the resume fires.',
+          effect: 'Too small and a clock-skewed resume lands before the window actually reset, burning an attempt; the cost of generous is only minutes of idleness.',
+        },
       },
       {
         id: 'limits.keep_awake',
@@ -321,6 +411,11 @@ export const GROUPS = Object.freeze([
         label: 'Hold the machine awake',
         kind: 'boolean',
         help: 'A laptop that suspends takes the resume watcher down with it. This holds the SYSTEM awake while it waits — never the display, so your screen lock is untouched.',
+        explain: {
+          what: 'Whether the machine is held awake while a scheduled resume waits.',
+          changes: 'On, the system cannot suspend while the watcher waits (the display still sleeps and locks); off, the laptop may sleep through its own resume.',
+          effect: 'The difference between an overnight run that resumed at 3 AM and one you find still paused at breakfast because the lid was closed.',
+        },
       },
     ],
   },
@@ -467,6 +562,12 @@ export function readSettings(tyranDir) {
         id: setting.id,
         label: setting.label,
         help: setting.help,
+        // The structured explanation the board folds shut under each row:
+        // what it is, what changing it does, how it lands on Tyran. The
+        // widening consequence travels beside it so the cost of loosening is
+        // readable BEFORE the confirm dialog restates it.
+        explain: setting.explain ?? null,
+        widens: setting.widening?.consequence ?? null,
         kind: setting.kind ?? 'choice',
         choices: setting.choices ?? null,
         min: setting.min ?? null,

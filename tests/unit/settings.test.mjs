@@ -72,6 +72,40 @@ test('every knob carries prose, because a control nobody understands is not a se
   for (const group of GROUPS) assert.ok(group.blurb && group.title, `${group.id} needs a title and a blurb`);
 });
 
+test('every knob carries the long answer too: what, what changes, and how it lands', () => {
+  // Operator-asked 2026-08-19: the help line says what a setting is; the
+  // folded explainer under it must say what CHANGING it does and what that
+  // means for Tyran. MUTANT: ship a setting without `explain` — the details
+  // element silently vanishes for that row and the operator is back to the
+  // help line alone.
+  for (const setting of allSettings()) {
+    assert.ok(setting.explain, `${setting.id} needs an explain block`);
+    for (const key of ['what', 'changes', 'effect']) {
+      assert.ok(
+        typeof setting.explain[key] === 'string' && setting.explain[key].length > 20,
+        `${setting.id} explain.${key} needs a real sentence`,
+      );
+    }
+  }
+});
+
+test('the explanation and the widening cost travel to the page', () => {
+  // MUTANT: drop `explain`/`widens` from the readSettings projection. The
+  // catalogue keeps its prose, the payload silently loses it, and the board
+  // renders nothing — the same silent-null shape cost.mjs already paid for.
+  const f = fixture();
+  try {
+    const flat = readSettings(f.tyran).groups.flatMap((g) => g.settings);
+    assert.ok(flat.every((x) => x.explain && x.explain.what), 'every served setting carries explain');
+    const preset = flat.find((x) => x.id === 'boundaries.preset');
+    assert.ok(preset.widens && preset.widens.length > 30, 'a widenable setting serves its consequence beside the explanation');
+    const tier = flat.find((x) => x.id === 'tiers.work');
+    assert.equal(tier.widens, null, 'a plain setting widens nothing');
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('a freshly scanned config exposes every knob this screen offers', () => {
   // The two spellings of one document: `templates/config.yaml` is what the
   // docs show, `renderConfig(scanRepo(...))` is what an operator actually

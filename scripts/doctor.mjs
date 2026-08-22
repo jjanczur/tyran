@@ -1854,11 +1854,14 @@ export function overnightFindings(dir, { now = null, configDoc = null, usageFall
         finding(
           'limit-telemetry-missing',
           show(sidecarPath),
-          `limits.mode is "${show(limits.mode)}" and NO usage telemetry is reachable — the sidecar is ` +
+          `limits.mode is "${show(limits.mode)}" and NO usage PERCENTAGE is reachable — the sidecar is ` +
             `${sidecar === null ? 'absent' : 'over a day old'} and the platform's own cache in ~/.claude.json ` +
-            'carries no window that is still running. The gate fails open without one, so the configured ' +
-            'pause protects nothing. Usually this means the account is signed out, or the platform has not ' +
-            'reported usage yet; see https://jjanczur.github.io/tyran/overnight/',
+            'carries no window that is still running. So nothing can stop this run EARLY: the threshold you ' +
+            'configured cannot be compared against anything, and the gate fails open. The wall itself is still ' +
+            'detected from the session transcript once it is hit, so the wind-down and the scheduled resume ' +
+            'survive — what is lost is the clean stop before the limit, not the whole feature. Usually this ' +
+            'means the account is signed out, or the platform has stopped reporting a percentage at all; ' +
+            'see https://jjanczur.github.io/tyran/overnight/',
           `node scripts/statusline.mjs --sidecar-only   # optional: a statusline is fresher, but no longer required`,
         ),
       );

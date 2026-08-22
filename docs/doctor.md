@@ -104,7 +104,7 @@ possible to change one and keep the suite green.
 | `limit-pause-active` | info | a usage-limit pause marker is present and its resume time has not passed — autonomous work is deliberately wound down |
 | `limit-pause-stale` | warning | the pause marker's resume time has passed and the marker remains — the watcher died (reboot) or was never scheduled |
 | `limit-resume-watcher-dead` | warning | `resume.json` says a watcher is waiting but no such process is alive, or the last scheduled resume failed |
-| `limit-telemetry-missing` | warning | `limits.mode` is `warn` or `pause` but the usage telemetry sidecar is absent or over a day old — the gate fails open, so the configured pause protects nothing |
+| `limit-telemetry-missing` | warning | `limits.mode` is `warn` or `pause` but no usage PERCENTAGE is reachable — nothing can stop the run early, though the wall itself is still detected from the transcript once it is hit |
 | `limit-watcher-absent` | warning | a pause marker is in force with no `resume.json` beside it — the wind-down stopped before it armed the resume, so nothing is waiting for the reset |
 | `limit-near` | warning | a usage window has crossed its configured threshold. Under `mode: warn` this is the whole of what `warn` does; under `pause` it is the wind-down announcing itself |
 | `limit-statusline-stale` | warning | the `statusLine` command in `~/.claude/settings.json` points into the plugin cache for a version that is no longer running — a cache is not an archive, and when it is pruned the telemetry stops silently |

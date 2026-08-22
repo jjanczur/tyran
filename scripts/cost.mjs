@@ -48,6 +48,7 @@ import { pricingOf, PRICING_RATE_KEYS } from './schema.mjs';
 import { defaultRateCard, RATE_CARD_ID, planOfTier, PLAN_LABELS, SUBSCRIPTION_USD, periodStart } from './pricing.mjs';
 import { jsonEscapeInvisible } from './invisible.mjs';
 import { wantsHelp } from './cli-args.mjs';
+import { projectSlug } from './usage-transcript.mjs';
 
 export const COST_FILE = 'cost.json';
 
@@ -410,7 +411,11 @@ export function transcriptDirFor(repoRoot, projectsRoot) {
 }
 
 function findTranscriptDir(want, projectsRoot) {
-  const direct = join(projectsRoot, want.split(sep).join('-'));
+  // The platform's own naming rule, spelled once in `usage-transcript.mjs`
+  // because the usage gate needs it on a path where loading THIS module would
+  // be too expensive. What is left here is the scan below, which only this
+  // report needs.
+  const direct = join(projectsRoot, projectSlug(want));
   if (existsSync(direct)) return direct;
   if (!existsSync(projectsRoot)) return null;
   for (const entry of readdirSync(projectsRoot, { withFileTypes: true })) {

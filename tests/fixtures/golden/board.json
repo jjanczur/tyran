@@ -19,6 +19,7 @@
       "question": "flat fee or per-seat on the team plan?",
       "recommendation": "per-seat",
       "default": "per-seat ships Friday if no answer",
+      "blocking": false,
       "since": "2026-07-26T09:41:55.000Z"
     },
     {
@@ -28,6 +29,7 @@
       "question": "en dash or em dash in headings?",
       "recommendation": null,
       "default": null,
+      "blocking": false,
       "since": "2026-07-26T09:41:57.000Z"
     }
   ],

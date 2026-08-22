@@ -119,7 +119,7 @@ export const DATA_KNOWN = Object.freeze({
   gate: Object.freeze([
     'kind', 'result', 'evidence', 'evidence_ref', 'ticket', 'question', 'recommendation', 'default',
     'reason', 'signals', 'code', 'would_be', 'initiative_inferred_from',
-    'answer', 'answer_mode', 'decision', 'via',
+    'answer', 'answer_mode', 'decision', 'via', 'blocking',
   ]),
   review: Object.freeze(['ticket', 'verdict', 'by']),
   merge: Object.freeze(['ticket', 'sha', 'mode']),
@@ -857,7 +857,10 @@ export function nextAskKind(events) {
  * the second question then replaces the first on the fold's kind-keyed Map —
  * silent loss, in an append-only file that can never be corrected.
  */
-export function raiseAsk(file, { init, actor = 'conductor', question, recommendation = null, default: dflt = null, ticket = null }) {
+export function raiseAsk(
+  file,
+  { init, actor = 'conductor', question, recommendation = null, default: dflt = null, ticket = null, blocking = false },
+) {
   if (typeof question !== 'string' || question.trim().length === 0) {
     throw new Error('ask requires a non-empty --question (what is the operator being asked?)');
   }
@@ -868,7 +871,25 @@ export function raiseAsk(file, { init, actor = 'conductor', question, recommenda
     if (ticket != null) data.ticket = ticket;
     data.question = question;
     if (recommendation != null) data.recommendation = recommendation;
+    // A RECOMMENDATION IS A DEFAULT unless the asker names a different one.
+    //
+    // The two fields are not the same thing — the recommendation is what the
+    // agent thinks is right, the default is what ships if nobody ever answers,
+    // and they legitimately differ ("switch to per-seat" vs "keep flat fee").
+    // But an ask that records only a recommendation was recording an opinion
+    // with no fallback, which read on the board as `blocking · no safe
+    // default` and stopped the queue on a question its own author had already
+    // answered.
+    //
+    // Derived at the MINT, not at every read: the journal then says what would
+    // ship, and the board's blocking/decision split keeps meaning "neither
+    // field was supplied" — a genuinely un-defaultable question.
     if (dflt != null) data.default = dflt;
+    else if (recommendation != null) data.default = recommendation;
+    // Marks the questions that must wake a human even under `unattended.mode:
+    // on`: the irreversible, the outward-facing, and the ones that spend
+    // money. Only written when true, so an ordinary ask is unchanged on disk.
+    if (blocking === true) data.blocking = true;
     return appendUnderLock(file, { ev: 'gate', init, actor, data }, snapshot);
   });
 }
@@ -1028,6 +1049,14 @@ function parseFlags(args, allowed) {
     if (args[i].startsWith('--')) {
       const name = args[i].slice(2);
       if (!allowed.includes(name)) throw new Error(`unknown flag --${name}`);
+      // A switch takes no value. Without this the parser would swallow the
+      // NEXT argument as `--blocking`'s value — silently, since `ask`'s
+      // positionals are read from `rest` and one missing element there is a
+      // usage error blamed on the wrong flag.
+      if (BOOLEAN_FLAGS.includes(name)) {
+        flags[name] = true;
+        continue;
+      }
       const value = args[++i];
       if (value === undefined || value.startsWith('--')) {
         throw new Error(`flag --${name} requires a value`);
@@ -1038,6 +1067,9 @@ function parseFlags(args, allowed) {
   return { flags, rest };
 }
 
+/** Flags that are switches: present means true, and they consume no value. */
+const BOOLEAN_FLAGS = ['blocking'];
+
 const CMD_FLAGS = {
   append: ['actor', 'data'],
   query: ['ev', 'init', 'ticket', 'limit'],
@@ -1046,7 +1078,7 @@ const CMD_FLAGS = {
   tail: [],
   'open-spawns': [],
   'close-spawn': ['actor', 'verdict', 'reason'],
-  ask: ['actor', 'ticket', 'question', 'recommendation', 'default'],
+  ask: ['actor', 'ticket', 'question', 'recommendation', 'default', 'blocking'],
 };
 
 /**
@@ -1065,7 +1097,7 @@ export const JOURNAL_USAGE = [
   '       journal.mjs validate <file> · next-id <file> <prefix> · tail <file>',
   '       journal.mjs open-spawns <file>',
   '       journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]',
-  '       journal.mjs ask <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A]',
+  '       journal.mjs ask <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A] [--blocking]',
   '',
   // The `--data` contract varies per event and lived only in a table no
   // command printed. A field run discovered it by rejection, one failed
@@ -1198,6 +1230,7 @@ function main() {
           recommendation: flags.recommendation ?? null,
           default: flags.default ?? null,
           ticket: flags.ticket ?? null,
+          blocking: flags.blocking === true,
         });
         console.log(emit(written));
         return;

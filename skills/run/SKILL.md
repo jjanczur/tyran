@@ -404,11 +404,17 @@ open one.
    re-litigated after every compaction; a question written as a bare `kind` of
    your own invention collides with the next one that shares it, and the older
    question is lost with nothing objecting anywhere.
-   - **Always record a `default`** — what ships if nobody ever answers. It is
-     what the operator accepts by leaving an answer blank, and it is the only
-     reason a queue of fifteen questions takes ten minutes instead of an hour.
-     An ask with no default is a question the operator must stop and think
-     about; spend that budget deliberately.
+   - **Always record a `recommendation`** — what you would do. It becomes the
+     `default` when you name no other, so an ask that carries one is a
+     question with a safe outcome rather than a stop. An ask carrying NEITHER
+     is a question the operator must wake up and think about; spend that
+     budget deliberately, and expect it to hold its ticket until they do.
+     Record a separate `default` only when the safe answer differs from your
+     advice — "per-seat" recommended, "keep flat fee" if nobody rules.
+   - **`--blocking` is for the ones that must wake them.** Irreversible,
+     visible outside the repo, or spending money. It is the only thing that
+     survives `unattended.mode: on`, so use it exactly there and nowhere else:
+     a run whose every question is blocking is a run that stops.
    - **Do not park an asked ticket.** An ask that names a ticket already puts
      it in the board's `waiting-operator` lane. A `ticket.status` override on
      top of it **overrules** that lane and hides the question's own ticket —
@@ -421,6 +427,14 @@ open one.
      operator answers you in chat instead, append that pair yourself — same
      `kind`, `result: answered`, plus a `decision` whose text begins
      `Q-<n>: ` — and say in your next report that you did.
+   - **Under `unattended: mode: on`, sweep after you raise.** Run
+     `node ${CLAUDE_PLUGIN_ROOT}/scripts/answer.mjs auto --dir .tyran`, which
+     closes every ask that carries a recommendation and is not `--blocking`,
+     recording `answer_mode: unattended`. The operator went to sleep expecting
+     shipped work; a queue nobody read is a night spent parked. It is a SWEEP
+     rather than a rule you apply yourself — the same command runs on the
+     board's own timer, so an ask you raise and then die on still gets ruled.
+     Say in your report which questions were answered without them.
    **Check the brake before every spawn and every merge:**
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/stop-check.mjs` — exit 1 means the
    operator created `.tyran/STOP`. Halt, report where you got to, and do not

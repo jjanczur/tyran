@@ -15,9 +15,9 @@ protocol that survived them, mechanized.
 
 ## How it works, end to end
 
-1. **Telemetry, from either of two channels.** The hook payload carries no
+1. **Telemetry, from three channels in order.** The hook payload carries no
    usage data — measured on Claude Code 2.1.197 — and Tyran deliberately does
-   not estimate from transcripts, so it reads what the platform already
+   not ESTIMATE from transcripts, so it reads what the platform already
    records.
 
    The **sidecar** is the sharp one: register `scripts/statusline.mjs` as your
@@ -36,6 +36,30 @@ protocol that survived them, mechanized.
 
    The fallback reads only the two usage windows out of that file, never the
    account id or the email beside them.
+
+   **And then that key went away too.** Measured on Claude Code 2.1.197:
+   `cachedUsageUtilization` is not a key of `~/.claude.json` at all, and no
+   percentage is reachable anywhere on the machine. Both channels above went
+   dark at once, and a repo configured `mode: pause, pause_at_percent: 99`
+   drove into the wall at full speed on three separate nights.
+
+   So there is a **third channel, and it is the wall itself.** Every rejected
+   request is written into the session transcript as an assistant record
+   carrying `quotaLimits: {status: "rejected", rateLimitType, resetsAt}` — 45
+   of them across one machine's projects. It appears in `subagents/*.jsonl`
+   too, which is the seam this project had written off: the limit surfaces
+   inside a subagent's API call, where no hook can see it.
+
+   This channel is exact and it is **late**. It reports 100% of a window that
+   is already spent, so it cannot restore the early stop; what it restores is
+   the clean wind-down and the scheduled resume. Read
+   `scripts/usage-transcript.mjs` for the bounds that keep it cheap enough to
+   run on every tool call — and for the rule that keeps it honest: a rejection
+   counts only while nothing NEWER shows a model answering. A weekly rejection
+   on this machine was followed by 565 successful messages, because an
+   allowance can be topped up; acting on `resetsAt` alone would have held a
+   working machine until the following Friday, which is a worse failure than
+   the one being fixed.
 2. **The gate.** A `PreToolUse` hook (`usage-gate`) compares the sidecar
    against `limits:` in `.tyran/config.yaml`. Below threshold, absent
    telemetry, stale telemetry, `mode: off`, a malformed config, a supervised
@@ -119,11 +143,59 @@ not behave this way: `caffeinate -i -s` still lets an explicit sleep request
 through. To put a Linux laptop in a bag mid-wait, cancel the watcher first —
 `node scripts/overnight.mjs cancel` releases the inhibitor with it.
 
-`warn` surfaces through doctor and never denies. The default is `off` because
-it is a behaviour change an operator should choose, not because it needs a
-setup step: enabling it takes one edit and the Settings tab will make it.
-`limit-telemetry-missing` now fires only when NO channel is reachable, which
-usually means signed out rather than misconfigured.
+`warn` surfaces through doctor and never denies — as `limit-near`, which
+compares the reading against your own thresholds. That comparison did not
+exist until 0.1.46: the gate returned PASS on `warn` because "surfacing is
+doctor's job", and doctor surfaced nothing, so `warn` differed from `off` in
+nothing an operator could see.
+
+The default is `off` because it is a behaviour change an operator should
+choose, not because it needs a setup step: enabling it takes one edit and the
+Settings tab will make it. `limit-telemetry-missing` fires only when NO
+channel is reachable, which usually means signed out rather than
+misconfigured.
+
+## Unattended delivery — the other half of a night
+
+The pause keeps a run alive across the wall. It does nothing about the other
+way a night is lost: a question.
+
+An ask has **no timeout, no expiry and no auto-apply** anywhere in Tyran. It
+sits `WAITING_ON_OPERATOR` until a human answers, forever; doctor turns
+`ask-open` into `ask-stale` after 72 hours of journal time and that is the
+entire consequence. The ask protocol has always said to record a `default` —
+"what ships if nobody ever answers" — and until 0.1.46 nothing ever took one.
+It fired when a human clicked **Take the default**, at which point somebody
+was awake and the promise was moot.
+
+```yaml
+unattended:
+  mode: on              # bare on/off are fine — both spellings are accepted
+  answer: recommendation # or: default
+```
+
+With `mode: on`, an ask that carries a recommendation is closed the moment it
+is raised, and the run keeps going. Two refusals are **mechanical**, which is
+what makes it safe to switch on:
+
+- an ask with no recommendation and no default is a real question, and waits;
+- an ask raised `journal.mjs ask … --blocking` is its author saying this one
+  must wake you — the irreversible, the outward-facing, the ones that spend
+  money.
+
+`.tyran/STOP` still outranks all of it.
+
+Everything taken automatically is legible in the morning: actor `overnight`,
+decision text prefixed `(auto-accepted overnight)`, `answer_mode: unattended`.
+An auto-ruling that looked like your own would be the failure this feature is
+judged by.
+
+Two things drive the sweep, deliberately: the conductor runs
+`answer.mjs auto --dir .tyran` after raising an ask, and the served board runs
+the same sweep on its own timer — so a question raised by a session that then
+died still gets ruled. The board is also what watches for the usage wall when
+no session is alive to be refused, which is the case a five-hour wall actually
+produces.
 
 ### Why a stale reading is still acted on
 

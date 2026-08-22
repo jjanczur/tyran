@@ -67,6 +67,13 @@ limits:                    # OPTIONAL. Overnight mode (docs/overnight.md):
                            # watcher waits — never the display, so the screen
                            # lock is untouched (docs/overnight.md)
 
+unattended:                # OPTIONAL. What an open question does when nobody
+  mode: 'off'              # is awake. off | on — bare on/off work here too
+  answer: recommendation   # recommendation | default — which recorded value
+                           # an unanswered ask resolves to. Asks raised
+                           # `--blocking`, and asks with neither value
+                           # recorded, always wait for you (docs/overnight.md)
+
 board:                     # OPTIONAL, and the one block that defaults ON.
   autostart: true          # start the dashboard with the session, if it is not
                            # already up. `limits:` off is inert; a board that

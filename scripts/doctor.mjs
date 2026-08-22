@@ -36,6 +36,7 @@
  * dead writes no state to be inconsistent with.
  */
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHooks, DEFAULT_PLUGIN_ROOT } from './hooks-check.mjs';
@@ -279,6 +280,9 @@ export const SEVERITY_BY_CODE = Object.freeze(
     'limit-pause-stale': 'warning',
     'limit-resume-watcher-dead': 'warning',
     'limit-telemetry-missing': 'warning',
+    'limit-watcher-absent': 'warning',
+    'limit-near': 'warning',
+    'limit-statusline-stale': 'warning',
   }),
 );
 
@@ -1860,7 +1864,105 @@ export function overnightFindings(dir, { now = null, configDoc = null, usageFall
       );
     }
   }
+
+  // A MARKER WITH NOBODY WAITING FOR IT. The wind-down is six steps the model
+  // executes, and step 5 is the one that arms the resume — so a session killed
+  // after step 4, or one that never read the refusal, leaves a pause that
+  // ends only when someone notices. Nothing reported that: `limit-pause-stale`
+  // fires only once `resume_at` has ALREADY passed, which is the morning after.
+  if (marker !== null && resume === null) {
+    findings.push(
+      finding(
+        'limit-watcher-absent',
+        show(markerPath),
+        'a pause is in force and NOTHING is waiting for the reset — no resume.json beside it. The wind-down ' +
+          'stopped before it scheduled the resume, so this run restarts only when a human starts a session',
+        `node scripts/overnight.mjs schedule --dir ${sq(dirname(resolve(dir)))}`,
+      ),
+    );
+  }
+
+  // `warn` PROMISED TO SURFACE and never did. The gate returns PASS on warn
+  // — "surfacing is doctor's job" — and doctor did not compare a percentage
+  // against a threshold anywhere, so `warn` differed from `off` in nothing an
+  // operator could see. This is that comparison, and it is doctor's alone: no
+  // KERNEL edit is needed for a mode whose whole contract is "never deny".
+  const limitsForWarn = knowsLimits(configDoc);
+  if (limitsForWarn !== null && limitsForWarn.mode !== 'off') {
+    const reading = readJsonIfSmall(sidecarPath) ?? usageFallback();
+    for (const [key, threshold, label] of [
+      ['seven_day', limitsForWarn.weekly_pause_at_percent, 'weekly'],
+      ['five_hour', limitsForWarn.pause_at_percent, 'five-hour'],
+    ]) {
+      const used = reading?.[key]?.used_percentage;
+      if (typeof used !== 'number' || used < threshold) continue;
+      findings.push(
+        finding(
+          'limit-near',
+          show(sidecarPath),
+          `the ${label} usage window is at ${show(String(Math.round(used)))}% against a threshold of ` +
+            `${show(String(threshold))}% — ` +
+            (limitsForWarn.mode === 'warn'
+              ? 'limits.mode is "warn", so nothing will stop; work runs until the platform cuts it off'
+              : 'the gate winds unsupervised work down from here'),
+          `node scripts/overnight.mjs status --dir ${sq(dirname(resolve(dir)))}`,
+        ),
+      );
+      break; // the binding window is enough; two lines about one wall is noise
+    }
+  }
+
   return findings;
+}
+
+/**
+ * The statusline the operator registered, pinned to a plugin version that is
+ * no longer the one running.
+ *
+ * MEASURED, which is why this exists: a real machine had
+ * `~/.claude/plugins/cache/tyran/tyran/0.1.29/scripts/statusline.mjs` in its
+ * user settings while 0.1.45 was installed. The old path still existed, so
+ * nothing failed — but a plugin cache is not an archive, and the day that
+ * directory is pruned the statusline silently stops writing the sidecar. The
+ * symptom is the one this whole area is about: a configured pause that never
+ * fires and says nothing.
+ *
+ * Read-only and best-effort: the file belongs to the operator, and a doctor
+ * that throws on a settings file it was only inspecting is worse than one that
+ * says nothing about it.
+ */
+export function statuslineFindings({ home = homedir(), version = null, readFile = readFileSync } = {}) {
+  let command;
+  try {
+    const doc = JSON.parse(readFile(join(home, '.claude', 'settings.json'), 'utf8'));
+    command = doc?.statusLine?.command;
+  } catch {
+    return [];
+  }
+  if (typeof command !== 'string' || !command.includes('statusline.mjs')) return [];
+  const pinned = /plugins[/\\]cache[/\\]tyran[/\\]tyran[/\\]([0-9][^/\\]*)[/\\]/.exec(command);
+  if (pinned === null || version === null || pinned[1] === version) return [];
+  return [
+    finding(
+      'limit-statusline-stale',
+      show(join(home, '.claude', 'settings.json')),
+      `your statusLine command points into the plugin cache for version ${show(pinned[1])}, but ${show(version)} ` +
+        'is running. That directory is a cache, not an archive: when it is pruned the statusline stops writing ' +
+        'usage telemetry and the pause it feeds silently stops firing',
+      'edit ~/.claude/settings.json and repoint statusLine at the version you run (or drop it — the platform cache and the transcript are read without it)',
+    ),
+  ];
+}
+
+/** The plugin version actually running, or null. Read from the manifest next
+ * to this script, so it cannot disagree with what `claude plugin update` sees. */
+function pluginVersion() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(join(here, '..', '.claude-plugin', 'plugin.json'), 'utf8'))?.version ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function readJsonIfSmall(path) {
@@ -1896,6 +1998,9 @@ export function runStateChecks({
   staleHours = DEFAULT_STALE_HOURS,
   run = null,
   usageFallback = () => readPlatformUsage(),
+  // The operator's home, injectable so a test never reads the real one. The
+  // statusline check is the only thing in this file that leaves the repo.
+  statuslineHome = homedir(),
 } = {}) {
   const root = resolve(dir);
   if (!existsSync(root)) {
@@ -2116,6 +2221,17 @@ export function runStateChecks({
   checked.push(worktrees.checked);
 
   findings.push(...overnightFindings(dir, { now, configDoc, usageFallback }));
+  // The one check that reads a file OUTSIDE the repository — the statusline
+  // lives in the operator's own settings, which is why no installer can write
+  // it and why nothing else notices when it rots.
+  //
+  // Gated on the feature being ON, for two reasons that point the same way: a
+  // stale statusline in a repo that never enabled overnight mode is not
+  // actionable, and a machine-scoped warning raised inside every repo-scoped
+  // run would follow the operator into projects it says nothing about.
+  if (knowsLimits(configDoc)?.mode !== undefined && knowsLimits(configDoc).mode !== 'off') {
+    findings.push(...statuslineFindings({ version: pluginVersion(), home: statuslineHome }));
+  }
   checked.push('overnight: checked');
 
   const trackedLeases = trackedLeaseFiles(gitRun, basename(root));

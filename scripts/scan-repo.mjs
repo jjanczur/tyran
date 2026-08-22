@@ -385,6 +385,13 @@ export function scanRepo(dir, { run = gitRunner(dir) } = {}) {
       resume_margin_minutes: 5,
       keep_awake: false,
     },
+    // Same argument as `limits:` above, and the same default: written in full
+    // so the Settings tab has keys to patch, and OFF because answering an
+    // operator's questions on their behalf is a behaviour change they choose.
+    unattended: {
+      mode: 'off',
+      answer: 'recommendation',
+    },
     // The dashboard, ON. Written in full for the same reason `limits:` is —
     // the Settings tab patches keys that exist and will not invent them — but
     // with the opposite default, because the argument for OFF does not apply.

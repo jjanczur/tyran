@@ -52,9 +52,11 @@ import { escapeInvisible, jsonEscapeInvisible } from './invisible.mjs';
 import { renderBoardError, renderBoardHtml } from './board-html.mjs';
 import { COST_SCHEMA, WINDOWS, costJson, costReport } from './cost.mjs';
 import { SettingsError, applyPolicyClass, applySetting, readSettings } from './settings.mjs';
+import { unattendedOf } from './schema.mjs';
+import { parse as parseYaml } from './yaml-lite.mjs';
 import { checkStopAt } from './stop-check.mjs';
-import { runState } from './overnight.mjs';
-import { answerOne, answerProblem, classify, openAsks, partitionAsks, reRender, sortAsks } from './answer.mjs';
+import { limitSweep, runState } from './overnight.mjs';
+import { answerOne, answerProblem, autoAnswer, classify, openAsks, partitionAsks, readConductor, reRender, resumePlan, sortAsks } from './answer.mjs';
 import { wantsHelp } from './cli-args.mjs';
 import {
   HEALTH_ROUTE,
@@ -695,6 +697,94 @@ const sendJson = (res, status, body) => {
   res.end(JSON.stringify(body) + '\n');
 };
 
+/** This repo's config, or null. Never throws: a served page must not 500 on
+ * a config that does not parse — every caller has a safe default. */
+function configOf(dir) {
+  try {
+    return parseYaml(readFileSync(join(dir, 'config.yaml'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+const unattendedFor = (dir) => unattendedOf(configOf(dir));
+
+/**
+ * Wake the conductor on the session the answer belongs to.
+ *
+ * Detached and unwatched on purpose: this is a web request handler, and the
+ * session it starts outlives the response by hours.
+ */
+function spawnResume(dir, sessionId) {
+  try {
+    const child = spawnProcess(
+      'claude',
+      ['--resume', sessionId, 'Answers landed while you were away — read the journal and carry on.'],
+      { cwd: resolve(dir, '..'), detached: true, stdio: 'ignore', shell: false },
+    );
+    child.on?.('error', (err) => console.error(`board: could not resume ${sessionId}: ${err.message}`));
+    child.unref?.();
+    console.log(`board: resumed session ${sessionId} (pid ${child.pid ?? '?'})`);
+  } catch (err) {
+    console.error(`board: could not resume ${sessionId}: ${String(err?.message ?? err)}`);
+  }
+}
+
+/**
+ * The unattended heartbeat, run by the served board because it is the one
+ * long-lived process a repo already has.
+ *
+ * Two jobs, both of which need something awake AFTER the session that was
+ * working has died:
+ *
+ *   1. the usage wall. The conductor's own request is the one the platform
+ *      rejects, so it cannot write its checkpoint or arm its own resume.
+ *   2. the question queue. An ask raised at 02:00 has nobody to sweep it, and
+ *      `unattended.mode: on` is the operator saying it should not wait.
+ *
+ * Best-effort throughout: this runs on a timer inside a server whose actual
+ * job is to render a page, and nothing here is worth a 500 or an exit.
+ */
+export function unattendedTick(dir, { sweep = limitSweep, auto = autoAnswer, schedule = scheduleResume } = {}) {
+  const repo = resolve(dir, '..');
+  try {
+    const wall = sweep(repo);
+    if (wall.action === 'paused') {
+      console.log(`board: usage wall on the ${wall.marker.window} window — resuming ${wall.marker.resume_at}`);
+      schedule(repo);
+    }
+  } catch (err) {
+    console.error(`board: usage watch failed: ${String(err?.message ?? err)}`);
+  }
+  try {
+    const unattended = unattendedFor(dir);
+    if (unattended.mode !== 'on') return;
+    // Line 603 spells it the same way: `checkStopAt` takes the FILE, and
+    // handing it the directory is a brake that silently never engages.
+    if (checkStopAt(join(dir, 'STOP')).stopped) return;
+    const result = auto(dir, { prefer: unattended.answer });
+    for (const a of result.answered) {
+      console.log(`board: ${a.ask.init}/${a.ask.kind} auto-accepted (unattended) -> decision ${a.decision}`);
+    }
+  } catch (err) {
+    console.error(`board: unattended sweep failed: ${String(err?.message ?? err)}`);
+  }
+}
+
+/** Arm the resume through overnight.mjs's own CLI, so the hold policy, the
+ * keep-awake warning and the babysitting ladder are the ones the operator
+ * already has rather than a second implementation inside a web server. */
+function scheduleResume(repo) {
+  const script = new URL('./overnight.mjs', import.meta.url).pathname;
+  const child = spawnProcess(process.execPath, [script, 'schedule', '--dir', repo], {
+    detached: true,
+    stdio: 'ignore',
+    shell: false,
+  });
+  child.on?.('error', (err) => console.error(`board: could not arm the resume: ${err.message}`));
+  child.unref?.();
+}
+
 /**
  * Answer one open question, from the page instead of from a terminal.
  *
@@ -733,7 +823,29 @@ function handleAnswer(dir, body) {
   // already correct.
   reRender(dir, new Map([[ask.init, ask.journal]]));
   console.log(`board: answered ${ask.init}/${ask.kind} (${verdict.mode}) -> decision ${outcome.decision}`);
-  return { ok: true, kind: ask.kind, init: ask.init, mode: verdict.mode, decision: outcome.decision, recorded: verdict.text };
+
+  // AN ANSWER NOBODY IS LISTENING FOR. The terminal path has offered to wake
+  // the conductor since answers existed; this one re-rendered the page and
+  // returned, so an operator who answered here at 23:00 had their ruling sit
+  // in the ledger until they happened to start a session. Measured on a real
+  // queue: a question answered in the morning, and the initiative it unblocked
+  // still parked that evening.
+  //
+  // The plan is REPORTED rather than acted on, except under `unattended.mode:
+  // on` where the operator has already said "keep going without me". Two
+  // conductors on one journal is a hazard this repo has paid for once, and
+  // `resumePlan` is the function that knows the difference.
+  const plan = resumePlan(readConductor(dir), { resume: unattendedFor(dir).mode === 'on' });
+  if (plan.action === 'spawn') spawnResume(dir, plan.sessionId);
+  return {
+    ok: true,
+    kind: ask.kind,
+    init: ask.init,
+    mode: verdict.mode,
+    decision: outcome.decision,
+    recorded: verdict.text,
+    resume: plan.action,
+  };
 }
 
 /**
@@ -1167,6 +1279,13 @@ function main() {
         clear();
         process.exit(0);
       }
+      // The one long-lived process a repo already has. The usage wall and the
+      // unattended queue both need something awake AFTER the session that was
+      // working is gone — the conductor's own request is the one the wall
+      // rejects, so it cannot arm its own resume, and a question raised at
+      // 02:00 has nobody to sweep it. Neither costs anything when its feature
+      // is off: both read the config first and return.
+      unattendedTick(dir);
     }, DIR_WATCHDOG_MS);
     // Unref'd so it is the SERVER that keeps this process alive, never the
     // timer: a watchdog that held the loop open would turn every exit path

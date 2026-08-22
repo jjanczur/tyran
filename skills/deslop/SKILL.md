@@ -64,7 +64,10 @@ fixed, the deleted test is the reason.
 
 **Keep behaviour unchanged unless you are fixing a defect you can name.** If the
 pass uncovers a real bug, that is a finding for the report and usually a
-separate change, not something to quietly correct inside a cleanup.
+separate change, not something to quietly correct inside a cleanup. The same
+goes for a slow data path — a query in a loop, awaits that could run together:
+that is `code-review`'s data-access dimension, its fix usually adds lines, and
+it belongs in the self-review before this pass, not inside it.
 
 ## Skill-file mode
 

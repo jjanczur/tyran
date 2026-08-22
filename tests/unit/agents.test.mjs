@@ -201,3 +201,23 @@ test('every agent tells its reader which language to answer in', () => {
     assert.match(text, /language the conductor writes to you in/, `${file}: no language rule`);
   }
 });
+
+test('the implementer self-reviews against code-review, and code-review carries the N+1 check', () => {
+  // The self-review had no criteria: it named no skill and listed no
+  // dimension, so an author's diff reached the reviewer with N+1 queries,
+  // serial awaits and unexplained cache TTLs in it, and the operator pasted
+  // the same checklist into every handoff by hand. The fix is one answer in
+  // one place (ADR-21): the dimensions live in `code-review`, and the
+  // implementer POINTS at them. A prompt-shortening pass like 0.1.40 is
+  // exactly the edit that drops a pointer without anyone noticing, so the
+  // pointer is pinned the way the reviewer's forfeit sentence is.
+  const implementer = readFileSync(join(AGENTS_DIR, 'implementer.md'), 'utf8');
+  assert.match(
+    // Whitespace-flexible: wrapped at 79 columns like every line here.
+    implementer.replace(/\s+/g, ' '),
+    /self-review is the `code-review` skill/i,
+    'implementer.md must send the self-review to the code-review skill, not to a checklist of its own',
+  );
+  const review = readFileSync(join(SKILLS_DIR, 'code-review', 'SKILL.md'), 'utf8');
+  assert.match(review, /N\+1/, 'code-review must carry the N+1 check — it is the dimension the implementer is pointed at');
+});

@@ -294,14 +294,15 @@ node scripts/journal.mjs next-id     <file> <prefix>
 node scripts/journal.mjs tail        <file>
 node scripts/journal.mjs open-spawns <file>        # agents with no report or review yet
 node scripts/journal.mjs close-spawn <file> <init> <agent> --reason R [--verdict V] [--actor A]
-node scripts/journal.mjs ask         <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A]
+node scripts/journal.mjs ask         <file> <init> --question Q [--recommendation R] [--default D] [--ticket T] [--actor A] [--blocking]
 ```
 
 ## Operator asks: a gate whose kind is its id
 
 An ask is not a new event type — the closed set above stays at 17. It is a
 `gate` with `result: WAITING_ON_OPERATOR` whose `kind` **is** its id, `Q-<n>`,
-plus `question`, `recommendation`, `default` and `ticket` in `data`:
+plus `question`, `recommendation`, `default`, `ticket` and `blocking` in
+`data`:
 
 ```bash
 node scripts/journal.mjs ask .tyran/state/payments/journal.jsonl payments \
@@ -310,6 +311,13 @@ node scripts/journal.mjs ask .tyran/state/payments/journal.jsonl payments \
   --recommendation 'per-seat' \
   --default 'per-seat ships Friday if no answer'
 ```
+
+**A recommendation becomes the `default` when you name no other**, at the mint
+rather than at every read — so an ask carrying one is a question with a safe
+outcome, and the board's `blocking · no safe default` split keeps meaning
+"neither was supplied". `--blocking` marks the asks that must wake a human even
+under `unattended.mode: on` (see [overnight mode](../overnight/)); it is written
+only when true, so an ordinary ask is unchanged on disk.
 
 The kind is the id because the fold already keys gates by kind, last write
 wins: one kind is one question, and the closing `gate` with `result: answered`

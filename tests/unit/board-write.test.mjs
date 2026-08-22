@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from '../../scripts/yaml-lite.mjs';
 import { validateConfig, validatePolicy } from '../../scripts/schema.mjs';
+import { unattendedTick } from '../../scripts/board.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = join(ROOT, 'scripts', 'board.mjs');
@@ -594,4 +595,90 @@ test('a damaged run-state file is absent, not fatal', () => {
       f.cleanup();
     }
   })();
+});
+
+// -------------------------------------------------- the unattended heartbeat
+
+/**
+ * The served board is the one long-lived process a repo already has, so it is
+ * where the two things that need to outlive a session belong: the usage wall
+ * (the conductor's own request is the one the platform rejects, so it cannot
+ * arm its own resume) and the question queue (an ask raised at 02:00 has
+ * nobody to sweep it).
+ *
+ * Driven directly rather than through the timer: a test that waited 60 seconds
+ * for a heartbeat is a test somebody deletes.
+ */
+
+function tickRepo({ unattended = null } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-tick-'));
+  const tyran = join(dir, '.tyran');
+  mkdirSync(join(tyran, 'state', 'demo'), { recursive: true });
+  writeFileSync(
+    join(tyran, 'config.yaml'),
+    'profile: balanced\nautonomy: P2\n' + (unattended === null ? '' : `unattended:\n  mode: ${unattended}\n`),
+  );
+  writeFileSync(
+    join(tyran, 'state', 'demo', 'journal.jsonl'),
+    JSON.stringify({ ts: '2026-08-21T19:00:00.000Z', ev: 'init.created', init: 'demo', actor: 'conductor', data: { title: 'demo' } }) + '\n',
+  );
+  return { dir, tyran };
+}
+
+test('a detected wall arms the resume, without a session anywhere', () => {
+  // MUTANT: sweep but never schedule. The marker lands, the board shows a
+  // pause, and nothing on the machine is waiting for the reset — which is
+  // precisely the state a real overnight run was found in.
+  const { tyran } = tickRepo();
+  const armed = [];
+  unattendedTick(tyran, {
+    sweep: () => ({ action: 'paused', marker: { window: 'five_hour', resume_at: '2026-08-21T20:05:00.000Z' } }),
+    auto: () => ({ answered: [], left: [] }),
+    schedule: (repo) => armed.push(repo),
+  });
+  assert.equal(armed.length, 1);
+  assert.equal(armed[0], dirname(tyran), 'schedule takes the REPO, not the .tyran directory');
+});
+
+test('with unattended off, the tick sweeps no questions at all', () => {
+  const { tyran } = tickRepo({ unattended: null });
+  let swept = 0;
+  unattendedTick(tyran, { sweep: () => ({ action: 'none' }), auto: () => { swept += 1; return { answered: [], left: [] }; }, schedule: () => {} });
+  assert.equal(swept, 0, 'the feature is opt-in, and a running board must not turn it on');
+});
+
+test('with unattended on, the tick sweeps the queue', () => {
+  const { tyran } = tickRepo({ unattended: 'on' });
+  const seen = [];
+  unattendedTick(tyran, {
+    sweep: () => ({ action: 'none' }),
+    auto: (dir, opts) => { seen.push(opts.prefer); return { answered: [], left: [] }; },
+    schedule: () => {},
+  });
+  assert.deepEqual(seen, ['recommendation']);
+});
+
+test('the STOP brake outranks unattended, and it is read as a FILE', () => {
+  // MUTANT: `checkStopAt(dir)`. The brake is a path to `.tyran/STOP`, and
+  // handing it the directory makes a check that can never engage — an
+  // operator who halted the run wakes to it having answered its own questions.
+  const { tyran } = tickRepo({ unattended: 'on' });
+  writeFileSync(join(tyran, 'STOP'), 'halted\n');
+  let swept = 0;
+  unattendedTick(tyran, { sweep: () => ({ action: 'none' }), auto: () => { swept += 1; return { answered: [], left: [] }; }, schedule: () => {} });
+  assert.equal(swept, 0);
+});
+
+test('a throwing sweep never takes the board down with it', () => {
+  // This runs on the render timer of a server whose actual job is a page.
+  const { tyran } = tickRepo({ unattended: 'on' });
+  let swept = 0;
+  assert.doesNotThrow(() =>
+    unattendedTick(tyran, {
+      sweep: () => { throw new Error('unreadable transcript'); },
+      auto: () => { swept += 1; return { answered: [], left: [] }; },
+      schedule: () => {},
+    }),
+  );
+  assert.equal(swept, 1, 'and the other half still runs');
 });

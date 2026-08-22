@@ -43,6 +43,8 @@ import {
   BOUNDARY_VALUES,
   LIMITS_LONG_WAIT,
   LIMITS_MODES,
+  UNATTENDED_ANSWER,
+  UNATTENDED_MODES,
   MANDATORY_KERNEL_PATHS,
   PROFILES,
   TIER_KEYS,
@@ -312,7 +314,7 @@ export const GROUPS = Object.freeze([
     id: 'overnight',
     title: 'Overnight mode',
     blurb:
-      'Pause near the subscription usage limit and resume after the window resets. Needs the statusline helper installed — it is the only place the platform reports usage, and without it this whole section is inert and doctor says so.',
+      'Pause near the subscription usage limit and resume after the window resets. Usage is read from the statusline helper if you installed one, otherwise from the platform’s own cache, otherwise from the wall itself once it is hit — that last one cannot stop you early, but it still winds work down cleanly and schedules the restart. Doctor says so when none of the three can see anything.',
     settings: [
       {
         id: 'limits.mode',
@@ -415,6 +417,44 @@ export const GROUPS = Object.freeze([
           what: 'Whether the machine is held awake while a scheduled resume waits.',
           changes: 'On, the system cannot suspend while the watcher waits (the display still sleeps and locks); off, the laptop may sleep through its own resume.',
           effect: 'The difference between an overnight run that resumed at 3 AM and one you find still paused at breakfast because the lid was closed.',
+        },
+      },
+    ],
+  },
+  {
+    id: 'unattended',
+    title: 'Unattended delivery',
+    blurb:
+      'What an open question does when nobody is awake to read it. Off, it waits for you — forever, which is the honest word for it. On, the agent takes its own recommendation and the run keeps going, except for questions raised as blocking and questions nobody wrote a recommendation for.',
+    settings: [
+      {
+        id: 'unattended.mode',
+        path: ['unattended', 'mode'],
+        label: 'Mode',
+        ...choice(UNATTENDED_MODES, {
+          off: 'Every question waits for you. Work that depends on it waits too.',
+          on: 'Questions are answered by their own recommendation as they are raised.',
+        }),
+        help: 'Whether a question raised while you are asleep gets answered without you.',
+        explain: {
+          what: 'Whether Tyran rules on its own questions when there is nobody to ask.',
+          changes: 'On, an ask carrying a recommendation is closed the moment it is raised, journalled as `answer_mode: unattended` and prefixed `(auto-accepted overnight)` in the decision stream. Asks raised as blocking, and asks with no recommendation at all, still wait for you.',
+          effect: 'The difference between waking to shipped work and waking to a queue of four questions and an initiative that stopped at the first one.',
+        },
+      },
+      {
+        id: 'unattended.answer',
+        path: ['unattended', 'answer'],
+        label: 'Take',
+        ...choice(UNATTENDED_ANSWER, {
+          recommendation: 'The agent’s own advice — what it would do if it were deciding.',
+          default: 'The conservative fallback it recorded alongside the advice.',
+        }),
+        help: 'Which of the two recorded answers is taken when nobody rules.',
+        explain: {
+          what: 'Which recorded value an unattended answer uses.',
+          changes: 'Recommendation takes the agent’s advice; default takes the safe fallback, which is usually some form of "change nothing yet".',
+          effect: 'The two are the same string unless the asker deliberately wrote both — and where they differ, `default` is the setting that keeps an overnight run from shipping anything.',
         },
       },
     ],

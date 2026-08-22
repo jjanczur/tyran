@@ -16,6 +16,17 @@
  * with it the one onboarding step no script can perform, since registering a
  * statusline means writing the operator's own settings file.
  *
+ * AND THEN THAT KEY WENT AWAY TOO. Measured on Claude Code 2.1.197:
+ * `cachedUsageUtilization` is not a key of `~/.claude.json` at all, and no
+ * percentage is reachable anywhere on the machine. Both channels above are
+ * dark, and the account wall was being hit at full speed by runs configured to
+ * stop before it. So `readPlatformUsage` gained a third channel — the wall
+ * itself, read back out of the session transcript by `usage-transcript.mjs`.
+ * It is exact and it is late; what it restores is the wind-down and the
+ * scheduled resume, not the early stop. Everything above still applies the
+ * moment the platform starts reporting a percentage again, which is why the
+ * order in `readPlatformUsage` puts the percentage first.
+ *
  * WHY A STALE READING IS STILL WORTH ACTING ON, which is the whole design.
  * That cache is refreshed by the platform on its own schedule; measured at 83
  * minutes old during heavy continuous use. Under the gate's ten-minute
@@ -45,6 +56,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { readTranscriptRejection } from './usage-transcript.mjs';
 
 /**
  * Where the statusline writes and everything else reads.
@@ -106,7 +118,7 @@ export function windowFrom(node, nowMs) {
  * budget and a hook process spawn that costs an order of magnitude more. No
  * caching layer is warranted and none is here.
  */
-export function readPlatformUsage({ home = homedir(), readFile = readFileSync, nowMs = Date.now() } = {}) {
+export function readConfigUsage({ home = homedir(), readFile = readFileSync, nowMs = Date.now() } = {}) {
   let doc;
   try {
     const raw = readFile(join(home, CLAUDE_CONFIG_RELPATH), 'utf8');
@@ -132,4 +144,47 @@ export function readPlatformUsage({ home = homedir(), readFile = readFileSync, n
   // gate a document its freshness rule discards, reintroducing the bug.
   // What the reading cannot support is a RESUME, and the gate is told so.
   return { written_at: new Date(nowMs).toISOString(), lower_bound: true, source: 'claude.json', ...out };
+}
+
+/**
+ * Everything the platform will tell us about this subscription, in the
+ * sidecar's shape, or null.
+ *
+ * TWO CHANNELS, IN THIS ORDER, and the order is the whole point:
+ *
+ *   1. `~/.claude.json`'s usage cache — a PERCENTAGE, which can cross a
+ *      threshold BEFORE the window closes. This is the only channel that can
+ *      stop a run early enough to wind down on its own terms, so it is
+ *      consulted first and its answer is never second-guessed.
+ *   2. the session transcript's `quotaLimits` record — the wall itself, read
+ *      back after the fact. Exact, and too late to prevent anything.
+ *
+ * Measured on Claude Code 2.1.197, which is why (2) exists at all: (1)'s key
+ * is not present in that file, and neither is the statusline's `rate_limits`
+ * block. Both of the percentage channels are dark on this build, so without
+ * (2) a repo configured to pause has nothing to pause ON — which is exactly
+ * the state a real overnight run was found in, having driven into the wall at
+ * full speed and stayed there until a human noticed in the morning.
+ *
+ * When (1) returns, (2) is not consulted: a percentage below the threshold is
+ * a live statement that the window is OPEN, and a stale rejection cannot
+ * outrank it.
+ */
+export function readPlatformUsage({
+  home = homedir(),
+  readFile = readFileSync,
+  nowMs = Date.now(),
+  repoRoot = process.cwd(),
+  readTranscript = readTranscriptRejection,
+} = {}) {
+  const cached = readConfigUsage({ home, readFile, nowMs });
+  if (cached !== null) return cached;
+  try {
+    return readTranscript({ repoRoot, home, nowMs });
+  } catch {
+    // Same contract as everything else here: telemetry is consulted, never
+    // depended on. A hook that throws over a transcript it was only reading
+    // stops the repository's work.
+    return null;
+  }
 }

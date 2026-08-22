@@ -16,6 +16,9 @@ import { append, raiseAsk, readJournal } from '../../scripts/journal.mjs';
 import {
   ANSWERS_FILE,
   answerProblem,
+  autoAnswer,
+  autoRefusal,
+  autoVerdict,
   applySheet,
   classify,
   defaultProblem,
@@ -26,6 +29,7 @@ import {
   renderSheet,
   resumePlan,
   sortAsks,
+  UNATTENDED_VIA,
 } from '../../scripts/answer.mjs';
 
 const SCRIPT = new URL('../../scripts/answer.mjs', import.meta.url).pathname;
@@ -690,4 +694,132 @@ test('the conductor record proves an announcement, never liveness', () => {
   assert.match(applied.stdout, /a conductor session announced itself at/);
   assert.doesNotMatch(applied.stdout, /resumed session/, 'nothing may be spawned onto a session that just announced itself');
   assert.doesNotMatch(applied.stdout, /is live/, 'this file cannot know that');
+});
+
+// ---------------------------------------------- unattended.mode: on (auto)
+
+/**
+ * The `default` field has promised "what ships if nobody ever answers" since
+ * the ask protocol was written, and until this existed nothing ever took it:
+ * it fired only when a human clicked a button, at which point somebody was
+ * awake and the promise was moot. These tests are that promise, kept — and
+ * the two mechanical refusals that make it safe to keep.
+ */
+
+const autoRepo = (mode, answerPref = 'recommendation') => {
+  const r = repo({
+    demo: [
+      { question: 'flat fee or per-seat?', recommendation: 'per-seat', ticket: 'T-1' },
+      { question: 'en dash or em dash?' },
+      { question: 'drop the prod table?', recommendation: 'no, archive it', blocking: true },
+      { question: 'ship the pricing page?', recommendation: 'ship it', default: 'hold until Monday' },
+    ],
+  });
+  writeFileSync(join(r.tyran, 'config.yaml'), `profile: balanced\nautonomy: P2\nunattended:\n  mode: ${mode}\n  answer: ${answerPref}\n`);
+  return r;
+};
+
+test('a recommendation with no default becomes the default at the MINT', () => {
+  // MUTANT: drop the derivation. The ask renders as `blocking · no safe
+  // default`, sorts to the top of the operator's queue, and stops the run on a
+  // question its own author already answered.
+  const r = repo({ demo: [{ question: 'flat fee or per-seat?', recommendation: 'per-seat' }] });
+  const ask = gates(r.journals.demo).find((g) => g.data.kind === 'Q-1');
+  assert.equal(ask.data.default, 'per-seat');
+  // An explicit default still wins: the two fields differ on purpose when the
+  // asker takes the trouble to write both.
+  const r2 = repo({ demo: [{ question: 'ship?', recommendation: 'ship it', default: 'hold' }] });
+  assert.equal(gates(r2.journals.demo).find((g) => g.data.kind === 'Q-1').data.default, 'hold');
+  // And an ask with neither records neither — that is a real question.
+  const r3 = repo({ demo: [{ question: 'en dash or em dash?' }] });
+  assert.equal(gates(r3.journals.demo).find((g) => g.data.kind === 'Q-1').data.default, undefined);
+});
+
+test('auto takes the recommendation and leaves exactly the two it must', () => {
+  const r = autoRepo('on');
+  const result = autoAnswer(r.tyran, { prefer: 'recommendation' });
+  assert.deepEqual(result.answered.map((a) => a.ask.kind).sort(), ['Q-1', 'Q-4']);
+  assert.deepEqual(result.left.map((l) => l.ask.kind).sort(), ['Q-2', 'Q-3']);
+  assert.equal(result.answered.find((a) => a.ask.kind === 'Q-1').verdict.text, 'per-seat');
+  assert.equal(result.answered.find((a) => a.ask.kind === 'Q-4').verdict.text, 'ship it');
+});
+
+test('--blocking is refused mechanically, not by an agent remembering', () => {
+  // MUTANT: read `blocking` off the raw gate instead of the projection, or
+  // drop it from the fold. `auto` then auto-accepts the irreversible ones —
+  // the single worst thing this feature could do.
+  const r = autoRepo('on');
+  const { asks } = openAsks(r.tyran);
+  const blocking = asks.find((a) => a.kind === 'Q-3');
+  assert.equal(blocking.blocking, true, 'the flag must survive the fold AND the projection');
+  assert.match(autoRefusal(blocking), /--blocking/);
+  assert.equal(autoVerdict(blocking), null);
+});
+
+test('an ask with nothing recorded is a real question and stays open', () => {
+  const r = autoRepo('on');
+  const bare = openAsks(r.tyran).asks.find((a) => a.kind === 'Q-2');
+  assert.match(autoRefusal(bare), /no recommendation and no default/);
+  assert.equal(autoVerdict(bare), null);
+});
+
+test('unattended.answer: default takes the conservative fallback instead', () => {
+  const r = autoRepo('on', 'default');
+  const result = autoAnswer(r.tyran, { prefer: 'default' });
+  assert.equal(result.answered.find((a) => a.ask.kind === 'Q-4').verdict.text, 'hold until Monday');
+  // Q-1 recorded no separate default, so the derived one is the recommendation
+  // and both settings agree — which is the common case by construction.
+  assert.equal(result.answered.find((a) => a.ask.kind === 'Q-1').verdict.text, 'per-seat');
+});
+
+test('the ledger says plainly that nobody was awake', () => {
+  // The morning review is a scan of the decision stream. An auto-accepted
+  // ruling that looks identical to one the operator made is the failure this
+  // whole feature would be judged by.
+  const r = autoRepo('on');
+  autoAnswer(r.tyran, { prefer: 'recommendation' });
+  const decision = decisions(r.journals.demo).find((d) => d.data.ask === 'Q-1');
+  assert.equal(decision.actor, 'overnight');
+  assert.match(decision.data.text, /^Q-1: \(auto-accepted overnight\) per-seat$/);
+  const gate = gates(r.journals.demo).find((g) => g.data.kind === 'Q-1' && g.data.result === 'answered');
+  assert.equal(gate.data.answer_mode, 'unattended');
+  assert.equal(gate.data.via, UNATTENDED_VIA);
+  assert.equal(gate.data.decision, decision.data.id, 'and the pair is linked, decision first');
+});
+
+test('the CLI refuses unless the repo opted in', () => {
+  // MUTANT: default to on. `--dir` is the only thing between this command and
+  // somebody else's repository, and it answers their questions for them.
+  const off = autoRepo('off');
+  const refused = run(['auto', '--dir', off.tyran]);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /unattended\.mode is not "on"/);
+  assert.equal(gates(off.journals.demo).filter((g) => g.data.result === 'answered').length, 0);
+
+  const on = autoRepo('on');
+  const ran = run(['auto', '--dir', on.tyran]);
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.match(ran.stdout, /2 auto-accepted · 2 left for you/);
+});
+
+test('bare `mode: on` works, because YAML reads it as a boolean', () => {
+  // The trap `limits.mode` documents with a comment on every occurrence. A
+  // two-value switch does not need it: both spellings are normalised.
+  //
+  // MUTANT: accept only the strings. `mode: on` — the spelling everyone types
+  // first — silently means off, and the operator wakes to a full queue and a
+  // config that looks exactly right.
+  const bare = autoRepo('on');
+  assert.equal(run(['auto', '--dir', bare.tyran, '--dry-run']).status, 0);
+  const quoted = autoRepo("'on'");
+  assert.equal(run(['auto', '--dir', quoted.tyran, '--dry-run']).status, 0);
+});
+
+test('a dry run writes nothing at all', () => {
+  const r = autoRepo('on');
+  const before = readFileSync(r.journals.demo, 'utf8');
+  const out = run(['auto', '--dir', r.tyran, '--dry-run']);
+  assert.equal(out.status, 0);
+  assert.match(out.stdout, /LEFT OPEN \(raised with --blocking/);
+  assert.equal(readFileSync(r.journals.demo, 'utf8'), before);
 });

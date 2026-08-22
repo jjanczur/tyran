@@ -21,7 +21,9 @@ import {
   RESUME_BACKOFFS_MS,
   SIDECAR_RELPATH,
   WATCHER_MAX_OVERRUN_MS,
+  activeInitiative,
   humanWait,
+  limitSweep,
   nextSleepMs,
   notifyDesktop,
   pidAlive,
@@ -31,6 +33,7 @@ import {
   runState,
   scheduleDecision,
   skipReason,
+  wallOf,
   watcherAlive,
   HEARTBEAT_FRESH_MS,
   weeklyDeferral,
@@ -643,4 +646,155 @@ test('run state says which MODE the gate is in, not only what it can see', () =>
     "profile: 'balanced'\nautonomy: P1\ntiers:\n  cheap: a\n  work: b\n  deep: c\n  top: d\nlimits:\n  mode: 'pause'\n",
   );
   assert.equal(runState(repo, Date.now()).limits_mode, 'pause');
+});
+
+// ------------------------------------------- watching for the wall (watch-limit)
+
+/**
+ * The gate can only refuse a session that is still calling tools. After a
+ * five-hour wall there is no such session — the conductor's own request was
+ * the one rejected — so the pause, the checkpoint and the armed resume all
+ * have to come from somewhere outside it. That is what these cover.
+ */
+
+function limitRepo({ mode = 'pause', init = 'demo' } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'tyran-wall-'));
+  mkdirSync(join(dir, '.tyran', 'state', init), { recursive: true });
+  writeFileSync(
+    join(dir, '.tyran', 'config.yaml'),
+    `autonomy: P2\nlimits:\n  mode: ${mode}\n  pause_at_percent: 99\n  weekly_pause_at_percent: 99\n  wait_max_hours: 5\n  long_wait: hold\n  resume_margin_minutes: 5\n  keep_awake: false\n`,
+  );
+  writeFileSync(
+    join(dir, '.tyran', 'state', init, 'journal.jsonl'),
+    JSON.stringify({ ts: new Date(NOW - 3600e3).toISOString(), ev: 'checkpoint', init, actor: 'conductor', data: { phase: 'building' } }) + '\n',
+  );
+  return dir;
+}
+
+/** What `usage-transcript.mjs` hands back, without touching a real transcript. */
+const wallReading = (window, resetsAtMs, session = SESSION) => () => ({
+  written_at: new Date(NOW).toISOString(),
+  lower_bound: false,
+  source: 'transcript',
+  session_id: session,
+  [window]: { used_percentage: 100, resets_at: Math.floor(resetsAtMs / 1000) },
+});
+
+test('a wall with no session alive still produces a marker and a resume time', () => {
+  // THE WHOLE POINT of watch-limit. Measured on this machine: walled at 19:25
+  // with the window resetting at 20:00, first real answer at 20:30 — because
+  // nothing was awake to notice the reset.
+  const dir = limitRepo();
+  const got = limitSweep(dir, { nowMs: NOW, readTranscript: wallReading('five_hour', NOW + 35 * 60e3), notify: () => {} });
+  assert.equal(got.action, 'paused');
+  assert.equal(got.marker.window, 'five_hour');
+  assert.equal(got.marker.session_id, SESSION, 'the session that hit the wall is the one to resume');
+  assert.equal(got.marker.init, 'demo');
+  assert.equal(got.marker.source, 'transcript', 'not "sidecar" — the next person debugging a stall must find the right file');
+  // reset + resume_margin_minutes, to the millisecond.
+  assert.equal(got.marker.resume_at, new Date(Math.floor((NOW + 35 * 60e3) / 1000) * 1000 + 5 * 60e3).toISOString());
+  assert.ok(existsSync(join(dir, MARKER_RELPATH)), 'the marker is on disk, which is what arms the resume');
+});
+
+test('the pause is journalled, so the board shows it paused rather than stopped', () => {
+  const dir = limitRepo();
+  limitSweep(dir, { nowMs: NOW, readTranscript: wallReading('seven_day', NOW + 4 * 86400e3), notify: () => {} });
+  const events = readFileSync(join(dir, '.tyran', 'state', 'demo', 'journal.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+  const checkpoint = events.find((e) => e.ev === 'checkpoint' && e.data.phase === 'usage-limit-pause');
+  const gate = events.find((e) => e.ev === 'gate' && e.data.kind === 'usage-limit');
+  assert.ok(checkpoint, 'a checkpoint the resumed session can start from');
+  assert.equal(gate.data.result, 'WAITING_ON_RESET', 'project.mjs reads this to give the ticket the paused-limit lane');
+  // The wind-down never ran, and a resumed session that assumes it did will
+  // trust a working tree nobody committed.
+  assert.ok(checkpoint.data.next_steps.some((s) => s.includes('no wind-down ran')));
+});
+
+test('a second sweep does not move the resume time forward', () => {
+  // MUTANT: drop the already-paused check. Every poll rewrites the marker with
+  // a fresh `paused_at`, and on a 60-second timer the resume recedes as fast
+  // as it approaches — a pause that never ends.
+  const dir = limitRepo();
+  const read = wallReading('five_hour', NOW + 35 * 60e3);
+  const first = limitSweep(dir, { nowMs: NOW, readTranscript: read, notify: () => {} });
+  const second = limitSweep(dir, { nowMs: NOW + 60e3, readTranscript: read, notify: () => {} });
+  assert.equal(second.action, 'none');
+  assert.equal(second.reason, 'already-paused');
+  assert.equal(JSON.parse(readFileSync(join(dir, MARKER_RELPATH), 'utf8')).resume_at, first.marker.resume_at);
+});
+
+test('limits.mode off means the watcher changes nothing at all', () => {
+  // The feature is opt-in. A repo that never enabled it must not acquire a
+  // pause marker because somebody left a watcher running.
+  const dir = limitRepo({ mode: "'off'" });
+  const got = limitSweep(dir, { nowMs: NOW, readTranscript: wallReading('five_hour', NOW + 35 * 60e3), notify: () => {} });
+  assert.equal(got.action, 'none');
+  assert.equal(got.reason, 'limits-off');
+  assert.ok(!existsSync(join(dir, MARKER_RELPATH)));
+});
+
+test('the STOP brake outranks the wall', () => {
+  // An operator who halted the run does not want it resumed at 4am because a
+  // window refilled.
+  const dir = limitRepo();
+  writeFileSync(join(dir, '.tyran', 'STOP'), 'halted\n');
+  const got = limitSweep(dir, { nowMs: NOW, readTranscript: wallReading('five_hour', NOW + 35 * 60e3), notify: () => {} });
+  assert.equal(got.reason, 'stop-brake');
+  assert.ok(!existsSync(join(dir, MARKER_RELPATH)));
+});
+
+test('no wall, or an unreadable one, changes nothing and never throws', () => {
+  const dir = limitRepo();
+  assert.equal(limitSweep(dir, { nowMs: NOW, readTranscript: () => null, notify: () => {} }).reason, 'no-wall');
+  assert.equal(
+    limitSweep(dir, {
+      nowMs: NOW,
+      readTranscript: () => {
+        throw new Error('half-written transcript');
+      },
+      notify: () => {},
+    }).reason,
+    'unreadable',
+  );
+  assert.ok(!existsSync(join(dir, MARKER_RELPATH)));
+});
+
+test('the weekly window governs when both are walled', () => {
+  // Waiting out the five-hour refill just hits the weekly wall again — the
+  // same precedence `trippedWindow` applies inside the gate.
+  const dir = limitRepo();
+  const got = limitSweep(dir, {
+    nowMs: NOW,
+    notify: () => {},
+    readTranscript: () => ({
+      written_at: new Date(NOW).toISOString(),
+      lower_bound: false,
+      source: 'transcript',
+      session_id: SESSION,
+      five_hour: { used_percentage: 100, resets_at: Math.floor((NOW + 35 * 60e3) / 1000) },
+      seven_day: { used_percentage: 100, resets_at: Math.floor((NOW + 4 * 86400e3) / 1000) },
+    }),
+  });
+  assert.equal(got.marker.window, 'seven_day');
+  assert.equal(got.marker.long_wait, true, 'and a multi-day wait holds rather than resuming unasked');
+});
+
+test('the initiative is the one whose journal moved last', () => {
+  const dir = limitRepo();
+  mkdirSync(join(dir, '.tyran', 'state', 'older'), { recursive: true });
+  writeFileSync(join(dir, '.tyran', 'state', 'older', 'journal.jsonl'), '{}\n');
+  // Touch `demo` after `older`, which is what an active initiative looks like.
+  writeFileSync(join(dir, '.tyran', 'state', 'demo', 'journal.jsonl'), JSON.stringify({ ts: new Date(NOW).toISOString(), ev: 'checkpoint', init: 'demo', actor: 'c', data: { phase: 'building' } }) + '\n');
+  assert.equal(activeInitiative(dir), 'demo');
+});
+
+test('a wall reading with no usable reset is not a pause', () => {
+  // `pauseMarker` would produce `new Date(NaN)` and throw. Nothing downstream
+  // can act on a window whose reset is unknown from THIS channel, because the
+  // whole value of the channel is that the reset is exact.
+  assert.equal(wallOf({ five_hour: { used_percentage: 100, resets_at: null } }), null);
+  assert.equal(wallOf({ five_hour: { used_percentage: 100 } }), null);
+  assert.equal(wallOf(null), null);
 });

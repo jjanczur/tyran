@@ -72,10 +72,13 @@ boundaries:
   prompts: ask
 
 # Overnight mode — pause autonomous work near the subscription usage limits
-# and resume after the window resets (https://jjanczur.github.io/tyran/overnight/). Requires the
-# operator-installed statusline helper (scripts/statusline.mjs), which is the
-# only place the platform exposes usage telemetry; without it the gate is
-# silent and doctor says so.
+# and resume after the window resets (https://jjanczur.github.io/tyran/overnight/).
+# Telemetry is read from three places in order: the statusline helper if you
+# installed one, the platform's usage cache in ~/.claude.json, and — when
+# neither reports a percentage — the wall itself, read back out of the session
+# transcript. The third only fires AFTER the limit is hit, so it cannot stop
+# you early; what it restores is the clean wind-down and the scheduled resume.
+# Doctor says so when none of the three can see anything.
 #
 #   mode: off | warn | pause     warn surfaces, never denies; pause winds down
 #   wait_max_hours: 5            reset further away than this = a LONG pause:
@@ -95,6 +98,29 @@ limits:
   long_wait: hold
   resume_margin_minutes: 5
   keep_awake: false # a real boolean, so the bare-off trap above cannot apply
+
+# Unattended delivery — what an open question does when nobody is awake.
+#
+# With mode: on, an ask is answered by the agent's own recommendation the
+# moment it is raised, and the run keeps going. That is the point of an
+# overnight run: you went to sleep expecting shipped work, and a queue of
+# questions nobody read is a night spent parked.
+#
+# Two refusals are mechanical, and they are what make this safe to switch on:
+# an ask with no recommendation is a real question and stays open, and an ask
+# raised with `--blocking` (the irreversible, the outward-facing, the ones that
+# spend money) always waits for you. Everything taken automatically is
+# journalled as `answer_mode: unattended` with its decision text prefixed
+# `(auto-accepted overnight)`, so the morning is one scan of the ledger.
+#
+# `.tyran/STOP` still outranks all of it.
+#
+#   mode: off | on               bare on/off are fine here — both spellings work
+#   answer: recommendation       what an ask resolves to: the agent's advice,
+#           | default            or the conservative fallback it recorded
+unattended:
+  mode: 'off'
+  answer: recommendation
 
 # The dashboard. Unlike everything above, this defaults ON: the board is where
 # a journal, a projection and a spend report become something a person can

@@ -98,7 +98,7 @@ export function validateConfig(doc) {
   const errors = [];
   if (!isPlainObject(doc)) return ['config must be a mapping'];
 
-  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'boundaries', 'limits', 'pricing', 'spend', 'board'];
+  const known = ['profile', 'autonomy', 'tiers', 'validation', 'shared_zones', 'budget', 'main_writable_paths', 'boundaries', 'limits', 'unattended', 'pricing', 'spend', 'board'];
   for (const key of Object.keys(doc)) {
     if (!known.includes(key)) errors.push(`${key}: unknown top-level key`);
   }
@@ -234,6 +234,25 @@ export function validateConfig(doc) {
       const knownLimits = ['mode', 'pause_at_percent', 'weekly_pause_at_percent', 'wait_max_hours', 'long_wait', 'resume_margin_minutes', 'keep_awake'];
       for (const key of Object.keys(limits)) {
         if (!knownLimits.includes(key)) errors.push(`limits.${key}: unknown key`);
+      }
+    }
+  }
+
+  // Unattended delivery: what an open question does when nobody is awake.
+  // Operator-written policy, never scanner-inferred — no provenance wrapper.
+  if ('unattended' in doc) {
+    if (!isPlainObject(doc.unattended)) errors.push('unattended: must be a mapping');
+    else {
+      const unattended = doc.unattended;
+      if (unattendedMode(unattended.mode) === null) {
+        errors.push(`unattended.mode: required, one of ${UNATTENDED_MODES.join(' | ')} (bare on/off are fine — YAML reads them as booleans and both spellings are accepted)`);
+      }
+      if ('answer' in unattended && !UNATTENDED_ANSWER.includes(unattended.answer)) {
+        errors.push(`unattended.answer: must be one of ${UNATTENDED_ANSWER.join(' | ')}`);
+      }
+      const knownUnattended = ['mode', 'answer'];
+      for (const key of Object.keys(unattended)) {
+        if (!knownUnattended.includes(key)) errors.push(`unattended.${key}: unknown key`);
       }
     }
   }
@@ -428,6 +447,63 @@ export function limitsOf(doc) {
     // Opt-in, strictly: anything that is not the boolean true is off. Nothing
     // on any machine changes until an operator writes `keep_awake: true`.
     keep_awake: limits.keep_awake === true,
+  };
+}
+
+export const UNATTENDED_MODES = Object.freeze(['off', 'on']);
+export const UNATTENDED_ANSWER = Object.freeze(['recommendation', 'default']);
+
+/**
+ * `mode` as one of `UNATTENDED_MODES`, or null if it is not a mode at all.
+ *
+ * BOOLEANS ARE ACCEPTED, and this is the one place in this file that bends.
+ * `yaml-lite.mjs` resolves bare `on` to `true` and bare `off` to `false` — the
+ * YAML 1.1 rule — so `mode: on`, the spelling every operator will type first,
+ * arrives here as a boolean and would be rejected with "must be one of off |
+ * on" against a config that LOOKS exactly right. `limits.mode` lives with that
+ * by carrying `# quoted — bare off/on are YAML booleans` next to every
+ * occurrence, which is a comment defending a trap rather than removing it.
+ *
+ * A two-value switch does not need the trap. Both spellings mean the same
+ * thing and both are normalised here, so there is still exactly one value
+ * downstream.
+ */
+export function unattendedMode(value) {
+  if (value === true) return 'on';
+  if (value === false) return 'off';
+  return UNATTENDED_MODES.includes(value) ? value : null;
+}
+
+/**
+ * The unattended block with defaults applied.
+ *
+ * WHAT THIS SWITCHES ON, stated plainly because it is the one setting in this
+ * file that decides something on the operator's behalf. With `mode: on`, an
+ * open question is answered by the agent's own recommendation the moment it is
+ * raised, and the run keeps going. That is the point: overnight means you went
+ * to sleep expecting shipped work, and a queue of questions nobody was awake
+ * to read is a night spent parked.
+ *
+ * The `default` field promised "what ships if nobody ever answers" since the
+ * ask protocol was written, and until this existed NOTHING ever took it — it
+ * fired only when a human clicked a button, at which point somebody was awake
+ * and the promise was moot.
+ *
+ * TWO REFUSALS ARE MECHANICAL, not prompt-level, and they are what make this
+ * safe enough to switch on: an ask with no recommendation is never
+ * auto-answered (nobody wrote down what to do), and an ask raised with
+ * `--blocking` is never auto-answered (its author said this one must wake
+ * you). Everything auto-answered is journalled as `answer_mode: unattended`,
+ * so the morning is one scan of the ledger rather than an archaeology.
+ *
+ * Off by default, in every template: it is a behaviour change an operator
+ * chooses, and `.tyran/STOP` still outranks it.
+ */
+export function unattendedOf(doc) {
+  const unattended = isPlainObject(doc) && isPlainObject(doc.unattended) ? doc.unattended : {};
+  return {
+    mode: unattendedMode(unattended.mode) ?? 'off',
+    answer: UNATTENDED_ANSWER.includes(unattended.answer) ? unattended.answer : 'recommendation',
   };
 }
 

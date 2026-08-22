@@ -1,5 +1,87 @@
 # Changelog
 
+## 0.1.46 — 2026-08-22
+
+### The wall is readable, and a question no longer costs a night
+
+Two failures were losing whole nights on a real install, and neither was
+visible while it happened.
+
+**The pause could never fire.** A repo configured `limits: mode: pause,
+pause_at_percent: 99` drove into the account wall at full speed on three
+separate nights. Both telemetry channels are dark on Claude Code 2.1.197: the
+statusline payload carries no `rate_limits` block — no `usage.json` had ever
+been written in ANY repo on that machine — and `cachedUsageUtilization` is not
+a key of `~/.claude.json` at all. The gate fails open on absent telemetry, by
+design, so nothing said so.
+
+The signal exists, and it is the wall itself. Every rejected request lands in
+the session transcript as an assistant record carrying `quotaLimits: {status:
+"rejected", rateLimitType, resetsAt}` — 45 of them across one machine's
+projects, including in `subagents/*.jsonl`, which is the seam this project had
+written off as needing a platform signal it did not have. `usage-transcript.mjs`
+reads it as a third channel, after the two percentage sources, because it is
+exact and LATE: it reports 100% of a window already spent, so it restores the
+clean wind-down and the scheduled resume rather than the early stop.
+
+The correctness rule is not "resetsAt is ahead of us". Measured: a weekly
+rejection carrying a reset five days out is followed by 565 successful
+assistant messages in the same file, because an allowance can be topped up.
+Acting on the reset alone would have held a working machine until the
+following Friday — a worse failure than the one being fixed, since a false
+pause burns the night the pause was meant to save. So a rejection counts only
+while nothing newer shows a named model answering, reconciled on one timeline
+across a session and its agents.
+
+**Nothing resumed, because nothing was awake to.** After a five-hour wall the
+conductor's own request is the one rejected, so it cannot checkpoint, cannot
+run the wind-down and cannot arm a resume. Measured on this machine: walled at
+19:25 with the window resetting at 20:00, first real answer at 20:30 — half an
+hour lost because the reset was nobody's job. `overnight.mjs watch-limit` and
+the served board's own timer now do that job, handing off to the existing
+`schedule` so the hold policy, the weekly deferral and the babysitting ladder
+are the ones already there.
+
+### Unattended delivery — the default that finally ships itself
+
+An open ask has **no timeout, no expiry and no auto-apply** anywhere in Tyran.
+It sits `WAITING_ON_OPERATOR` forever; doctor turns info into warning after 72
+hours of journal time and that is the whole consequence. The ask protocol has
+said "record a `default` — what ships if nobody ever answers" since it was
+written, and nothing ever took one: it fired when a human clicked **Take the
+default**, at which point somebody was awake and the promise was moot.
+
+`unattended: mode: on` closes an ask with its own recommendation the moment it
+is raised, and the run keeps going. Two refusals are mechanical: an ask with
+no recommendation and no default is a real question, and an ask raised
+`--blocking` is its author saying this one must wake you. `.tyran/STOP` still
+outranks both. Everything taken is journalled as `answer_mode: unattended`
+with its decision text prefixed `(auto-accepted overnight)` — an auto-ruling
+that looked like the operator's own would be the failure this is judged by.
+
+A recommendation now becomes the `default` at the mint when no other is given.
+The two fields stay distinct, but an ask recording only an opinion rendered as
+`blocking · no safe default` and stopped the queue on a question its own
+author had answered.
+
+### Smaller, and each one a silence
+
+- **Answering on the board never woke the conductor.** The terminal path has
+  offered to since answers existed; `POST /answer` re-rendered the page and
+  returned, so a ruling made at 23:00 sat until a session happened to start.
+- **`limit-near`** — `warn` promised to surface and never did. The gate
+  returns PASS ("surfacing is doctor's job") and doctor compared no percentage
+  to any threshold, so `warn` differed from `off` in nothing visible.
+- **`limit-watcher-absent`** — a pause in force with no watcher beside it.
+  `limit-pause-stale` fires only once `resume_at` has already passed.
+- **`limit-statusline-stale`** — a statusline pinned to a plugin-cache version
+  that is no longer running. A cache is not an archive; when it is pruned the
+  telemetry stops with no symptom but a pause that never fires.
+- Two findings recorded rather than papered over: `SESSION_ID_RE` admits
+  `--dangerous`, so the watcher's filename-sourced id uses a stricter pattern;
+  and both marker writers throw on `resets_at: undefined`, unreachable and
+  left shared because a guard on one side is a silent divergence.
+
 ## 0.1.45 — 2026-08-22
 
 ### The review reads data access and structure, and the self-review has criteria

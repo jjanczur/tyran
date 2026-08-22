@@ -41,6 +41,7 @@
  * CLI:
  *   node answer.mjs render [--dir <.tyran>] [--force]
  *   node answer.mjs apply  [--dir <.tyran>] [--dry-run] [--resume]
+ *   node answer.mjs auto   [--dir <.tyran>] [--dry-run]   # unattended.mode: on
  * Exit: 0 ok · 1 nothing is waiting on you · 2 usage, IO, a sheet that did
  *       not parse, or a sheet with answers already typed into it
  */
@@ -54,6 +55,8 @@ import { append, ASK_KIND_RE, CAPPED_DATA_KEYS, readJournal } from './journal.mj
 import { formatCodePoint, invisibleProblem } from './invisible.mjs';
 import { resumeArgv, SESSION_ID_RE } from './overnight.mjs';
 import { inlinePlain, naturalCompare, projectFile, WAITING_RE, writeAllAtomic, writeAtomic } from './project.mjs';
+import { unattendedOf } from './schema.mjs';
+import { parse } from './yaml-lite.mjs';
 import { wantsHelp } from './cli-args.mjs';
 
 /** The sheet, and the session record `apply --resume` reads. Both under
@@ -396,13 +399,31 @@ export function answerProblem(answer) {
  * `ticket` comes from the ASK, which came from the journal. Nothing here may
  * come from the sheet.
  */
+/**
+ * How each verdict mode is recorded. One table, because the three fields have
+ * to agree: a decision whose text says a human ruled, next to a gate whose
+ * `answer_mode` says nobody did, is a ledger that cannot be read back.
+ *
+ * `unattended` is the one nobody was awake for. It is prefixed IN THE DECISION
+ * TEXT rather than only in a field, because the decision stream is what an
+ * operator actually reads in the morning, and a night's auto-accepted rulings
+ * that look identical to their own is the failure this whole feature would be
+ * judged by.
+ */
+const RECORDING = Object.freeze({
+  default: { prefix: '(default accepted) ', actor: 'operator', answer_mode: 'default' },
+  answered: { prefix: '', actor: 'operator', answer_mode: 'operator' },
+  unattended: { prefix: '(auto-accepted overnight) ', actor: 'overnight', answer_mode: 'unattended' },
+});
+
 export function eventsFor(ask, verdict, decisionId = null) {
+  const how = RECORDING[verdict.mode] ?? RECORDING.answered;
   const decision = {
     ev: 'decision',
     init: ask.init,
-    actor: 'operator',
+    actor: how.actor,
     data: {
-      text: `${ask.kind}: ${verdict.mode === 'default' ? '(default accepted) ' : ''}${verdict.text}`,
+      text: `${ask.kind}: ${how.prefix}${verdict.text}`,
       ask: ask.kind,
       ...(ask.ticket != null ? { ticket: String(ask.ticket) } : {}),
     },
@@ -410,18 +431,90 @@ export function eventsFor(ask, verdict, decisionId = null) {
   const gate = {
     ev: 'gate',
     init: ask.init,
-    actor: 'operator',
+    actor: how.actor,
     data: {
       kind: ask.kind,
       result: 'answered',
       ...(ask.ticket != null ? { ticket: String(ask.ticket) } : {}),
       answer: verdict.text,
-      answer_mode: verdict.mode === 'default' ? 'default' : 'operator',
+      answer_mode: how.answer_mode,
       decision: decisionId,
-      via: ANSWERS_FILE,
+      via: verdict.mode === 'unattended' ? UNATTENDED_VIA : ANSWERS_FILE,
     },
   };
   return { decision, gate };
+}
+
+/** What the `via` field says when no human was in the loop. */
+export const UNATTENDED_VIA = 'unattended.mode: on';
+
+/**
+ * Why an ask may not be auto-answered, or null when it may.
+ *
+ * BOTH refusals are mechanical, and that is the point: `unattended.mode: on`
+ * is a standing instruction to rule on the operator's behalf, and an
+ * instruction like that is only safe if the exceptions are enforced by code
+ * rather than by an agent remembering them.
+ *
+ *   - No recommendation means nobody wrote down what to do. `raiseAsk` copies
+ *     a recommendation into `default` when the asker gives no other, so an ask
+ *     reaching here with neither was raised with neither: a real question.
+ *   - `blocking` is the asker saying THIS one must wake a human — the
+ *     irreversible, the outward-facing, the ones that spend money.
+ */
+export function autoRefusal(ask) {
+  if (ask.blocking === true) return 'raised with --blocking: it must wake you';
+  const text = ask.recommendation ?? ask.default;
+  if (typeof text !== 'string' || text.trim() === '') return 'no recommendation and no default was recorded';
+  return null;
+}
+
+/**
+ * The verdict `unattended.mode: on` takes on one ask, or null if it may not.
+ *
+ * `prefer` is `unattended.answer` from the config: `recommendation` (the
+ * default) takes the agent's own advice, `default` takes the conservative
+ * fallback. They are usually the same string now that `raiseAsk` derives one
+ * from the other; they differ exactly when the asker deliberately wrote both.
+ */
+export function autoVerdict(ask, prefer = 'recommendation') {
+  if (autoRefusal(ask) !== null) return null;
+  const first = prefer === 'default' ? ask.default : ask.recommendation;
+  const text = typeof first === 'string' && first.trim() !== '' ? first : (ask.default ?? ask.recommendation);
+  return { mode: 'unattended', text: String(text) };
+}
+
+/**
+ * Answer every open ask that may be answered without a human, and say what was
+ * left alone.
+ *
+ * Uses `answerOne` unchanged — same journal lock, same re-check that the ask
+ * is still open, same decision-before-gate ordering. An auto-answer is an
+ * ordinary answer with a different signature on it, not a second write path.
+ */
+export function autoAnswer(tyranDir, { prefer = 'recommendation' } = {}) {
+  const { asks, errors } = openAsks(tyranDir);
+  const { answerable, unanswerable } = partitionAsks(asks);
+  const answered = [];
+  const left = [];
+  const touched = new Map();
+  for (const ask of answerable) {
+    const verdict = autoVerdict(ask, prefer);
+    if (verdict === null) {
+      left.push({ ask, why: autoRefusal(ask) });
+      continue;
+    }
+    const outcome = answerOne(ask, verdict);
+    if (outcome.skipped !== undefined) {
+      left.push({ ask, why: outcome.skipped });
+      continue;
+    }
+    answered.push({ ask, verdict, decision: outcome.decision });
+    touched.set(ask.init, ask.journal);
+  }
+  if (touched.size > 0) reRender(tyranDir, touched);
+  for (const u of unanswerable) left.push({ ask: u.ask, why: u.why });
+  return { answered, left, errors };
 }
 
 /** The sheet's blocks, matched against the journal's open asks. Every
@@ -762,7 +855,8 @@ export function parseArgs(argv) {
 
 const USAGE =
   'usage: answer.mjs render [--dir <.tyran>] [--force]\n' +
-  '       answer.mjs apply  [--dir <.tyran>] [--dry-run] [--resume]';
+  '       answer.mjs apply  [--dir <.tyran>] [--dry-run] [--resume]\n' +
+  '       answer.mjs auto   [--dir <.tyran>] [--dry-run]   # unattended.mode: on — take the recommendation';
 
 /**
  * Answers already typed into the sheet on disk, for asks that are STILL OPEN.
@@ -871,6 +965,55 @@ function doApply(tyranDir, sheetPath, flags) {
   }
 }
 
+/**
+ * This repo's config, or null. `tyranDir` IS the `.tyran` directory, so the
+ * config sits directly inside it rather than under a repo root.
+ *
+ * Never throws: an unreadable or unparseable config means the unattended
+ * switch is not on, which is the safe reading of "I cannot tell".
+ */
+function readConfig(tyranDir) {
+  try {
+    return parse(readFileSync(join(tyranDir, 'config.yaml'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `auto` — the unattended sweep.
+ *
+ * REFUSES unless the repo has opted in. A command that answers the operator's
+ * questions on their behalf must not be runnable by accident, and `--dir` is
+ * the only thing standing between this and somebody else's repository.
+ */
+function doAuto(tyranDir, flags) {
+  const unattended = unattendedOf(readConfig(tyranDir));
+  if (unattended.mode !== 'on') {
+    console.error(
+      'answer: unattended.mode is not "on" in .tyran/config.yaml — refusing to answer your questions for you.\n' +
+        '  set  unattended:\n         mode: on\n  to have open asks take their own recommendation while you sleep.',
+    );
+    process.exit(1);
+  }
+  if (flags['dry-run'] === true) {
+    const { asks } = openAsks(tyranDir);
+    const { answerable } = partitionAsks(asks);
+    for (const ask of answerable) {
+      const why = autoRefusal(ask);
+      const verdict = autoVerdict(ask, unattended.answer);
+      console.log(why === null ? `${ask.init}/${ask.kind}  ->  ${excerpt(verdict.text)}` : `${ask.init}/${ask.kind}  ->  LEFT OPEN (${why})`);
+    }
+    console.log(`answer: ${answerable.length} open · dry run, nothing written`);
+    return;
+  }
+  const result = autoAnswer(tyranDir, { prefer: unattended.answer });
+  for (const a of result.answered) console.log(`answer: ${a.ask.init}/${a.ask.kind} auto-accepted -> ${excerpt(a.verdict.text)} (decision ${a.decision})`);
+  for (const l of result.left) console.log(`answer: ${l.ask.init}/${l.ask.kind} LEFT OPEN — ${l.why}`);
+  console.log(`answer: ${result.answered.length} auto-accepted · ${result.left.length} left for you`);
+  for (const e of result.errors ?? []) console.error(`answer: ${e}`);
+}
+
 function main() {
   if (wantsHelp(process.argv.slice(2))) {
     console.log(USAGE);
@@ -890,6 +1033,7 @@ function main() {
     if (!existsSync(tyranDir)) throw new IOError(`no such directory ${tyranDir}`);
     if (parsed.verb === 'render') return doRender(tyranDir, sheetPath, parsed.flags);
     if (parsed.verb === 'apply') return doApply(tyranDir, sheetPath, parsed.flags);
+    if (parsed.verb === 'auto') return doAuto(tyranDir, parsed.flags);
     // A verb-less invocation NEVER guesses. This command writes to the ledger,
     // and an invocation that sometimes writes and sometimes does not is what a
     // tired operator gets wrong at 23:00.

@@ -620,6 +620,12 @@ export function fold({ events = [], truncatedTail = false, badLines = [] } = {})
           question: data.question ?? null,
           recommendation: data.recommendation ?? null,
           default: data.default ?? null,
+          // The asker's "this one must wake a human". It rides the fold for
+          // the same reason the three fields above do — and this one is not
+          // decoration: it is what `answer.mjs auto` refuses on, so a gate
+          // fold that dropped it would auto-accept the very questions their
+          // author marked as needing a person.
+          blocking: data.blocking === true,
           count: (prev?.count ?? 0) + 1,
           // Gate results are keyed by `kind`, so the latest one wins the slot —
           // and a re-run that passes therefore ERASED the refusal that came
@@ -869,6 +875,10 @@ export function boardOf(state, { staleHours = DEFAULT_STALE_HOURS } = {}) {
         question: g.question ?? null,
         recommendation: g.recommendation ?? null,
         default: g.default ?? null,
+        // Projected, not merely stored: this is what `answer.mjs auto` reads
+        // to refuse an ask under `unattended.mode: on`, and the refusal has to
+        // work from the PROJECTION — the sweep never re-reads raw gates.
+        blocking: g.blocking === true,
         since: g.ts ?? null,
       });
     }

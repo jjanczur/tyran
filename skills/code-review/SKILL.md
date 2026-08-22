@@ -1,5 +1,5 @@
 ---
-description: The depth half of a review - the dimensions a diff is read against (correctness, boundaries, concurrency, failure paths, secrets, test quality) and the rule that a finding is refuted before it is reported. The verdict stays with the reviewer agent. Use when reviewing a diff or a pull request.
+description: The depth half of a review - the dimensions a diff is read against (correctness, boundaries, concurrency, failure paths, secrets, data access, structure, test quality) and the rule that a finding is refuted before it is reported. The verdict stays with the reviewer agent. Use when reviewing a diff or a pull request, or when asked about N+1 queries or wasted round trips.
 ---
 
 # Code review — reading depth
@@ -57,6 +57,34 @@ gap nobody notices.
   through the real producer, not a stand-in for its output.
 - **Resource lifecycle.** What is opened, started, spawned or leased, and where
   it is closed — including on the path where an exception is thrown.
+- **Data access and wasted work.** Count the round trips one request makes
+  and how the count moves with the rows. A query, fetch or RPC inside a loop
+  or an awaited per-item `map` is 1 + N; one query over the set (a join, an
+  `IN`, a loader) is the shape. Awaits with no data dependency between them
+  run together, fan-out bounded — unbounded over a pool or a rate limit, a
+  slow request becomes a failed one. The same pure computation over the same
+  inputs runs once per request. A cache comes AFTER those, never instead: a
+  cache over a query that should not have run is a defect with a warm cache,
+  and one the diff adds or touches must say what invalidates it and why the
+  TTL is that number — a TTL is the staleness the product agreed to, and a
+  number with no reason is the first stale read filed in advance. None of this
+  shows in the diff alone: a helper that runs one query is correct where it is
+  written and N+1 where a loop calls it, so follow the new call up to the
+  request that triggers it. Rank by the path — a query on every page load is
+  a finding, a nightly job over twelve rows is a `NOTES.md` line. The finding
+  is a count, "N+1 queries for N rows, expected 1": an input and an expected
+  result, so it pins as a test against the query log.
+- **Structure.** A thousand-line file is built one reasonable addition at a
+  time, so the question is about THIS addition: does it give a module a second
+  reason to change, or grow the largest file in its area? A new concern is a
+  new module, and the simplest change that meets the criteria is the bar — a
+  layer, an option or a generic helper introduced for the one caller the story
+  has is the opposite failure, not the cure; `deslop` already names it as
+  slop. This finding is a location, not a counterexample: the file, the two
+  responsibilities it now carries, the seam between them. It is the story's
+  finding only when the story made the tangle; a giant the story merely
+  touched is a `NOTES.md` debt, and splitting it here is the work nobody asked
+  for.
 - **The gate itself.** If the change touches a check, ask what that check can
   no longer see. A loosened tolerance, a narrowed selector, a broadened
   try/catch and a skipped test all keep the run green while removing its

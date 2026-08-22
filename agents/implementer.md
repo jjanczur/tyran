@@ -54,6 +54,14 @@ commits and anything written to disk are in English.**
    optimization pass recorded in the story file (`deslop` — it deletes rather
    than adds, and it needs a test that ran BEFORE your edit), repo validation,
    then commits, push and PR on the story branch.
+   - **The self-review is the `code-review` skill run on yourself** — load it
+     with the `Skill` tool; a checklist recalled from memory is the one you
+     already failed to apply while writing. The dimension an author misses
+     most is data access: each call site looked fine where you wrote it, and
+     the loop that multiplies it is in a file you did not open, so follow your
+     new call up to the request. For work that reads or writes data, the
+     short plan states the round trips one request will cost — a number
+     written down before the code is the cheapest one you will ever fix.
    - When a test fails for a reason you cannot explain, **stop patching and
      follow `root-cause`**. Reproduce it, change one variable at a time with
      the prediction written down first, and name the mechanism. A fix for a

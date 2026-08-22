@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.1.45 — 2026-08-22
+
+### The review reads data access and structure, and the self-review has criteria
+
+`code-review` gained two dimensions. **Data access and wasted work**: the
+round trips one request makes and how the count moves with the rows — a query
+inside a loop or an awaited per-item `map` is 1 + N, awaits with no dependency
+between them run together with the fan-out bounded, the same pure computation
+runs once per request, and a cache comes AFTER those, never instead of them,
+with the diff saying what invalidates it and why the TTL is that number. None
+of it shows in the diff alone, so the rule is to follow the new call up to the
+request that triggers it, and the finding is a count — "N+1 queries for N rows,
+expected 1" — which is what lets it pin as a test. **Structure**: a
+thousand-line file is built one reasonable addition at a time, so the question
+is whether THIS addition gives a module a second reason to change; the
+counterweight is `deslop`'s own — a layer or helper introduced for one caller
+is the opposite failure, not the cure — and a giant the story merely touched is
+a `NOTES.md` debt, not an in-story refactor.
+
+Reported from the operator's own repos: the implementer and reviewer shipped
+N+1 queries, serial awaits over independent calls, repeated queries that could
+have been one, and caches with no stated reason for their TTL, often enough
+that the same eight-point checklist was being pasted into every handoff by
+hand. The checklist now lives in one place — the skill the reviewer already
+loads — and nowhere else.
+
+The implementer's "self-review of your own diff" had no criteria: it named no
+skill and listed no dimension. It is now the `code-review` skill run on
+yourself, loaded rather than recalled, with data access called out as the
+dimension an author misses most, because each call site looked fine where it
+was written. For work that reads or writes data the short plan states the
+round trips one request will cost. `deslop` says in one sentence that a slow
+data path is not its business — it deletes, and the fix for a query in a loop
+adds lines — so "the optimization pass" can no longer be read as the
+performance pass. A test pins the pointer and the N+1 clause, because 0.1.40
+is exactly the kind of edit that drops a cross-reference.
+
+Not added: a performance-audit skill. The operator's four-phase audit — recon,
+a false-positive pass, a report split by what is safe to fix without asking,
+iterative implementation — is the shape of an initiative under `/tyran:run`:
+scout, plan, implementer, reviewer, with the policy classes deciding what needs
+a human. A skill nothing asks for by name is a library entry, and every
+description is paid for by every session. Skill descriptions: 3868 → 3947 of
+5000.
+
 ## 0.1.44 — 2026-08-19
 
 ### The board follows your OS, and finally has a light mode

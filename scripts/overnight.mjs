@@ -45,22 +45,25 @@
  * numbers.
  *
  * CLI:
- *   node overnight.mjs schedule [--dir <repo>] [--prompt <text>] [--cmd <exe>] [--force-resume]
+ *   node overnight.mjs schedule    [--dir <repo>] [--prompt <text>] [--cmd <exe>] [--force-resume]
+ *   node overnight.mjs watch-limit [--dir <repo>] [--once] [--poll-ms <n>]   # detect the wall with no session alive
  *   node overnight.mjs status   [--dir <repo>]
  *   node overnight.mjs cancel   [--dir <repo>] [--clear]
  *   node overnight.mjs --wait   [--dir <repo>]        # internal (the watcher)
  * Exit: 0 ok/held · 1 refused (no marker, already scheduled, STOP) · 2 usage/IO
  */
 import { spawn, execFile } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkStop } from './stop-check.mjs';
-import { readJournal } from './journal.mjs';
+import { append, readJournal } from './journal.mjs';
 import { GATE_PASS } from './project.mjs';
 import { withKeepAwake } from './keepawake.mjs';
 import { SIDECAR_RELPATH, SIDECAR_FRESH_MS } from './usage-source.mjs';
+import { readTranscriptRejection, WINDOW_KEYS } from './usage-transcript.mjs';
+import { pauseMarkerFrom, writePauseMarker } from './usage-marker.mjs';
 import { limitsOf } from './schema.mjs';
 import { parse } from './yaml-lite.mjs';
 import { escapeInvisible } from './invisible.mjs';
@@ -689,10 +692,201 @@ function doCancel(repo, flags) {
   }
 }
 
+// ------------------------------------------------- watching for the wall
+
+/**
+ * How often the standalone watcher looks for a wall. Cheap by construction —
+ * see `usage-transcript.mjs` for the three bounds on what it opens.
+ */
+export const LIMIT_POLL_MS = 60 * 1000;
+
+/** Slug shape shared with `doWait`: what may become a directory name. */
+const INIT_RE = /^[A-Za-z0-9._-]{1,80}$/;
+
+/**
+ * The initiative a pause belongs to: the one whose journal was written last.
+ *
+ * The gate learns this from the session that is being refused. Nothing is
+ * being refused here — that is the whole point of this path — so the most
+ * recently advanced journal is the best available answer, and a wrong guess
+ * costs a checkpoint filed against the wrong initiative rather than a missed
+ * resume: `runWaitLoop` re-reads `marker.init` only to look for evidence that
+ * somebody already came back.
+ */
+export function activeInitiative(repo, { readdir = readdirSync, stat = statSync } = {}) {
+  const root = join(repo, '.tyran', 'state');
+  let entries;
+  try {
+    entries = readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !INIT_RE.test(entry.name)) continue;
+    try {
+      const mtime = stat(join(root, entry.name, 'journal.jsonl')).mtimeMs;
+      if (best === null || mtime > best.mtime) best = { init: entry.name, mtime };
+    } catch {
+      /* a directory with no journal is not an initiative */
+    }
+  }
+  return best === null ? null : best.init;
+}
+
+/**
+ * The window a transcript reading should pause on, in `trippedWindow`'s shape.
+ *
+ * The weekly one governs when both are walled, for the reason the gate gives:
+ * waiting out the five-hour refill just hits the weekly wall again.
+ */
+export function wallOf(reading) {
+  if (reading === null || typeof reading !== 'object') return null;
+  for (const window of ['seven_day', ...WINDOW_KEYS.filter((w) => w !== 'seven_day')]) {
+    const node = reading[window];
+    if (node === null || typeof node !== 'object') continue;
+    if (typeof node.resets_at !== 'number' || !Number.isFinite(node.resets_at)) continue;
+    return {
+      window,
+      used_percentage: typeof node.used_percentage === 'number' ? node.used_percentage : 100,
+      resets_at: node.resets_at,
+      // Exact, not a bound: this is the window closing at a known second, so
+      // the scheduler may act on it. See `usage-transcript.mjs`.
+      lower_bound: false,
+    };
+  }
+  return null;
+}
+
+/**
+ * One look for the wall, and the pause if there is one.
+ *
+ * WHY THIS EXISTS AT ALL. The gate can only refuse a session that is still
+ * calling tools. After a five-hour wall there is no such session: the
+ * conductor's own request was the one rejected, so it cannot write its
+ * checkpoint, cannot run the wind-down, and cannot arm a resume. Measured on
+ * this machine — walled at 19:25 with the window resetting at 20:00, and the
+ * first real answer at 20:30, because the reset was nobody's job.
+ *
+ * Returns what it did rather than printing it, so the board server can call
+ * the same function on its refresh timer.
+ */
+export function limitSweep(repo, { nowMs = Date.now(), readTranscript = readTranscriptRejection, notify = notifyDesktop } = {}) {
+  const limits = readLimitsFile(repo);
+  if (limits === null || limits.mode === 'off') return { action: 'none', reason: 'limits-off' };
+  if (checkStop(repo).stopped) return { action: 'none', reason: 'stop-brake' };
+
+  // An existing marker means the gate already saw this, or a previous sweep
+  // did. Writing a second one would move `resume_at` forward on every poll —
+  // a pause that recedes as you approach it.
+  const existing = readSmallJson(join(repo, MARKER_RELPATH));
+  if (existing !== null) {
+    const resumeAtMs = Date.parse(typeof existing.resume_at === 'string' ? existing.resume_at : '');
+    if (!Number.isFinite(resumeAtMs) || resumeAtMs > nowMs) return { action: 'none', reason: 'already-paused' };
+  }
+
+  let reading;
+  try {
+    reading = readTranscript({ repoRoot: repo, nowMs });
+  } catch {
+    // Telemetry is consulted, never depended on — the same contract the gate
+    // keeps. A watcher that dies on a malformed transcript is a watcher that
+    // is not there on the night it was needed.
+    return { action: 'none', reason: 'unreadable' };
+  }
+  const tripped = wallOf(reading);
+  if (tripped === null) return { action: 'none', reason: 'no-wall' };
+
+  const init = activeInitiative(repo);
+  const marker = pauseMarkerFrom(tripped, limits, nowMs, reading.session_id, init, 'transcript');
+  writePauseMarker(repo, marker);
+  log(repo, `wall: window=${tripped.window} resets_at=${tripped.resets_at} session=${marker.session_id ?? 'unknown'}`);
+
+  // The journal is what makes this visible as a PAUSE rather than as a run
+  // that simply stopped. Best-effort: a locked or unwritable journal must not
+  // cost the marker that was already written, which is what arms the resume.
+  const journalPath = journalPathFor(repo, init);
+  if (journalPath !== null && existsSync(journalPath)) {
+    try {
+      append(journalPath, {
+        ev: 'checkpoint',
+        init,
+        actor: 'overnight-watcher',
+        data: {
+          phase: 'usage-limit-pause',
+          next_steps: [
+            `the ${tripped.window === 'seven_day' ? 'weekly' : 'five-hour'} window is exhausted; it resets ${marker.resume_at}`,
+            'this pause was detected from the transcript AFTER the wall — no wind-down ran, so open work may be uncommitted',
+            'on resume: close the open usage-limit gate with result: passed, then re-read STATE.md before spawning anything',
+          ],
+        },
+      });
+      append(journalPath, {
+        ev: 'gate',
+        init,
+        actor: 'overnight-watcher',
+        data: { kind: 'usage-limit', result: 'WAITING_ON_RESET', reason: `${tripped.window} window exhausted; resets ${marker.resume_at}` },
+      });
+    } catch {
+      log(repo, 'wall: journal append failed — the marker stands and the resume is still armed');
+    }
+  }
+
+  const windowName = tripped.window === 'seven_day' ? 'weekly' : 'five-hour';
+  notify('Tyran: hit the usage limit', `The ${windowName} window is exhausted. Resuming automatically ${marker.resume_at}.`);
+  return { action: 'paused', reason: 'wall', marker };
+}
+
+function doWatchLimit(repo, flags) {
+  const limits = readLimitsFile(repo);
+  if (limits.mode === 'off') {
+    console.error(
+      'overnight: limits.mode is "off" in .tyran/config.yaml — nothing to watch for.\n' +
+        '  set limits.mode: pause to have the wall detected and the resume armed.',
+    );
+    process.exit(1);
+  }
+  const pollMs = typeof flags['poll-ms'] === 'number' ? flags['poll-ms'] : LIMIT_POLL_MS;
+
+  const sweepOnce = () => {
+    const result = limitSweep(repo);
+    if (result.action === 'paused') {
+      console.log(`overnight: wall detected on the ${result.marker.window} window — resuming ${result.marker.resume_at}`);
+      // Arm the resume through the ordinary path, so the hold policy, the
+      // keep-awake warning and the babysitting ladder are the ones the
+      // operator already has, not a second implementation of them.
+      doSchedule(repo, flags);
+      return true;
+    }
+    return false;
+  };
+
+  if (flags.once === true) {
+    if (!sweepOnce()) console.log('overnight: no wall in force');
+    return;
+  }
+
+  console.log(`overnight: watching for the usage wall every ${Math.round(pollMs / 1000)}s (Ctrl-C to stop)`);
+  const timer = setInterval(() => {
+    try {
+      if (sweepOnce()) {
+        clearInterval(timer);
+        // doSchedule spawned the resume watcher; this process has done its job.
+        process.exit(0);
+      }
+    } catch (err) {
+      log(repo, `watch-limit: ${err.message}`);
+    }
+  }, pollMs);
+  timer.unref?.();
+  // Without this the unref'd timer lets the process exit immediately.
+  process.stdin.resume?.();
+}
+
 // ------------------------------------------------------------------- CLI
 
-const BOOLEAN_FLAGS = ['force-resume', 'clear', 'wait'];
-const NUMERIC_FLAGS = ['chunk-ms', 'backoff-ms'];
+const BOOLEAN_FLAGS = ['force-resume', 'clear', 'wait', 'once'];
+const NUMERIC_FLAGS = ['chunk-ms', 'backoff-ms', 'poll-ms'];
 const VALUE_FLAGS = ['dir', 'prompt', 'cmd', ...NUMERIC_FLAGS];
 
 function parseArgs(argv) {
@@ -725,7 +919,8 @@ function parseArgs(argv) {
 const SELF = fileURLToPath(import.meta.url);
 
 async function main() {
-  const usage = 'usage: overnight.mjs <schedule|status|cancel> [--dir <repo>] · schedule [--force-resume] [--prompt <t>] [--cmd <exe>] · cancel [--clear]';
+  const usage =
+    'usage: overnight.mjs <schedule|watch-limit|status|cancel> [--dir <repo>] · schedule [--force-resume] [--prompt <t>] [--cmd <exe>] · watch-limit [--once] [--poll-ms N] · cancel [--clear]';
   let parsed;
   try {
     parsed = parseArgs(process.argv.slice(2));
@@ -738,6 +933,7 @@ async function main() {
   const repo = resolve(typeof flags.dir === 'string' ? flags.dir : process.cwd());
   const command = flags.wait === true ? '--wait' : positionals[0];
   if (command === 'schedule') return doSchedule(repo, flags);
+  if (command === 'watch-limit') return doWatchLimit(repo, flags);
   if (command === '--wait') return doWait(repo, flags);
   if (command === 'status') return doStatus(repo);
   if (command === 'cancel') return doCancel(repo, flags);

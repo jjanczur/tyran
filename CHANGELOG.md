@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.47 — 2026-09-19
+
+### The secrets gate scans 10 MiB, and buys the time to do it
+
+`MAX_PAYLOAD_BYTES` goes from 4 MiB to 10 MiB, together with what the number
+depends on: `DEADLINE_MS` 7 s → 15 s, the scanner's own budget 5 s → 11 s and
+the registered `timeout` 15 s → 30 s, the most a hook here may declare. The
+old ceiling was true to its 7 s budget, and it made a finished change on a
+real project — two 2.4 MB translation catalogs plus the code that used them —
+into three commits and a chunked push, because the gate could not scan them
+in one go.
+
+Measured end to end through the real hook before the number was written
+(8 cores, load average 3): copies of a 2.4 MB JSON catalog, 4 MiB / 3.14 s,
+8 MiB / 5.99 s, 9.5 MiB / 7.45 s; base64 folded at 76 columns,
+9.9 MiB / 6.97 s. The ceiling counts every object git would write, so 9.9 MiB
+of catalog files arrived as 10,703,651 bytes in nine objects and was refused
+in 0.08 s.
+
+One cost the size made visible, recorded in `docs/hooks.md`: gitleaks 8.30.1
+stops reading a single line that carries no newline, deterministically per
+payload and chunking, exits 0 and reports the smaller count — 3 of 18 runs at
+8 MiB of unbroken base64, 0 of 6 at 4 MiB, never with newlines. The coverage
+check refuses such a scan rather than trusting it, which is unchanged and is
+the point of that check.
+
+The pins moved with the numbers: `tests/unit/hook-secrets-gate.test.mjs` pins
+10,485,760 and 17,000 and sizes its oversized-report fixture from the constant
+instead of a literal.
+
 ## 0.1.46 — 2026-08-22
 
 ### The wall is readable, and a question no longer costs a night

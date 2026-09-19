@@ -460,18 +460,40 @@ fingerprint in a **tracked** `.gitleaksignore`, or agree a **tracked**
 
 - **No gitleaks means no commit.** A check that passes when its dependency is
   gone is a check you disable by uninstalling a package.
-- **The payload is capped at 4 MiB** (`MAX_PAYLOAD_BYTES`, 4,194,304 bytes) and
-  a larger one refuses rather than being scanned in part. A partial scan that
-  reports nothing looks exactly like a clean one.
+- **The payload is capped at 10 MiB** (`MAX_PAYLOAD_BYTES`, 10,485,760 bytes)
+  and a larger one refuses rather than being scanned in part. A partial scan
+  that reports nothing looks exactly like a clean one.
 
   The number was **8 MB here for three rounds and it was never true**. It came
   from timing `gitleaks stdin` alone and ignoring everything the gate spends
   before the scan. Measured end to end on this machine, high-entropy base64
   through the real hook: 1 MiB / 1.07 s, 2 MiB / 1.71 s, 3 MiB / 2.42 s,
-  4 MiB / 3.14 s against a 7 s deadline — so 4 MiB fits and 8 MiB never did.
+  4 MiB / 3.14 s against a 7 s deadline — so 4 MiB fit and 8 MiB never did.
   The constant was corrected before this line was, which is the same defect as
   the AWS miss rate above: the code told the truth and the documentation kept
   publishing the flattering figure.
+
+  The cap went from 4 MiB to 10 MiB in 0.1.47 **together with the time it
+  buys**, not instead of it: `DEADLINE_MS` 7 s → 15 s, the scanner's own
+  budget 5 s → 11 s and the registered `timeout` 15 s → 30 s, the most a
+  hook here may declare. The reason was a real project whose two 2.4 MB
+  translation catalogs plus the code that used them made one finished
+  change, and the gate made it three commits and a chunked push. Measured
+  end to end through the real hook on the same
+  machine (8 cores, load average 3): copies of a 2.4 MB JSON catalog,
+  4 MiB / 3.14 s, 8 MiB / 5.99 s, 9.5 MiB / 7.45 s; base64 folded at 76
+  columns, 9.9 MiB / 6.97 s. The ceiling counts every object git would write,
+  so 9.9 MiB of catalog files arrived as 10,703,651 bytes in nine objects and
+  was refused — in 0.08 s, since the size is read before any object is.
+
+  A cost that only appeared with size: gitleaks 8.30.1 stops reading one
+  line that has no newline before the end, deterministically for a given
+  payload and chunking, exits 0 and reports the smaller count. Measured: 3 of
+  18 runs at 8 MiB of unbroken base64, 0 of 6 at 4 MiB, never once the same
+  bytes carried a newline every 76 columns. The coverage check turns that
+  into a refusal (*the scanner read N of the M bytes*), which is the side to
+  fail on; a source file already has newlines, and a blob that does not is
+  the kind of file the remedy says to keep out of the commit.
 
   Its cost is real and is not a rounding error. The size is checked from
   `cat-file --batch-check` BEFORE any object is read, so an oversized push is

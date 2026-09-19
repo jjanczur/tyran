@@ -592,7 +592,8 @@ test('R17: an oversized REPORT refuses — the size guard is reachable and shown
   // Round-2 review found this guard surviving mutation: nothing produced a
   // report past the limit, so deleting the check changed nothing observable.
   // Per ADR-20 that made it an unproven control. It is provoked here.
-  const huge = `[${Array.from({ length: 300000 }, (_, i) => `{"RuleID":"r${i}","StartLine":1}`).join(',')}]`;
+  // Sized from the cap, not a literal: every entry is at least 29 bytes.
+  const huge = `[${Array.from({ length: Math.ceil(MAX_PAYLOAD_BYTES / 29) + 1 }, (_, i) => `{"RuleID":"r${i}","StartLine":1}`).join(',')}]`;
   assert.ok(huge.length > MAX_PAYLOAD_BYTES, `the fixture must exceed the cap (${huge.length})`);
   const verdict = await withRepo(() => ({ code: 1, report: huge }));
   assert.equal(verdict.decision, 'deny');
@@ -1073,7 +1074,7 @@ test('the registered timeout leaves the internal deadline room to refuse first',
     .find((h) => h.command.includes('secrets-gate.mjs'));
   assert.equal(typeof entry.timeout, 'number');
   assert.ok(DEADLINE_MS <= (entry.timeout * 1000) / 2);
-  assert.equal(DEADLINE_MS, 7000, 'pinned so a change has to be deliberate');
+  assert.equal(DEADLINE_MS, 15000, 'pinned so a change has to be deliberate');
 });
 
 // ============================================== 4. THE EIGHT ROUND-2 BLOCKERS
@@ -1418,7 +1419,7 @@ test(
     git(dir, 'commit', '-qm', 'big');
     git(dir, 'remote', 'add', 'origin', bare);
     const reason = reasonOf(runGateScript('git push origin HEAD:refs/heads/main', dir));
-    assert.match(reason, /this would publish \d+ bytes in \d+ object\(s\), past the 4194304/);
+    assert.match(reason, /this would publish \d+ bytes in \d+ object\(s\), past the 10485760/);
     assert.match(reason, /push in smaller steps/);
     assert.equal(/git answered for \d+ of the \d+ objects/.test(reason), false, reason);
     // And the floor is stated, because a refspec cannot split one commit.
@@ -1429,11 +1430,13 @@ test(
 test('BL-4: the payload ceiling the documentation publishes is the one the code enforces', () => {
   // The constant was corrected to 4 MiB and `docs/hooks.md` went on saying
   // 8 MB — the same shape as the AWS miss rate that was wrong for two rounds.
-  // A number a user reads is part of the control.
+  // A number a user reads is part of the control. Raised to 10 MiB in 0.1.47
+  // together with the deadline, measured end to end (see docs/hooks.md).
   const doc = readFileSync(join(REPO_ROOT, 'docs', 'hooks.md'), 'utf8');
-  assert.equal(MAX_PAYLOAD_BYTES, 4 * 1024 * 1024, 'pinned so a change has to be deliberate');
+  assert.equal(MAX_PAYLOAD_BYTES, 10 * 1024 * 1024, 'pinned so a change has to be deliberate');
   assert.match(doc, new RegExp(String(MAX_PAYLOAD_BYTES).replace(/\B(?=(\d{3})+(?!\d))/g, ',')));
   assert.equal(/capped at 8 ?MB/.test(doc), false, 'the retired figure is back');
+  assert.equal(/capped at 4 ?MiB/.test(doc), false, 'the previous figure is back');
 });
 
 // ==================================== 5. THE ALIAS HOLE (found while building

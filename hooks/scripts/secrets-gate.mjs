@@ -71,13 +71,13 @@ import { fileURLToPath } from 'node:url';
 import { PASS, field, main, runGate } from './hook-io.mjs';
 
 /** This gate's own budget, half the `timeout` its hooks.json entry declares. */
-export const DEADLINE_MS = 7000;
+export const DEADLINE_MS = 15000;
 
 /** Left unspent so a refusal can still be serialized after the last child. */
 export const DEADLINE_MARGIN_MS = 1200;
 
 /** No single child may hold the whole budget; several have to run. */
-export const CHILD_BUDGET_MS = 5000;
+export const CHILD_BUDGET_MS = 11000;
 
 /** Cheap `git` queries. Generous next to a measured 24-75 ms. */
 export const GIT_BUDGET_MS = 2000;
@@ -85,17 +85,23 @@ export const GIT_BUDGET_MS = 2000;
 /**
  * The most content this gate will assemble and scan.
  *
- * 4 MB, not 8. The 8 MB figure came from timing `gitleaks stdin` in isolation
- * (1.07 s) and ignored everything the gate spends BEFORE the scan — listing
- * objects, reading them, and the git calls in front of both. Review measured
- * the real ceiling inside the budget at roughly 4.5 MB, so the constant is set
- * below it rather than at the number that made the prose sound better.
+ * 10 MiB, against a 15 s deadline (hooks.json: 30 s, the most a hook here may
+ * register). The first figure here
+ * was 8 MB and it was never true: it came from timing `gitleaks stdin` in
+ * isolation (1.07 s) and ignored everything the gate spends BEFORE the scan —
+ * listing objects, reading them, and the git calls in front of both. Review
+ * measured the real ceiling inside the 7 s budget of that time at roughly
+ * 4.5 MB, and the constant sat at 4 MiB for the next rounds. It was raised
+ * together with the deadline, not instead of it, when 4 MiB forced a real
+ * project to split one finished change into several commits and pushes just
+ * to get its two 2.4 MB translation catalogs past the gate (measured
+ * end to end on that machine: see `docs/hooks.md`, "Costs that are deliberate").
  *
  * Past it the gate REFUSES rather than scanning a prefix: a partial scan that
  * reports nothing is indistinguishable from a clean one, which is the defect
  * this whole file exists to remove.
  */
-export const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
+export const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Bytes of a command we are willing to hand to the scanner as data. */
 export const MAX_COMMAND_BYTES = 128 * 1024;

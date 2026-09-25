@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.48 — 2026-09-25
+
+### `mistakes.mjs` writes no em dash, and reads a rule whose dash a human fixed
+
+Two bugs from one character, reported from a real install. `add` wrote every
+entry heading as `## <date> — <title>` and `promote --law` wrote every rule
+line with ` — MISTAKES.md entries ...`, so in a host repo whose gate rejects
+U+2014 on added lines, every `add` and every `promote --law` turned the commit
+red, and that repo's `MISTAKES.md` header had to tell people to fix the dash by
+hand after each `add`.
+
+The hand fix then caused the second bug. `RULE_EVIDENCE_RE` accepted only
+U+2014, so a rule line whose dash had been turned into a hyphen no longer named
+its signature: `fenceCarriesSignature` answered false and the next
+`promote --law` wrote the same rule into `CLAUDE.md` a second time. Measured on
+that repo: 4 of the 5 rules in its fence were invisible to the check, and
+`promote --law --dry-run` offered a duplicate of one of them without the
+"already carries this signature" notice.
+
+Both writers now use a plain hyphen (` - `), and the evidence pattern accepts a
+hyphen, an en dash or an em dash, because fences already in use hold rules with
+the old character and with the hand-fixed one. Messages on stderr and in the
+usage text keep their dashes; they never reach a file. `templates/MISTAKES.md`
+and the rule-line example in `docs/self-improvement.md` (and its site copy)
+show the new separator.
+
+Four assertions that pinned U+2014 in written text now pin the hyphen; the
+forged-heading test keeps its second em dash, which comes from the hostile
+title, not from the template. Two new tests, each naming the mutant it kills:
+M18 (U+2014 back in `renderEntry` or `ruleLineFor`) and M19 (`RULE_EVIDENCE_RE`
+back to U+2014 only).
+
 ## 0.1.47 — 2026-09-19
 
 ### The secrets gate scans 10 MiB, and buys the time to do it

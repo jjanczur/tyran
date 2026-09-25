@@ -236,7 +236,7 @@ your `CLAUDE.md` between two markers, and never a byte outside them:
 
 ```markdown
 <!-- tyran:rules start -->
-- Link the dependency directory into every new worktree before the handoff. (`worktree-missing-deps`, 5 occurrences — MISTAKES.md entries 2026-05-02, 2026-06-11, 2026-07-03, 2026-07-28, 2026-08-09)
+- Link the dependency directory into every new worktree before the handoff. (`worktree-missing-deps`, 5 occurrences - MISTAKES.md entries 2026-05-02, 2026-06-11, 2026-07-03, 2026-07-28, 2026-08-09)
 <!-- tyran:rules end -->
 ```
 

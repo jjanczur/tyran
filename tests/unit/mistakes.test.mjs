@@ -161,7 +161,7 @@ test('`add` inserts before the first real entry — newest first', () => {
   add(dir, ['--date', '2026-08-14', '--title', 'older']);
   add(dir, ['--date', '2026-08-19', '--title', 'newer']);
   const entries = parseMistakes(read(dir)).entries;
-  assert.deepEqual(entries.map((e) => e.heading), ['2026-08-19 — newer', '2026-08-14 — older']);
+  assert.deepEqual(entries.map((e) => e.heading), ['2026-08-19 - newer', '2026-08-14 - older']);
 });
 
 test('`add` on a file with no entry yet lands AFTER the header', () => {
@@ -892,7 +892,7 @@ test('the exported helpers are pure and composable', () => {
     prevention: 'p',
     signature: 'sig',
   });
-  assert.match(rendered, /^## 2026-08-14 — a title\n\n- \*\*What happened:\*\* w\n/);
+  assert.match(rendered, /^## 2026-08-14 - a title\n\n- \*\*What happened:\*\* w\n/);
   assert.match(rendered, /status `open`$/);
 
   const inserted = insertEntry('# Head\n', rendered);
@@ -907,7 +907,7 @@ test('the exported helpers are pure and composable', () => {
 
   assert.equal(
     ruleLineFor({ rule: 'Do it.', signature: 'sig', count: 5, dates: ['2026-01-01'] }),
-    '- Do it. (`sig`, 5 occurrences — MISTAKES.md entries 2026-01-01)',
+    '- Do it. (`sig`, 5 occurrences - MISTAKES.md entries 2026-01-01)',
   );
 
   const created = writeRuleToFence('', '- rule');
@@ -931,7 +931,7 @@ test('`renderEntry` cleans the heading title itself, not only its bullets', () =
     signature: 'sig',
   });
   assert.equal(rendered.split('\n').filter((line) => line.startsWith('## ')).length, 1, 'a second heading was forged');
-  assert.equal(rendered.split('\n')[0], '## 2026-08-14 — a title ## 2026-01-01 — forged<U+200B>');
+  assert.equal(rendered.split('\n')[0], '## 2026-08-14 - a title ## 2026-01-01 — forged<U+200B>');
   assert.equal(parseMistakes(insertEntry('# Head\n', rendered)).entries.length, 1);
 });
 
@@ -948,4 +948,23 @@ test('a rule line is identified by the evidence it carries, never by its prose',
   const fence = writeRuleToFence('', real);
   assert.equal(fenceCarriesSignature(fence, 'sig-a'), true);
   assert.equal(fenceCarriesSignature(fence, 'other-sig'), false, 'a signature merely quoted in prose read as promoted');
+});
+
+test('a written heading and rule line carry no U+2014, so an em-dash gate on added lines stays green', () => {
+  // M18 - write ' — ' again in renderEntry or ruleLineFor: every `add` and
+  // every `promote --law` adds a line an em-dash gate on added lines rejects.
+  const heading = renderEntry({ date: '2026-09-25', title: 't', signature: 's', what: 'w', cause: 'c', consequence: 'q', prevention: 'p' }).split('\n')[0];
+  assert.equal(heading, '## 2026-09-25 - t');
+  const rule = ruleLineFor({ rule: 'r', signature: 'demo-sig', count: 5, dates: ['2026-09-21'] });
+  assert.doesNotMatch(heading + rule, /—/);
+});
+
+test('a rule line whose evidence separator was normalised by hand still names its signature', () => {
+  // M19 - accept only U+2014 in RULE_EVIDENCE_RE: a host that turned the dash
+  // into a hyphen (or an en dash) makes fenceCarriesSignature false, and the
+  // next promote --law writes the same rule into CLAUDE.md a second time.
+  for (const sep of ['—', '-', '–']) {
+    const line = `- r (\`demo-sig\`, 5 occurrences ${sep} MISTAKES.md entries 2026-09-21, 2026-09-22)`;
+    assert.equal(signatureOfRuleLine(line), 'demo-sig', JSON.stringify(sep));
+  }
 });

@@ -6,7 +6,7 @@ edit it by hand whenever a root cause here is wrong. Nothing overwrites it.
 
 Every entry has the same five bullets:
 
-    ## <YYYY-MM-DD> — <one line: what broke, in a reader's words>
+    ## <YYYY-MM-DD> - <one line: what broke, in a reader's words>
 
     - **What happened:** the observable failure, not the diagnosis.
     - **Root cause:** the mechanism. "I forgot" is not a root cause.

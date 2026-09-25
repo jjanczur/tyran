@@ -323,7 +323,7 @@ export function renderEntry(entry) {
   } = entry;
   const bullets = FIELDS.map(([key, label]) => `- **${label}:** ${clean(entry[key] ?? '')}`);
   return [
-    `## ${clean(date)} — ${clean(title)}`,
+    `## ${clean(date)} - ${clean(title)}`,
     '',
     ...bullets,
     `- **Signature:** \`${clean(signature)}\` · initiative \`${clean(initiative)}\` · ` +
@@ -488,7 +488,7 @@ export function fenceRules(text) {
  * and the only way to disagree well is to be able to read what it cost.
  */
 export function ruleLineFor({ rule, signature, count, dates }) {
-  const pointer = dates.length > 0 ? ` — ${MISTAKES_FILE} entries ${dates.join(', ')}` : '';
+  const pointer = dates.length > 0 ? ` - ${MISTAKES_FILE} entries ${dates.join(', ')}` : '';
   return `- ${clean(rule)} (\`${clean(signature)}\`, ${count} occurrences${pointer})`;
 }
 
@@ -496,7 +496,7 @@ export function ruleLineFor({ rule, signature, count, dates }) {
  * The evidence parenthetical `ruleLineFor` writes, anchored where it writes it.
  * Whitespace after it is tolerated; a rule's human text is not searched.
  */
-const RULE_EVIDENCE_RE = /\(`([a-z0-9]+(?:-[a-z0-9]+)*)`, \d+ occurrences(?: — [^`)]*)?\)$/;
+const RULE_EVIDENCE_RE = /\(`([a-z0-9]+(?:-[a-z0-9]+)*)`, \d+ occurrences(?: [-\u2013\u2014] [^`)]*)?\)$/;
 
 /**
  * The signature a rule line's MACHINE-WRITTEN evidence names, or `null`.

@@ -15,7 +15,7 @@
     "sandbox": "node scripts/build-sandbox.mjs"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.41.4",
+    "@astrojs/starlight": "^0.42.3",
     "astro": "^7.1.4"
   },
   "devDependencies": {

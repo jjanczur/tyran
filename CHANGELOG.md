@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### The secrets gate sees `git commit` and `git push` behind a quoted value with a space
+
+Reported from a real install and measured by invoking the hook by hand with
+two findings staged: `git commit -m x` and `git -c user.name=JJ commit -m x`
+were refused, while `git -c user.name="Jacek Janczura" commit -m x`, the
+single-quoted `-c` spelling and `GIT_AUTHOR_NAME='Jacek Janczura' git commit`
+PASSED UNSCANNED. `tokensOf` splits a segment on whitespace before dropping
+the quote characters, so the subcommand resolver read `Janczura` as the verb
+(or, behind an assignment, as the program, with `git` as the verb). No target,
+no scan, PASS. `env X=1 git commit` was the same hole with no quote at all,
+and `for c in ...; do git push ...; done` read `do` as the program. The same
+reading feeds the policy gate's deployment check, so a quoted identity in
+front of `git push` also walked past the deployment class.
+
+`planCommand` now asks a second, quote-aware reading of each segment
+(`shellWords`: single and double quotes, `$'...'`, backslashes) and peels
+assignments and wrapper prefixes in a loop (`gitInvocation`). A verb either
+reading finds counts, so every command the old reading recognised is handled
+exactly as before. `splitSegments` stays quote-blind, for the reason recorded
+on `SEPARATORS`; a separator inside a quoted value in front of the subcommand
+(`git -c user.name="A; B" commit`) leaves the verb unreadable, and that now
+fails CLOSED (`unreadableVerb`, refused by both gates) instead of passing.
+
+Measured on 220,747 distinct real `Bash` commands from two projects'
+transcripts, old reading against new: no command lost a scan or a denial;
+1,471 commands that passed unscanned are now scanned, and 880 more that passed
+unscanned are now refused because their `-C`/`cd` target is a shell variable
+(`W=...; git -C $W -c user.name="..." commit`), which the existing target
+doctrine already refused whenever the verb was visible.
+
+`hooks/**` is KERNEL here, so the gate change ships as
+`.tyran/state/secrets-gate-quoting/hooks.patch` for a human to apply
+(`git apply`); the tests in `tests/unit/hook-secrets-gate-quoting.test.mjs`
+and the new policy-gate case are red until it is applied.
+
 ## 0.1.48 — 2026-09-25
 
 ### `mistakes.mjs` writes no em dash, and reads a rule whose dash a human fixed

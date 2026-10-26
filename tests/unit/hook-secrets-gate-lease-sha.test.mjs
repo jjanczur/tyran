@@ -17,7 +17,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -191,4 +191,44 @@ test('gate: when git cannot answer, the value is scanned (fails toward refusing)
 test('gate: a ref without a keyword was never refused, and still is not', { skip: NEEDS_SCANNER }, async () => {
   const verdict = await handle({ input: bashInput(`git push ${lease(PLAIN_REF, SHA)} origin ${PLAIN_REF}`, REPO), cwd: REPO });
   assert.deepEqual(verdict, PASS, JSON.stringify(verdict));
+});
+
+test('gate: asking about a lease value never fetches it from a promisor remote', { skip: NEEDS_SCANNER }, async () => {
+  // In a partial clone, `cat-file -e <missing>^{object}` lazily FETCHES the
+  // object, which sends the suspected secret to the remote as `want <hex>`.
+  // Measured on review: 4 such packet lines through the gate without the
+  // guard, 0 with it. A git that lacks `--no-lazy-fetch` exits 129 and the
+  // value stays scanned, so this test holds on any git version.
+  const origin = tempDir('tyran-lease-promisor-origin-');
+  git(origin, 'init', '-q');
+  git(origin, 'config', 'user.email', 'gate@test.invalid');
+  git(origin, 'config', 'user.name', 'gate');
+  writeFileSync(join(origin, 'f.txt'), 'blob\n');
+  git(origin, 'add', 'f.txt');
+  git(origin, 'commit', '-q', '-m', 'c');
+  git(origin, 'config', 'uploadpack.allowFilter', 'true');
+  git(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true');
+  const clone = join(tempDir('tyran-lease-promisor-'), 'clone');
+  execFileSync('git', ['clone', '-q', '--filter=blob:none', `file://${origin}`, clone], { stdio: 'ignore' });
+  assert.equal(git(clone, 'config', 'remote.origin.promisor'), 'true', 'premise: a partial clone');
+
+  const fake = highEntropyNonObject();
+  const trace = join(tempDir('tyran-lease-trace-'), 'packets.txt');
+  const before = process.env.GIT_TRACE_PACKET;
+  process.env.GIT_TRACE_PACKET = trace;
+  let verdict;
+  try {
+    verdict = await handle({ input: bashInput(`git push ${lease(KEYWORD_REF, fake)} origin HEAD`, clone), cwd: clone });
+  } finally {
+    if (before === undefined) delete process.env.GIT_TRACE_PACKET;
+    else process.env.GIT_TRACE_PACKET = before;
+  }
+  assert.ok(deniedByRule(verdict, 'generic-api-key'), JSON.stringify(verdict));
+  let packets = '';
+  try {
+    packets = readFileSync(trace, 'utf8');
+  } catch {
+    /* no packet at all was traced */
+  }
+  assert.equal(packets.includes(`want ${fake}`), false, 'the suspected value went out on the wire');
 });

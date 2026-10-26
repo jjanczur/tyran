@@ -14,17 +14,22 @@ was a plain `--force-with-lease`, which drops the explicit expected value.
 `planCommand` now records the `<ref>:<full lowercase hex>` slot of a lease on a
 `git push`, with the repository that segment targets, and `decide` hides that
 one value (same length, all zeros) from the command-text scan ONLY when
-`git cat-file -e <hex>^{object}` finds it in that repository. A hex that is no
-object, an object of another repository, an abbreviation, a git failure or a
-timeout all leave the text scanned as before, and nothing else in the command
-changes.
+`git --no-lazy-fetch cat-file -e <hex>^{object}` finds it in that repository.
+A hex that is no object, an object of another repository, an abbreviation, a
+git failure or a timeout all leave the text scanned as before, and nothing else
+in the command changes. `--no-lazy-fetch` matters: in a partial clone the
+question would otherwise FETCH the missing object from the promisor remote,
+sending the suspected value off the machine as `want <hex>`.
 
 `hooks/**` is KERNEL here, so the gate change ships as
 `.tyran/state/secrets-gate-lease-sha/hooks.patch` for a human to apply
-(`git apply`); 5 of the 12 tests in
+(`git apply`); 5 of the 13 tests in
 `tests/unit/hook-secrets-gate-lease-sha.test.mjs` are red until it is applied.
 The patch is against 0.1.48 and edits `planCommand`, which the quoted-commit
-patch also edits: apply in either order and re-check with `git apply --check`.
+patch (`.tyran/state/secrets-gate-quoting/hooks.patch`) also edits. Applied
+AFTER it, a plain `git apply` fails at the `planCommand` hunk and `--3way`
+applies, but the lease loop must then record `pushAt.dir`, not `dir`: the
+quoted reading resolves the push directory on its own.
 
 ## 0.1.48 — 2026-09-25
 

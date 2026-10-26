@@ -50,7 +50,7 @@ index b0db336..0d786a6 100755
      // An unmodellable construct only matters if something is being published.
      // `cd "$D" && npm test` has no scan to misdirect.
      unmodellable: needsScan ? unmodellable : [],
-@@ -1825,6 +1845,36 @@ export function renderFindings(findings, map) {
+@@ -1825,6 +1845,40 @@ export function renderFindings(findings, map) {
  
  // ----------------------------------------------------------------- the gate
  
@@ -74,7 +74,11 @@ index b0db336..0d786a6 100755
 +    const timeoutMs = budget(GIT_BUDGET_MS);
 +    if (timeoutMs <= 0) break;
 +    try {
-+      const r = await runner('git', ['-C', dir, 'cat-file', '-e', `${sha}^{object}`], { timeoutMs });
++      // `--no-lazy-fetch`: in a partial clone, asking about a missing object
++      // makes git FETCH it from the promisor remote, sending the very value
++      // under suspicion off the machine (measured: `want <hex>` on the wire).
++      // A git too old to know the flag exits 129, which leaves the text scanned.
++      const r = await runner('git', ['--no-lazy-fetch', '-C', dir, 'cat-file', '-e', `${sha}^{object}`], { timeoutMs });
 +      if (r.spawned !== true || r.timedOut === true || r.code !== 0) continue;
 +    } catch {
 +      continue;
@@ -87,7 +91,7 @@ index b0db336..0d786a6 100755
  export async function decide({ input, cwd, runner = runChild, startedAt = Date.now() } = {}) {
    const budget = makeBudget(startedAt);
    const toolName = field(input, 'tool_name');
-@@ -1938,7 +1988,10 @@ export async function decide({ input, cwd, runner = runChild, startedAt = Date.n
+@@ -1938,7 +1992,10 @@ export async function decide({ input, cwd, runner = runChild, startedAt = Date.n
  
      // The command line itself, through the same rule set. `git commit -m
      // "<key>"` puts a secret in history without it ever being a staged file.

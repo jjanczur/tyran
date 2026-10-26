@@ -1,0 +1,101 @@
+diff --git a/hooks/scripts/secrets-gate.mjs b/hooks/scripts/secrets-gate.mjs
+index b0db336..0d786a6 100755
+--- a/hooks/scripts/secrets-gate.mjs
++++ b/hooks/scripts/secrets-gate.mjs
+@@ -505,6 +505,14 @@ const UNMODELLABLE_REMEDY =
+   'a shell. Write the path literally, run the command from that directory, or split it into ' +
+   'separate tool calls so each one is unambiguous.';
+ 
++/**
++ * `--force-with-lease=<ref>:<full object name>`. Group 1 is the flag and ref,
++ * group 2 the expected value. A ref cannot contain `:`, so the split is exact;
++ * only the FULL 40 (sha-1) or 64 (sha-256) lowercase hex is taken, because an
++ * abbreviation is not worth a second rule and stays scanned.
++ */
++const LEASE_EXPECT = /^(--force-with-lease=[^:\s]+:)([0-9a-f]{40}|[0-9a-f]{64})$/;
++
+ function flagValue(token) {
+   for (const flag of ['--git-dir=', '--work-tree=']) {
+     if (token.startsWith(flag)) return token.slice(flag.length);
+@@ -526,6 +534,8 @@ export function planCommand(command, startDir) {
+   const triggers = [];
+   const unmodellable = [];
+   const extraFiles = [];
++  /** `--force-with-lease=<ref>:<object name>` spellings, with the repo they target. */
++  const leaseExpects = [];
+   /** dir -> what has to be scanned there */
+   const targets = new Map();
+ 
+@@ -768,6 +778,15 @@ export function planCommand(command, startDir) {
+       const pushArgv = tokens.slice(op.index + 1);
+       note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs, pushArgv, pushReadable: readable });
+       triggers.push('a git push (every commit not already on the target remote is scanned)');
++      // The expected value of an explicit lease is a git object name, which
++      // gitleaks reads as a high-entropy `generic-api-key` whenever the ref in
++      // front of it carries a keyword (`secret`, `token`, `api`...). Recorded
++      // here, with the directory THIS segment targets, so `decide` can check it
++      // against that repository before it hides anything from the scan.
++      for (const t of pushArgv) {
++        const lease = LEASE_EXPECT.exec(t);
++        if (lease !== null) leaseExpects.push({ dir, spelled: t, sha: lease[2] });
++      }
+     }
+     if (ghPublishes) {
+       // `gh pr create` publishes ONE branch — the PR's head — and adds no git
+@@ -980,6 +999,7 @@ export function planCommand(command, startDir) {
+     triggers: [...new Set(triggers)],
+     targets: [...targets.values()],
+     extraFiles,
++    leaseExpects,
+     // An unmodellable construct only matters if something is being published.
+     // `cd "$D" && npm test` has no scan to misdirect.
+     unmodellable: needsScan ? unmodellable : [],
+@@ -1825,6 +1845,36 @@ export function renderFindings(findings, map) {
+ 
+ // ----------------------------------------------------------------- the gate
+ 
++/**
++ * The command text with the expected value of an explicit lease hidden from
++ * the scanner, and nothing else changed.
++ *
++ * `git push --force-with-lease=pv3/api-fix:<40 hex> origin ...` was refused as
++ * `generic-api-key`: the ref carries a keyword and the object name's entropy is
++ * above the rule's floor (measured, 1908 of 2000 recent shas). The value is
++ * hidden ONLY when it names an object that exists in the repository the
++ * segment targets: a hash cannot be chosen to carry a payload, while a 40-hex
++ * that is no object is exactly what a pasted key looks like and stays scanned.
++ * Same length, all zeros, so offsets and the byte count do not move. Any
++ * failure to ask (no budget, git missing, timeout, not a repo) leaves the text
++ * as it was: the question is only ever allowed to NARROW a refusal on proof.
++ */
++async function maskLeaseExpects(command, leaseExpects, { runner, budget }) {
++  let text = command;
++  for (const { dir, spelled, sha } of leaseExpects) {
++    const timeoutMs = budget(GIT_BUDGET_MS);
++    if (timeoutMs <= 0) break;
++    try {
++      const r = await runner('git', ['-C', dir, 'cat-file', '-e', `${sha}^{object}`], { timeoutMs });
++      if (r.spawned !== true || r.timedOut === true || r.code !== 0) continue;
++    } catch {
++      continue;
++    }
++    text = text.split(spelled).join(spelled.slice(0, spelled.length - sha.length) + '0'.repeat(sha.length));
++  }
++  return text;
++}
++
+ export async function decide({ input, cwd, runner = runChild, startedAt = Date.now() } = {}) {
+   const budget = makeBudget(startedAt);
+   const toolName = field(input, 'tool_name');
+@@ -1938,7 +1988,10 @@ export async function decide({ input, cwd, runner = runChild, startedAt = Date.n
+ 
+     // The command line itself, through the same rule set. `git commit -m
+     // "<key>"` puts a secret in history without it ever being a staged file.
+-    const commandBytes = Buffer.from(command, 'utf8');
++    const commandBytes = Buffer.from(
++      await maskLeaseExpects(command, plan.leaseExpects, { runner, budget }),
++      'utf8',
++    );
+     const commandFindings = await scanBytes(commandBytes, { runner, budget, workDir });
+     for (const f of commandFindings) findings.push({ ...f, line: null, inCommand: true });
+     scanned.push('the command line itself');

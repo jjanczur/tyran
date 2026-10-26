@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### The secrets gate no longer refuses an explicit lease as a `generic-api-key`
+
+`git push --force-with-lease=pv3/api-token-fix:<40-hex sha> origin ...` was
+refused: gitleaks reads the expected value as a high-entropy key whenever the
+ref carries a keyword (`secret`, `token`, `api`, `key`, `auth`...). Measured
+with gitleaks 8.30.1, 1908 of 2000 recent commit ids clear the entropy floor;
+`pv3/cron-g2b`, `main` and a low-entropy sha scanned clean. The only workaround
+was a plain `--force-with-lease`, which drops the explicit expected value.
+
+`planCommand` now records the `<ref>:<full lowercase hex>` slot of a lease on a
+`git push`, with the repository that segment targets, and `decide` hides that
+one value (same length, all zeros) from the command-text scan ONLY when
+`git cat-file -e <hex>^{object}` finds it in that repository. A hex that is no
+object, an object of another repository, an abbreviation, a git failure or a
+timeout all leave the text scanned as before, and nothing else in the command
+changes.
+
+`hooks/**` is KERNEL here, so the gate change ships as
+`.tyran/state/secrets-gate-lease-sha/hooks.patch` for a human to apply
+(`git apply`); 5 of the 12 tests in
+`tests/unit/hook-secrets-gate-lease-sha.test.mjs` are red until it is applied.
+The patch is against 0.1.48 and edits `planCommand`, which the quoted-commit
+patch also edits: apply in either order and re-check with `git apply --check`.
+
 ## 0.1.48 — 2026-09-25
 
 ### `mistakes.mjs` writes no em dash, and reads a rule whose dash a human fixed

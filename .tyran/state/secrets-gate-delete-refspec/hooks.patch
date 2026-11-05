@@ -1,0 +1,133 @@
+diff --git a/hooks/scripts/secrets-gate.mjs b/hooks/scripts/secrets-gate.mjs
+index b0db336..6932671 100755
+--- a/hooks/scripts/secrets-gate.mjs
++++ b/hooks/scripts/secrets-gate.mjs
+@@ -412,6 +412,57 @@ export function isAbbreviationOf(token, longOption, minimum = 4) {
+   return token.length >= minimum && token.length <= longOption.length && longOption.startsWith(token);
+ }
+ 
++/**
++ * `git push` flags that change neither WHICH refs are sent nor where a value
++ * sits on the command line, so a deletion carrying them still publishes
++ * nothing. Exact spellings only: anything else (`-o <value>`, `--all`,
++ * `--mirror`, `--tags`, `--force`, an abbreviation) keeps the push scanned.
++ */
++const DELETION_NEUTRAL_FLAGS = Object.freeze([
++  '--quiet', '--verbose', '--dry-run', '--porcelain', '--progress', '--no-progress', '--ipv4', '--ipv6',
++]);
++
++/** A short cluster of neutral letters, at least one of which is `d`. */
++const DELETE_CLUSTER = /^-[qvn46]*d[qvnd46]*$/;
++
++/**
++ * True when a `git push` with these arguments can only DELETE remote refs.
++ *
++ * A deletion publishes no objects, so the wide range a push falls back to
++ * (`--all`, every unpushed commit on every branch) is the wrong thing to scan,
++ * and it made a deletion fail on the size of unrelated work: measured on a
++ * real install, `git push -q origin --delete review/a review/b` was refused
++ * for 1,370,527,212 bytes in 9,130 objects. Two spellings delete, and only
++ * these are recognised:
++ *
++ *  - `--delete` / `-d` (or an unambiguous abbreviation of `--delete`, or `-d`
++ *    inside a cluster of neutral letters): every named ref is deleted. Git
++ *    refuses it together with `--all`, `--mirror` and `--tags`; those are not
++ *    neutral, so such a line stays scanned rather than trusted.
++ *  - a refspec with an EMPTY source and a non-empty destination, `:dst` or
++ *    `+:dst`. A bare `:` is the MATCHING refspec, which pushes every branch
++ *    both sides have, and is never a deletion.
++ *
++ * Anything else answers false and the push is scanned as before: an unknown
++ * flag may take a value and shift the positions read here, and failing to
++ * recognise a deletion costs a scan while misreading a push as one would
++ * publish it unscanned.
++ */
++export function isDeletionOnly(pushArgv, specs) {
++  if (specs.length === 0) return false;
++  let deleteFlag = false;
++  for (const token of pushArgv) {
++    if (!token.startsWith('-')) continue;
++    if (token === '-d' || DELETE_CLUSTER.test(token) || (token.startsWith('--') && isAbbreviationOf(token, '--delete'))) {
++      deleteFlag = true;
++    } else if (!DELETION_NEUTRAL_FLAGS.includes(token) && !/^-[qvn46]+$/.test(token)) {
++      return false;
++    }
++  }
++  if (deleteFlag) return true;
++  return specs.every((spec) => /^\+?:[^:]+$/.test(spec));
++}
++
+ // ------------------------------------------------------ the subcommand slot
+ 
+ /**
+@@ -766,8 +817,32 @@ export function planCommand(command, startDir) {
+       // (ADR-21), and the one that decides whether a push reaches production is
+       // not the place to start diverging.
+       const pushArgv = tokens.slice(op.index + 1);
+-      note(dir, { scanPush: true, pushRemote: remote, pushRefs: refs, pushArgv, pushReadable: readable });
+-      triggers.push('a git push (every commit not already on the target remote is scanned)');
++      const deletesOnly = readable && isDeletionOnly(pushArgv, after.slice(1));
++      // One line can push the same repository more than once. The scan is the
++      // UNION of what every segment publishes: letting the last segment's refs
++      // replace the earlier ones let `git push origin leaky && git push origin
++      // main` publish `leaky` unscanned, and a deletion, which adds nothing,
++      // must not replace a real push either. `pushRefs: []` is the wide range
++      // and stays wide.
++      const prior = targets.get(dir);
++      const priorPush = prior !== undefined && prior.scanPush === true ? prior : null;
++      let scan;
++      if (deletesOnly) {
++        scan = priorPush !== null ? {} : { pushRemote: remote, pushRefs: [], pushDeletesOnly: true };
++      } else if (priorPush === null || priorPush.pushDeletesOnly === true) {
++        scan = { pushRemote: remote, pushRefs: refs, pushDeletesOnly: false };
++      } else {
++        // A prior `gh` publish can leave `pushRefs` unset, which is wide too.
++        const priorRefs = priorPush.pushRefs ?? [];
++        const wide = priorRefs.length === 0 || refs.length === 0;
++        scan = { pushRemote: remote, pushRefs: wide ? [] : [...new Set([...priorRefs, ...refs])] };
++      }
++      note(dir, { scanPush: true, ...scan, pushArgv, pushReadable: readable });
++      triggers.push(
++        deletesOnly
++          ? 'a git push that only deletes remote refs (it publishes no objects; the command line is scanned)'
++          : 'a git push (every commit not already on the target remote is scanned)',
++      );
+     }
+     if (ghPublishes) {
+       // `gh pr create` publishes ONE branch — the PR's head — and adds no git
+@@ -853,16 +928,20 @@ export function planCommand(command, startDir) {
+         }
+         if (unreadable) prHead = null;
+       }
++      // An earlier push that only DELETED refs published nothing, so it is no
++      // prior range at all: neither wide nor something to union with.
+       const existing = targets.get(dir);
++      const priorDeletes = existing?.pushDeletesOnly === true;
+       const priorWide =
+         existing !== undefined &&
+         existing.scanPush === true &&
++        !priorDeletes &&
+         !(Array.isArray(existing.pushRefs) && existing.pushRefs.length > 0);
+       if (prHead !== null && !priorWide) {
+-        const prior = existing?.pushRefs ?? [];
+-        note(dir, { scanPush: true, pushRefs: [...new Set([...prior, prHead])] });
++        const prior = priorDeletes ? [] : (existing?.pushRefs ?? []);
++        note(dir, { scanPush: true, pushRefs: [...new Set([...prior, prHead])], pushDeletesOnly: false });
+       } else {
+-        note(dir, { scanPush: true });
++        note(dir, { scanPush: true, pushDeletesOnly: false });
+       }
+       triggers.push('a gh command that publishes');
+       if (words.has('release') || words.has('gist')) {
+@@ -1490,7 +1569,10 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
+     await addBlobs(target.dir, wanted.filter((e) => !/^0+$/.test(e.sha)), add, { runner, budget });
+   }
+ 
+-  if (target !== null && target.scanPush) {
++  // A push that only deletes remote refs sends no objects (`isDeletionOnly`),
++  // so there is no range to list. Its command line is still scanned by
++  // `decide`, like every other command this gate sees.
++  if (target !== null && target.scanPush && target.pushDeletesOnly !== true) {
+     const range = await pushRange(target.dir, target.pushRemote, target.pushRefs, {
+       runner, timeoutMs: budget(GIT_BUDGET_MS),
+     });

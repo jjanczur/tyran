@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### The secrets gate lets a push that only deletes remote refs through, and scans two pushes in one line as their union
+
+`git push -q origin --delete review/a review/b` was refused on a real install
+with "this would publish 1370527212 bytes in 9130 object(s), past the 10485760
+this gate can scan". A deletion sends no objects. The gate read the two names
+as refspec sources, neither resolved locally, and `pushRange` widened to
+`--all --not --remotes=origin`, which is every unpushed commit on every local
+branch. `git push origin :refs/heads/x` went the same way, because its empty
+source is dropped and an empty list is the wide range.
+
+`planCommand` now marks a push `pushDeletesOnly` when `isDeletionOnly` can
+prove it deletes and does nothing else. That means either `--delete`/`-d`
+(an unambiguous abbreviation, or `-d` inside a cluster of `q v n 4 6`) with
+only neutral flags, or every refspec of the form `:dst`/`+:dst`. A bare `:`
+is the matching refspec and pushes, so it never counts. Any other flag
+(`-o <value>`, `--all`, `--mirror`, `--tags`, `--force`, `--no-delete`) or an
+unreadable ref keeps the push scanned. `buildPayload` lists no range for such
+a target. The command line is still scanned, the policy gate still gets
+`pushArgv`, and `scanPush` stays true.
+
+Two pushes in one line now scan the UNION of their refs. Before, the second
+segment's refs replaced the first's, so `git push origin leaky && git push
+origin main` published `leaky` unscanned. With real gitleaks that command
+PASSED with a private-key block on `leaky`. A deletion cannot replace an
+earlier push, a push or `gh pr create` after a deletion is scanned as if the
+deletion were not there, and a wide push stays wide.
+
+`hooks/**` is KERNEL here, so the gate change ships as
+`.tyran/state/secrets-gate-delete-refspec/hooks.patch` for a human to apply
+(`git apply`, checked clean against 0.1.48). Until it is applied, 10 of the 13
+tests in `tests/unit/hook-secrets-gate-delete-refspec.test.mjs` are red and the
+full suite is 1718/1728. With it applied the suite is 1728/1728. Six
+mutations of the patch each turn at least one test red. The patch conflicts in
+one hunk with `.tyran/state/secrets-gate-quoting/hooks.patch`
+(`fix/secrets-gate-quoted-commit`), which renames `tokens`/`op`/`dir` to
+`pushAt.tokens`/`pushAt.op`/`pushAt.dir` in the same block. Whichever lands
+second takes that rename.
+
 ## 0.1.48 — 2026-09-25
 
 ### `mistakes.mjs` writes no em dash, and reads a rule whose dash a human fixed

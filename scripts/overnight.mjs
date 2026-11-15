@@ -774,6 +774,11 @@ export function wallOf(reading) {
 export function limitSweep(repo, { nowMs = Date.now(), readTranscript = readTranscriptRejection, notify = notifyDesktop } = {}) {
   const limits = readLimitsFile(repo);
   if (limits === null || limits.mode === 'off') return { action: 'none', reason: 'limits-off' };
+  // `warn` never pauses, and the marker IS a pause: the gate denies on its
+  // presence alone. The line above was the only check until 0.1.49, so a repo on
+  // `warn` that hit the wall on ONE account got a repo-wide marker, and every
+  // unsupervised session in it was refused, on accounts with quota left too.
+  if (limits.mode !== 'pause') return { action: 'none', reason: 'limits-warn' };
   if (checkStop(repo).stopped) return { action: 'none', reason: 'stop-brake' };
 
   // An existing marker means the gate already saw this, or a previous sweep
@@ -839,9 +844,9 @@ export function limitSweep(repo, { nowMs = Date.now(), readTranscript = readTran
 
 function doWatchLimit(repo, flags) {
   const limits = readLimitsFile(repo);
-  if (limits.mode === 'off') {
+  if (limits.mode !== 'pause') {
     console.error(
-      'overnight: limits.mode is "off" in .tyran/config.yaml — nothing to watch for.\n' +
+      `overnight: limits.mode is "${limits.mode}" in .tyran/config.yaml — only "pause" pauses, so nothing to watch for.\n` +
         '  set limits.mode: pause to have the wall detected and the resume armed.',
     );
     process.exit(1);

@@ -735,6 +735,28 @@ test('limits.mode off means the watcher changes nothing at all', () => {
   assert.ok(!existsSync(join(dir, MARKER_RELPATH)));
 });
 
+test('limits.mode warn never writes the marker, even at a real wall', () => {
+  // MUTANT: the check as it was in 0.1.48, `mode === 'off'` only. One account
+  // at 100% of its weekly window then wrote a REPO-wide marker, the gate
+  // denied on the marker alone, and every unsupervised session in the repo was
+  // refused, including sessions on accounts that still had quota. `warn`
+  // promises a warning and never a refusal, so there is nothing to write.
+  const dir = limitRepo({ mode: 'warn' });
+  const journal = join(dir, '.tyran', 'state', 'demo', 'journal.jsonl');
+  const before = readFileSync(journal, 'utf8');
+  let notified = 0;
+  const got = limitSweep(dir, {
+    nowMs: NOW,
+    readTranscript: wallReading('seven_day', NOW + 4 * 86400e3),
+    notify: () => notified++,
+  });
+  assert.equal(got.action, 'none');
+  assert.equal(got.reason, 'limits-warn');
+  assert.ok(!existsSync(join(dir, MARKER_RELPATH)), 'a marker under warn blocks the whole repo');
+  assert.equal(readFileSync(journal, 'utf8'), before, 'no usage-limit pause journalled');
+  assert.equal(notified, 0, 'no "hit the usage limit, resuming" notice for a pause that is not happening');
+});
+
 test('the STOP brake outranks the wall', () => {
   // An operator who halted the run does not want it resumed at 4am because a
   // window refilled.

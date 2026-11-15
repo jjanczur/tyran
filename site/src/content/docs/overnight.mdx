@@ -149,6 +149,15 @@ exist until 0.1.46: the gate returned PASS on `warn` because "surfacing is
 doctor's job", and doctor surfaced nothing, so `warn` differed from `off` in
 nothing an operator could see.
 
+Nor does `warn` write the pause marker. Until 0.1.49 the wall watcher (the
+board's timer and `overnight.mjs watch-limit`) skipped only `off`, so under
+`warn` one account at its wall wrote `.tyran/state/paused-until.json`. That
+marker is per repo while the account is per session, and the gate denies on the
+marker alone, so every unattended session in the repo was refused, including
+sessions on accounts with quota left. A marker that is already there, left by
+`pause` mode or by 0.1.48, still binds under `warn`;
+`node scripts/overnight.mjs cancel --clear` removes it.
+
 The default is `off` because it is a behaviour change an operator should
 choose, not because it needs a setup step: enabling it takes one edit and the
 Settings tab will make it. `limit-telemetry-missing` fires only when NO

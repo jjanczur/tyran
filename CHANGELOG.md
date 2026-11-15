@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.49 — 2026-11-14
+
+### `limits.mode: warn` no longer writes a pause marker that blocks the whole repo
+
+Reported from a real install running `warn`. One Claude account reached 100%
+of its weekly window. The wall watcher (`limitSweep`, run by the board's timer
+and by `overnight.mjs watch-limit`) then wrote `.tyran/state/paused-until.json`
+with a resume five days out. The marker is per repo, the account is per
+session, and `usage-gate` denies on the marker alone, so every unattended
+session in the repo was refused, including sessions on accounts that still had
+quota. It held for several minutes, until someone removed the marker by hand.
+
+The cause was one condition. `limitSweep` skipped `mode: off` and treated
+every other mode as `pause`. It now writes a marker only under `pause` and
+returns `reason: 'limits-warn'` under `warn`. `watch-limit` refuses to start
+under `warn` with the same message it gives under `off`, because it would have
+nothing to do.
+
+Still open: `usage-gate` reads `warn` only when NO marker exists. A marker
+already on disk, from `pause` mode or from 0.1.48, still binds every
+unattended session under `warn` until `overnight.mjs cancel --clear` removes
+it. The fix is in `hooks/scripts/`, which is KERNEL in this repo, so it is a
+human edit and is not in this release.
+
+One new test: a wall under `warn` writes no marker, journals nothing and sends
+no notification. Its mutant (the 0.1.48 `=== 'off'` condition) goes red.
+
 ## 0.1.48 — 2026-09-25
 
 ### `mistakes.mjs` writes no em dash, and reads a rule whose dash a human fixed

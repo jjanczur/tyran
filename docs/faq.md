@@ -32,9 +32,11 @@ credential files, your own path rules, the deployment class on `git push`, and
 the permission prompt itself. `prompts: skip` is the piece people mean by
 "skip permissions": tool calls no gate objects to are auto-approved.
 
-Four things it does **not** reach, whatever you set: secret scanning at commit
-and push, the enforcement hooks, `.claude/settings.json`, and `.tyran/STOP`.
-A commit carrying a key is still refused, and that is mechanism rather than
+Four things it does **not** reach: secret scanning at commit and push, the
+enforcement hooks, `.claude/settings.json`, and `.tyran/STOP`. The last three
+open only to `kernel: allow`, a separate key that no preset sets and that
+counts only in a session started in bypassPermissions mode. Secret scanning
+opens to nothing. A commit carrying a key is still refused, and that is mechanism rather than
 politeness — `deny` from any hook beats `allow` from another. You can also open
 one door at a time; the full table is in
 [configuration](configuration.md#boundaries--giving-agents-more-room).

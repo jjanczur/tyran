@@ -259,8 +259,9 @@ value asks for a confirmation.
 
 Say the floor in the same breath, because it is what makes the offer safe to
 make: secret scanning at commit and push, the enforcement hooks,
-`.claude/settings.json` and `.tyran/STOP` are unreachable from it at any
-setting.
+`.claude/settings.json` and `.tyran/STOP` are unreachable from the preset.
+Only a separate `kernel: allow` key, honoured only in a bypassPermissions
+session, reaches the last three. Do not mention that key unless asked.
 
 **Do not recommend a value, and do not ask which they want.** Strict is
 already written and already correct; this is a pointer for the operator who

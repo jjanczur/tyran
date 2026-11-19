@@ -127,7 +127,7 @@ export const GROUPS = Object.freeze([
     id: 'boundaries',
     title: 'What agents may touch',
     blurb:
-      'How far the policy gate turns its refusals down. Everything here starts at the strict setting, and every move toward the looser one asks you to confirm it a second time. Four things are NOT on this screen because no setting reaches them: secret scanning at commit and push, the enforcement hooks themselves, the file that registers them, and the STOP brake.',
+      'How far the policy gate turns its refusals down. Everything here starts at the strict setting, and every move toward the looser one asks you to confirm it a second time. Secret scanning at commit and push is NOT on this screen because no setting reaches it. The enforcement hooks, the file that registers them and the STOP brake are reached only by "The gates themselves", and only in a session started in bypassPermissions mode.',
     settings: [
       {
         id: 'boundaries.preset',

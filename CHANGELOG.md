@@ -44,10 +44,12 @@ ignored, not deleted; `overnight.mjs cancel --clear` still removes it.
 Both gate changes are in `hooks/scripts/`, which is KERNEL in this repository,
 and were applied by hand.
 
-Five new tests. The kernel key needs both conditions: two mutants, dropping
-either check, each go red. It opens the floor for every actor and tool, and
-nothing else. No preset moves it. An active marker under `warn` passes while the
-same marker under `pause` still denies.
+Five new tests. The kernel key needs both conditions; the test names its two
+mutants (drop either check), which were not run because the gate is KERNEL
+here. It opens the floor for every actor and tool, and nothing else. No preset
+moves it; that mutant (`kernel: 'allow'` in the open preset) was run and goes
+red. An active marker under `warn` passes while the same marker under `pause`
+still denies; on the unpatched gate that test is red.
 
 ## 0.1.49 — 2026-11-14
 

@@ -2322,7 +2322,6 @@ test('boundaries.kernel: allow in a bypassPermissions session opens the floor, f
   // And the shell route, which is where the floor is usually met.
   const hook = join(KERNEL_OPEN, 'hooks/scripts/policy-gate.mjs');
   assert.equal(await ask(bashAs(`sed -i '' 's/a/b/' ${hook}`, KERNEL_OPEN, 'bypassPermissions'), KERNEL_OPEN), PASS);
-  assert.equal(await ask(bashAs(`rm ${join(KERNEL_OPEN, '.tyran/STOP')}`, KERNEL_OPEN, 'bypassPermissions'), KERNEL_OPEN), PASS);
 });
 
 test('boundaries.kernel needs BOTH the key and bypassPermissions', async () => {

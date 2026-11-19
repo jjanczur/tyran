@@ -47,28 +47,35 @@ shared_zones: []
 # strict one, which is what Tyran did before this block existed — nothing is
 # relaxed by having it in the file, only made editable from the Settings tab.
 #
-#   preset: strict | open   one switch. `open` sets all five below at once and
-#                           is the closest thing to running with permissions
-#                           skipped. Anything you set explicitly wins over it.
+#   preset: strict | open   one switch. `open` sets the first four below and
+#                           `prompts` at once, and is the closest thing to
+#                           running with permissions skipped. It never sets
+#                           `kernel`. Anything you set explicitly wins over it.
 #   outside_repo            refuse | allow — files outside this repository
 #   credentials             refuse | allow — .env, keys, ~/.ssh, ~/.aws
 #   path_classes            refuse | allow — the GATED/KERNEL rules you wrote
 #   push                    refuse | allow — the deployment class on git push
+#   kernel                  refuse | allow — the enforcement hooks, the policy,
+#                           .claude/settings*.json and .tyran/STOP. `allow`
+#                           counts ONLY in a session started with
+#                           --permission-mode bypassPermissions.
 #   prompts                 ask | skip     — skip Claude Code's own prompts
 #
-# FOUR THINGS NO SETTING HERE REACHES, whatever it says: secret scanning at
-# commit and push, the enforcement hooks, `.claude/settings.json`, and
-# `.tyran/STOP`. A refusal from any gate still wins over an auto-approval.
+# Unless `kernel: allow` AND a bypassPermissions session, nothing here reaches
+# the enforcement hooks, `.tyran/policies/`, `.claude/settings.json` or
+# `.tyran/STOP`. No setting reaches secret scanning at commit and push. A
+# refusal from any gate still wins over an auto-approval.
 #
 # This file is class AUTO, so an agent can widen these itself — the same trade
-# `autonomy:` above already makes, and the reason the four exceptions are
-# mechanical rather than a matter of policy. See docs/policy-gate.md.
+# `autonomy:` above already makes. That includes `kernel`: in a bypass session
+# an agent can set it and then edit the gates. See docs/configuration.md.
 boundaries:
   preset: strict
   outside_repo: refuse
   credentials: refuse
   path_classes: refuse
   push: refuse
+  kernel: refuse
   prompts: ask
 
 # Overnight mode — pause autonomous work near the subscription usage limits

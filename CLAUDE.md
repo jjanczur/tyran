@@ -79,6 +79,12 @@ and Tyran's own repo was the last place still exempt from its own rule.
 Before that, the directory was absent and the gate was silent here; treat any
 instruction that assumes an allowed `Edit hooks/…` as pre-0.1.41.
 
+Since 0.1.50 there is one exception, and it is the operator's to make:
+`boundaries.kernel: allow` in `.tyran/config.yaml` opens all of the above to a
+session started with `--permission-mode bypassPermissions`, and to nothing
+else. Read the config before assuming either answer. Without the key, a KERNEL
+change still goes to the human as a patch.
+
 ## The YAML subset is small, and it bites
 
 `scripts/yaml-lite.mjs` rejects block scalars (`>-`, `|`), anchors, tags, flow

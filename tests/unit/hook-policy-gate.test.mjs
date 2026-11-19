@@ -2304,6 +2304,59 @@ test('an explicit key beats the preset, in both directions', async () => {
   assert.equal((await askRead(oneDoor, '.env')).decision, 'deny');
 });
 
+// ── boundaries.kernel: the floor, opened by the operator, in bypass only ──
+
+const FLOOR = ['hooks/scripts/policy-gate.mjs', '.tyran/policies/autonomy.yaml', '.claude/settings.json', '.claude/settings.local.json', '.tyran/STOP'];
+const KERNEL_OPEN = withBoundaries('  kernel: allow\n');
+const bashAs = (command, cwd, mode) => ({ ...bashInput(command, cwd), permission_mode: mode });
+
+test('boundaries.kernel: allow in a bypassPermissions session opens the floor, for every actor and tool', async () => {
+  for (const path of FLOOR) {
+    assert.equal(await askWrite(KERNEL_OPEN, path, { mode: 'bypassPermissions' }), PASS, `main: ${path}`);
+    assert.equal(await askWrite(KERNEL_OPEN, path, { mode: 'bypassPermissions', agentId: 'a1' }), PASS, `subagent: ${path}`);
+    assert.equal(await askWrite(KERNEL_OPEN, path, { mode: 'bypassPermissions', tool: 'Edit' }), PASS, `Edit: ${path}`);
+  }
+  // Your own KERNEL and GATED rules stand down too: the operator asked for no
+  // distinction, and path_classes is still at refuse here.
+  assert.equal(await askWrite(KERNEL_OPEN, 'CLAUDE.md', { mode: 'bypassPermissions', agentId: 'a1' }), PASS);
+  // And the shell route, which is where the floor is usually met.
+  const hook = join(KERNEL_OPEN, 'hooks/scripts/policy-gate.mjs');
+  assert.equal(await ask(bashAs(`sed -i '' 's/a/b/' ${hook}`, KERNEL_OPEN, 'bypassPermissions'), KERNEL_OPEN), PASS);
+  assert.equal(await ask(bashAs(`rm ${join(KERNEL_OPEN, '.tyran/STOP')}`, KERNEL_OPEN, 'bypassPermissions'), KERNEL_OPEN), PASS);
+});
+
+test('boundaries.kernel needs BOTH the key and bypassPermissions', async () => {
+  // MUTANT A: drop the mode check. The key alone then reaches an overnight
+  // resume, which runs in acceptEdits, and every subagent of a default session.
+  for (const mode of ['default', 'acceptEdits', 'plan', 'dontAsk']) {
+    for (const path of FLOOR) {
+      const v = await askWrite(KERNEL_OPEN, path, { mode, agentId: 'a1' });
+      assert.equal(v.decision, 'deny', `${mode}: ${path}`);
+    }
+    const shell = await ask(bashAs(`echo x > ${join(KERNEL_OPEN, '.claude/settings.json')}`, KERNEL_OPEN, mode), KERNEL_OPEN);
+    assert.equal(shell.decision, 'deny', `${mode}: shell`);
+  }
+  // MUTANT B: drop the key check. Bypass alone then opens the floor in every
+  // install that runs in bypass, and none of them chose this.
+  for (const root of [adopted(), OPEN, withBoundaries('  kernel: refuse\n'), withBoundaries('  kernel: yes\n')]) {
+    for (const path of FLOOR) {
+      const v = await askWrite(root, path, { mode: 'bypassPermissions', agentId: 'a1' });
+      assert.equal(v.decision, 'deny', path);
+    }
+    const shell = await ask(bashAs(`echo x > ${join(root, 'hooks/scripts/policy-gate.mjs')}`, root, 'bypassPermissions'), root);
+    assert.equal(shell.decision, 'deny');
+  }
+});
+
+test('boundaries.kernel opens the floor and nothing else', async () => {
+  // Credentials, outside the repo and push keep their own flags.
+  assert.equal((await askRead(KERNEL_OPEN, '.env', { mode: 'bypassPermissions' })).decision, 'deny');
+  assert.equal((await askWrite(KERNEL_OPEN, '/etc/hosts', { mode: 'bypassPermissions', agentId: 'a1' })).decision, 'deny');
+  const cred = await ask(bashAs(`cat ${join(KERNEL_OPEN, '.env')} ${join(KERNEL_OPEN, 'hooks/x.mjs')}`, KERNEL_OPEN, 'bypassPermissions'), KERNEL_OPEN);
+  assert.equal(cred.decision, 'deny', 'a credential in the same command still refuses');
+  assert.doesNotMatch(cred.reason, /under the protected path/, 'and the kernel path is no longer named as the reason');
+});
+
 test('a boundaries value the schema rejects is STRICT, never a relaxation', async () => {
   // Direction of error. `limitsOf` treats a bad value as absent so a default
   // applies; here "absent" has to mean the refusal stays.

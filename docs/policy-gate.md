@@ -263,7 +263,8 @@ finds by itself is a boundary it learns to prefer.
    gate's own refusals down. One entry rather than two, because it is one fact
    — a class `AUTO` file decides how far the gate reaches — and the answer to
    it is the floor in "Turning the gate down" below, which no setting in that
-   file can move.
+   file can move outside a `bypassPermissions` session. Inside one,
+   `kernel: allow` moves it, and an agent can write that key itself.
 7. **Only the argv of `git push` is modelled**, not every publishing command.
    `gh release create` and friends are the secrets gate's business; the
    deployment class does not see them.
@@ -283,14 +284,17 @@ is the reference; this is what changes *here*.
 | `outside_repo: allow` | the "outside the repository" row of the matrix, for **every** actor — the row becomes pass rather than deny |
 | `credentials: allow` | the credential-shaped read rule, on `Read`, `Grep`, and in the text of a shell command |
 | `path_classes: allow` | `verdictForClass` is not consulted: a rule-derived `GATED` or `KERNEL` passes |
+| `kernel: allow` | in a `bypassPermissions` session only: every path inside the repository passes the write matrix, the floor below included, and the shell rule stops refusing a protected path. `credentials` still governs a credential in the same command |
 | `push: allow` | the whole deployment-class analysis is skipped, refspec and alias refusals included — with no destination left to judge, refusing a command for being unreadable to a check that is off is noise |
 | `prompts: skip` | nothing. It changes what a PASS *means*: the gate emits `permissionDecision: "allow"` instead of silence, which auto-approves the call and skips the platform's own prompt |
 
 **The floor, checked before any flag.** `BOUNDARY_FLOOR_GLOBS` is
 `SHELL_PROTECTED_GLOBS` plus `.tyran/STOP` — `hooks/**`,
 `.tyran/policies/**`, `.claude/settings.json`, `.claude/settings.local.json`
-and the brake. No value of any flag reaches them, and `path_classes: allow`
-consults the floor before it consults the flag. This does **not** change what a
+and the brake. No value of any flag reaches them except `kernel: allow` in a
+session whose `permission_mode` is `bypassPermissions`, and
+`path_classes: allow` consults the floor before it consults the flag. No
+preset sets `kernel`. This does **not** change what a
 policy file may say: the asymmetry named above stays exactly as it was, because
 this closes a new door rather than reopening an old one.
 

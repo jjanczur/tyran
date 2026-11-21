@@ -154,6 +154,18 @@ test('gate: an allowlist regex that matches the empty string does not silence a 
   assert.match(verdict.reason, /src\/server\.pem/);
 });
 
+test('gate: a file the path scan never reports is scanned over stdin, not dropped', { skip: NEEDS_SCANNER }, async () => {
+  // Measured on gitleaks 8.30.1: `gitleaks dir` neither reads nor reports a
+  // file under `node_modules/`; its trace does not name it at all. The
+  // accounting must notice and send it to stdin, where it is refused.
+  const dir = repo(OR_TESTS);
+  put(dir, 'node_modules/pkg/key.pem', fakeSecret());
+  git(dir, 'add', '-f', 'node_modules/pkg/key.pem');
+  const verdict = await gate('git commit -m x', dir);
+  assert.equal(verdict.decision, 'deny', JSON.stringify(verdict));
+  assert.match(verdict.reason, /node_modules\/pkg\/key\.pem/);
+});
+
 test('gate: without a tracked config nothing changes - a fixture is refused as before', { skip: NEEDS_SCANNER }, async () => {
   const dir = repo();
   put(dir, '__tests__/fixture.pem', fakeSecret());
@@ -302,6 +314,7 @@ test('plan: a commit whose pathspec cannot be read is planned exactly as before'
     // `<` and `>` are separators to the quote-blind split, so the segment
     // ends inside the quote; an open quote never narrows
     'git commit --author="A B <a@b>" -m x b.txt',
+    'git commit -m x # b.txt', // a comment, not a pathspec
   ]) {
     const [target] = planCommand(command, '/repo').targets;
     assert.equal(target.commitPaths ?? null, null, command);
@@ -354,6 +367,47 @@ test('gate: a pathspec commit in a repository with no commits yet is scanned, no
   put(dir, 'b.txt', fakeSecret());
   git(dir, 'add', 'b.txt');
   assert.equal((await gate('git commit -m x -- b.txt', dir)).decision, 'deny');
+});
+
+test('gate: words that only look like a pathspec do not narrow the scan', { skip: NEEDS_SCANNER }, async () => {
+  // `#` starts a comment, so the shell commits the whole index; `fix the bug`
+  // unquoted makes `the` and `bug` pathspecs git would refuse. Narrowing on
+  // either would scan an empty diff while the index holds the key.
+  const dir = repo();
+  put(dir, 'a.txt', fakeSecret());
+  git(dir, 'add', 'a.txt');
+  for (const command of ['git commit -m x # note', 'git commit -m x -- nothere.txt', 'git commit -m fix the bug']) {
+    assert.equal((await gate(command, dir)).decision, 'deny', command);
+  }
+});
+
+test('gate: two commits in one line scan what BOTH commit', { skip: NEEDS_SCANNER }, async () => {
+  // The target is one per repository, and the second commit's plan replaced
+  // the first's: its pathspec narrowed the first commit's scan, and its
+  // missing `-a` dropped the first commit's working tree.
+  const staged = repo();
+  put(staged, 'a.txt', fakeSecret());
+  git(staged, 'add', 'a.txt');
+  put(staged, 'b.txt', 'clean, edited\n');
+  assert.equal((await gate('git commit -m a && git commit -m b -- b.txt', staged)).decision, 'deny');
+
+  const unstaged = repo();
+  put(unstaged, 'b.txt', `clean\n${fakeSecret()}`);
+  for (const command of [
+    'git commit -m a -- b.txt && git commit -m b -- readme.txt',
+    'git commit -am a && git commit -m b',
+    'git commit -m a && git commit -m b -- b.txt',
+  ]) {
+    assert.equal((await gate(command, unstaged)).decision, 'deny', command);
+  }
+});
+
+test('gate: two `git add`s before a commit fold BOTH into the scan', { skip: NEEDS_SCANNER }, async () => {
+  const dir = repo();
+  put(dir, 'new.pem', fakeSecret());
+  put(dir, 'other.txt', 'clean\n');
+  const verdict = await gate('git add new.pem && git add other.txt && git commit -m x', dir);
+  assert.equal(verdict.decision, 'deny', JSON.stringify(verdict));
 });
 
 // ------------------------------- found on the way: `git add` from a subdirectory

@@ -167,7 +167,7 @@ test('plan: `git add X && git -c a="b c" commit` folds the add into the scan', (
   const plan = planCommand('git -c a="b c" add server.pem && git -c a="b c" commit -m x', '/repo');
   const [target] = commitTargets(plan);
   assert.equal(target.includeWorktree, true);
-  assert.deepEqual(target.includePaths, ['server.pem']);
+  assert.deepEqual(target.includePaths, ['/repo/server.pem']);
 });
 
 test('plan: a quoted value does not hide a PUSH, and its remote and refs are read', () => {

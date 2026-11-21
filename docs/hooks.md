@@ -333,7 +333,10 @@ it read. Anything that does not add up is scanned over stdin, as before. A file
 whose name gitleaks would read as its own configuration (`.gitleaks*`), and a
 path that is not a plain relative path, is never written into the tree.
 Without a tracked config nothing changes, because gitleaks' default config
-allowlists paths too (lock files, `vendor/`).
+allowlists paths too. With `[extend] useDefault = true` in a tracked config,
+that default allowlist now applies: measured on 8.30.1, a key in
+`package-lock.json`, `yarn.lock`, `go.sum`, a `.png` or a `.svg` is skipped,
+where stdin refused it.
 
 ### The alias hole, closed 2026-07-27
 

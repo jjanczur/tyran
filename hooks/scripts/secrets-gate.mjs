@@ -545,7 +545,10 @@ export function commitPathspec(args) {
   if (paths.length === 0) return { paths: [], mode: null };
   if (only && include) return null;
   for (const p of paths) {
-    if (p === '' || p.startsWith(':') || [...EXPANSION_CHARS].some((c) => p.includes(c))) return null;
+    // `#` starts a comment: `git commit -m x # note` commits the whole index.
+    if (p === '' || p.startsWith(':') || p.startsWith('#') || [...EXPANSION_CHARS].some((c) => p.includes(c))) {
+      return null;
+    }
   }
   return { paths, mode: include ? 'include' : 'only' };
 }
@@ -1130,7 +1133,13 @@ export function planCommand(command, startDir) {
       }
       // Naming files one by one is the commonest form an agent uses, and it
       // was the form round 2 left open: only `-A`/`.` folded anything in.
-      pendingAdd = { dir: addAt.dir, all: all || widen, paths: named };
+      // Every `git add` in the line, not the last one: `git add a && git add b
+      // && git commit` kept only `b`. The paths are absolute, resolved where
+      // that add ran, so a later `cd` cannot change which file they name.
+      pendingAdd = {
+        all: (pendingAdd?.all ?? false) || all || widen,
+        paths: [...new Set([...(pendingAdd?.paths ?? []), ...named.map((t) => resolvePath(addAt.dir, t))])],
+      };
     }
 
     if (gitCommit) {
@@ -1149,24 +1158,36 @@ export function planCommand(command, startDir) {
         quotedOp !== null && quotedOp.name === 'commit' && parsed.closed
           ? commitPathspec(quoted.tokens.slice(quotedOp.index + 1))
           : null;
-      const narrowed = spec !== null && spec.paths.length > 0 ? spec : null;
+      // One target per repository, and a line can commit twice. The second
+      // commit's plan replaced the first's: its pathspec narrowed the first
+      // commit's scan, and a missing `-a` dropped the first one's working
+      // tree. Two commits are never narrowed, and every flag only widens.
+      const prior = targets.get(commitAt.dir);
+      const priorCommit = prior !== undefined && prior.scanCommit === true ? prior : null;
+      const narrowed = spec !== null && spec.paths.length > 0 && priorCommit === null ? spec : null;
       note(commitAt.dir, {
         commitPaths: narrowed === null ? null : narrowed.paths,
         commitMode: narrowed === null ? null : narrowed.mode,
-        // Where the pathspec is relative to, and where the added paths are:
-        // the directory the segment ran in, not the repository root.
+        // Where the pathspec is relative to: the directory the segment ran
+        // in, not the repository root.
         commitFrom: commitAt.dir,
-        includeFrom: sameRepo ? pendingAdd.dir : null,
         scanCommit: true,
         // `git commit -a` stages tracked modifications as it runs, and
         // `git add X && git commit` stages them in an earlier segment of the
         // very same command line. In both cases the index at the moment this
         // gate runs is NOT what the commit will contain, so the working tree
         // is folded in. Round 1 declared this a limitation; closing it is
-        // cheaper than describing it.
-        includeWorktree: commitAll || sameRepo,
-        includeUntracked: sameRepo && pendingAdd.all,
-        includePaths: sameRepo ? pendingAdd.paths : [],
+        // cheaper than describing it. A second commit in the line also folds
+        // it in: the first one's pathspec, if it had one, committed from it.
+        // So does a pathspec this commit carries but is not narrowed on.
+        includeWorktree:
+          commitAll ||
+          sameRepo ||
+          (spec !== null && spec.paths.length > 0 && narrowed === null) ||
+          priorCommit?.includeWorktree === true ||
+          (priorCommit?.commitPaths ?? null) !== null,
+        includeUntracked: (sameRepo && pendingAdd.all) || priorCommit?.includeUntracked === true,
+        includePaths: [...new Set([...(priorCommit?.includePaths ?? []), ...(sameRepo ? pendingAdd.paths : [])])],
       });
       triggers.push('a git commit (everything the commit would add is scanned)');
     }
@@ -1971,7 +1992,10 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
       assertComplete(0, parsed.malformed, what);
       return parsed.entries;
     };
-    const DIFF = ['--raw', '-z', '--no-renames', '--diff-filter=ACMR'];
+    // `--no-relative`: with `diff.relative` set, a diff run from a
+    // subdirectory prints paths relative to it, and every one would then be
+    // read from the wrong place below.
+    const DIFF = ['--raw', '-z', '--no-renames', '--no-relative', '--diff-filter=ACMR'];
     // A pathspec is relative to the directory the commit ran in, so these
     // diffs run THERE; their output paths are relative to the root either way.
     const from = target.commitFrom ?? target.dir;
@@ -1981,12 +2005,21 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
     // the diff from HEAD to the working tree, for those paths, is exactly
     // what it adds. With no HEAD yet there is nothing to diff from, and the
     // commit is scanned as a whole instead (see below).
+    //
+    // Narrowed only on PROOF that the pathspec names what git will commit:
+    // every path must match a tracked file. Words that merely parse as paths
+    // (`git commit -m fix the bug`) match nothing, git refuses that commit,
+    // and the scan stays whole.
+    const ok = (r) => r.spawned === true && r.timedOut !== true && r.code === 0;
     let hasHead = false;
     if (paths !== null && target.commitMode === 'only') {
-      const head = await runner('git', ['-C', target.dir, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
-        timeoutMs: budget(GIT_BUDGET_MS),
-      });
-      hasHead = head.spawned === true && head.timedOut !== true && head.code === 0;
+      hasHead =
+        ok(await runner('git', ['-C', target.dir, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+          timeoutMs: budget(GIT_BUDGET_MS),
+        })) &&
+        ok(await runner('git', ['-C', from, 'ls-files', '--error-unmatch', '--', ...paths], {
+          timeoutMs: budget(GIT_BUDGET_MS),
+        }));
     }
     const wanted = [];
     if (hasHead) {
@@ -2009,9 +2042,8 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
     // `git add` ran: joining them to the repository ROOT read `sub/new.pem`
     // as `new.pem` when the add ran in `sub/`, found nothing there, and the
     // commit published it unscanned.
-    const addedFrom = target.includeFrom ?? target.dir;
-    for (const rel of target.includePaths ?? []) {
-      const abs = resolvePath(addedFrom, rel);
+    for (const path of target.includePaths ?? []) {
+      const abs = resolvePath(target.dir, path);
       add(repoLabel(target.dir, abs), await readFileBounded(abs));
     }
     if (target.includeUntracked) {
@@ -2230,13 +2262,19 @@ export async function scanTree(chunks, { runner, budget, workDir, suppressionArg
   }
   const tree = await mkdtemp(join(workDir, 'tree-'));
   const sizes = new Map();
-  for (const chunk of chunks) {
-    const abs = join(tree, ...chunk.label.split('/'));
-    await mkdir(dirname(abs), { recursive: true });
-    // `wx`: a path that already exists is a collision `pathScanRounds` should
-    // have prevented, and it must fail rather than overwrite.
-    await writeFile(abs, chunk.body, { flag: 'wx' });
-    sizes.set(chunk.label, chunk.body.length);
+  try {
+    for (const chunk of chunks) {
+      const abs = join(tree, ...chunk.label.split('/'));
+      await mkdir(dirname(abs), { recursive: true });
+      // `wx`: a path that already exists is a collision `pathScanRounds`
+      // should have prevented, and it must fail rather than overwrite.
+      await writeFile(abs, chunk.body, { flag: 'wx' });
+      sizes.set(chunk.label, chunk.body.length);
+    }
+  } catch {
+    // A name this disk will not hold (too long, a folding `pathScanRounds`
+    // did not foresee): those files are scanned over stdin instead.
+    return null;
   }
   const ignoreArgs = [];
   if (!suppressionArgs.includes('--gitleaks-ignore-path')) {

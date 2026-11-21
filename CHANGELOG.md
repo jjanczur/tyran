@@ -74,6 +74,29 @@ Two new tests. The planner test has five redirect spellings plus the `2>&1`
 remote and the `v2` control. The gate test runs against real git and
 gitleaks. Both are red on 0.1.51.
 
+### An explicit lease's expected sha is no longer refused as an API key
+
+`git push --force-with-lease=pv3/api-token-fix:<40-hex sha> origin ...` was
+refused as `generic-api-key`. Gitleaks reads the expected value as a
+high-entropy key whenever the ref in front of it carries a keyword (`secret`,
+`token`, `api`, `key`, `auth`). The only workaround was a bare
+`--force-with-lease`, which drops the expected value.
+
+`planCommand` now records the `<ref>:<full lowercase hex>` slot of a lease on
+a `git push`, with the repository that push targets. `decide` hides that one
+value (same length, all zeros) from the command-text scan, and ONLY when
+`git --no-lazy-fetch cat-file -e <hex>^{object}` finds it in that repository.
+Everything else leaves the text scanned as before: a hex that names no object,
+an object of another repository, an abbreviation, a git failure or a timeout.
+Nothing else in the command changes. `--no-lazy-fetch` matters: in a partial
+clone the question would otherwise fetch the missing object from the promisor
+remote, which sends the suspected value off the machine as `want <hex>`.
+
+The gate change is the patch from `fix/secrets-gate-lease-sha` (dce74d6),
+ported onto this release's push code. 13 tests in
+`hook-secrets-gate-lease-sha.test.mjs`; on 0.1.51, 5 are red, the reported
+false refusal among them.
+
 ## 0.1.51 — 2026-11-21
 
 ### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends

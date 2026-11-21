@@ -331,6 +331,14 @@ export function splitSegments(command) {
       // what every consumer sees for a reason unrelated to splitting.
       current += ch;
     } else if (SEPARATORS.includes(ch)) {
+      // A redirection's file descriptor (`2>/dev/null`, `2>&1`, `0<in`) is a
+      // whole word of digits directly in front of `<` or `>`, and the shell
+      // never passes it to the command. Left in place it was the LAST WORD of
+      // the segment: `git push origin :gone 2>/dev/null` read `2` as a
+      // refspec, so the deletion was scanned as a wide push, and `git push
+      // 2>&1` read `2` as the remote. Only a whole word is a descriptor, which
+      // is the shell's own rule: `v2>x` passes `v2` and redirects stdout.
+      if (ch === '<' || ch === '>') current = current.replace(/(^|\s)\d+$/, '$1');
       out.push(current);
       current = '';
     } else {

@@ -59,6 +59,21 @@ policy-gate suite. On 0.1.51, 33 of the branch's 36 are red. With the branch's
 patch alone, four stay red: the two gate tests and the planner test for the
 assignment-separator spellings, and the policy-gate test.
 
+### A redirection's file descriptor is no longer read as a refspec
+
+0.1.51 left one spelling of a remote-branch deletion refused for gigabytes:
+`git push origin :gone 2>/dev/null`. `splitSegments` ends a segment at `>`,
+so the `2` stayed behind as the last word of the push. It is not a `:dst`
+refspec, so the deletion was scanned as a wide push. `git push 2>&1` read
+the same `2` as the remote, and the policy gate then named a remote called
+`2`. `splitSegments` now drops a whole word of digits directly in front of
+`<` or `>`. That is the shell's own rule for a descriptor: in `v2>x` the word
+`v2` is an argument and stays.
+
+Two new tests. The planner test has five redirect spellings plus the `2>&1`
+remote and the `v2` control. The gate test runs against real git and
+gitleaks. Both are red on 0.1.51.
+
 ## 0.1.51 — 2026-11-21
 
 ### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends

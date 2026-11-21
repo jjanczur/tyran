@@ -266,3 +266,37 @@ test('gate: a branch already on one remote is still scanned when the line also p
   // the control: pushing it to the remote that already holds it publishes nothing
   assert.deepEqual(await handle({ input: bashInput('git push origin leaky', dir), cwd: dir }), PASS);
 });
+
+// ---------------------------------------------------------------------------
+// a redirection's file descriptor is not a refspec
+
+test('plan: the fd number of a redirection is not read as a refspec or a remote', () => {
+  // `splitSegments` ends a segment at `>`, which left the `2` of `2>/dev/null`
+  // as the last word of the push: a refspec that is not `:dst`, so the
+  // deletion was scanned as a wide push. `git push 2>&1` read `2` as the remote.
+  for (const command of [
+    'git push origin :gone 2>/dev/null',
+    'git push origin --delete gone 2>&1',
+    'git push origin --delete gone 2> /dev/null',
+    'git push origin :gone 1>/dev/null 2>&1',
+    'git push origin :gone 0</dev/null',
+  ]) {
+    const [target] = pushTargets(command);
+    assert.equal(target.pushDeletesOnly, true, command);
+  }
+  const [narrow] = pushTargets('git push origin main 2>&1');
+  assert.deepEqual(narrow.pushRefs, ['main']);
+  const [bare] = pushTargets('git push 2>&1');
+  assert.equal(bare.pushRemote, null);
+  // a word that merely ENDS in a digit is a word, not a descriptor
+  const [named] = pushTargets('git push origin v2>/dev/null');
+  assert.deepEqual(named.pushRefs, ['v2']);
+});
+
+test('gate: a deletion with its stderr redirected is not refused for unpushed work', { skip: NEEDS_SCANNER }, async () => {
+  const dir = repoWithUnpushedBranch('big', randomBytes(MAX_PAYLOAD_BYTES + 1024 * 1024).toString('base64'));
+  for (const command of ['git push origin :gone 2>/dev/null', 'git push origin --delete gone 2>&1']) {
+    const verdict = await handle({ input: bashInput(command, dir), cwd: dir });
+    assert.deepEqual(verdict, PASS, `${command}: ${JSON.stringify(verdict)}`);
+  }
+});

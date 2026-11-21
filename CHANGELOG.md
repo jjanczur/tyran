@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.1.50 — 2026-11-19
+
+### `boundaries.kernel: allow` — no floor in a bypassPermissions session
+
+An operator asked for a way to remove the last distinction: when they start a
+session in bypass mode, agents should be able to edit any file, the gates
+included. Until now no setting could do that. `preset: open` and every flag
+stopped at the floor: `hooks/**`, `.tyran/policies/**`,
+`.claude/settings*.json` and `.tyran/STOP`.
+
+The new key `boundaries.kernel` (`refuse` | `allow`, default `refuse`) removes
+the floor and every path class in the policy for paths inside the repository,
+on the write tools and in the text of a shell command. It counts only when the
+call's `permission_mode` is `bypassPermissions`. Both are required. The key
+alone does nothing in `default`, `acceptEdits` or `plan`, so an overnight resume
+(`acceptEdits`) never gets it. Bypass alone does nothing, so an install that
+runs in bypass and never set the key keeps its floor. Subagents inherit the
+session's mode. No preset sets the key, so a repo already on `preset: open`
+gains nothing by updating.
+
+`.tyran/STOP` is included, by the operator's choice: under the unlock an agent
+can clear the brake.
+
+What it does not change: secret scanning at commit and push; the credential,
+outside-repo and push rules, which keep their own flags; the other hooks.
+
+The cost: `.tyran/config.yaml` is class `AUTO`. Inside a bypass session an
+agent can write `kernel: allow` itself and edit the gates on its next call. In
+bypass the key is a default, not a lock. `docs/configuration.md` says so.
+
+Also: doctor's `boundaries-relaxed` names what `kernel` opens, the Settings tab
+has the knob, and `scan-repo` and `templates/config.yaml` write `kernel: refuse`.
+
+### `usage-gate` reads `warn` before the pause marker
+
+The second half of the 0.1.49 fix. The gate read `limits.mode: warn` only when
+no marker existed, so a marker already on disk, from `pause` mode or from
+0.1.48, still refused every unattended session in the repo. It now returns PASS
+for any mode other than `pause` before it reads the marker. The marker is
+ignored, not deleted; `overnight.mjs cancel --clear` still removes it.
+
+Both gate changes are in `hooks/scripts/`, which is KERNEL in this repository,
+and were applied by hand.
+
+Five new tests. The kernel key needs both conditions; the test names its two
+mutants (drop either check), which were not run because the gate is KERNEL
+here. It opens the floor for every actor and tool, and nothing else. No preset
+moves it; that mutant (`kernel: 'allow'` in the open preset) was run and goes
+red. An active marker under `warn` passes while the same marker under `pause`
+still denies; on the unpatched gate that test is red.
+
 ## 0.1.49 — 2026-11-14
 
 ### `limits.mode: warn` no longer writes a pause marker that blocks the whole repo

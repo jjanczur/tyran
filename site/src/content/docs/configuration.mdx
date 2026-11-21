@@ -57,11 +57,12 @@ main_writable_paths:       # OPTIONAL. Out-of-repo paths the MAIN thread may
 
 boundaries:                # OPTIONAL. How far the policy gate turns its
   preset: strict           # refusals DOWN. Absent = strict = what Tyran has
-  outside_repo: refuse     # always done. `preset: open` sets all five at once.
+  outside_repo: refuse     # always done. `preset: open` sets all but kernel.
   credentials: refuse      # An explicit key beats the preset, both ways.
-  path_classes: refuse     # Four things NO value here reaches: secret scanning
-  push: refuse             # at commit and push, the enforcement hooks,
-  prompts: ask             # .claude/settings.json, and .tyran/STOP.
+  path_classes: refuse     # Secret scanning at commit and push: no value here
+  push: refuse             # reaches it. The hooks, the policy, settings*.json
+  kernel: refuse           # and .tyran/STOP: only kernel: allow, and only in
+  prompts: ask             # a bypassPermissions session.
 
 limits:                    # OPTIONAL. Overnight mode (see the Overnight page):
   mode: 'off'              # off | warn | pause — quoted, bare off is YAML false
@@ -275,10 +276,13 @@ screen patches keys that already exist and deliberately will not invent them.
 | `credentials` | `refuse` | `allow` | `.env`, private keys, `~/.ssh`, `~/.aws` and their relatives can be read into the conversation, on `Read`, `Grep` and in a shell command |
 | `path_classes` | `refuse` | `allow` | the `GATED` and `KERNEL` rules in **your own** policy stop being enforced for writes |
 | `push` | `refuse` | `allow` | the deployment class is not checked at all, including the pushes nothing can undo — `--mirror`, a force push to the default branch, a deleted remote branch |
+| `kernel` | `refuse` | `allow` | **in a session started with `--permission-mode bypassPermissions` only**: the floor below is gone. Agents may edit `hooks/**`, `.tyran/policies/**`, `.claude/settings*.json` and `.tyran/STOP`, and every path class in your policy, from any tool. In every other mode this key does nothing |
 | `prompts` | `ask` | `skip` | Claude Code stops prompting for calls no gate objects to. This is the one that people mean by "skip permissions" |
 
-`preset:` sets all five at once. `strict` is the default; `open` is the loose
-column, top to bottom:
+`preset:` sets all of them but `kernel` at once. `strict` is the default;
+`open` is the loose column, top to bottom, with `kernel` left at `refuse` —
+so a repo that said `open` before `kernel` existed did not gain it by
+updating:
 
 ```yaml
 boundaries:
@@ -297,7 +301,10 @@ boundaries:
 ### What `open` never reaches
 
 Named as a list rather than implied, because "everything" needs a floor and
-this block lives in a file agents can write:
+this block lives in a file agents can write. Items 2 and 3 are the floor that
+`kernel: allow` removes, and only in a bypassPermissions session — see
+[below](#kernel-allow--no-floor-in-a-bypass-session). Items 1 and 4 no value
+here reaches:
 
 1. **Secret scanning.** `gitleaks` runs from the
    [secrets gate](../hooks/#the-secrets-gate-and-exactly-where-it-stops), a different hook that never reads
@@ -312,13 +319,39 @@ this block lives in a file agents can write:
 4. The control-character guard, the evidence gate and the usage gate, none of
    which read this block either.
 
+### `kernel: allow` — no floor in a bypass session
+
+For an operator who wants no distinction at all: when you start a session with
+`--permission-mode bypassPermissions`, you have already said that nothing in
+it should ask. `kernel: allow` says the gate should not refuse either, for any
+path inside the repository:
+
+```yaml
+boundaries:
+  preset: open
+  kernel: allow
+```
+
+Both are required. The key alone does nothing in `default`, `acceptEdits` or
+`plan` — so an overnight resume, which runs in `acceptEdits`, never gets it.
+Bypass alone does nothing either, so an install that runs in bypass and never
+set the key keeps its floor. Subagents inherit the session's mode, so in a
+bypass session they get it too.
+
+What it still leaves: secret scanning at commit and push, the credential read
+rule unless `credentials: allow`, paths outside the repository unless
+`outside_repo: allow`, and push checks unless `push: allow`. The other hooks
+do not read this block.
+
 ### The cost, stated rather than implied
 
 `.tyran/config.yaml` is class `AUTO` in the shipped policy, so **an agent can
-widen these itself** — the same trade `autonomy:` already makes, and the reason
-the four exceptions above are mechanical rather than a matter of anyone's good
-behaviour. What holds regardless: nothing in this block lets a session switch a
-gate off, edit the hook registry, clear `.tyran/STOP`, or publish a secret.
+widen these itself** — the same trade `autonomy:` already makes. That
+includes `kernel`: **inside a bypassPermissions session an agent can write
+`kernel: allow` and then edit the gates**, so in bypass the key is a default,
+not a lock. Outside bypass the floor is mechanical: no setting here lets a
+session in another mode switch a gate off, edit the hook registry or clear
+`.tyran/STOP`, and none in any mode lets it publish a secret.
 
 A value the validator rejects resolves to **strict**, never to the loose side.
 `credentials: yes` is not `allow` — guessing that it was would open the secret
@@ -336,7 +369,8 @@ Three artifact classes, enforced by a `PreToolUse` hook on file paths:
 - **GATED** — new/changed hooks, `CLAUDE.md`, budget raises, deletion of
   safety rules: proposed, you approve.
 - **KERNEL** — the enforcement hooks themselves, the rollback mechanism, and
-  this very list: never touched autonomously.
+  this very list: never touched autonomously, unless you set
+  `boundaries.kernel: allow` and start the session in bypassPermissions.
 
 You can tighten (or loosen) the classification per repo by editing the file.
 

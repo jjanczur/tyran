@@ -565,10 +565,11 @@ export function renderConfig(config) {
     '# where the most agents run.\n' +
     '#\n' +
     '# GIVING AGENTS MORE ROOM: `boundaries:` below is the one place the policy\n' +
-    '# gate can be turned down. `preset: open` relaxes all five at once — the\n' +
-    '# closest thing to running with permissions skipped. Secret scanning at\n' +
-    '# commit and push, the enforcement hooks, `.claude/settings.json` and\n' +
-    '# `.tyran/STOP` are NOT reachable from it, whatever it is set to.\n' +
+    '# gate can be turned down. `preset: open` relaxes all but `kernel` at\n' +
+    '# once — the closest thing to running with permissions skipped. Secret\n' +
+    '# scanning at commit and push is never reachable. The enforcement hooks,\n' +
+    '# `.claude/settings.json` and `.tyran/STOP` are reachable only with\n' +
+    '# `kernel: allow` AND a session started in bypassPermissions mode.\n' +
     '# See docs/configuration.md.\n' +
     '#\n' +
     '# Validate:  node scripts/schema.mjs validate config .tyran/config.yaml\n' +

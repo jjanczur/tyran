@@ -621,7 +621,7 @@ test('a scanned config carries the boundaries block, all of it strict', () => {
   try {
     const result = scanRepo(dir);
     assert.deepEqual(result.config.boundaries, {
-      preset: 'strict', outside_repo: 'refuse', credentials: 'refuse', path_classes: 'refuse', push: 'refuse', prompts: 'ask',
+      preset: 'strict', outside_repo: 'refuse', credentials: 'refuse', path_classes: 'refuse', push: 'refuse', kernel: 'refuse', prompts: 'ask',
     });
     const rendered = parse(renderConfig(result.config));
     assert.deepEqual(validateConfig(rendered), []);

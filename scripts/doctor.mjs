@@ -2049,8 +2049,13 @@ export function runStateChecks({
           'boundaries-relaxed',
           show(configPath),
           `boundaries: ${relaxed.join(', ')} ${relaxed.length === 1 ? 'is' : 'are'} turned down, so the policy gate ` +
-            'no longer refuses what they cover. Secret scanning at commit and push, the enforcement hooks, ' +
-            '.claude/settings.json and .tyran/STOP are unaffected — no setting reaches those',
+            'no longer refuses what they cover. ' +
+            (relaxed.includes('kernel')
+              ? 'kernel: allow means a session started with --permission-mode bypassPermissions may edit the ' +
+                'enforcement hooks, .tyran/policies, .claude/settings*.json and .tyran/STOP. Secret scanning at ' +
+                'commit and push is unaffected'
+              : 'Secret scanning at commit and push, the enforcement hooks, .claude/settings.json and ' +
+                '.tyran/STOP are unaffected — only boundaries.kernel reaches those, and only in bypassPermissions'),
           `node scripts/schema.mjs validate config ${sq(configPath)}   # then edit boundaries: to tighten`,
         ),
       );

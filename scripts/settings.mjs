@@ -127,17 +127,17 @@ export const GROUPS = Object.freeze([
     id: 'boundaries',
     title: 'What agents may touch',
     blurb:
-      'How far the policy gate turns its refusals down. Everything here starts at the strict setting, and every move toward the looser one asks you to confirm it a second time. Four things are NOT on this screen because no setting reaches them: secret scanning at commit and push, the enforcement hooks themselves, the file that registers them, and the STOP brake.',
+      'How far the policy gate turns its refusals down. Everything here starts at the strict setting, and every move toward the looser one asks you to confirm it a second time. Secret scanning at commit and push is NOT on this screen because no setting reaches it. The enforcement hooks, the file that registers them and the STOP brake are reached only by "The gates themselves", and only in a session started in bypassPermissions mode.',
     settings: [
       {
         id: 'boundaries.preset',
         path: ['boundaries', 'preset'],
         label: 'Preset',
-        help: 'The one switch. "Open" turns every boundary below to its loose setting at once — the closest thing Tyran has to running Claude Code with permissions skipped. Anything you set individually below wins over the preset.',
+        help: 'The one switch. "Open" turns every boundary below except "The gates themselves" to its loose setting at once — the closest thing Tyran has to running Claude Code with permissions skipped. Anything you set individually below wins over the preset.',
         explain: {
           what: 'The master position for every boundary in this group at once.',
           changes: 'Flips outside-repo access, credential reads, your path rules, push checks and permission prompts together; any boundary you set individually below overrides it.',
-          effect: 'On "open", agents move without friction and without asking — the four things no setting reaches (secret scanning, the hooks, their registry, the STOP brake) still hold.',
+          effect: 'On "open", agents move without friction and without asking — secret scanning, the hooks, their registry and the STOP brake still hold; only "The gates themselves" below reaches the last three.',
         },
         widening: {
           scale: 'preset',
@@ -146,7 +146,7 @@ export const GROUPS = Object.freeze([
         },
         ...choice(BOUNDARY_PRESETS, {
           strict: 'Every boundary on. This is what Tyran has always done.',
-          open: 'Every boundary below turned down at once.',
+          open: 'Every boundary below except the gates themselves turned down at once.',
         }),
       },
       {
@@ -192,10 +192,10 @@ export const GROUPS = Object.freeze([
         id: 'boundaries.path_classes',
         path: ['boundaries', 'path_classes'],
         label: 'Your own path rules',
-        help: 'The AUTO / GATED / KERNEL rules in the policy below. Allowing this makes them advisory: a subagent may write a path you gated. The four paths that protect the gate itself stay refused whatever this says.',
+        help: 'The AUTO / GATED / KERNEL rules in the policy below. Allowing this makes them advisory: a subagent may write a path you gated. The paths that protect the gate itself stay refused whatever this says; only "The gates themselves" reaches them.',
         explain: {
           what: 'Whether the AUTO / GATED / KERNEL classes in the autonomy policy further down this page are enforced on writes.',
-          changes: 'On "allow" they become advisory: a subagent may write a path you gated, and only the four self-protecting paths still refuse.',
+          changes: 'On "allow" they become advisory: a subagent may write a path you gated, and only the self-protecting paths still refuse.',
           effect: 'Turning this off removes the distinction the policy exists to draw — everything an agent can reach becomes effectively AUTO.',
         },
         widening: {
@@ -225,6 +225,26 @@ export const GROUPS = Object.freeze([
         ...choice(BOUNDARY_VALUES, {
           refuse: 'Pushes are checked against the deployment autonomy above.',
           allow: 'Any push is allowed, including the irreversible ones.',
+        }),
+      },
+      {
+        id: 'boundaries.kernel',
+        path: ['boundaries', 'kernel'],
+        label: 'The gates themselves',
+        help: 'The enforcement hooks, the autonomy policy, .claude/settings*.json and .tyran/STOP. "Allow" counts only in a session you started with --permission-mode bypassPermissions; in every other mode these stay refused. The "Open" preset never sets this.',
+        explain: {
+          what: 'Whether an agent may edit the files that enforce every other boundary on this page, in a bypassPermissions session.',
+          changes: 'On "allow", a bypassPermissions session may write hooks/**, .tyran/policies/**, .claude/settings*.json and .tyran/STOP, from any tool. Other modes are unchanged.',
+          effect: 'In that session nothing on this page is a boundary any more: an agent can edit or remove the gates, and clear your STOP brake.',
+        },
+        widening: {
+          scale: 'boundary',
+          consequence:
+            'In a bypassPermissions session agents may edit the enforcement hooks, the policy, the hook registry and the STOP brake.',
+        },
+        ...choice(BOUNDARY_VALUES, {
+          refuse: 'The gates and your brake are edited by hand, outside a session.',
+          allow: 'A bypassPermissions session may edit the gates and the brake.',
         }),
       },
       {

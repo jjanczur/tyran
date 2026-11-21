@@ -677,7 +677,7 @@ test('boundariesOf: absent means strict, and so does anything unreadable', () =>
 
 test('boundariesOf: the preset expands, and an explicit key beats it both ways', () => {
   const open = boundariesOf({ boundaries: { preset: 'open' } });
-  assert.deepEqual(open, { outside_repo: 'allow', credentials: 'allow', path_classes: 'allow', push: 'allow', prompts: 'skip' });
+  assert.deepEqual(open, { outside_repo: 'allow', credentials: 'allow', path_classes: 'allow', push: 'allow', kernel: 'refuse', prompts: 'skip' });
 
   // A repo that wants everything except its own keys.
   assert.equal(boundariesOf({ boundaries: { preset: 'open', credentials: 'refuse' } }).credentials, 'refuse');
@@ -685,6 +685,19 @@ test('boundariesOf: the preset expands, and an explicit key beats it both ways',
   // And the other direction: one door open in an otherwise strict repo.
   assert.equal(boundariesOf({ boundaries: { preset: 'strict', outside_repo: 'allow' } }).outside_repo, 'allow');
   assert.equal(boundariesOf({ boundaries: { outside_repo: 'allow' } }).credentials, 'refuse');
+});
+
+test('boundaries.kernel: no preset moves it, only the key itself', () => {
+  // MUTANT: `kernel: 'allow'` in the open preset. Every install that already
+  // says `preset: open` would then gain kernel writes in bypass sessions just
+  // by updating, which nobody chose.
+  assert.equal(boundariesOf({ boundaries: { preset: 'open' } }).kernel, 'refuse');
+  assert.equal(boundariesOf({ boundaries: { preset: 'strict' } }).kernel, 'refuse');
+  assert.equal(boundariesOf({ boundaries: { kernel: 'allow' } }).kernel, 'allow');
+  assert.equal(boundariesOf({ boundaries: { preset: 'open', kernel: 'allow' } }).kernel, 'allow');
+  assert.equal(boundariesOf({ boundaries: { kernel: 'yes' } }).kernel, 'refuse', 'unreadable is strict');
+  assert.deepEqual(validateConfig({ ...minimalConfig(), boundaries: { kernel: 'allow' } }), []);
+  assert.ok(validateConfig({ ...minimalConfig(), boundaries: { kernel: true } }).some((e) => e.includes('boundaries.kernel')));
 });
 
 test('boundariesOf: the result is frozen, so no caller can widen it after the fact', () => {
@@ -701,6 +714,7 @@ test('relaxedBoundaries names exactly what is loose', () => {
     'credentials', 'outside_repo', 'path_classes', 'prompts', 'push',
   ]);
   assert.deepEqual(relaxedBoundaries(boundariesOf({ boundaries: { push: 'allow' } })), ['push']);
+  assert.deepEqual(relaxedBoundaries(boundariesOf({ boundaries: { kernel: 'allow' } })), ['kernel']);
 });
 
 test('every boundary key the validator accepts is one boundariesOf resolves', () => {

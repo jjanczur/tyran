@@ -461,7 +461,7 @@ test('the boundaries knobs are on the screen, and every choice validates', () =>
     assert.ok(group, 'the Settings tab has a boundaries section');
     assert.deepEqual(
       group.settings.map((x) => x.id),
-      ['boundaries.preset', 'boundaries.outside_repo', 'boundaries.credentials', 'boundaries.path_classes', 'boundaries.push', 'boundaries.prompts'],
+      ['boundaries.preset', 'boundaries.outside_repo', 'boundaries.credentials', 'boundaries.path_classes', 'boundaries.push', 'boundaries.kernel', 'boundaries.prompts'],
     );
     // Every knob reads a value out of the shipped template, or the control
     // renders and cannot be used: yaml-patch refuses a key not already there.

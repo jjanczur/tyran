@@ -119,6 +119,25 @@ test('below both thresholds passes; warn mode passes even over threshold', () =>
   assert.equal(verdict(warn, MAIN_AUTONOMOUS), PASS);
 });
 
+test('warn mode passes with an ACTIVE marker on disk; the same marker under pause still binds', () => {
+  // MUTANT: move the mode check back onto the no-marker branch (0.1.49). A
+  // marker written by the 0.1.48 watcher under warn, or left over from pause
+  // mode, then refuses every unattended session in the repo, on every account.
+  const marker = markerOf(
+    { window: 'seven_day', used_percentage: 100, resets_at: EPOCH_S(NOW + 5 * 86400e3) },
+    LIMITS_PAUSE,
+    NOW,
+    'f9271c9c-e951-47be-af1f-a5742c6df046',
+    'demo',
+  );
+  const warn = repo({ config: "limits:\n  mode: warn\n", marker });
+  assert.equal(verdict(warn, MAIN_AUTONOMOUS), PASS);
+  assert.equal(verdict(warn, SUBAGENT), PASS);
+  assert.ok(existsSync(join(warn, MARKER_RELPATH)), 'warn ignores the marker; it does not delete it');
+  const paused = repo({ marker });
+  assert.equal(verdict(paused, MAIN_AUTONOMOUS).decision, 'deny');
+});
+
 test('a SUPERVISED operator is never bound, and no marker is written for them', () => {
   const dir = repo({ sidecar: sidecar({ five: 99.9 }) });
   assert.equal(verdict(dir, MAIN_SUPERVISED), PASS);

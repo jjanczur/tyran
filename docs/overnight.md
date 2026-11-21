@@ -151,9 +151,10 @@ board's timer and `overnight.mjs watch-limit`) skipped only `off`, so under
 `warn` one account at its wall wrote `.tyran/state/paused-until.json`. That
 marker is per repo while the account is per session, and the gate denies on the
 marker alone, so every unattended session in the repo was refused, including
-sessions on accounts with quota left. A marker that is already there, left by
-`pause` mode or by 0.1.48, still binds under `warn`;
-`node scripts/overnight.mjs cancel --clear` removes it.
+sessions on accounts with quota left. Until 0.1.50 the gate also read `warn`
+only when no marker existed, so a marker left over from `pause` mode or from
+0.1.48 still bound. It now reads the mode first: under `warn` a marker binds
+nothing, and `node scripts/overnight.mjs cancel --clear` still removes it.
 
 The default is `off` because it is a behaviour change an operator should
 choose, not because it needs a setup step: enabling it takes one edit and the

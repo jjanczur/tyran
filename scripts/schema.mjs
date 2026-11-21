@@ -51,14 +51,24 @@ export const KNOWLEDGE_KINDS = Object.freeze(['fact', 'convention', 'gotcha', 'c
 export const BOUNDARY_PRESETS = Object.freeze(['strict', 'open']);
 export const BOUNDARY_VALUES = Object.freeze(['refuse', 'allow']);
 export const BOUNDARY_PROMPTS = Object.freeze(['ask', 'skip']);
-/** The four refusal flags, in the order they are documented. */
-export const BOUNDARY_FLAGS = Object.freeze(['outside_repo', 'credentials', 'path_classes', 'push']);
+/**
+ * The refusal flags, in the order they are documented.
+ *
+ * `kernel` is last and is the one no preset moves: it reaches the files that
+ * enforce every other flag in this list (`hooks/**`, `.tyran/policies/**`,
+ * `.claude/settings*.json`, `.tyran/STOP`), and the gate honours it only in a
+ * session a human started with `--permission-mode bypassPermissions`. An
+ * install that already says `preset: open` must not gain kernel writes by
+ * updating, so it is spelled out or it is `refuse`.
+ */
+export const BOUNDARY_FLAGS = Object.freeze(['outside_repo', 'credentials', 'path_classes', 'push', 'kernel']);
 /** Every key legal inside the block. */
 export const BOUNDARY_KEYS = Object.freeze(['preset', ...BOUNDARY_FLAGS, 'prompts']);
 /** What each preset resolves to before per-key overrides are applied. */
 const BOUNDARY_BY_PRESET = Object.freeze({
-  strict: Object.freeze({ outside_repo: 'refuse', credentials: 'refuse', path_classes: 'refuse', push: 'refuse', prompts: 'ask' }),
-  open: Object.freeze({ outside_repo: 'allow', credentials: 'allow', path_classes: 'allow', push: 'allow', prompts: 'skip' }),
+  strict: Object.freeze({ outside_repo: 'refuse', credentials: 'refuse', path_classes: 'refuse', push: 'refuse', kernel: 'refuse', prompts: 'ask' }),
+  // `kernel: 'refuse'` under open too, on purpose: see BOUNDARY_FLAGS.
+  open: Object.freeze({ outside_repo: 'allow', credentials: 'allow', path_classes: 'allow', push: 'allow', kernel: 'refuse', prompts: 'skip' }),
 });
 /** The safe answer, used for an absent block and for every value the schema rejects. */
 export const BOUNDARIES_STRICT = BOUNDARY_BY_PRESET.strict;

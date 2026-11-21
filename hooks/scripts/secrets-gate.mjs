@@ -378,10 +378,10 @@ export function tokensOf(segment) {
  * direction this gate wants to be wrong in, and it is why the measured reason
  * `splitSegments` stays quote-blind (see SEPARATORS) still holds.
  *
- * `closed` is false when a quote is still open at the end of the segment,
- * which is what a quote-blind split through a quoted value looks like;
- * `openedAt` is the index of the word that quote opened in. Nothing is
- * expanded: `$VAR`, globs and `~` stay literal and still fail `isLiteralPath`.
+ * Nothing is expanded: `$VAR`, globs and `~` stay literal and still fail
+ * `isLiteralPath`. A quote still open at the end of the segment, which is what
+ * a quote-blind split through a quoted value looks like, simply ends the last
+ * word; `quotedSeparatorHidesVerb` is what reads that shape.
  */
 export function shellWords(segment) {
   const text = String(segment);
@@ -389,10 +389,8 @@ export function shellWords(segment) {
   let word = '';
   let inWord = false;
   let quote = null;
-  let openedAt = -1;
   const open = (kind) => {
     quote = kind;
-    openedAt = words.length;
   };
   for (let k = 0; k < text.length; k++) {
     const ch = text[k];
@@ -426,11 +424,8 @@ export function shellWords(segment) {
     }
   }
   if (inWord) words.push(word);
-  return { words, closed: quote === null, openedAt: quote === null ? -1 : openedAt };
+  return { words };
 }
-
-/** How far `planCommand` follows a quote across segments before it stops reading. */
-const MAX_SPAN_CHARS = 16 * 1024;
 
 /** `NAME=value` in the program slot: an assignment for the command after it. */
 const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
@@ -482,6 +477,126 @@ export function gitInvocation(words) {
   const index = k < all.length && isGitProgram(all[k]) ? k : all.findIndex((w, i) => i >= k && isGitProgram(w));
   if (index === -1) return null;
   return { index, words: all, tokens: all.slice(index), env };
+}
+
+/** The git verbs whose arguments decide what this gate scans. */
+const PUBLISHING_VERBS = Object.freeze(['commit', 'push', 'add']);
+
+/**
+ * True when a command separator sits inside a quoted value IN FRONT OF the
+ * verb of a `git commit`, `git push` or `git add`, within one command as the
+ * shell runs it.
+ *
+ * That is the shape `splitSegments`, which is quote-blind on purpose, cannot
+ * read: it cuts the command inside the value, and the pieces land in
+ * different segments. Three spellings defeated a check made one segment at a
+ * time, each measured to pass a staged key unscanned:
+ *
+ *  - `GIT_AUTHOR_NAME="A; B" git commit`: the quote hiding `git` opened in
+ *    the previous segment;
+ *  - `GIT_AUTHOR_NAME="A; cd /tmp" git commit`: the second segment starts
+ *    with `cd`, which the walk handles and skips;
+ *  - `GIT_AUTHOR_NAME="A; git -C <decoy> commit" git commit`: a commit IS
+ *    found, in a decoy repository, and stood in for the real one.
+ *
+ * So this is decided by POSITION, in one linear pass over the whole line: the
+ * line is split where the shell splits it, and a segment is marked when a
+ * separator inside a quote comes at or before the verb's word. A separator in
+ * a commit MESSAGE comes after the verb (`git commit -m "fix; x"`) and does
+ * not mark it. A command substitution, `"$(...)"` or backticks, is parsed by
+ * the shell as commands, and `splitSegments` already reads those as segments
+ * of their own, so a separator inside one is not counted.
+ */
+export function quotedSeparatorHidesVerb(command) {
+  const text = stripHeredocBodies(command).replace(/\\\r?\n/g, ' ');
+  const modes = [];
+  let words = [];
+  let word = '';
+  let inWord = false;
+  let sepWord = -1;
+  let hidden = false;
+  const endWord = () => {
+    if (inWord) words.push(word);
+    word = '';
+    inWord = false;
+  };
+  const endSegment = () => {
+    endWord();
+    if (sepWord !== -1 && !hidden) {
+      const inv = gitInvocation(words);
+      const op = inv === null ? null : gitOperation(inv.tokens);
+      if (op !== null && PUBLISHING_VERBS.includes(op.name) && inv.index + op.index >= sepWord) hidden = true;
+    }
+    words = [];
+    sepWord = -1;
+  };
+  const literal = (ch) => {
+    const inSubstitution = modes.includes('$(') || modes.includes('`');
+    if (!inSubstitution && SEPARATORS.includes(ch) && sepWord === -1) sepWord = words.length;
+    word += ch;
+  };
+  for (let k = 0; k < text.length; k++) {
+    const ch = text[k];
+    const mode = modes[modes.length - 1];
+    if (mode === "'") {
+      if (ch === "'") modes.pop();
+      else literal(ch);
+      continue;
+    }
+    if (mode === "$'") {
+      if (ch === '\\' && k + 1 < text.length) word += text[++k];
+      else if (ch === "'") modes.pop();
+      else literal(ch);
+      continue;
+    }
+    if (mode === '"') {
+      if (ch === '\\' && k + 1 < text.length && '$`"\\\n'.includes(text[k + 1])) word += text[++k];
+      else if (ch === '"') modes.pop();
+      else if (ch === '$' && text[k + 1] === '(') {
+        modes.push('$(');
+        word += '$(';
+        k++;
+      } else if (ch === '`') {
+        modes.push('`');
+        word += ch;
+      } else literal(ch);
+      continue;
+    }
+    // Unquoted, or inside a command substitution, which parses like unquoted.
+    if (ch === '\\') {
+      inWord = true;
+      if (k + 1 < text.length) word += text[++k];
+    } else if ((mode === '$(' && ch === ')') || (mode === '`' && ch === '`')) {
+      modes.pop();
+      word += ch;
+    } else if (ch === "'" || ch === '"') {
+      modes.push(ch);
+      inWord = true;
+    } else if (ch === '$' && (text[k + 1] === "'" || text[k + 1] === '(')) {
+      modes.push(text[k + 1] === "'" ? "$'" : '$(');
+      if (text[k + 1] === '(') word += '$(';
+      inWord = true;
+      k++;
+    } else if (ch === '`') {
+      modes.push('`');
+      inWord = true;
+      word += ch;
+    } else if (mode !== undefined) {
+      // Inside a substitution: its words and separators belong to the inner
+      // command, which `splitSegments` reads as segments of its own.
+      inWord = true;
+      word += ch;
+    } else if (/\s/.test(ch)) {
+      endWord();
+    } else if (SEPARATORS.includes(ch)) {
+      endSegment();
+    } else {
+      inWord = true;
+      word += ch;
+    }
+  }
+  endSegment();
+  return hidden;
 }
 
 export function isGitProgram(token) {
@@ -743,35 +858,9 @@ export function planCommand(command, startDir) {
   /** Set once a `git add` is seen: a later commit in the line will include it. */
   let pendingAdd = null;
 
-  /**
-   * A quote still open at the end of a segment: the text since it opened, and
-   * the verbs the per-segment readings found inside it. See the span check
-   * below the readings.
-   */
-  let span = null;
-
   for (const segment of splitSegments(command)) {
     const raw = tokensOf(segment);
     if (raw.length === 0) continue;
-
-    // Joined with a space, not with the separator `splitSegments` consumed:
-    // this reading only ever asks WHICH VERB runs, never a value, and a space
-    // inside a quote does not change that.
-    const continuing = span !== null;
-    const spanText = continuing ? `${span.text} ${segment}` : segment;
-    const spanVerbs = continuing ? span.verbs : new Set();
-    const spanParse = shellWords(spanText);
-    span = spanParse.closed ? null : { text: spanText, verbs: spanVerbs };
-    if (span !== null && span.text.length > MAX_SPAN_CHARS) {
-      // Bounded, so a quote that never closes cannot make the walk quadratic
-      // in the length of the command. A span that long with git in it is not
-      // read: it fails closed.
-      if (/(^|[\s/])git(\.exe)?(\s|$)/i.test(span.text)) {
-        unreadableVerb = true;
-        unmodellable.push({ what: 'a quoted value spans more of the command than this gate follows' });
-      }
-      span = null;
-    }
 
     // Environment assignments first: they can name the repository outright.
     let i = 0;
@@ -944,50 +1033,6 @@ export function planCommand(command, startDir) {
     const gitPush = pushAt !== null;
     const gitAdd = addAt !== null;
 
-    // FAIL CLOSED where neither reading can see the verb. `splitSegments` is
-    // quote-blind on purpose, so `git -c user.name="A; B" commit` arrives as
-    // `git -c user.name="A` (git, no verb) and ` B" commit` (verb, no git).
-    // The mark is a quote opened AFTER the git word and still open at the end
-    // of a segment whose verb is unreadable: a separator sat inside a value in
-    // front of the subcommand. A quote opened inside a commit MESSAGE leaves
-    // the verb readable (`git commit -m "fix; x"`) and does not trip it.
-    if (
-      quoted !== null &&
-      quotedOp === null &&
-      !parsed.closed &&
-      parsed.openedAt > quoted.index &&
-      !gitCommit &&
-      !gitPush
-    ) {
-      unreadableVerb = true;
-      unmodellable.push({
-        what: 'a quoted value in front of the `git` subcommand holds a command separator, so which subcommand runs cannot be read',
-      });
-    }
-
-    // The same hole, with the quote opened in an EARLIER segment:
-    // `GIT_AUTHOR_NAME="A; B" git commit` splits into `GIT_AUTHOR_NAME="A` and
-    // ` B" git commit`, where the whitespace reading takes `B` as the program
-    // and the quote-aware reading of the segment alone swallows `git` inside a
-    // quote that is still open. Read across the segments the quote joins, the
-    // verb is plain. When that verb is one no segment of the span found, it
-    // was hidden by a separator in a quoted value, and the line fails closed.
-    // A separator inside a commit MESSAGE leaves the verb found by the
-    // segment it starts in (`git commit -m "fix; x"`), and does not trip it.
-    if (gitCommit) spanVerbs.add('commit');
-    if (gitPush) spanVerbs.add('push');
-    if (gitAdd) spanVerbs.add('add');
-    if (continuing) {
-      const joined = gitInvocation(spanParse.words);
-      const joinedOp = joined === null ? null : gitOperation(joined.tokens);
-      if (joinedOp !== null && ['commit', 'push', 'add'].includes(joinedOp.name) && !spanVerbs.has(joinedOp.name)) {
-        unreadableVerb = true;
-        unmodellable.push({
-          what: 'a quoted value in front of the `git` subcommand holds a command separator, so which subcommand runs cannot be read',
-        });
-      }
-    }
-
     const hasGh = raw.some(isGhProgram);
     const ghPublishes =
       hasGh &&
@@ -1094,9 +1139,15 @@ export function planCommand(command, startDir) {
         // A prior `gh` publish can leave `pushRefs` unset, which is wide too.
         const priorRefs = priorPush.pushRefs ?? [];
         const wide = priorRefs.length === 0 || refs.length === 0;
+        // A prior `gh pr create` names no remote (null). Beside a push that
+        // names one it is not a second remote: counted as one, a repository
+        // with two remotes refused `gh pr create && git push origin x`, which
+        // `pushRange` cannot answer for an unnamed remote.
+        const remotes = [...new Set([...(priorPush.pushRemotes ?? [priorPush.pushRemote]), remote])];
+        const named = remotes.filter((r) => r !== null);
         scan = {
           pushRemote: remote,
-          pushRemotes: [...new Set([...(priorPush.pushRemotes ?? [priorPush.pushRemote]), remote])],
+          pushRemotes: named.length > 0 ? named : remotes,
           pushRefs: wide ? [] : [...new Set([...priorRefs, ...refs])],
         };
       }
@@ -1325,6 +1376,18 @@ export function planCommand(command, startDir) {
         });
       }
     }
+  }
+
+  // FAIL CLOSED where a separator inside a quoted value hides the verb.
+  // `splitSegments` is quote-blind on purpose, so `git -c user.name="A; B"
+  // commit` arrives as `git -c user.name="A` (git, no verb) and ` B" commit`
+  // (verb, no git), and no reading of either segment sees a commit. Asked of
+  // the whole line, once, so no `continue` in the walk above can skip it.
+  if (quotedSeparatorHidesVerb(command)) {
+    unreadableVerb = true;
+    unmodellable.push({
+      what: 'a quoted value in front of the `git` subcommand holds a command separator, so which subcommand runs cannot be read',
+    });
   }
 
   // `aliased` counts as "something might be published here": without it the

@@ -243,6 +243,12 @@ test('gate: the command line of a deletion is still scanned', { skip: NEEDS_SCAN
 test('plan: two pushes to two remotes keep both remotes', () => {
   const [target] = pushTargets('git push upstream leaky && git push origin leaky');
   assert.deepEqual(target.pushRemotes, ['upstream', 'origin']);
+  // A `gh pr create` names no remote. Beside a push that does, it adds no
+  // unnamed one, which in a repository with two remotes would refuse a line
+  // that 0.1.51 passed.
+  for (const command of ['gh pr create --title x && git push origin leaky', 'git push origin leaky && gh pr create --title x']) {
+    assert.deepEqual(pushTargets(command)[0].pushRemotes, ['origin'], command);
+  }
 });
 
 test('gate: a branch already on one remote is still scanned when the line also pushes it to another', { skip: NEEDS_SCANNER }, async () => {

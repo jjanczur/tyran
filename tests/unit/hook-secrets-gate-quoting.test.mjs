@@ -222,6 +222,15 @@ test('plan: a SEPARATOR inside a quoted value fails closed instead of passing', 
     'GIT_AUTHOR_NAME="A; B" git commit -m x',
     'GIT_AUTHOR_NAME="A & B" git commit -m x',
     "GIT_AUTHOR_NAME='A | B' git push origin main",
+    // the second segment starts with `cd`, which the walk handles and skips
+    'GIT_AUTHOR_NAME="A; cd /tmp" git commit -m x',
+    'GIT_AUTHOR_NAME="A; pushd /tmp" git commit -m x',
+    // a decoy commit inside the value, in another directory
+    'GIT_AUTHOR_NAME="A; git -C /elsewhere commit" git commit -m x',
+    // a value long enough that no bounded look-back would reach its quote
+    `GIT_AUTHOR_NAME="${'a'.repeat(20000)}; B" git commit -m x`,
+    // two quoted values in a row, the separator in the first
+    'GIT_A="x; y" GIT_B="p q" git commit -m x',
   ]) {
     const plan = planCommand(command, '/repo');
     assert.equal(plan.needsScan, true, command);
@@ -253,6 +262,11 @@ test('plan: commands that commit nothing still plan nothing', () => {
 
 test('plan: a separator inside a commit MESSAGE is not an unreadable verb', () => {
   for (const command of [
+    'git commit -m "fix; refactor" && git push origin main',
+    'git -c user.name="J J" commit -m "a; b" -m "c | d"',
+    'GIT_COMMITTER_DATE="$(git log -1 --format=%cd)" git commit --amend --no-edit',
+    'echo "a; b" && git commit -m x',
+    "git commit -m \"$(cat <<'EOF'\nsubject; body (scope)\nEOF\n)\"",
     'git commit -m "fix; refactor"',
     'git -c user.name="J J" commit -m "fix (scope): a & b"',
     "git commit -m \"it's the source of truth\" ; git push origin main",
@@ -266,6 +280,7 @@ test('plan: a separator inside a commit MESSAGE is not an unreadable verb', () =
 // ----------------------------------------------- end to end, real scanner
 
 const E2E_COMMITS = [
+  'GIT_AUTHOR_NAME="A; cd /tmp" git commit -m x',
   'git -c user.name="Jacek Janczura" commit -m x',
   "git -c 'user.name=Jacek Janczura' commit -m x",
   "GIT_AUTHOR_NAME='Jacek Janczura' git commit -m x",
@@ -289,6 +304,16 @@ test('gate: `git -C "<dir with a space>" -c a="b c" commit` scans that repositor
   const dir = repoWithStagedSecret(join(tempDir(), 'with space', 'repo'));
   const elsewhere = tempDir();
   assert.equal(verdictOf(runGateScript(`git -C "${dir}" -c a="b c" commit -m x`, elsewhere)), 'deny');
+});
+
+test('gate: a decoy commit inside a quoted value does not stand in for the real one', { skip: NEEDS_SCANNER }, () => {
+  // The whitespace reading finds `git -C <decoy> commit` inside the value and
+  // scans the clean decoy; the shell runs only the commit after it, in cwd.
+  const dir = repoWithStagedSecret();
+  const decoy = tempDir();
+  git(decoy, 'init', '-q');
+  const command = `GIT_AUTHOR_NAME="A; git -C ${decoy} commit" git commit -m x`;
+  assert.equal(verdictOf(runGateScript(command, dir)), 'deny');
 });
 
 test('gate: `cd <repo> && GIT_AUTHOR_NAME="a b" git commit` scans that repository', { skip: NEEDS_SCANNER }, () => {

@@ -17,7 +17,8 @@ two pushes but kept the last push's remote, and the range is "commits not on
 that remote". So `git push upstream leaky && git push origin leaky`, with
 `leaky` already on `origin`, scanned an empty range while `upstream` received
 the branch for the first time. The remotes are now unioned too, and the range
-is listed once per remote.
+is listed once per remote. A `gh pr create`, which names no remote, adds no
+unnamed one beside a push that names its remote.
 
 Three new tests. The policy-gate test runs six spellings under P1, both orders
 among them; on 0.1.51 it is red. The secrets-gate pair is a planner test and a
@@ -46,18 +47,26 @@ as before. `splitSegments` stays quote-blind, for the reason recorded on
 fails closed (`unreadableVerb`, refused by both gates) instead of passing.
 
 The gate change is the patch from `fix/secrets-gate-quoted-commit` (0648f5c),
-ported onto the 0.1.51 push code. Review of the patch found one more spelling
-it left open: a separator in an ASSIGNMENT in front of git,
-`GIT_AUTHOR_NAME="A; B" git commit -m x`, still passed unscanned, because the
-quote that hides `git` was opened in the previous segment. `planCommand` now
-follows an open quote across segments and fails closed when the joined text
-runs a commit, push or add that no segment of it showed.
+ported onto the 0.1.51 push code, with its fail-closed check replaced. The
+patch decided one segment at a time, and review found three spellings that
+still passed a staged key unscanned. In `GIT_AUTHOR_NAME="A; B" git commit`
+the quote hiding `git` opened in the previous segment. In
+`GIT_AUTHOR_NAME="A; cd /tmp" git commit` the second segment starts with `cd`,
+which the walk handles and skips. In `GIT_AUTHOR_NAME="A; git -C <decoy>
+commit" git commit` a commit is found, in a clean decoy repository, and stands
+in for the real one. The check is now one linear pass over the whole line
+(`quotedSeparatorHidesVerb`), split where the shell splits it. It is decided
+by position: a line fails closed when a separator inside a quote comes at or
+before the verb of a commit, push or add. A separator in a commit message
+comes after the verb and does not trip it. Neither does one inside `"$(...)"`,
+which the shell runs as commands and the quote-blind lexer already reads.
 
-39 tests in `hook-secrets-gate-quoting.test.mjs` (the branch's 36, plus the
-assignment-separator spellings and a push inside a shell loop) and one in the
-policy-gate suite. On 0.1.51, 33 of the branch's 36 are red. With the branch's
-patch alone, four stay red: the two gate tests and the planner test for the
-assignment-separator spellings, and the policy-gate test.
+41 tests in `hook-secrets-gate-quoting.test.mjs` (the branch's 36, plus the
+spellings above, a value too long for any bounded look-back, and a push inside
+a shell loop) and one in the policy-gate suite. On 0.1.51, 38 of the 41 are
+red. With the branch's patch alone, 5 are red: the three assignment-separator
+gate tests, the decoy, and the planner test that lists the separator
+spellings.
 
 ### A redirection's file descriptor is no longer read as a refspec
 
@@ -97,7 +106,7 @@ ported onto this release's push code. 13 tests in
 `hook-secrets-gate-lease-sha.test.mjs`; on 0.1.51, 5 are red, the reported
 false refusal among them.
 
-### Release titles keep the code span their heading starts with
+### Release titles no longer lose the words of a leading code span
 
 The GitHub releases for 0.1.48 to 0.1.51 were titled `0.1.51 — : deleting a
 remote branch ...`: the first heading's code span was missing. The release job

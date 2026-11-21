@@ -236,3 +236,33 @@ test('gate: the command line of a deletion is still scanned', { skip: NEEDS_SCAN
   assert.equal(verdict.decision, 'deny', JSON.stringify(verdict));
   assert.equal(verdict.reason.includes(secret), false, 'the refusal must not quote the secret');
 });
+
+// ---------------------------------------------------------------------------
+// two pushes to two REMOTES: each push is scanned against its own remote
+
+test('plan: two pushes to two remotes keep both remotes', () => {
+  const [target] = pushTargets('git push upstream leaky && git push origin leaky');
+  assert.deepEqual(target.pushRemotes, ['upstream', 'origin']);
+});
+
+test('gate: a branch already on one remote is still scanned when the line also pushes it to another', { skip: NEEDS_SCANNER }, async () => {
+  // Measured on 0.1.51: the union of refs kept only the LAST push's remote, so
+  // the range was `leaky --not --remotes=origin`. `leaky` is on `origin`
+  // already, the range was empty, and the push to `upstream`, where `leaky`
+  // has never been, published the key unscanned.
+  const dir = repoWithUnpushedBranch('leaky', fakeSecret());
+  git(dir, 'push', '-q', 'origin', 'leaky');
+  const upstream = tempDir('tyran-del-upstream-');
+  execFileSync('git', ['init', '-q', '--bare', upstream]);
+  git(dir, 'remote', 'add', 'upstream', upstream);
+  for (const command of [
+    'git push upstream leaky && git push origin leaky',
+    'git push origin leaky && git push upstream leaky',
+  ]) {
+    const verdict = await handle({ input: bashInput(command, dir), cwd: dir });
+    assert.equal(verdict.decision, 'deny', `${command}: ${JSON.stringify(verdict)}`);
+    assert.match(verdict.reason, /secret-shaped finding/, command);
+  }
+  // the control: pushing it to the remote that already holds it publishes nothing
+  assert.deepEqual(await handle({ input: bashInput('git push origin leaky', dir), cwd: dir }), PASS);
+});

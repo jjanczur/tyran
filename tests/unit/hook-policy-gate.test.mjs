@@ -1746,6 +1746,33 @@ test('B1: a git ALIAS makes the subcommand unreadable, so it refuses', async () 
   assert.equal(await ask(bashInput('git status', dir), dir), PASS);
 });
 
+test('B1: every push on one command line is judged, not only the last one', async () => {
+  // Measured on 0.1.51: `git push origin HEAD:main && git push origin
+  // feature/x` passed under P1. `planCommand` keeps one target per directory,
+  // and each push in that directory overwrote the previous one's argv, so this
+  // gate judged the LAST push only. The first one published to `main`.
+  const dir = deployRepo('P1', 'feature/x');
+  for (const command of [
+    'git push origin HEAD:main && git push origin feature/x',
+    'git push origin main; git push origin feature/x',
+    'git push origin HEAD:main || git push origin feature/x',
+    'git push origin feature/x && git push origin HEAD:main',
+    'git push origin main && git push origin feature/x && git push origin feature/y',
+    // two directories spelled for one repository are two targets already;
+    // this pins that the same holds when both spellings resolve to one
+    'git -C . push origin main && git push origin feature/x',
+  ]) {
+    const got = await ask(bashInput(command, dir), dir);
+    assert.equal(got.decision, 'deny', command);
+    assert.match(got.reason, /`main`/, command);
+  }
+  // a line of pushes that are all within the class still passes
+  assert.equal(
+    await ask(bashInput('git push origin feature/x && git push origin feature/y', dir), dir),
+    PASS,
+  );
+});
+
 test('B2: the read rule is not bypassable through Bash', async () => {
   // Measured live by review: this gate refused `Read .env` and the model
   // reached for `Bash: grep` in its NEXT tool call, unprompted, and read the

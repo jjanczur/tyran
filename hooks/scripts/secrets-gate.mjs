@@ -826,18 +826,36 @@ export function planCommand(command, startDir) {
       // and stays wide.
       const prior = targets.get(dir);
       const priorPush = prior !== undefined && prior.scanPush === true ? prior : null;
+      //
+      // The REMOTES are unioned too, for the same reason. Which commits are
+      // already public is a question about one remote (see `pushRange`), and
+      // keeping only the last one let `git push upstream leaky && git push
+      // origin leaky` scan `leaky --not --remotes=origin`: empty, because
+      // `leaky` was on origin already, while upstream had never seen it.
+      // `buildPayload` lists the range once per remote and scans the union.
       let scan;
       if (deletesOnly) {
-        scan = priorPush !== null ? {} : { pushRemote: remote, pushRefs: [], pushDeletesOnly: true };
+        scan =
+          priorPush !== null ? {} : { pushRemote: remote, pushRemotes: [remote], pushRefs: [], pushDeletesOnly: true };
       } else if (priorPush === null || priorPush.pushDeletesOnly === true) {
-        scan = { pushRemote: remote, pushRefs: refs, pushDeletesOnly: false };
+        scan = { pushRemote: remote, pushRemotes: [remote], pushRefs: refs, pushDeletesOnly: false };
       } else {
         // A prior `gh` publish can leave `pushRefs` unset, which is wide too.
         const priorRefs = priorPush.pushRefs ?? [];
         const wide = priorRefs.length === 0 || refs.length === 0;
-        scan = { pushRemote: remote, pushRefs: wide ? [] : [...new Set([...priorRefs, ...refs])] };
+        scan = {
+          pushRemote: remote,
+          pushRemotes: [...new Set([...(priorPush.pushRemotes ?? [priorPush.pushRemote]), remote])],
+          pushRefs: wide ? [] : [...new Set([...priorRefs, ...refs])],
+        };
       }
-      note(dir, { scanPush: true, ...scan, pushArgv, pushReadable: readable });
+      // Every push's argv, in order, deletions included. The policy gate
+      // judges each one: keeping only the last let `git push origin HEAD:main
+      // && git push origin feature/x` reach `main` under P1 while the gate
+      // read `feature/x`. `pushArgv` is the last of them, for readers that
+      // only ever see one push.
+      const pushArgvs = [...(prior?.pushArgvs ?? []), pushArgv];
+      note(dir, { scanPush: true, ...scan, pushArgv, pushArgvs, pushReadable: readable });
       triggers.push(
         deletesOnly
           ? 'a git push that only deletes remote refs (it publishes no objects; the command line is scanned)'
@@ -1573,17 +1591,25 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
   // so there is no range to list. Its command line is still scanned by
   // `decide`, like every other command this gate sees.
   if (target !== null && target.scanPush && target.pushDeletesOnly !== true) {
-    const range = await pushRange(target.dir, target.pushRemote, target.pushRefs, {
-      runner, timeoutMs: budget(GIT_BUDGET_MS),
-    });
-    const listed = await git(['-C', target.dir, 'rev-list', '--objects', ...range], {
-      runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'listing the objects this push would publish',
-    });
+    // One range per remote the line pushes to (see `planCommand`): what is
+    // already public on one remote is not on another. `addBlobs` reads each
+    // object once, so the union costs nothing for what the ranges share.
+    const remotes = Array.isArray(target.pushRemotes) && target.pushRemotes.length > 0
+      ? target.pushRemotes
+      : [target.pushRemote];
     const objects = [];
-    for (const line of String(listed).split('\n')) {
-      const space = line.indexOf(' ');
-      if (space === -1) continue; // a commit, which carries no path
-      objects.push({ sha: line.slice(0, space), path: line.slice(space + 1) });
+    for (const remote of remotes) {
+      const range = await pushRange(target.dir, remote, target.pushRefs, {
+        runner, timeoutMs: budget(GIT_BUDGET_MS),
+      });
+      const listed = await git(['-C', target.dir, 'rev-list', '--objects', ...range], {
+        runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'listing the objects this push would publish',
+      });
+      for (const line of String(listed).split('\n')) {
+        const space = line.indexOf(' ');
+        if (space === -1) continue; // a commit, which carries no path
+        objects.push({ sha: line.slice(0, space), path: line.slice(space + 1) });
+      }
     }
     await addBlobs(target.dir, objects, add, { runner, budget });
   }

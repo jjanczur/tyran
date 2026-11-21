@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.52 — 2026-11-21
+
+### Both gates judge every push on a command line, not only the last one
+
+The policy gate judged only the LAST push in a line. Under P1,
+`git push origin HEAD:main && git push origin feature/x` passed and the first
+push reached `main`. The cause was in `planCommand`, which both gates read: it
+keeps one target per repository, and each push into that repository overwrote
+the previous one's argv. The target now carries `pushArgvs`, every push in
+order, and the policy gate reads the destination, the deletion and the force of
+each one. Any one push past the class refuses the line.
+
+The secrets gate had the same shape on the remote. 0.1.51 unioned the refs of
+two pushes but kept the last push's remote, and the range is "commits not on
+that remote". So `git push upstream leaky && git push origin leaky`, with
+`leaky` already on `origin`, scanned an empty range while `upstream` received
+the branch for the first time. The remotes are now unioned too, and the range
+is listed once per remote.
+
+Three new tests. The policy-gate test runs six spellings under P1, both orders
+among them; on 0.1.51 it is red. The secrets-gate pair is a planner test and a
+gate test against real git and gitleaks; both are red on 0.1.51.
+
 ## 0.1.51 — 2026-11-21
 
 ### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends

@@ -2014,6 +2014,17 @@ async function decideBash({ input, toolInput, root, runner, budget, boundaries, 
         'to a protected branch while this gate saw no push at all.',
     );
   }
+  // Same hole, opened by a separator inside a quoted value in front of the
+  // subcommand (`git -c user.name="A; B" push origin main`): the lexer splits
+  // there on purpose, so the verb is in a segment with no `git` in it.
+  if (plan.unreadableVerb) {
+    throw new PolicyFailure(
+      'a quoted value in front of the git subcommand holds a command separator (`;`, `&`, `|`, ' +
+        'a bracket), so which subcommand it runs is not readable from the command line',
+      'set the value first (`git config user.name "A B"`) or drop the separator from it, then run ' +
+        'the subcommand on its own.',
+    );
+  }
   if (pushes.length === 0) return PASS;
 
   const deployClass = await loadDeployClass(root);

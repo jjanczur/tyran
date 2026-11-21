@@ -1773,6 +1773,33 @@ test('B1: every push on one command line is judged, not only the last one', asyn
   );
 });
 
+test('B1: a quoted value with a space in front of `push` does not hide it from the deployment class', async () => {
+  // The lexer read `Janczura` as the verb of `git -c user.name="Jacek
+  // Janczura" push ...`, so this gate saw no push and a P1 repository
+  // published to `main`. The fix lives in `planCommand`, which both gates
+  // read; this pins the policy side of it.
+  const dir = deployRepo('P1', 'main');
+  for (const command of [
+    'git -c user.name="Jacek Janczura" push origin main',
+    "git -c 'user.name=Jacek Janczura' push origin main",
+    "GIT_AUTHOR_NAME='Jacek Janczura' git push origin main",
+    'env X=a git push origin main',
+    'for b in a; do git push origin main; done',
+    // a separator inside the value: the verb is unreadable, so it refuses
+    'git -c user.name="A; B" push origin main',
+    'GIT_AUTHOR_NAME="A; B" git push origin main',
+  ]) {
+    const got = await ask(bashInput(command, dir), dir);
+    assert.equal(got.decision, 'deny', command);
+  }
+  // a feature branch behind the same quoted value still passes
+  const feature = deployRepo('P1', 'feature/x');
+  assert.equal(
+    await ask(bashInput('git -c user.name="Jacek Janczura" push origin HEAD', feature), feature),
+    PASS,
+  );
+});
+
 test('B2: the read rule is not bypassable through Bash', async () => {
   // Measured live by review: this gate refused `Read .env` and the model
   // reached for `Bash: grep` in its NEXT tool call, unprompted, and read the

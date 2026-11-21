@@ -23,6 +23,42 @@ Three new tests. The policy-gate test runs six spellings under P1, both orders
 among them; on 0.1.51 it is red. The secrets-gate pair is a planner test and a
 gate test against real git and gitleaks; both are red on 0.1.51.
 
+### A quoted value with a space no longer hides git commit or git push
+
+Reported from a real install. `git -c user.name="Jacek Janczura" commit -m x`,
+the single-quoted `-c` spelling and `GIT_AUTHOR_NAME='Jacek Janczura' git
+commit` all passed the secrets gate UNSCANNED with a key staged, while
+`git -c user.name=JJ commit` was refused. `tokensOf` splits a segment on
+whitespace before it drops the quotes, so the subcommand resolver read
+`Janczura` as the verb, or, behind an assignment, as the program with `git` as
+the verb. No target meant no scan. `env X=1 git commit` and
+`for b in a; do git push ...; done` had the same hole with no quote at all. The
+policy gate reads the same plan, so a quoted identity in front of `git push`
+also walked past the deployment class.
+
+`planCommand` now also reads each segment the way the shell splits it
+(`shellWords`: single and double quotes, `$'...'`, backslashes), and peels
+assignments and wrapper prefixes in a loop (`gitInvocation`). A verb either
+reading finds counts, so every command the old reading recognised is handled
+as before. `splitSegments` stays quote-blind, for the reason recorded on
+`SEPARATORS`. A separator inside a quoted value in front of the subcommand
+(`git -c user.name="A; B" commit`) leaves the verb unreadable, and that now
+fails closed (`unreadableVerb`, refused by both gates) instead of passing.
+
+The gate change is the patch from `fix/secrets-gate-quoted-commit` (0648f5c),
+ported onto the 0.1.51 push code. Review of the patch found one more spelling
+it left open: a separator in an ASSIGNMENT in front of git,
+`GIT_AUTHOR_NAME="A; B" git commit -m x`, still passed unscanned, because the
+quote that hides `git` was opened in the previous segment. `planCommand` now
+follows an open quote across segments and fails closed when the joined text
+runs a commit, push or add that no segment of it showed.
+
+39 tests in `hook-secrets-gate-quoting.test.mjs` (the branch's 36, plus the
+assignment-separator spellings and a push inside a shell loop) and one in the
+policy-gate suite. On 0.1.51, 33 of the branch's 36 are red. With the branch's
+patch alone, four stay red: the two gate tests and the planner test for the
+assignment-separator spellings, and the policy-gate test.
+
 ## 0.1.51 — 2026-11-21
 
 ### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends

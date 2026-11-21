@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.51 — 2026-11-21
+
+### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends
+
+Reported from a real install. `git push origin --delete <branch>` was refused
+with *"this would publish 4060145442 bytes in 29635 object(s)"*. A second
+report was `git push -q origin --delete review/a review/b` at 1,370,527,212
+bytes. Agents could not clean up merged branches.
+
+The cause: the deleted names were read as refspec sources. They did not
+resolve locally, and `pushRange` then widened to `--all --not
+--remotes=<target>`, which is every unpushed commit on every local branch.
+`git push origin :refs/heads/x` took the same path, because its empty source
+was dropped and an empty list is the wide range.
+
+`isDeletionOnly` now recognises the two spellings that cannot publish. The
+first is `--delete` or `-d` (an unambiguous abbreviation of `--delete`, or `-d`
+inside a cluster of `q`/`v`/`n`/`4`/`6`) beside nothing but output flags. The
+second is refspecs that are all `:<ref>` or `+:<ref>`. For those, no range is
+listed. The command line is still scanned, like every other command the gate
+sees, and the policy gate still reads where the push lands. Anything else stays
+scanned: a bare `:` (the matching refspec), `--no-delete`, `-o <value>`,
+`--push-option`, `--all`, `--mirror`, `--tags`, `-f`, a refspec the shell would
+rewrite, and a deletion beside a real refspec (`:old main` scans `main`).
+
+Found on the way and fixed in the same change: two pushes on one command line
+kept only the last segment's refs. So `git push origin leaky && git push origin
+main` passed the real gate with a private key on `leaky`. The refs are now
+unioned. A deletion never replaces an earlier push, and a wide range stays
+wide.
+
+13 new tests in `hook-secrets-gate-delete-refspec.test.mjs`, end to end against
+real git and gitleaks. On the unpatched gate 10 of them are red, the ticket's
+own `git push origin --delete gone` among them.
+
+The gate change is in `hooks/scripts/`, which is KERNEL in this repository. It
+was made in a session the operator opened for it with `boundaries.kernel:
+allow`, and the key was removed again afterwards.
+
 ## 0.1.50 — 2026-11-19
 
 ### `boundaries.kernel: allow` — no floor in a bypassPermissions session

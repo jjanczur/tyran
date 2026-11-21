@@ -271,12 +271,23 @@ can read.
 | `git commit` | every object the commit would add |
 | `git commit -a`, `git add … && git commit` | the same, plus the working-tree changes those commands stage as they run |
 | `git push`, `gh pr create` | every commit not already on **the remote being pushed to** |
+| `git push --delete <ref>`, `git push <remote> :<ref>` | only the command line: a push that only deletes remote refs sends no objects |
 | `gh release create`, `gh gist create` | the uploaded files, read from disk — they may be in no commit at all |
 | any of the above | the command line itself, so `git commit -m "<key>"` is not a hole |
 
 Excluding commits present on *any* remote (rather than the target one) let a
 key held on a private `upstream` be published to a public `origin` unscanned.
 A push that does not say which of several remotes it targets is refused.
+
+A deletion is recognised only in the spellings that cannot publish: `--delete`
+or `-d` beside nothing but output flags (`-q`, `-v`, `--dry-run`,
+`--porcelain`), or refspecs that are all `:<ref>`. A bare `:` pushes every
+matching branch and is scanned. So is anything else, such as `-o <value>`,
+`--all` or `--mirror` next to a deletion. Before 0.1.51 the deleted names were
+read as sources, did not resolve, and widened the range to every unpushed commit
+on every branch: `git push origin --delete <branch>` was refused for gigabytes
+it would never send. Two pushes in one command line are scanned as the union of
+their refs. Before, the last one replaced the first.
 
 ### What it refuses without scanning
 

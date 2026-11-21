@@ -151,8 +151,16 @@ Everything the gate knows about a command line comes from the **secrets gate's
 lexer** (`planCommand`): segmentation, transparent prefixes like `sudo`/`env`,
 the `cd`/`pushd`/`popd` working-directory model, and refusal on anything that
 needs shell expansion. There is no second decomposition — `planCommand` records
-the raw argv after `push`, and this gate reads that. Anything the lexer cannot
-model is a refusal here for the same reason it is one there.
+the raw argv after every `push`, and this gate reads each one. Anything the
+lexer cannot model is a refusal here for the same reason it is one there.
+
+Two more spellings reached `main` under P1 before 0.1.52, both through that
+shared plan. `git push origin HEAD:main && git push origin feature/x` passed
+because the plan keeps one entry per repository and the second push overwrote
+the first one's argv, so only the last push was judged. And
+`git -c user.name="A B" push origin main` passed because the lexer read `B` as
+the subcommand and saw no push at all. Each push in a line is now judged on its
+own, and any one past the class refuses the line.
 
 ## Credential-shaped reads
 

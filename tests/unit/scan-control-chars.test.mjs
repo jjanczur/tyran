@@ -1051,6 +1051,7 @@ test('THIS repository scans clean end to end', () => {
     "tests/unit/hook-retro-gate.test.mjs",
     "tests/unit/hook-secrets-gate-delete-refspec.test.mjs",
     "tests/unit/hook-secrets-gate-lease-sha.test.mjs",
+    "tests/unit/hook-secrets-gate-paths.test.mjs",
     "tests/unit/hook-secrets-gate-quoting.test.mjs",
     "tests/unit/hook-secrets-gate.test.mjs",
     "tests/unit/hook-session-start.test.mjs",

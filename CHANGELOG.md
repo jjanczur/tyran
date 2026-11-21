@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.1.53 — 2026-11-21
+
+### Path allowlists in a tracked gitleaks config apply, and a pathspec commit scans what it commits
+
+Issue #105, points 1 and 3.
+
+**Path allowlists.** The secrets gate piped every file into one
+`gitleaks stdin` buffer, so every finding had an empty `File`. A `paths`
+allowlist in a tracked `.gitleaks.toml` therefore never matched a real file,
+and a fixture under `__tests__/` was refused whatever the config said. This is
+the issue's AND case. Its OR case, a key under `src/` passing, did not
+reproduce here with an allowlist regex that matches the empty string; that
+case is now pinned as a guard. When a repository tracks a `.gitleaks.toml`,
+the gate now writes the files it determined into a temporary tree and runs
+`gitleaks dir` over it, so each file is scanned under its own path. Coverage
+stays arithmetic. The scanner's trace must name every file written, as read or
+as skipped by the allowlist and for no other reason, and the bytes it reports
+must equal the sizes of the files it read. A scan that does not add up is
+repeated over stdin, so a scanner change costs a false refusal, never a missed
+key. A push range holding several versions of one path is split into rounds,
+with one path per round under case and Unicode folding. Labels that are not
+plain relative paths, and files gitleaks would read as its own configuration
+(`.gitleaks*`), stay on stdin. A repository with no tracked config is scanned
+exactly as before, because gitleaks' default config allowlists paths of its
+own (lock files, images).
+
+One consequence for a repository whose tracked config says
+`[extend] useDefault = true`: gitleaks' default path allowlist now applies to
+it too. Measured on 8.30.1, a key in `package-lock.json`, `yarn.lock`,
+`go.sum`, a `.png` or a `.svg` is skipped by that allowlist. Over stdin it was
+refused. A key under `vendor/` is still read. A file under `node_modules/` is
+neither read nor reported by `gitleaks dir`. The accounting notices that and
+scans it over stdin, where it is refused.
+
+**Pathspec commits.** `git commit -m x -- b.txt` commits the working-tree
+content of `b.txt` and nothing else that is staged. The gate scanned the whole
+index instead. A key staged in another file refused the commit, and a key in
+an unstaged edit of `b.txt` was published unscanned. `planCommand` now reads
+the pathspec (`commitPathspec`), and the scan is the diff from `HEAD` to the
+working tree for those paths. `--include` scans the index plus those paths.
+The pathspec is narrowed on only under three conditions:
+
+- it comes from the quote-aware reading with every quote closed;
+- every word after the verb is understood;
+- every path matches a tracked file (`git ls-files --error-unmatch`).
+
+Each of these leaves the commit scanned whole:
+
+- an unknown flag, a short cluster, `-a` or `--pathspec-from-file`;
+- a glob, pathspec magic, a `#` comment or a word the shell would expand;
+- a message read as paths: `-m "update b.txt"`, or unquoted words
+  (`git commit -m fix the bug`), which git refuses as pathspecs anyway.
+
+With no `HEAD` yet, the index and the working tree are scanned. The diffs pass
+`--no-relative`, so a `diff.relative` setting cannot move the paths they print.
+
+**Found on the way: last-wins, again.** The commit side of `planCommand` had
+the shape fixed for pushes in 0.1.52.
+
+- **Two commits in one line.** The second commit's plan replaced the first's.
+  `git commit -am a && git commit -m b` lost the first commit's `-a`, so an
+  unstaged key it committed was not scanned. A second commit now only widens
+  the scan, and is never narrowed.
+- **Two adds before a commit.** `git add a && git add b && git commit` kept
+  only `b`. Every add now folds in.
+- **An add in a subdirectory.** `cd sub && git add new.pem && git commit` read
+  the added file at the repository root: `new.pem`, not `sub/new.pem`. It found
+  nothing there, and the commit published the file unscanned. Added paths are
+  now absolute, resolved where the `git add` ran, and an add folds into the
+  commit even when a `cd` lies between them.
+
+23 tests in `hook-secrets-gate-paths.test.mjs`; on 0.1.52, 15 are red. Five
+of the 15 drive `scanTree` with a scripted scanner trace, and each of these is
+not trusted:
+
+- a file the trace does not name;
+- a skip for another reason;
+- a byte count that disagrees;
+- a path the gate never wrote.
+
+Eight more are guards that pass on both versions: a message that looks like a
+pathspec, `--include`, no `HEAD`, a `node_modules/` file, and others. Five
+mutants were run against the file, and each turns at least one test red:
+
+- the per-file accounting;
+- the byte check;
+- the skip-reason check;
+- the tracked-config switch;
+- the add-folding.
+
+Still open: #105 point 2. A file created in the same command that commits it
+(`printf ... > f && git add f && git commit`) is read before it exists, and is
+scanned as empty. The same goes for a new file under a directory named to
+`git add` (`git add src/ && git commit`): the directory is not a file, and the
+untracked files under it are not read.
+
 ## 0.1.52 — 2026-11-21
 
 ### Both gates judge every push on a command line, not only the last one

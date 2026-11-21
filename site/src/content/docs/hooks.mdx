@@ -317,6 +317,7 @@ can read.
 |---|---|
 | `git commit` | every object the commit would add |
 | `git commit -a`, `git add … && git commit` | the same, plus the working-tree changes those commands stage as they run |
+| `git commit -m x -- <paths>`, `git commit -m x <paths>` | what that commit contains: the named paths as they are on disk, against `HEAD` (`--include` adds the index). Read only when every word is understood; otherwise the index and the working tree |
 | `git push`, `gh pr create` | every commit not already on **the remote being pushed to** |
 | `git push --delete <ref>`, `git push <remote> :<ref>` | only the command line: a push that only deletes remote refs sends no objects |
 | `gh release create`, `gh gist create` | the uploaded files, read from disk — they may be in no commit at all |
@@ -366,6 +367,23 @@ the wrong lesson: `*.pem binary` is a line people add for diff rendering with
 no idea a secrets gate reads it, an **accidental** hole — which is why that
 class is closed by not consulting attributes at all. A `.gitleaksignore` has
 no purpose other than suppressing findings.
+
+**Path allowlists work when the config is tracked.** Since 0.1.53, a repository
+that tracks a `.gitleaks.toml` has each file scanned under its own path, with
+`gitleaks dir` over a temporary tree the gate writes itself. Before, every file
+went into one `gitleaks stdin` buffer, every finding had an empty `File`, and a
+`paths` allowlist never matched: a fixture under `__tests__/` was refused
+whatever the config said. Coverage is still arithmetic. The scanner's trace has
+to name every file written, either as read or as skipped by the allowlist and
+for no other reason, and the bytes it reports must equal the sizes of the files
+it read. Anything that does not add up is scanned over stdin, as before. A file
+whose name gitleaks would read as its own configuration (`.gitleaks*`), and a
+path that is not a plain relative path, is never written into the tree.
+Without a tracked config nothing changes, because gitleaks' default config
+allowlists paths too. With `[extend] useDefault = true` in a tracked config,
+that default allowlist now applies: measured on 8.30.1, a key in
+`package-lock.json`, `yarn.lock`, `go.sum`, a `.png` or a `.svg` is skipped,
+where stdin refused it.
 
 ### The alias hole, closed 2026-07-27
 

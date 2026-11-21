@@ -1154,11 +1154,11 @@ test('BL-2: `git add <file>` names the file, and a later commit in the line scan
   //
   // KILLS: `paths: named` -> `paths: []`.
   const plan = planCommand('git add secret.env && git commit -m x', '/repo');
-  assert.deepEqual(plan.targets[0].includePaths, ['secret.env']);
+  assert.deepEqual(plan.targets[0].includePaths, ['/repo/secret.env']);
   assert.equal(plan.targets[0].includeUntracked, false, 'naming one file must not widen to all of them');
   assert.deepEqual(
     planCommand('git add a.pem b.pem && git commit -m x', '/repo').targets[0].includePaths,
-    ['a.pem', 'b.pem'],
+    ['/repo/a.pem', '/repo/b.pem'],
   );
 });
 

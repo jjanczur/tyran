@@ -331,6 +331,14 @@ export function splitSegments(command) {
       // what every consumer sees for a reason unrelated to splitting.
       current += ch;
     } else if (SEPARATORS.includes(ch)) {
+      // A redirection's file descriptor (`2>/dev/null`, `2>&1`, `0<in`) is a
+      // whole word of digits directly in front of `<` or `>`, and the shell
+      // never passes it to the command. Left in place it was the LAST WORD of
+      // the segment: `git push origin :gone 2>/dev/null` read `2` as a
+      // refspec, so the deletion was scanned as a wide push, and `git push
+      // 2>&1` read `2` as the remote. Only a whole word is a descriptor, which
+      // is the shell's own rule: `v2>x` passes `v2` and redirects stdout.
+      if (ch === '<' || ch === '>') current = current.replace(/(^|\s)\d+$/, '$1');
       out.push(current);
       current = '';
     } else {
@@ -351,6 +359,244 @@ export function tokensOf(segment) {
     .split(/\s+/)
     .map((w) => w.replaceAll('"', '').replaceAll("'", '').replaceAll('\\', ''))
     .filter((w) => w !== '');
+}
+
+/**
+ * Words of one segment as the SHELL splits them, for the subcommand slot.
+ *
+ * `tokensOf` splits on whitespace and only then drops quote characters, so
+ * `git -c user.name="Jacek Janczura" commit` read `Janczura` as the verb and
+ * `GIT_AUTHOR_NAME='Jacek Janczura' git commit` read `Janczura` as the
+ * program. Measured with two real findings staged: both, and the single-quoted
+ * `-c` spelling, PASSED UNSCANNED while `-c user.name=JJ` was refused. A
+ * quoted value with a space is how every agent sets a commit identity.
+ *
+ * So this reading honours single quotes, double quotes (with the backslash
+ * escapes the shell allows there), `$'...'` and unquoted backslashes. It is an
+ * ADDITIONAL reading, never a replacement: `planCommand` keeps `tokensOf` and
+ * asks both, so a spelling either one recognises is scanned. That is the
+ * direction this gate wants to be wrong in, and it is why the measured reason
+ * `splitSegments` stays quote-blind (see SEPARATORS) still holds.
+ *
+ * Nothing is expanded: `$VAR`, globs and `~` stay literal and still fail
+ * `isLiteralPath`. A quote still open at the end of the segment, which is what
+ * a quote-blind split through a quoted value looks like, simply ends the last
+ * word; `quotedSeparatorHidesVerb` is what reads that shape.
+ */
+export function shellWords(segment) {
+  const text = String(segment);
+  const words = [];
+  let word = '';
+  let inWord = false;
+  let quote = null;
+  const open = (kind) => {
+    quote = kind;
+  };
+  for (let k = 0; k < text.length; k++) {
+    const ch = text[k];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else word += ch;
+    } else if (quote === "$'") {
+      if (ch === '\\' && k + 1 < text.length) word += text[++k];
+      else if (ch === "'") quote = null;
+      else word += ch;
+    } else if (quote === '"') {
+      if (ch === '\\' && k + 1 < text.length && '$`"\\\n'.includes(text[k + 1])) word += text[++k];
+      else if (ch === '"') quote = null;
+      else word += ch;
+    } else if (/\s/.test(ch)) {
+      if (inWord) words.push(word);
+      word = '';
+      inWord = false;
+    } else {
+      inWord = true;
+      if (ch === '\\') {
+        if (k + 1 < text.length) word += text[++k];
+      } else if (ch === "'" || ch === '"') {
+        open(ch);
+      } else if (ch === '$' && (text[k + 1] === "'" || text[k + 1] === '"')) {
+        open(text[k + 1] === "'" ? "$'" : '"');
+        k++;
+      } else {
+        word += ch;
+      }
+    }
+  }
+  if (inWord) words.push(word);
+  return { words };
+}
+
+/** `NAME=value` in the program slot: an assignment for the command after it. */
+const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * Where the git program sits in a `shellWords` reading, and the environment
+ * assigned in front of it.
+ *
+ * Assignments and transparent prefixes are peeled in a LOOP, because each may
+ * follow the other: `env X=1 git commit` was a bypass with no quote at all,
+ * since the old reading peeled assignments once, then prefixes once, and read
+ * `X=1` as the program and `git` as the verb. A prefix's own options are
+ * peeled with it; `env -S STRING` splits STRING into the command it runs.
+ *
+ * When the program slot still is not git, the FIRST git word of the segment is
+ * taken instead. `timeout 60 git commit`, `sudo -u u git commit` and any
+ * wrapper this list does not know all run git, and the cost of being wrong the
+ * other way (`echo git commit`, unquoted) is a scan, not a pass.
+ */
+export function gitInvocation(words) {
+  const all = [...words];
+  const env = {};
+  let k = 0;
+  for (;;) {
+    if (k < all.length && ASSIGNMENT_RE.test(all[k])) {
+      const at = all[k].indexOf('=');
+      env[all[k].slice(0, at)] = all[k].slice(at + 1);
+      k++;
+      continue;
+    }
+    if (k < all.length && TRANSPARENT_PREFIXES.has(basename(all[k]))) {
+      const prefix = basename(all[k]);
+      k++;
+      while (k < all.length && all[k].startsWith('-')) {
+        const flag = all[k];
+        k++;
+        if (flag === '--') break;
+        if (prefix !== 'env') continue;
+        let split = null;
+        if (flag === '-S' || flag === '--split-string') split = all[k++] ?? '';
+        else if (flag.startsWith('--split-string=')) split = flag.slice('--split-string='.length);
+        else if (flag.startsWith('-S')) split = flag.slice(2);
+        if (split !== null) all.splice(k, 0, ...shellWords(split).words);
+      }
+      continue;
+    }
+    break;
+  }
+  const index = k < all.length && isGitProgram(all[k]) ? k : all.findIndex((w, i) => i >= k && isGitProgram(w));
+  if (index === -1) return null;
+  return { index, words: all, tokens: all.slice(index), env };
+}
+
+/** The git verbs whose arguments decide what this gate scans. */
+const PUBLISHING_VERBS = Object.freeze(['commit', 'push', 'add']);
+
+/**
+ * True when a command separator sits inside a quoted value IN FRONT OF the
+ * verb of a `git commit`, `git push` or `git add`, within one command as the
+ * shell runs it.
+ *
+ * That is the shape `splitSegments`, which is quote-blind on purpose, cannot
+ * read: it cuts the command inside the value, and the pieces land in
+ * different segments. Three spellings defeated a check made one segment at a
+ * time, each measured to pass a staged key unscanned:
+ *
+ *  - `GIT_AUTHOR_NAME="A; B" git commit`: the quote hiding `git` opened in
+ *    the previous segment;
+ *  - `GIT_AUTHOR_NAME="A; cd /tmp" git commit`: the second segment starts
+ *    with `cd`, which the walk handles and skips;
+ *  - `GIT_AUTHOR_NAME="A; git -C <decoy> commit" git commit`: a commit IS
+ *    found, in a decoy repository, and stood in for the real one.
+ *
+ * So this is decided by POSITION, in one linear pass over the whole line: the
+ * line is split where the shell splits it, and a segment is marked when a
+ * separator inside a quote comes at or before the verb's word. A separator in
+ * a commit MESSAGE comes after the verb (`git commit -m "fix; x"`) and does
+ * not mark it. A command substitution, `"$(...)"` or backticks, is parsed by
+ * the shell as commands, and `splitSegments` already reads those as segments
+ * of their own, so a separator inside one is not counted.
+ */
+export function quotedSeparatorHidesVerb(command) {
+  const text = stripHeredocBodies(command).replace(/\\\r?\n/g, ' ');
+  const modes = [];
+  let words = [];
+  let word = '';
+  let inWord = false;
+  let sepWord = -1;
+  let hidden = false;
+  const endWord = () => {
+    if (inWord) words.push(word);
+    word = '';
+    inWord = false;
+  };
+  const endSegment = () => {
+    endWord();
+    if (sepWord !== -1 && !hidden) {
+      const inv = gitInvocation(words);
+      const op = inv === null ? null : gitOperation(inv.tokens);
+      if (op !== null && PUBLISHING_VERBS.includes(op.name) && inv.index + op.index >= sepWord) hidden = true;
+    }
+    words = [];
+    sepWord = -1;
+  };
+  const literal = (ch) => {
+    const inSubstitution = modes.includes('$(') || modes.includes('`');
+    if (!inSubstitution && SEPARATORS.includes(ch) && sepWord === -1) sepWord = words.length;
+    word += ch;
+  };
+  for (let k = 0; k < text.length; k++) {
+    const ch = text[k];
+    const mode = modes[modes.length - 1];
+    if (mode === "'") {
+      if (ch === "'") modes.pop();
+      else literal(ch);
+      continue;
+    }
+    if (mode === "$'") {
+      if (ch === '\\' && k + 1 < text.length) word += text[++k];
+      else if (ch === "'") modes.pop();
+      else literal(ch);
+      continue;
+    }
+    if (mode === '"') {
+      if (ch === '\\' && k + 1 < text.length && '$`"\\\n'.includes(text[k + 1])) word += text[++k];
+      else if (ch === '"') modes.pop();
+      else if (ch === '$' && text[k + 1] === '(') {
+        modes.push('$(');
+        word += '$(';
+        k++;
+      } else if (ch === '`') {
+        modes.push('`');
+        word += ch;
+      } else literal(ch);
+      continue;
+    }
+    // Unquoted, or inside a command substitution, which parses like unquoted.
+    if (ch === '\\') {
+      inWord = true;
+      if (k + 1 < text.length) word += text[++k];
+    } else if ((mode === '$(' && ch === ')') || (mode === '`' && ch === '`')) {
+      modes.pop();
+      word += ch;
+    } else if (ch === "'" || ch === '"') {
+      modes.push(ch);
+      inWord = true;
+    } else if (ch === '$' && (text[k + 1] === "'" || text[k + 1] === '(')) {
+      modes.push(text[k + 1] === "'" ? "$'" : '$(');
+      if (text[k + 1] === '(') word += '$(';
+      inWord = true;
+      k++;
+    } else if (ch === '`') {
+      modes.push('`');
+      inWord = true;
+      word += ch;
+    } else if (mode !== undefined) {
+      // Inside a substitution: its words and separators belong to the inner
+      // command, which `splitSegments` reads as segments of its own.
+      inWord = true;
+      word += ch;
+    } else if (/\s/.test(ch)) {
+      endWord();
+    } else if (SEPARATORS.includes(ch)) {
+      endSegment();
+    } else {
+      inWord = true;
+      word += ch;
+    }
+  }
+  endSegment();
+  return hidden;
 }
 
 export function isGitProgram(token) {
@@ -556,6 +802,14 @@ const UNMODELLABLE_REMEDY =
   'a shell. Write the path literally, run the command from that directory, or split it into ' +
   'separate tool calls so each one is unambiguous.';
 
+/**
+ * `--force-with-lease=<ref>:<full object name>`. Group 1 is the flag and ref,
+ * group 2 the expected value. A ref cannot contain `:`, so the split is exact;
+ * only the FULL 40 (sha-1) or 64 (sha-256) lowercase hex is taken, because an
+ * abbreviation is not worth a second rule and stays scanned.
+ */
+const LEASE_EXPECT = /^(--force-with-lease=[^:\s]+:)([0-9a-f]{40}|[0-9a-f]{64})$/;
+
 function flagValue(token) {
   for (const flag of ['--git-dir=', '--work-tree=']) {
     if (token.startsWith(flag)) return token.slice(flag.length);
@@ -577,6 +831,8 @@ export function planCommand(command, startDir) {
   const triggers = [];
   const unmodellable = [];
   const extraFiles = [];
+  /** `--force-with-lease=<ref>:<object name>` spellings, with the repo they target. */
+  const leaseExpects = [];
   /** dir -> what has to be scanned there */
   const targets = new Map();
 
@@ -597,6 +853,8 @@ export function planCommand(command, startDir) {
   const stack = [];
   /** Set when a git alias makes some subcommand of this line unreadable. */
   let aliased = false;
+  /** Set when a separator inside a quoted value hides which subcommand runs. */
+  let unreadableVerb = false;
   /** Set once a `git add` is seen: a later commit in the line will include it. */
   let pendingAdd = null;
 
@@ -680,23 +938,23 @@ export function planCommand(command, startDir) {
 
     // ---- which repository this segment would touch --------------------------
     const hasGit = raw.some(isGitProgram);
-    let dir = cur;
-    if (hasGit) {
+    const repoDir = (dashC, flagWords, gitDir, workTree) => {
+      let at = cur;
       // `-C` may repeat, each relative to the previous one (git's own rule).
-      for (let k = 0; k < tokens.length; k++) {
-        if (tokens[k] !== '-C') continue;
-        const arg = tokens[k + 1];
+      for (let k = 0; k < dashC.length; k++) {
+        if (dashC[k] !== '-C') continue;
+        const arg = dashC[k + 1];
         if (arg === undefined || !isLiteralPath(arg)) {
           unmodellable.push({ what: '`git -C` names a directory that needs shell expansion' });
         } else {
-          dir = resolvePath(dir, arg);
+          at = resolvePath(at, arg);
         }
       }
-      const named = [envWorkTree, envGitDir, ...raw.map(flagValue)].filter((v) => v !== null && v !== undefined);
+      const named = [workTree, gitDir, ...flagWords.map(flagValue)].filter((v) => v !== null && v !== undefined);
       // Resolved against the directory this segment runs in, NOT against each
       // other: `--git-dir=r/.git --work-tree=r` names ONE repository twice,
       // and folding the second onto the first produced `r/r`.
-      const base = dir;
+      const base = at;
       for (const value of named) {
         if (!isLiteralPath(value)) {
           unmodellable.push({ what: 'a `--git-dir`/`--work-tree` value needs shell expansion' });
@@ -706,9 +964,11 @@ export function planCommand(command, startDir) {
         // `--git-dir=repo/.git` names the repository through its metadata
         // directory. Review used exactly this spelling to walk past a rule
         // that only understood `-C`.
-        dir = basename(abs) === '.git' ? dirname(abs) : abs;
+        at = basename(abs) === '.git' ? dirname(abs) : abs;
       }
-    }
+      return at;
+    };
+    const dir = hasGit ? repoDir(tokens, raw, envGitDir, envWorkTree) : cur;
 
     // Asked of the SUBCOMMAND SLOT, never of the token bag.
     //
@@ -729,15 +989,50 @@ export function planCommand(command, startDir) {
     // `git remote add` and `git worktree add` had the same shape against
     // `gitAdd` — and `worktree add` is the command rule 7 tells every parallel
     // agent to run.
-    const op = hasGit ? gitOperation(tokens) : null;
-    const gitCommit = op !== null && op.name === 'commit';
+    //
+    // Two READINGS of the slot are asked, and a verb either one finds counts.
+    // `tokensOf` (whitespace, quotes dropped) is the one every rule below was
+    // measured on, and a verb it recognises is handled exactly as before.
+    // `shellWords` (quotes honoured) is what the shell actually runs, and it
+    // is the one that sees `git -c user.name="A B" commit`: see `shellWords`
+    // for the measured bypass. Each reading carries its OWN tokens and
+    // directory, because after a quoted value the old tokens are misaligned:
+    // `git -C "a b" commit` would scan `a`.
+    const parsed = shellWords(segment);
+    const quoted = gitInvocation(parsed.words);
+    const quotedOp = quoted === null ? null : gitOperation(quoted.tokens);
+    const readings = [{ op: hasGit ? gitOperation(tokens) : null, tokens, dir: () => dir }];
+    if (quotedOp !== null) {
+      readings.push({
+        op: quotedOp,
+        tokens: quoted.tokens,
+        dir: () => {
+          // A wrapper that changes directory before git runs (`env -C`,
+          // `sudo -D`) is not modelled; the old reading never saw it either.
+          const before = quoted.words.slice(0, quoted.index);
+          if (before.some((w) => w === '-C' || w === '-D' || w === '--chdir' || w.startsWith('--chdir='))) {
+            unmodellable.push({ what: 'a wrapper changes directory before `git` runs' });
+          }
+          return repoDir(quoted.tokens, quoted.tokens, quoted.env.GIT_DIR ?? null, quoted.env.GIT_WORK_TREE ?? null);
+        },
+      });
+    }
+    const reading = (verb) => {
+      const found = readings.find((r) => r.op !== null && r.op.name === verb);
+      return found === undefined ? null : { op: found.op, tokens: found.tokens, dir: found.dir() };
+    };
+    const commitAt = reading('commit');
     // NOT narrower than the token bag where it counts: `git subtree push`
     // publishes for real and its verb is the second word, so the resolver
     // returns that word rather than stopping at `subtree`. Dropping it would
     // have traded one false positive for a false NEGATIVE on a real push,
     // which is the wrong direction for this gate.
-    const gitPush = op !== null && op.name === 'push';
-    const gitAdd = op !== null && op.name === 'add';
+    const pushAt = reading('push');
+    const addAt = reading('add');
+    const gitCommit = commitAt !== null;
+    const gitPush = pushAt !== null;
+    const gitAdd = addAt !== null;
+
     const hasGh = raw.some(isGhProgram);
     const ghPublishes =
       hasGh &&
@@ -745,7 +1040,7 @@ export function planCommand(command, startDir) {
       (words.has('pr') || words.has('repo') || words.has('release') || words.has('gist'));
 
     if (gitAdd) {
-      const after = tokens.slice(op.index + 1);
+      const after = addAt.tokens.slice(addAt.op.index + 1);
       const all = after.some((t) => t === '-A' || t === '--all' || t === '.' || t === '-u');
       const named = [];
       let widen = false;
@@ -764,12 +1059,13 @@ export function planCommand(command, startDir) {
       }
       // Naming files one by one is the commonest form an agent uses, and it
       // was the form round 2 left open: only `-A`/`.` folded anything in.
-      pendingAdd = { dir, all: all || widen, paths: named };
+      pendingAdd = { dir: addAt.dir, all: all || widen, paths: named };
     }
 
     if (gitCommit) {
-      const commitAll = tokens.some((t) => t === '--all' || (isShortCluster(t) && t.includes('a')));
-      note(dir, {
+      const commitAll = commitAt.tokens.some((t) => t === '--all' || (isShortCluster(t) && t.includes('a')));
+      const sameRepo = pendingAdd !== null && pendingAdd.dir === commitAt.dir;
+      note(commitAt.dir, {
         scanCommit: true,
         // `git commit -a` stages tracked modifications as it runs, and
         // `git add X && git commit` stages them in an earlier segment of the
@@ -777,9 +1073,9 @@ export function planCommand(command, startDir) {
         // gate runs is NOT what the commit will contain, so the working tree
         // is folded in. Round 1 declared this a limitation; closing it is
         // cheaper than describing it.
-        includeWorktree: commitAll || (pendingAdd !== null && pendingAdd.dir === dir),
-        includeUntracked: pendingAdd !== null && pendingAdd.dir === dir && pendingAdd.all,
-        includePaths: pendingAdd !== null && pendingAdd.dir === dir ? pendingAdd.paths : [],
+        includeWorktree: commitAll || sameRepo,
+        includeUntracked: sameRepo && pendingAdd.all,
+        includePaths: sameRepo ? pendingAdd.paths : [],
       });
       triggers.push('a git commit (everything the commit would add is scanned)');
     }
@@ -789,8 +1085,8 @@ export function planCommand(command, startDir) {
       // lives on a private `upstream` be published to a public `origin`
       // without ever being scanned. Review raised it as a hypothesis; it
       // reproduced on the first attempt.
-      const after = tokens
-        .slice(op.index + 1)
+      const after = pushAt.tokens
+        .slice(pushAt.op.index + 1)
         .filter((t) => !t.startsWith('-'))
         .map((t) => (t.startsWith('+') ? t.slice(1) : t));
       const remote = after[0] ?? null;
@@ -816,7 +1112,7 @@ export function planCommand(command, startDir) {
       // would have been the third spelling of one rule in this repository
       // (ADR-21), and the one that decides whether a push reaches production is
       // not the place to start diverging.
-      const pushArgv = tokens.slice(op.index + 1);
+      const pushArgv = pushAt.tokens.slice(pushAt.op.index + 1);
       const deletesOnly = readable && isDeletionOnly(pushArgv, after.slice(1));
       // One line can push the same repository more than once. The scan is the
       // UNION of what every segment publishes: letting the last segment's refs
@@ -824,25 +1120,58 @@ export function planCommand(command, startDir) {
       // main` publish `leaky` unscanned, and a deletion, which adds nothing,
       // must not replace a real push either. `pushRefs: []` is the wide range
       // and stays wide.
-      const prior = targets.get(dir);
+      const prior = targets.get(pushAt.dir);
       const priorPush = prior !== undefined && prior.scanPush === true ? prior : null;
+      //
+      // The REMOTES are unioned too, for the same reason. Which commits are
+      // already public is a question about one remote (see `pushRange`), and
+      // keeping only the last one let `git push upstream leaky && git push
+      // origin leaky` scan `leaky --not --remotes=origin`: empty, because
+      // `leaky` was on origin already, while upstream had never seen it.
+      // `buildPayload` lists the range once per remote and scans the union.
       let scan;
       if (deletesOnly) {
-        scan = priorPush !== null ? {} : { pushRemote: remote, pushRefs: [], pushDeletesOnly: true };
+        scan =
+          priorPush !== null ? {} : { pushRemote: remote, pushRemotes: [remote], pushRefs: [], pushDeletesOnly: true };
       } else if (priorPush === null || priorPush.pushDeletesOnly === true) {
-        scan = { pushRemote: remote, pushRefs: refs, pushDeletesOnly: false };
+        scan = { pushRemote: remote, pushRemotes: [remote], pushRefs: refs, pushDeletesOnly: false };
       } else {
         // A prior `gh` publish can leave `pushRefs` unset, which is wide too.
         const priorRefs = priorPush.pushRefs ?? [];
         const wide = priorRefs.length === 0 || refs.length === 0;
-        scan = { pushRemote: remote, pushRefs: wide ? [] : [...new Set([...priorRefs, ...refs])] };
+        // A prior `gh pr create` names no remote (null). Beside a push that
+        // names one it is not a second remote: counted as one, a repository
+        // with two remotes refused `gh pr create && git push origin x`, which
+        // `pushRange` cannot answer for an unnamed remote.
+        const remotes = [...new Set([...(priorPush.pushRemotes ?? [priorPush.pushRemote]), remote])];
+        const named = remotes.filter((r) => r !== null);
+        scan = {
+          pushRemote: remote,
+          pushRemotes: named.length > 0 ? named : remotes,
+          pushRefs: wide ? [] : [...new Set([...priorRefs, ...refs])],
+        };
       }
-      note(dir, { scanPush: true, ...scan, pushArgv, pushReadable: readable });
+      // Every push's argv, in order, deletions included. The policy gate
+      // judges each one: keeping only the last let `git push origin HEAD:main
+      // && git push origin feature/x` reach `main` under P1 while the gate
+      // read `feature/x`. `pushArgv` is the last of them, for readers that
+      // only ever see one push.
+      const pushArgvs = [...(prior?.pushArgvs ?? []), pushArgv];
+      note(pushAt.dir, { scanPush: true, ...scan, pushArgv, pushArgvs, pushReadable: readable });
       triggers.push(
         deletesOnly
           ? 'a git push that only deletes remote refs (it publishes no objects; the command line is scanned)'
           : 'a git push (every commit not already on the target remote is scanned)',
       );
+      // The expected value of an explicit lease is a git object name, which
+      // gitleaks reads as a high-entropy `generic-api-key` whenever the ref in
+      // front of it carries a keyword (`secret`, `token`, `api`...). Recorded
+      // here, with the directory THIS segment targets, so `decide` can check it
+      // against that repository before it hides anything from the scan.
+      for (const t of pushArgv) {
+        const lease = LEASE_EXPECT.exec(t);
+        if (lease !== null) leaseExpects.push({ dir: pushAt.dir, spelled: t, sha: lease[2] });
+      }
     }
     if (ghPublishes) {
       // `gh pr create` publishes ONE branch — the PR's head — and adds no git
@@ -997,7 +1326,7 @@ export function planCommand(command, startDir) {
         remedy: 'run the command without -c core.hooksPath=... (a bare `git config core.hooksPath` query is fine)',
       });
     }
-    if (gitCommit && tokens.some((t) => isShortCluster(t) && t.includes('n'))) {
+    if (gitCommit && commitAt.tokens.some((t) => isShortCluster(t) && t.includes('n'))) {
       denials.push({
         code: DENIAL_CODES.NO_VERIFY,
         detail: "`-n` on git commit is --no-verify, which disables git's own hooks",
@@ -1005,7 +1334,7 @@ export function planCommand(command, startDir) {
       });
     }
     if (gitPush) {
-      for (const token of tokens) {
+      for (const token of pushAt.tokens) {
         const forced =
           token.startsWith('--force') ||
           (isShortCluster(token) && token.includes('f')) ||
@@ -1049,16 +1378,31 @@ export function planCommand(command, startDir) {
     }
   }
 
+  // FAIL CLOSED where a separator inside a quoted value hides the verb.
+  // `splitSegments` is quote-blind on purpose, so `git -c user.name="A; B"
+  // commit` arrives as `git -c user.name="A` (git, no verb) and ` B" commit`
+  // (verb, no git), and no reading of either segment sees a commit. Asked of
+  // the whole line, once, so no `continue` in the walk above can skip it.
+  if (quotedSeparatorHidesVerb(command)) {
+    unreadableVerb = true;
+    unmodellable.push({
+      what: 'a quoted value in front of the `git` subcommand holds a command separator, so which subcommand runs cannot be read',
+    });
+  }
+
   // `aliased` counts as "something might be published here": without it the
   // unmodellable entry above is discarded by the filter below, which is
-  // exactly how the hole stayed open.
-  const needsScan = targets.size > 0 || extraFiles.length > 0 || aliased;
+  // exactly how the hole stayed open. `unreadableVerb` is the same hole,
+  // opened by a quoted separator instead of an alias.
+  const needsScan = targets.size > 0 || extraFiles.length > 0 || aliased || unreadableVerb;
   return {
     aliased,
+    unreadableVerb,
     denials,
     triggers: [...new Set(triggers)],
     targets: [...targets.values()],
     extraFiles,
+    leaseExpects,
     // An unmodellable construct only matters if something is being published.
     // `cd "$D" && npm test` has no scan to misdirect.
     unmodellable: needsScan ? unmodellable : [],
@@ -1573,17 +1917,25 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
   // so there is no range to list. Its command line is still scanned by
   // `decide`, like every other command this gate sees.
   if (target !== null && target.scanPush && target.pushDeletesOnly !== true) {
-    const range = await pushRange(target.dir, target.pushRemote, target.pushRefs, {
-      runner, timeoutMs: budget(GIT_BUDGET_MS),
-    });
-    const listed = await git(['-C', target.dir, 'rev-list', '--objects', ...range], {
-      runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'listing the objects this push would publish',
-    });
+    // One range per remote the line pushes to (see `planCommand`): what is
+    // already public on one remote is not on another. `addBlobs` reads each
+    // object once, so the union costs nothing for what the ranges share.
+    const remotes = Array.isArray(target.pushRemotes) && target.pushRemotes.length > 0
+      ? target.pushRemotes
+      : [target.pushRemote];
     const objects = [];
-    for (const line of String(listed).split('\n')) {
-      const space = line.indexOf(' ');
-      if (space === -1) continue; // a commit, which carries no path
-      objects.push({ sha: line.slice(0, space), path: line.slice(space + 1) });
+    for (const remote of remotes) {
+      const range = await pushRange(target.dir, remote, target.pushRefs, {
+        runner, timeoutMs: budget(GIT_BUDGET_MS),
+      });
+      const listed = await git(['-C', target.dir, 'rev-list', '--objects', ...range], {
+        runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'listing the objects this push would publish',
+      });
+      for (const line of String(listed).split('\n')) {
+        const space = line.indexOf(' ');
+        if (space === -1) continue; // a commit, which carries no path
+        objects.push({ sha: line.slice(0, space), path: line.slice(space + 1) });
+      }
     }
     await addBlobs(target.dir, objects, add, { runner, budget });
   }
@@ -1907,6 +2259,40 @@ export function renderFindings(findings, map) {
 
 // ----------------------------------------------------------------- the gate
 
+/**
+ * The command text with the expected value of an explicit lease hidden from
+ * the scanner, and nothing else changed.
+ *
+ * `git push --force-with-lease=pv3/api-fix:<40 hex> origin ...` was refused as
+ * `generic-api-key`: the ref carries a keyword and the object name's entropy is
+ * above the rule's floor (measured, 1908 of 2000 recent shas). The value is
+ * hidden ONLY when it names an object that exists in the repository the
+ * segment targets: a hash cannot be chosen to carry a payload, while a 40-hex
+ * that is no object is exactly what a pasted key looks like and stays scanned.
+ * Same length, all zeros, so offsets and the byte count do not move. Any
+ * failure to ask (no budget, git missing, timeout, not a repo) leaves the text
+ * as it was: the question is only ever allowed to NARROW a refusal on proof.
+ */
+async function maskLeaseExpects(command, leaseExpects, { runner, budget }) {
+  let text = command;
+  for (const { dir, spelled, sha } of leaseExpects) {
+    const timeoutMs = budget(GIT_BUDGET_MS);
+    if (timeoutMs <= 0) break;
+    try {
+      // `--no-lazy-fetch`: in a partial clone, asking about a missing object
+      // makes git FETCH it from the promisor remote, sending the very value
+      // under suspicion off the machine (measured: `want <hex>` on the wire).
+      // A git too old to know the flag exits 129, which leaves the text scanned.
+      const r = await runner('git', ['--no-lazy-fetch', '-C', dir, 'cat-file', '-e', `${sha}^{object}`], { timeoutMs });
+      if (r.spawned !== true || r.timedOut === true || r.code !== 0) continue;
+    } catch {
+      continue;
+    }
+    text = text.split(spelled).join(spelled.slice(0, spelled.length - sha.length) + '0'.repeat(sha.length));
+  }
+  return text;
+}
+
 export async function decide({ input, cwd, runner = runChild, startedAt = Date.now() } = {}) {
   const budget = makeBudget(startedAt);
   const toolName = field(input, 'tool_name');
@@ -2020,7 +2406,10 @@ export async function decide({ input, cwd, runner = runChild, startedAt = Date.n
 
     // The command line itself, through the same rule set. `git commit -m
     // "<key>"` puts a secret in history without it ever being a staged file.
-    const commandBytes = Buffer.from(command, 'utf8');
+    const commandBytes = Buffer.from(
+      await maskLeaseExpects(command, plan.leaseExpects, { runner, budget }),
+      'utf8',
+    );
     const commandFindings = await scanBytes(commandBytes, { runner, budget, workDir });
     for (const f of commandFindings) findings.push({ ...f, line: null, inCommand: true });
     scanned.push('the command line itself');

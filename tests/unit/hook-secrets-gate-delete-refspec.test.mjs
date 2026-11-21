@@ -236,3 +236,73 @@ test('gate: the command line of a deletion is still scanned', { skip: NEEDS_SCAN
   assert.equal(verdict.decision, 'deny', JSON.stringify(verdict));
   assert.equal(verdict.reason.includes(secret), false, 'the refusal must not quote the secret');
 });
+
+// ---------------------------------------------------------------------------
+// two pushes to two REMOTES: each push is scanned against its own remote
+
+test('plan: two pushes to two remotes keep both remotes', () => {
+  const [target] = pushTargets('git push upstream leaky && git push origin leaky');
+  assert.deepEqual(target.pushRemotes, ['upstream', 'origin']);
+  // A `gh pr create` names no remote. Beside a push that does, it adds no
+  // unnamed one, which in a repository with two remotes would refuse a line
+  // that 0.1.51 passed.
+  for (const command of ['gh pr create --title x && git push origin leaky', 'git push origin leaky && gh pr create --title x']) {
+    assert.deepEqual(pushTargets(command)[0].pushRemotes, ['origin'], command);
+  }
+});
+
+test('gate: a branch already on one remote is still scanned when the line also pushes it to another', { skip: NEEDS_SCANNER }, async () => {
+  // Measured on 0.1.51: the union of refs kept only the LAST push's remote, so
+  // the range was `leaky --not --remotes=origin`. `leaky` is on `origin`
+  // already, the range was empty, and the push to `upstream`, where `leaky`
+  // has never been, published the key unscanned.
+  const dir = repoWithUnpushedBranch('leaky', fakeSecret());
+  git(dir, 'push', '-q', 'origin', 'leaky');
+  const upstream = tempDir('tyran-del-upstream-');
+  execFileSync('git', ['init', '-q', '--bare', upstream]);
+  git(dir, 'remote', 'add', 'upstream', upstream);
+  for (const command of [
+    'git push upstream leaky && git push origin leaky',
+    'git push origin leaky && git push upstream leaky',
+  ]) {
+    const verdict = await handle({ input: bashInput(command, dir), cwd: dir });
+    assert.equal(verdict.decision, 'deny', `${command}: ${JSON.stringify(verdict)}`);
+    assert.match(verdict.reason, /secret-shaped finding/, command);
+  }
+  // the control: pushing it to the remote that already holds it publishes nothing
+  assert.deepEqual(await handle({ input: bashInput('git push origin leaky', dir), cwd: dir }), PASS);
+});
+
+// ---------------------------------------------------------------------------
+// a redirection's file descriptor is not a refspec
+
+test('plan: the fd number of a redirection is not read as a refspec or a remote', () => {
+  // `splitSegments` ends a segment at `>`, which left the `2` of `2>/dev/null`
+  // as the last word of the push: a refspec that is not `:dst`, so the
+  // deletion was scanned as a wide push. `git push 2>&1` read `2` as the remote.
+  for (const command of [
+    'git push origin :gone 2>/dev/null',
+    'git push origin --delete gone 2>&1',
+    'git push origin --delete gone 2> /dev/null',
+    'git push origin :gone 1>/dev/null 2>&1',
+    'git push origin :gone 0</dev/null',
+  ]) {
+    const [target] = pushTargets(command);
+    assert.equal(target.pushDeletesOnly, true, command);
+  }
+  const [narrow] = pushTargets('git push origin main 2>&1');
+  assert.deepEqual(narrow.pushRefs, ['main']);
+  const [bare] = pushTargets('git push 2>&1');
+  assert.equal(bare.pushRemote, null);
+  // a word that merely ENDS in a digit is a word, not a descriptor
+  const [named] = pushTargets('git push origin v2>/dev/null');
+  assert.deepEqual(named.pushRefs, ['v2']);
+});
+
+test('gate: a deletion with its stderr redirected is not refused for unpushed work', { skip: NEEDS_SCANNER }, async () => {
+  const dir = repoWithUnpushedBranch('big', randomBytes(MAX_PAYLOAD_BYTES + 1024 * 1024).toString('base64'));
+  for (const command of ['git push origin :gone 2>/dev/null', 'git push origin --delete gone 2>&1']) {
+    const verdict = await handle({ input: bashInput(command, dir), cwd: dir });
+    assert.deepEqual(verdict, PASS, `${command}: ${JSON.stringify(verdict)}`);
+  }
+});

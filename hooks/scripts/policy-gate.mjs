@@ -1993,7 +1993,13 @@ async function decideBash({ input, toolInput, root, runner, budget, boundaries, 
   if (boundaries.push === 'allow') return PASS;
 
   const plan = planCommand(command, startDir);
-  const pushes = plan.targets.filter((t) => t.scanPush === true && Array.isArray(t.pushArgv));
+  // EVERY push, not one per directory. A target is per repository and a line
+  // can push the same repository twice; judging the target's last argv let
+  // `git push origin HEAD:main && git push origin feature/x` reach `main`
+  // under P1. `pushArgvs` is every push in that repository, in order.
+  const pushes = plan.targets
+    .filter((t) => t.scanPush === true && Array.isArray(t.pushArgv))
+    .flatMap((t) => (Array.isArray(t.pushArgvs) ? t.pushArgvs : [t.pushArgv]).map((argv) => ({ dir: t.dir, argv })));
   // Asked of the LEXER, not spelled again here. The first version of this gate
   // carried its own alias test, which was a second spelling of one rule two
   // files apart — and the secrets gate, which had the same blind spot, went on
@@ -2006,6 +2012,17 @@ async function decideBash({ input, toolInput, root, runner, budget, boundaries, 
         'any subcommand, so a gate that trusted the words it can see would be reading a different ' +
         'command from the one git runs — measured: `git -c alias.zz=push zz origin main` published ' +
         'to a protected branch while this gate saw no push at all.',
+    );
+  }
+  // Same hole, opened by a separator inside a quoted value in front of the
+  // subcommand (`git -c user.name="A; B" push origin main`): the lexer splits
+  // there on purpose, so the verb is in a segment with no `git` in it.
+  if (plan.unreadableVerb) {
+    throw new PolicyFailure(
+      'a quoted value in front of the git subcommand holds a command separator (`;`, `&`, `|`, ' +
+        'a bracket), so which subcommand it runs is not readable from the command line',
+      'set the value first (`git config user.name "A B"`) or drop the separator from it, then run ' +
+        'the subcommand on its own.',
     );
   }
   if (pushes.length === 0) return PASS;
@@ -2048,7 +2065,7 @@ async function decideBash({ input, toolInput, root, runner, budget, boundaries, 
   }
 
   for (const target of pushes) {
-    const push = readPush(target.pushArgv);
+    const push = readPush(target.argv);
     const dir = target.dir;
 
     if (push.unreadable.length > 0) {

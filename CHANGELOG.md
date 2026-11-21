@@ -1,5 +1,124 @@
 # Changelog
 
+## 0.1.52 — 2026-11-21
+
+### Both gates judge every push on a command line, not only the last one
+
+The policy gate judged only the LAST push in a line. Under P1,
+`git push origin HEAD:main && git push origin feature/x` passed and the first
+push reached `main`. The cause was in `planCommand`, which both gates read: it
+keeps one target per repository, and each push into that repository overwrote
+the previous one's argv. The target now carries `pushArgvs`, every push in
+order, and the policy gate reads the destination, the deletion and the force of
+each one. Any one push past the class refuses the line.
+
+The secrets gate had the same shape on the remote. 0.1.51 unioned the refs of
+two pushes but kept the last push's remote, and the range is "commits not on
+that remote". So `git push upstream leaky && git push origin leaky`, with
+`leaky` already on `origin`, scanned an empty range while `upstream` received
+the branch for the first time. The remotes are now unioned too, and the range
+is listed once per remote. A `gh pr create`, which names no remote, adds no
+unnamed one beside a push that names its remote.
+
+Three new tests. The policy-gate test runs six spellings under P1, both orders
+among them; on 0.1.51 it is red. The secrets-gate pair is a planner test and a
+gate test against real git and gitleaks; both are red on 0.1.51.
+
+### A quoted value with a space no longer hides git commit or git push
+
+Reported from a real install. `git -c user.name="Jacek Janczura" commit -m x`,
+the single-quoted `-c` spelling and `GIT_AUTHOR_NAME='Jacek Janczura' git
+commit` all passed the secrets gate UNSCANNED with a key staged, while
+`git -c user.name=JJ commit` was refused. `tokensOf` splits a segment on
+whitespace before it drops the quotes, so the subcommand resolver read
+`Janczura` as the verb, or, behind an assignment, as the program with `git` as
+the verb. No target meant no scan. `env X=1 git commit` and
+`for b in a; do git push ...; done` had the same hole with no quote at all. The
+policy gate reads the same plan, so a quoted identity in front of `git push`
+also walked past the deployment class.
+
+`planCommand` now also reads each segment the way the shell splits it
+(`shellWords`: single and double quotes, `$'...'`, backslashes), and peels
+assignments and wrapper prefixes in a loop (`gitInvocation`). A verb either
+reading finds counts, so every command the old reading recognised is handled
+as before. `splitSegments` stays quote-blind, for the reason recorded on
+`SEPARATORS`. A separator inside a quoted value in front of the subcommand
+(`git -c user.name="A; B" commit`) leaves the verb unreadable, and that now
+fails closed (`unreadableVerb`, refused by both gates) instead of passing.
+
+The gate change is the patch from `fix/secrets-gate-quoted-commit` (0648f5c),
+ported onto the 0.1.51 push code, with its fail-closed check replaced. The
+patch decided one segment at a time, and review found three spellings that
+still passed a staged key unscanned. In `GIT_AUTHOR_NAME="A; B" git commit`
+the quote hiding `git` opened in the previous segment. In
+`GIT_AUTHOR_NAME="A; cd /tmp" git commit` the second segment starts with `cd`,
+which the walk handles and skips. In `GIT_AUTHOR_NAME="A; git -C <decoy>
+commit" git commit` a commit is found, in a clean decoy repository, and stands
+in for the real one. The check is now one linear pass over the whole line
+(`quotedSeparatorHidesVerb`), split where the shell splits it. It is decided
+by position: a line fails closed when a separator inside a quote comes at or
+before the verb of a commit, push or add. A separator in a commit message
+comes after the verb and does not trip it. Neither does one inside `"$(...)"`,
+which the shell runs as commands and the quote-blind lexer already reads.
+
+41 tests in `hook-secrets-gate-quoting.test.mjs` (the branch's 36, plus the
+spellings above, a value too long for any bounded look-back, and a push inside
+a shell loop) and one in the policy-gate suite. On 0.1.51, 38 of the 41 are
+red. With the branch's patch alone, 5 are red: the three assignment-separator
+gate tests, the decoy, and the planner test that lists the separator
+spellings.
+
+### A redirection's file descriptor is no longer read as a refspec
+
+0.1.51 left one spelling of a remote-branch deletion refused for gigabytes:
+`git push origin :gone 2>/dev/null`. `splitSegments` ends a segment at `>`,
+so the `2` stayed behind as the last word of the push. It is not a `:dst`
+refspec, so the deletion was scanned as a wide push. `git push 2>&1` read
+the same `2` as the remote, and the policy gate then named a remote called
+`2`. `splitSegments` now drops a whole word of digits directly in front of
+`<` or `>`. That is the shell's own rule for a descriptor: in `v2>x` the word
+`v2` is an argument and stays.
+
+Two new tests. The planner test has five redirect spellings plus the `2>&1`
+remote and the `v2` control. The gate test runs against real git and
+gitleaks. Both are red on 0.1.51.
+
+### An explicit lease's expected sha is no longer refused as an API key
+
+`git push --force-with-lease=pv3/api-token-fix:<40-hex sha> origin ...` was
+refused as `generic-api-key`. Gitleaks reads the expected value as a
+high-entropy key whenever the ref in front of it carries a keyword (`secret`,
+`token`, `api`, `key`, `auth`). The only workaround was a bare
+`--force-with-lease`, which drops the expected value.
+
+`planCommand` now records the `<ref>:<full lowercase hex>` slot of a lease on
+a `git push`, with the repository that push targets. `decide` hides that one
+value (same length, all zeros) from the command-text scan, and ONLY when
+`git --no-lazy-fetch cat-file -e <hex>^{object}` finds it in that repository.
+Everything else leaves the text scanned as before: a hex that names no object,
+an object of another repository, an abbreviation, a git failure or a timeout.
+Nothing else in the command changes. `--no-lazy-fetch` matters: in a partial
+clone the question would otherwise fetch the missing object from the promisor
+remote, which sends the suspected value off the machine as `want <hex>`.
+
+The gate change is the patch from `fix/secrets-gate-lease-sha` (dce74d6),
+ported onto this release's push code. 13 tests in
+`hook-secrets-gate-lease-sha.test.mjs`; on 0.1.51, 5 are red, the reported
+false refusal among them.
+
+### Release titles no longer lose the words of a leading code span
+
+The GitHub releases for 0.1.48 to 0.1.51 were titled `0.1.51 — : deleting a
+remote branch ...`: the first heading's code span was missing. The release job
+pasted the title into a bash line as `--title "..."`, and inside double
+quotes a backtick is command substitution, so `secrets-gate` ran as a command
+and printed nothing. The title now reaches the shell through an environment
+variable, and backticks are dropped from it, since a title renders no
+Markdown. The four titles were corrected by hand.
+
+Also corrected: the 0.1.51 entry said its 13 tests ran end to end against real
+git and gitleaks. 8 of them test the parser and 5 run the full gate.
+
 ## 0.1.51 — 2026-11-21
 
 ### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends
@@ -31,9 +150,10 @@ main` passed the real gate with a private key on `leaky`. The refs are now
 unioned. A deletion never replaces an earlier push, and a wide range stays
 wide.
 
-13 new tests in `hook-secrets-gate-delete-refspec.test.mjs`, end to end against
-real git and gitleaks. On the unpatched gate 10 of them are red, the ticket's
-own `git push origin --delete gone` among them.
+13 new tests in `hook-secrets-gate-delete-refspec.test.mjs`: 8 test the parser
+(`planCommand`) and 5 run the full gate against real git and gitleaks. On the
+unpatched gate 10 of them are red, the ticket's own `git push origin --delete
+gone` among them.
 
 The gate change is in `hooks/scripts/`, which is KERNEL in this repository. It
 was made in a session the operator opened for it with `boundaries.kernel:

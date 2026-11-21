@@ -287,7 +287,15 @@ matching branch and is scanned. So is anything else, such as `-o <value>`,
 read as sources, did not resolve, and widened the range to every unpushed commit
 on every branch: `git push origin --delete <branch>` was refused for gigabytes
 it would never send. Two pushes in one command line are scanned as the union of
-their refs. Before, the last one replaced the first.
+their refs. Before, the last one replaced the first. Since 0.1.52 their remotes
+are unioned too, and the range is listed once per remote: what is already on
+one remote may never have reached the other.
+
+A redirection's file descriptor (`2>/dev/null`, `2>&1`) is not read as a
+refspec or a remote. The expected value of `--force-with-lease=<ref>:<sha>` is
+hidden from the command-line scan when, and only when, it names an object in
+the repository being pushed, because gitleaks reads a full sha behind a ref
+like `api-fix` as a generic API key.
 
 ### What it refuses without scanning
 
@@ -323,6 +331,15 @@ building the policy gate, which had the same blind spot.
 `planCommand` now reports `aliased`, which forces `needsScan` — an unmodellable
 construct that nothing needs to scan is discarded, and that is exactly how the
 hole stayed open. Both gates read the one answer.
+
+A quoted value with a space in front of the subcommand opened the same hole
+until 0.1.52. `git -c user.name="A B" commit` and `GIT_AUTHOR_NAME='A B' git
+commit` were split on whitespace before the quotes were dropped, so the verb
+slot held `B` and nothing was scanned. `planCommand` now also reads each
+segment the way the shell splits it, and a verb either reading finds counts. A
+command separator inside such a value (`git -c user.name="A; B" commit`,
+`GIT_AUTHOR_NAME="A; B" git commit`) leaves the verb unreadable, and both gates
+refuse the line.
 
 ### What it does NOT catch — the declared boundary
 

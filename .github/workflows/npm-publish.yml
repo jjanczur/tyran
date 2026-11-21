@@ -191,15 +191,24 @@ jobs:
           # The title follows the convention the existing releases already use:
           # the version, then the first heading of its entry, which is the one
           # sentence that says what the release is about.
-          HEAD=$(awk 'index($0, "### ") == 1 { sub(/^### /, ""); print; exit }' notes.md)
+          #
+          # Backticks are dropped: a title is plain text, and GitHub renders none
+          # of the Markdown. 0.1.48 to 0.1.51 lost the code span their headings
+          # start with, because the title was pasted into the shell below as
+          # `--title "..."`, where backticks are command substitution.
+          HEAD=$(awk 'index($0, "### ") == 1 { sub(/^### /, ""); print; exit }' notes.md | tr -d '`')
           echo "title=$VERSION${HEAD:+ — $HEAD}" >> "$GITHUB_OUTPUT"
           echo "notes: $(wc -l < notes.md) lines, title: $VERSION${HEAD:+ — $HEAD}"
 
       - name: Create it, or leave the one that is already there alone
         # Idempotent because a tag can be re-pushed and this job re-run, and
         # overwriting notes someone edited by hand is not this job's business.
+        # The title reaches the shell as an environment variable, never as text
+        # pasted into the script: an expression inside `run:` is substituted
+        # before bash parses the line, so a heading is code there.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.notes.outputs.title }}
         run: |
           set -euo pipefail
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -207,6 +216,6 @@ jobs:
             exit 0
           fi
           gh release create "$GITHUB_REF_NAME" \
-            --title "${{ steps.notes.outputs.title }}" \
+            --title "$TITLE" \
             --notes-file notes.md \
             --verify-tag

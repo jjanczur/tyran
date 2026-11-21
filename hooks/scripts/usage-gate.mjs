@@ -436,6 +436,11 @@ export function decide(
 
   const limits = readLimitsFn(repoRoot);
   if (limits === null) return PASS;
+  // `warn` never denies, marker or not, so it is read BEFORE the marker. The
+  // marker is per repo and the account is per session: a marker that binds
+  // under `warn` refuses sessions on accounts with quota left. Until 0.1.50
+  // this check sat below, on the no-marker branch only.
+  if (limits.mode !== 'pause') return PASS;
 
   const nowMs = now();
   let marker = readMarkerFn(repoRoot, nowMs);
@@ -445,7 +450,6 @@ export function decide(
     if (sidecar === null) return PASS; // no telemetry = unknown = open
     const tripped = trippedWindow(sidecar, limits);
     if (tripped === null) return PASS;
-    if (limits.mode === 'warn') return PASS; // surfacing is doctor's job
     if (!isUnsupervised(input)) return PASS; // never bind the operator
     const journal = locate(repoRoot);
     marker = markerOf(tripped, limits, nowMs, field(input, 'session_id'), journal.init ? forJournal(journal.init) : null);

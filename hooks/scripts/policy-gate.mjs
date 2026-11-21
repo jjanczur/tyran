@@ -1113,8 +1113,22 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
   const askable = actor === 'main' && field(input, 'permission_mode') === 'acceptEdits';
 
   const boundaries = await loadBoundaries(root);
+  // `boundaries.kernel: allow` is the operator taking the floor out, and it
+  // counts only in a session a human started with --permission-mode
+  // bypassPermissions. Both, because each alone says less than the operator
+  // meant: the key alone would reach an overnight resume (acceptEdits) or a
+  // subagent of a supervised session, and bypass alone would reach every
+  // install that runs in bypass and never chose this. Subagents inherit the
+  // session's mode (measured, see SUPERVISED_MODES), so the actors doing the
+  // work are covered.
+  //
+  // STATED, NOT HIDDEN: config.yaml is class AUTO, so inside a bypass session
+  // an agent can write `kernel: allow` itself and be unlocked on its next
+  // call. The key constrains every OTHER mode; in bypass it is a default, not
+  // a lock. docs/configuration.md says the same.
+  const kernelOpen = boundaries.kernel === 'allow' && field(input, 'permission_mode') === 'bypassPermissions';
 
-  if (toolName === 'Bash') return await decideBash({ input, toolInput, root, runner, budget, boundaries });
+  if (toolName === 'Bash') return await decideBash({ input, toolInput, root, runner, budget, boundaries, kernelOpen });
 
   const targets = pathTargets(toolInput);
   const isWriteTool = typeof toolName === 'string' && WRITE_TOOLS.includes(toolName);
@@ -1234,6 +1248,12 @@ export async function decide({ input, runner = runChild, startedAt = Date.now(),
     if (normalized !== null && decidingRule(policy, normalized) === null && !isGoverned(normalized)) {
       continue;
     }
+    // The one setting below the floor. Inside the repository, every class and
+    // every floor path stands down: hooks/**, .tyran/policies/**,
+    // .claude/settings*.json and .tyran/STOP included, the last by the
+    // operator's explicit choice. Outside the repository `outside_repo` still
+    // decides, above.
+    if (kernelOpen && normalized !== null) continue;
     // The floor is consulted BEFORE the flag, so no ordering of settings can
     // reach the files that enforce every other boundary.
     const relaxClasses =
@@ -1446,8 +1466,10 @@ export const SHELL_PROTECTED_GLOBS = Object.freeze([
 ]);
 
 /**
- * Paths no `boundaries:` setting can reach, checked before `path_classes` is
- * consulted.
+ * Paths no `boundaries:` setting but one can reach, checked before
+ * `path_classes` is consulted. The one is `kernel: allow` in a
+ * bypassPermissions session (see `kernelOpen` in `decide`), and no preset
+ * sets it.
  *
  * `SHELL_PROTECTED_GLOBS` is already "the files that switch every gate off":
  * the enforcement hooks, the policy that classifies them, and the settings
@@ -1924,7 +1946,7 @@ function refuseShellPaths(findings, command = '', allowCredentials = false) {
   return { decision: 'deny', reason: lines.join('\n') };
 }
 
-async function decideBash({ input, toolInput, root, runner, budget, boundaries }) {
+async function decideBash({ input, toolInput, root, runner, budget, boundaries, kernelOpen = false }) {
   const command = field(toolInput, 'command');
   if (typeof command !== 'string') {
     return {
@@ -1945,10 +1967,13 @@ async function decideBash({ input, toolInput, root, runner, budget, boundaries }
   // check that only runs once a policy loads is a check an unconfigured repo
   // does not have.
   // `credentials: allow` drops the CREDENTIAL findings and nothing else. A
-  // kernel finding is a path that protects the gate, and no setting reaches
-  // those — which is why this filters the list rather than skipping the call.
+  // kernel finding is a path that protects the gate, and only `kernelOpen`
+  // (`kernel: allow` in a bypassPermissions session) drops those — which is
+  // why this filters the list rather than skipping the call.
   const findings = shellPathFindings(command, startDir, root).filter(
-    (f) => !(f.kind === 'credential' && boundaries.credentials === 'allow'),
+    (f) =>
+      !(f.kind === 'credential' && boundaries.credentials === 'allow') &&
+      !(f.kind === 'kernel' && kernelOpen),
   );
   // The exemption SKIPS this refusal; it does not return PASS. A `git log` that
   // names a protected path still travels the deployment class and every other
@@ -2173,7 +2198,8 @@ export async function handle({ input, runner, startedAt, env }) {
         'tyran policy-gate: approved without asking. This repository sets `boundaries.prompts: skip` ' +
         'in .tyran/config.yaml, so a tool call no gate objects to is auto-approved.\n' +
         'What this does NOT reach: a refusal from any other gate still wins, so secret scanning at ' +
-        'commit and push is unaffected, and so are the paths that protect the gates themselves.',
+        'commit and push is unaffected, and so are the paths that protect the gates themselves ' +
+        'unless `boundaries.kernel: allow` is set and this session runs in bypassPermissions.',
     };
   } catch (err) {
     if (err instanceof PolicyFailure) {

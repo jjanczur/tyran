@@ -97,6 +97,19 @@ ported onto this release's push code. 13 tests in
 `hook-secrets-gate-lease-sha.test.mjs`; on 0.1.51, 5 are red, the reported
 false refusal among them.
 
+### Release titles keep the code span their heading starts with
+
+The GitHub releases for 0.1.48 to 0.1.51 were titled `0.1.51 — : deleting a
+remote branch ...`: the first heading's code span was missing. The release job
+pasted the title into a bash line as `--title "..."`, and inside double
+quotes a backtick is command substitution, so `secrets-gate` ran as a command
+and printed nothing. The title now reaches the shell through an environment
+variable, and backticks are dropped from it, since a title renders no
+Markdown. The four titles were corrected by hand.
+
+Also corrected: the 0.1.51 entry said its 13 tests ran end to end against real
+git and gitleaks. 8 of them test the parser and 5 run the full gate.
+
 ## 0.1.51 — 2026-11-21
 
 ### `secrets-gate`: deleting a remote branch is no longer refused for gigabytes it never sends
@@ -128,9 +141,10 @@ main` passed the real gate with a private key on `leaky`. The refs are now
 unioned. A deletion never replaces an earlier push, and a wide range stays
 wide.
 
-13 new tests in `hook-secrets-gate-delete-refspec.test.mjs`, end to end against
-real git and gitleaks. On the unpatched gate 10 of them are red, the ticket's
-own `git push origin --delete gone` among them.
+13 new tests in `hook-secrets-gate-delete-refspec.test.mjs`: 8 test the parser
+(`planCommand`) and 5 run the full gate against real git and gitleaks. On the
+unpatched gate 10 of them are red, the ticket's own `git push origin --delete
+gone` among them.
 
 The gate change is in `hooks/scripts/`, which is KERNEL in this repository. It
 was made in a session the operator opened for it with `boundaries.kernel:

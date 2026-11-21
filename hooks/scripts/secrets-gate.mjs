@@ -63,9 +63,9 @@
  */
 import { spawn } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PASS, field, main, runGate } from './hook-io.mjs';
@@ -379,9 +379,10 @@ export function tokensOf(segment) {
  * `splitSegments` stays quote-blind (see SEPARATORS) still holds.
  *
  * Nothing is expanded: `$VAR`, globs and `~` stay literal and still fail
- * `isLiteralPath`. A quote still open at the end of the segment, which is what
- * a quote-blind split through a quoted value looks like, simply ends the last
- * word; `quotedSeparatorHidesVerb` is what reads that shape.
+ * `isLiteralPath`. `closed` is false when a quote is still open at the end of
+ * the segment, which is what a quote-blind split through a quoted value looks
+ * like; `quotedSeparatorHidesVerb` is what reads that shape, and a caller that
+ * narrows anything from these words must not do it from an open quote.
  */
 export function shellWords(segment) {
   const text = String(segment);
@@ -424,7 +425,7 @@ export function shellWords(segment) {
     }
   }
   if (inWord) words.push(word);
-  return { words };
+  return { words, closed: quote === null };
 }
 
 /** `NAME=value` in the program slot: an assignment for the command after it. */
@@ -477,6 +478,76 @@ export function gitInvocation(words) {
   const index = k < all.length && isGitProgram(all[k]) ? k : all.findIndex((w, i) => i >= k && isGitProgram(w));
   if (index === -1) return null;
   return { index, words: all, tokens: all.slice(index), env };
+}
+
+/** `git commit` options that take no value and leave the pathspec readable. */
+const COMMIT_BARE_FLAGS = new Set([
+  '-q', '--quiet', '-v', '--verbose', '-s', '--signoff', '--no-signoff', '-e', '--edit', '--no-edit',
+  '--amend', '--no-post-rewrite', '--allow-empty', '--allow-empty-message', '--dry-run', '--short',
+  '--branch', '--porcelain', '--long', '-z', '--null', '--reset-author', '--status', '--no-status',
+  '-S', '--gpg-sign', '--no-gpg-sign', '--verify', '-u', '--untracked-files',
+]);
+
+/** `git commit` options whose value is the NEXT word unless it is attached. */
+const COMMIT_VALUE_FLAGS = new Set([
+  '-m', '--message', '-F', '--file', '-C', '--reuse-message', '-c', '--reedit-message', '--author',
+  '--date', '--fixup', '--squash', '-t', '--template', '--cleanup', '--trailer',
+]);
+
+/**
+ * The pathspec of a `git commit`, read from the words after the verb, or null
+ * when they cannot be read with certainty.
+ *
+ * A commit with a pathspec commits the WORKING-TREE content of the named
+ * paths and nothing else that is staged (`--only`, git's default), or the
+ * index plus those paths (`--include`). Scanning the whole index instead
+ * refused the commit for an unrelated staged key, and missed a key in an
+ * unstaged edit of a named path (issue #105, point 3).
+ *
+ * Narrowing a scan is the direction in which a misreading publishes a key, so
+ * this answers null for anything it does not positively understand: an
+ * unknown flag (it may take a value and shift every position after it), a
+ * short cluster, `-a` (git refuses it with paths), `--pathspec-from-file`, a
+ * path the shell would expand, a glob or pathspec magic (git's to expand, not
+ * this parser's). `{ paths: [] }` means "no pathspec": the commit is read as
+ * before.
+ */
+export function commitPathspec(args) {
+  let only = false;
+  let include = false;
+  const paths = [];
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k];
+    if (t === '--') {
+      paths.push(...args.slice(k + 1));
+      break;
+    }
+    if (!t.startsWith('-') || t === '-') {
+      paths.push(t);
+      continue;
+    }
+    if (COMMIT_VALUE_FLAGS.has(t)) {
+      if (k + 1 >= args.length) return null;
+      k++;
+    } else if (t.startsWith('--') && t.includes('=')) {
+      const name = t.slice(0, t.indexOf('='));
+      if (!COMMIT_VALUE_FLAGS.has(name) && name !== '--gpg-sign' && name !== '--untracked-files') return null;
+    } else if (/^-[mFCct]./.test(t) || /^-[Su]./.test(t)) {
+      // a short option with its value attached: `-mfix`, `-Skeyid`, `-uno`
+    } else if (t === '-o' || t === '--only') {
+      only = true;
+    } else if (t === '-i' || t === '--include') {
+      include = true;
+    } else if (!COMMIT_BARE_FLAGS.has(t)) {
+      return null;
+    }
+  }
+  if (paths.length === 0) return { paths: [], mode: null };
+  if (only && include) return null;
+  for (const p of paths) {
+    if (p === '' || p.startsWith(':') || [...EXPANSION_CHARS].some((c) => p.includes(c))) return null;
+  }
+  return { paths, mode: include ? 'include' : 'only' };
 }
 
 /** The git verbs whose arguments decide what this gate scans. */
@@ -1064,8 +1135,28 @@ export function planCommand(command, startDir) {
 
     if (gitCommit) {
       const commitAll = commitAt.tokens.some((t) => t === '--all' || (isShortCluster(t) && t.includes('a')));
-      const sameRepo = pendingAdd !== null && pendingAdd.dir === commitAt.dir;
+      // Any `git add` earlier in the line, not only one from the same
+      // directory: `cd sub && git add x && cd .. && git commit` stages `x` in
+      // the same repository from another directory, and the directories here
+      // are as the shell sees them, not repositories. Folding in an add from
+      // another repository scans more, never less.
+      const sameRepo = pendingAdd !== null;
+      // The pathspec is read only from the quote-aware reading, and only when
+      // its quotes are closed: the whitespace reading turns `-m "add b.txt"`
+      // into a pathspec `b.txt`, and narrowing on that would scan the wrong
+      // file (see `commitPathspec`).
+      const spec =
+        quotedOp !== null && quotedOp.name === 'commit' && parsed.closed
+          ? commitPathspec(quoted.tokens.slice(quotedOp.index + 1))
+          : null;
+      const narrowed = spec !== null && spec.paths.length > 0 ? spec : null;
       note(commitAt.dir, {
+        commitPaths: narrowed === null ? null : narrowed.paths,
+        commitMode: narrowed === null ? null : narrowed.mode,
+        // Where the pathspec is relative to, and where the added paths are:
+        // the directory the segment ran in, not the repository root.
+        commitFrom: commitAt.dir,
+        includeFrom: sameRepo ? pendingAdd.dir : null,
         scanCommit: true,
         // `git commit -a` stages tracked modifications as it runs, and
         // `git add X && git commit` stages them in an earlier segment of the
@@ -1875,27 +1966,53 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
   };
 
   if (target !== null && target.scanCommit) {
-    const staged = parseRawDiff(
-      await git(['-C', target.dir, 'diff', '--cached', '--raw', '-z', '--no-renames', '--diff-filter=ACMR'], {
-        runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'reading the staged index',
-      }),
-    );
-    assertComplete(0, staged.malformed, 'reading the staged index');
-    const wanted = [...staged.entries];
-    if (target.includeWorktree) {
-      const unstaged = parseRawDiff(
-        await git(['-C', target.dir, 'diff', '--raw', '-z', '--no-renames', '--diff-filter=ACMR'], {
-          runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'reading unstaged modifications',
-        }),
-      );
-      assertComplete(0, unstaged.malformed, 'reading unstaged modifications');
-      wanted.push(...unstaged.entries);
+    const rawDiff = async (args, what) => {
+      const parsed = parseRawDiff(await git(args, { runner, timeoutMs: budget(GIT_BUDGET_MS), what }));
+      assertComplete(0, parsed.malformed, what);
+      return parsed.entries;
+    };
+    const DIFF = ['--raw', '-z', '--no-renames', '--diff-filter=ACMR'];
+    // A pathspec is relative to the directory the commit ran in, so these
+    // diffs run THERE; their output paths are relative to the root either way.
+    const from = target.commitFrom ?? target.dir;
+    const paths = Array.isArray(target.commitPaths) && target.commitPaths.length > 0 ? target.commitPaths : null;
+    // `--only` (git's default with a pathspec) commits the working-tree
+    // content of the named paths over HEAD, and nothing else that is staged:
+    // the diff from HEAD to the working tree, for those paths, is exactly
+    // what it adds. With no HEAD yet there is nothing to diff from, and the
+    // commit is scanned as a whole instead (see below).
+    let hasHead = false;
+    if (paths !== null && target.commitMode === 'only') {
+      const head = await runner('git', ['-C', target.dir, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+        timeoutMs: budget(GIT_BUDGET_MS),
+      });
+      hasHead = head.spawned === true && head.timedOut !== true && head.code === 0;
+    }
+    const wanted = [];
+    if (hasHead) {
+      wanted.push(...(await rawDiff(['-C', from, 'diff', 'HEAD', ...DIFF, '--', ...paths], 'reading the paths this commit names')));
+    } else {
+      wanted.push(...(await rawDiff(['-C', target.dir, 'diff', '--cached', ...DIFF], 'reading the staged index')));
+      if (paths !== null && target.commitMode === 'include' && !target.includeWorktree) {
+        // `--include`: the index, plus the named paths as they are on disk.
+        wanted.push(...(await rawDiff(['-C', from, 'diff', ...DIFF, '--', ...paths], 'reading the paths this commit names')));
+      } else if (target.includeWorktree || paths !== null) {
+        // A pathspec this gate could not narrow on (no HEAD) still commits
+        // the named paths' working-tree content, so the working tree is folded
+        // in: wider than the commit, never narrower.
+        wanted.push(...(await rawDiff(['-C', target.dir, 'diff', ...DIFF], 'reading unstaged modifications')));
+      }
     }
     // Files named on a `git add <path>` earlier in the same command line. They
     // are not in the index yet and may not be modifications of a tracked file
-    // at all, so neither diff above can see them.
+    // at all, so neither diff above can see them. They are read where that
+    // `git add` ran: joining them to the repository ROOT read `sub/new.pem`
+    // as `new.pem` when the add ran in `sub/`, found nothing there, and the
+    // commit published it unscanned.
+    const addedFrom = target.includeFrom ?? target.dir;
     for (const rel of target.includePaths ?? []) {
-      add(rel, await readFileBounded(join(target.dir, rel)));
+      const abs = resolvePath(addedFrom, rel);
+      add(repoLabel(target.dir, abs), await readFileBounded(abs));
     }
     if (target.includeUntracked) {
       const listed = await git(['-C', target.dir, 'ls-files', '-z', '--others', '--exclude-standard'], {
@@ -1946,6 +2063,22 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
     add(file.shown, await readFileBounded(file.path));
   }
 
+  const { bytes, map } = assemble(chunks);
+  if (bytes.length > MAX_PAYLOAD_BYTES) {
+    throw new ScanFailure(
+      `this would publish ${bytes.length} bytes, past the ${MAX_PAYLOAD_BYTES} this gate can scan inside its budget`,
+      'commit or push in smaller steps. The gate refuses rather than scanning a prefix: a partial ' +
+        'scan that reports nothing looks exactly like a clean one.',
+    );
+  }
+  return { bytes, map, chunks, files: chunks.length };
+}
+
+/**
+ * Chunks as ONE byte stream for `gitleaks stdin`, with a line map back to
+ * their labels.
+ */
+export function assemble(chunks) {
   const parts = [];
   const map = [];
   let line = 1;
@@ -1961,15 +2094,205 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
     parts.push(chunk.body, Buffer.from('\n\n'));
     line += newlines + 2;
   }
-  const bytes = Buffer.concat(parts);
-  if (bytes.length > MAX_PAYLOAD_BYTES) {
+  return { bytes: Buffer.concat(parts), map };
+}
+
+/**
+ * The repository-relative label of a file named on the command line, or the
+ * path as given when it is not inside the repository. Both sides are
+ * canonicalized, because the shell's spelling of a directory and git's
+ * `--show-toplevel` disagree wherever a symlink sits on the way (`/var` and
+ * `/private/var` on macOS).
+ */
+function repoLabel(top, abs) {
+  const canonical = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  const rel = relative(canonical(top), join(canonical(dirname(abs)), basename(abs)));
+  return rel.split(sep).join('/');
+}
+
+// --------------------------------------------------------- scanning by path
+
+/**
+ * A chunk label as a path the gate may write into a scan tree, or null.
+ *
+ * Only a plain relative path qualifies: no `..`, no empty or `.` segment, no
+ * absolute path, nothing under `.git/`, and no file whose name gitleaks reads
+ * as its OWN configuration when it finds one in the tree it scans
+ * (`.gitleaks.toml`, `.gitleaksignore`, measured: a `.gitleaksignore` at the
+ * root of the tree suppressed a finding even with `--gitleaks-ignore-path`
+ * pointing elsewhere). A label that does not qualify is scanned the old way.
+ */
+function treePath(label) {
+  if (typeof label !== 'string' || label === '' || label.length > 4096) return null;
+  if (label.startsWith('/') || label.includes('\\') || label.includes('\u0000')) return null;
+  const parts = label.split('/');
+  if (parts.some((p) => p === '' || p === '.' || p === '..' || Buffer.byteLength(p, 'utf8') > 255)) return null;
+  if (parts[0] === '.git' || basename(label).startsWith('.gitleaks')) return null;
+  return label;
+}
+
+/** How many trees one payload may be split into before the rest goes to stdin. */
+export const MAX_PATH_ROUNDS = 4;
+
+/**
+ * Split chunks into ROUNDS that can each be written as one tree, and the
+ * REST, which cannot be written as a tree at all.
+ *
+ * A push range carries several versions of one path, and a disk may fold case
+ * or Unicode normalization, so two labels can name one file; and a path can
+ * be a file in one commit and a directory in another. Each round holds every
+ * path at most once, under that folding, and never a file where another
+ * path needs a directory. A chunk that fits no round within `maxRounds`, and
+ * a chunk whose label is no plain relative path (`treePath`), goes to `rest`
+ * and is scanned exactly as before this existed.
+ */
+export function pathScanRounds(chunks, maxRounds = MAX_PATH_ROUNDS) {
+  const rounds = [];
+  const rest = [];
+  for (const chunk of chunks) {
+    const path = treePath(chunk.label);
+    if (path === null) {
+      rest.push(chunk);
+      continue;
+    }
+    const key = path.normalize('NFC').toLowerCase();
+    const segments = key.split('/');
+    const parents = segments.slice(0, -1).map((_, i) => segments.slice(0, i + 1).join('/'));
+    const round = rounds.find(
+      (r) => !r.files.has(key) && !r.dirs.has(key) && !parents.some((d) => r.files.has(d)),
+    );
+    if (round !== undefined) {
+      round.chunks.push(chunk);
+      round.files.add(key);
+      for (const d of parents) round.dirs.add(d);
+    } else if (rounds.length < maxRounds) {
+      rounds.push({ chunks: [chunk], files: new Set([key]), dirs: new Set(parents) });
+    } else {
+      rest.push(chunk);
+    }
+  }
+  return { rounds: rounds.map((r) => r.chunks), rest };
+}
+
+/** One trace line of `gitleaks dir`: a file it read, or one it skipped and why. */
+const TRACE_LINE = /\b(?:TRC|DBG) (scanning path|skipping file: ([^=]*?)) path=(.*)$/;
+
+/** A `path=` value from that trace, unquoted the way gitleaks quotes one with a space. */
+function tracePath(value) {
+  const v = value.trim();
+  if (!v.startsWith('"')) return v.replace(/^\.\//, '');
+  try {
+    return JSON.parse(v).replace(/^\.\//, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scan chunks as FILES, under their own paths, so a tracked `.gitleaks.toml`
+ * can allowlist a path (issue #105, point 1). Returns the findings, or null
+ * when the scan's coverage could not be accounted for, and the caller scans
+ * the same chunks over stdin instead.
+ *
+ * `gitleaks stdin` sees one nameless buffer, so every finding had `File: ""`
+ * and a `paths` allowlist could never match: a fixture under `__tests__/` was
+ * refused whatever the config said. `gitleaks dir` reads real paths and
+ * applies the config's allowlists, and it SKIPS a file a path allowlist
+ * matches, reading none of its bytes, so the stdin coverage rule ("read
+ * exactly the bytes sent") cannot hold. The rule that replaces it is the same
+ * arithmetic, per file: the scanner's trace must name EVERY file written,
+ * either as read or as skipped by the allowlist and for no other reason, and
+ * the bytes it reports must equal the sizes of the files it says it read.
+ * Anything else (a file the trace does not name, another skip reason, a path
+ * that will not parse, a byte count that disagrees) is not trusted, and those
+ * chunks are scanned the old way: failing to use a path costs a false
+ * refusal, never a missed key.
+ *
+ * The tree is written by this gate into an empty directory, so no file the
+ * command did not determine can be in it, and nothing the scanner reads as
+ * configuration (`treePath`). The config itself is passed explicitly; the
+ * ignore path is always explicit too, so the default (`.`, the tree) is never
+ * consulted.
+ */
+export async function scanTree(chunks, { runner, budget, workDir, suppressionArgs = [] }) {
+  const timeoutMs = budget(CHILD_BUDGET_MS);
+  if (timeoutMs <= 0) {
     throw new ScanFailure(
-      `this would publish ${bytes.length} bytes, past the ${MAX_PAYLOAD_BYTES} this gate can scan inside its budget`,
-      'commit or push in smaller steps. The gate refuses rather than scanning a prefix: a partial ' +
-        'scan that reports nothing looks exactly like a clean one.',
+      'the gate ran out of its own budget before it could start the scan',
+      'raise DEADLINE_MS together with the timeout in hooks.json',
     );
   }
-  return { bytes, map, files: chunks.length };
+  const tree = await mkdtemp(join(workDir, 'tree-'));
+  const sizes = new Map();
+  for (const chunk of chunks) {
+    const abs = join(tree, ...chunk.label.split('/'));
+    await mkdir(dirname(abs), { recursive: true });
+    // `wx`: a path that already exists is a collision `pathScanRounds` should
+    // have prevented, and it must fail rather than overwrite.
+    await writeFile(abs, chunk.body, { flag: 'wx' });
+    sizes.set(chunk.label, chunk.body.length);
+  }
+  const ignoreArgs = [];
+  if (!suppressionArgs.includes('--gitleaks-ignore-path')) {
+    const empty = join(workDir, 'no-ignore');
+    await writeFile(empty, '');
+    ignoreArgs.push('--gitleaks-ignore-path', empty);
+  }
+  const reportPath = join(workDir, `report-${Math.random().toString(36).slice(2)}.json`);
+  const args = [
+    'dir', '.',
+    '--report-format', 'json',
+    '--report-path', reportPath,
+    '--no-banner',
+    '--no-color',
+    '--redact',
+    '--log-level', 'trace',
+    ...ignoreArgs,
+    ...suppressionArgs,
+  ];
+  const result = await runner(GITLEAKS_BIN(), args, { cwd: tree, timeoutMs, env: scannerEnv() });
+  if (!result.spawned) {
+    if (result.error?.code === 'ENOENT') {
+      throw new ScanFailure('gitleaks is not installed (or not on PATH)', INSTALL_INSTRUCTIONS);
+    }
+    throw new ScanFailure(`gitleaks could not be started (${result.error?.code ?? 'unknown error'})`, INSTALL_INSTRUCTIONS);
+  }
+  if (result.timedOut) {
+    throw new ScanFailure(
+      `the scan did not finish within ${timeoutMs} ms and was killed`,
+      'commit or push in smaller steps, or run gitleaks by hand',
+    );
+  }
+  const read = new Set();
+  const skipped = new Set();
+  let unaccounted = false;
+  for (const line of String(result.stderr).split('\n')) {
+    const m = TRACE_LINE.exec(line);
+    if (m === null) continue;
+    const path = tracePath(m[3]);
+    if (path === null || !sizes.has(path)) unaccounted = true;
+    else if (m[1] === 'scanning path') read.add(path);
+    else if (m[2].trim() === 'global allowlist') skipped.add(path);
+    else unaccounted = true;
+  }
+  const readBytes = [...read].reduce((n, p) => n + sizes.get(p), 0);
+  const covered =
+    !unaccounted &&
+    [...sizes.keys()].every((p) => read.has(p) !== skipped.has(p)) &&
+    parseScannedBytes(result.stderr) === readBytes;
+  if (!covered) return null;
+  return (await readReport(reportPath, result)).map((raw) => ({
+    ...safeFinding(raw),
+    line: null,
+    label: typeof raw?.File === 'string' ? raw.File.replace(/^\.\//, '') : null,
+    fileLine: Number.isInteger(raw?.StartLine) ? raw.StartLine : null,
+  }));
 }
 
 // ------------------------------------------------------------------ scanner
@@ -2248,7 +2571,7 @@ export function locate(map, line) {
 
 export function renderFindings(findings, map) {
   const shown = findings.slice(0, MAX_FINDINGS_SHOWN).map((f) => {
-    const at = locate(map, f.line);
+    const at = f.label !== undefined ? { label: f.label, line: f.fileLine } : locate(map, f.line);
     const where = at.label === null ? 'somewhere in the scanned payload' : JSON.stringify(shortPath(at.label));
     const line = at.line === null ? '' : `:${at.line}`;
     return `  - ${where}${line} — rule \`${safeRuleName(f.rule)}\``;
@@ -2384,23 +2707,43 @@ export async function decide({ input, cwd, runner = runChild, startedAt = Date.n
       suppressed.push(...supp.found);
       const payload = await buildPayload(resolved, index === 0 ? plan.extraFiles : [], { runner, budget });
       totalBytes += payload.bytes.length;
-      if (payload.bytes.length > 0) {
+      // With a TRACKED config, every chunk that can be a file in a tree is
+      // scanned under its own path, so the config's path allowlists apply
+      // (`scanTree`). Without one nothing changes: gitleaks' default config
+      // allowlists paths too (lock files, `vendor/`...), and applying that
+      // here would pass what this gate refused before.
+      const byPath = supp.found.some((f) => f.kind === 'config');
+      const { rounds, rest } = byPath ? pathScanRounds(payload.chunks) : { rounds: [], rest: payload.chunks };
+      const viaStdin = [...rest];
+      let viaTree = 0;
+      for (const round of rounds) {
+        const found = await scanTree(round, { runner, budget, workDir, suppressionArgs: supp.args });
+        if (found === null) {
+          viaStdin.push(...round);
+        } else {
+          findings.push(...found);
+          viaTree += round.length;
+        }
+      }
+      const stream = assemble(viaStdin);
+      if (stream.bytes.length > 0) {
         // The map and the FINDINGS have to move by the SAME amount, and by the
         // offset as it stood BEFORE this payload was added. Capturing it after
         // the increment shifted every finding by a whole payload and produced
         // "somewhere in the scanned payload" — a refusal that names nothing.
         const base = lineOffset;
-        for (const entry of payload.map) {
+        for (const entry of stream.map) {
           map.push({ ...entry, from: entry.from + base, to: entry.to + base });
         }
-        const found = await scanBytes(payload.bytes, { runner, budget, workDir, suppressionArgs: supp.args });
+        const found = await scanBytes(stream.bytes, { runner, budget, workDir, suppressionArgs: supp.args });
         findings.push(...found.map((f) => ({ ...f, line: f.line === null ? null : f.line + base })));
-        lineOffset += newlineCount(payload.bytes) + 2;
+        lineOffset += newlineCount(stream.bytes) + 2;
       }
       scanned.push(
         resolved === null
           ? `${payload.files} uploaded file(s)`
-          : `${payload.files} object(s), ${payload.bytes.length} bytes, from ${shortPath(resolved.dir)}`,
+          : `${payload.files} object(s), ${payload.bytes.length} bytes, from ${shortPath(resolved.dir)}` +
+            (viaTree > 0 ? ` (${viaTree} of them by path, under the tracked ${SUPPRESSION_FILES.config})` : ''),
       );
     }
 

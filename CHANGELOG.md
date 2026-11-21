@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.1.53 — 2026-11-21
+
+### Path allowlists in a tracked gitleaks config apply, and a pathspec commit scans what it commits
+
+Issue #105, points 1 and 3.
+
+**Path allowlists.** The secrets gate piped every file into one
+`gitleaks stdin` buffer, so every finding had an empty `File`. A `paths`
+allowlist in a tracked `.gitleaks.toml` therefore never matched a real file,
+and a fixture under `__tests__/` was refused whatever the config said. This is
+the issue's AND case. Its OR case, a key under `src/` passing, did not
+reproduce here with an allowlist regex that matches the empty string; that
+case is now pinned as a guard. When a repository tracks a `.gitleaks.toml`,
+the gate now writes the files it determined into a temporary tree and runs
+`gitleaks dir` over it, so each file is scanned under its own path. Coverage
+stays arithmetic. The scanner's trace must name every file written, as read or
+as skipped by the allowlist and for no other reason, and the bytes it reports
+must equal the sizes of the files it read. A scan that does not add up is
+repeated over stdin, so a scanner change costs a false refusal, never a missed
+key. A push range holding several versions of one path is split into rounds,
+with one path per round under case and Unicode folding. Labels that are not
+plain relative paths, and files gitleaks would read as its own configuration
+(`.gitleaks*`), stay on stdin. A repository with no tracked config is scanned
+exactly as before, because gitleaks' default config allowlists paths of its
+own (lock files, `vendor/`).
+
+**Pathspec commits.** `git commit -m x -- b.txt` commits the working-tree
+content of `b.txt` and nothing else that is staged. The gate scanned the whole
+index instead. A key staged in another file refused the commit, and a key in
+an unstaged edit of `b.txt` was published unscanned. `planCommand` now reads
+the pathspec (`commitPathspec`), and the scan is the diff from `HEAD` to the
+working tree for those paths. `--include` scans the index plus those paths.
+The pathspec is read only from the quote-aware reading, only when its quotes
+are closed, and only when every word after the verb is understood. An unknown
+flag, a short cluster, `-a`, `--pathspec-from-file`, a glob, pathspec magic or
+a word the shell would expand all leave the commit scanned as before.
+`-m "update b.txt"` is a message, not a pathspec. With no `HEAD` yet, the
+index and the working tree are scanned.
+
+**Found on the way.** `cd sub && git add new.pem && git commit` read the added
+file at the repository root (`new.pem`, not `sub/new.pem`). It found nothing
+there, and the commit published it unscanned. Added paths are now read where
+the `git add` ran. An add earlier in the line folds into the commit even when a
+`cd` lies between them.
+
+19 tests in `hook-secrets-gate-paths.test.mjs`. 14 of them were written
+before the change, and 8 of those are red on 0.1.52. The other 5 drive
+`scanTree` with a scripted scanner trace: a file the trace does not name, a
+skip for another reason, a byte count that disagrees, and a path the gate never
+wrote are each not trusted. Five mutants were run against the file, and each
+turns at least one test red: the per-file accounting, the byte check, the
+skip-reason check, the tracked-config switch and the add-folding.
+
+Still open from #105: point 2, a file created in the same command that commits
+it (`printf ... > f && git add f && git commit`), is read before it exists and
+scanned as empty.
+
 ## 0.1.52 — 2026-11-21
 
 ### Both gates judge every push on a command line, not only the last one

@@ -65,7 +65,7 @@ import { spawn } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve as resolvePath, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PASS, field, main, runGate } from './hook-io.mjs';
@@ -310,12 +310,43 @@ export function stripHeredocBodies(command) {
 
 /** Split a command line into candidate command segments. */
 export function splitSegments(command) {
+  return splitSegmentsWithSeparators(command).map((s) => s.text);
+}
+
+/**
+ * True when the separators in front of a segment make its first word the
+ * target of an output redirection: `>`, `>>`, `&>`, `&>>`, `>|`, `<>`. A
+ * duplication (`>&2`, `2>&1`) ends in `&`, and its "target" is a descriptor.
+ */
+export function isWriteRedirection(before) {
+  return typeof before === 'string' && (before.endsWith('>') || before.endsWith('>|'));
+}
+
+/**
+ * `splitSegments`, with the run of separators in front of each segment.
+ *
+ * The run is what tells a redirection target from a command: `cat k > f`
+ * splits into `cat k ` and ` f`, and only the `>` in front of the second says
+ * that `f` is a file this line WRITES. `planCommand` needs that to see a file
+ * the line writes before it commits it (issue #105, point 2).
+ */
+export function splitSegmentsWithSeparators(command) {
   // Folded FIRST: `git \<newline> commit` otherwise splits into a segment
   // holding `git` and one holding `commit`, and the detector sees neither.
   const folded = stripHeredocBodies(command).replace(/\\\r?\n/g, ' ');
   const out = [];
   let current = '';
+  let run = '';
   let escaped = false;
+  // A blank segment between two separators (`>&`, `&>`, `>>`) joins them into
+  // one run rather than becoming a segment of its own.
+  const flush = () => {
+    if (current.trim() !== '') {
+      out.push({ text: current, before: run });
+      run = '';
+    }
+    current = '';
+  };
   for (const ch of folded) {
     // ORDER IS LOAD-BEARING. This branch must come first so an escaped
     // backslash consumes itself: without it `echo a\\; git push origin main`
@@ -339,14 +370,14 @@ export function splitSegments(command) {
       // 2>&1` read `2` as the remote. Only a whole word is a descriptor, which
       // is the shell's own rule: `v2>x` passes `v2` and redirects stdout.
       if (ch === '<' || ch === '>') current = current.replace(/(^|\s)\d+$/, '$1');
-      out.push(current);
-      current = '';
+      flush();
+      run += ch;
     } else {
       current += ch;
     }
   }
-  out.push(current);
-  return out.filter((s) => s.trim() !== '');
+  flush();
+  return out;
 }
 
 /**
@@ -931,10 +962,27 @@ export function planCommand(command, startDir) {
   let unreadableVerb = false;
   /** Set once a `git add` is seen: a later commit in the line will include it. */
   let pendingAdd = null;
+  /**
+   * Files this line WRITES, in order, as absolute paths resolved where the
+   * shell was: redirection targets and `tee` arguments. A commit later in the
+   * line records the ones written before it (`writtenBefore`), because the
+   * gate runs before any of them exist with the content the commit will take
+   * (issue #105, point 2). Other writers (`cp`, `sed -i`, a script) are not
+   * read here; a NEW file they create is caught where `git add` names it.
+   */
+  const written = [];
 
-  for (const segment of splitSegments(command)) {
+  for (const { text: segment, before } of splitSegmentsWithSeparators(command)) {
     const raw = tokensOf(segment);
     if (raw.length === 0) continue;
+
+    // The first word after an output redirection is a file, not a command. A
+    // target that needs expansion (`> "$LOG"`) cannot be resolved, and is
+    // left out rather than refused: it is the same declared gap as a writer
+    // this gate does not read.
+    if (isWriteRedirection(before) && isLiteralPath(raw[0])) {
+      written.push(resolvePath(cur, raw[0]));
+    }
 
     // Environment assignments first: they can name the repository outright.
     let i = 0;
@@ -951,6 +999,13 @@ export function planCommand(command, startDir) {
     const tokens = raw.slice(i);
     const words = new Set(raw);
     const program = tokens[0] ?? '';
+
+    if (basename(program) === 'tee') {
+      for (const t of tokens.slice(1)) {
+        if (t.startsWith('-') || !isLiteralPath(t)) continue;
+        written.push(resolvePath(cur, t));
+      }
+    }
 
     // Only the PROGRAM slot, never any token. Matching anywhere reported
     // `sees`/`the`/`New` as shell movers — the offending token was a stray `.`
@@ -1188,6 +1243,13 @@ export function planCommand(command, startDir) {
           (priorCommit?.commitPaths ?? null) !== null,
         includeUntracked: (sameRepo && pendingAdd.all) || priorCommit?.includeUntracked === true,
         includePaths: [...new Set([...(priorCommit?.includePaths ?? []), ...(sameRepo ? pendingAdd.paths : [])])],
+        // What this line writes before the commit, and whether the commit
+        // takes every tracked modification (`-a`). `buildPayload` refuses a
+        // written file the commit takes; `includeWorktree` is too wide for
+        // that, because it is set by ANY earlier `git add`, and widening a
+        // scan is free where widening a refusal is a false alarm.
+        commitAll: commitAll || priorCommit?.commitAll === true,
+        writtenBefore: [...new Set(written)],
       });
       triggers.push('a git commit (everything the commit would add is scanned)');
     }
@@ -1969,6 +2031,82 @@ async function addBlobs(repo, entries, add, { runner, budget }) {
   });
 }
 
+/** `path` with every existing ancestor resolved through its symlinks. */
+function realish(path) {
+  const tail = [];
+  let head = path;
+  for (;;) {
+    try {
+      return join(realpathSync(head), ...tail.reverse());
+    } catch {
+      const up = dirname(head);
+      if (up === head) return path;
+      tail.push(basename(head));
+      head = up;
+    }
+  }
+}
+
+/** True when `path` is `base` or lies under it. Both are absolute. */
+function isAtOrUnder(path, base) {
+  const rel = relative(base, path);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+const WRITE_THEN_COMMIT_REMEDY =
+  'write the file in one command and commit it in the next. This gate runs BEFORE the command, ' +
+  'so a file the same line writes does not yet hold what the commit will take, and scanning it ' +
+  'early would pass anything. Splitting the line costs one call.';
+
+/**
+ * Refuse a commit that takes a file the same command line writes before it.
+ *
+ * Issue #105, point 2: `cat k > f && git add f && git commit` reached the
+ * gate while `f` did not exist, the read came back empty, and the commit
+ * published what the first segment wrote. Its content cannot be known before
+ * the command runs, so there is nothing to scan and the honest answer is to
+ * refuse. Only a file the COMMIT TAKES is refused: a log beside `git commit
+ * -a` that git does not track, an ignored file beside `git add -A`, and
+ * anything outside the repository are written and not committed, and
+ * refusing them is the kind of false alarm that gets this gate uninstalled.
+ */
+async function assertNoSameCommandWrites(target, { runner, budget }) {
+  const writes = target.writtenBefore ?? [];
+  if (writes.length === 0) return;
+  // `decide` has already replaced `dir` with the work tree root.
+  const root = realish(target.dir);
+  const from = target.commitFrom ?? target.dir;
+  const named = [
+    ...(target.includePaths ?? []).map((p) => realish(resolvePath(target.dir, p))),
+    ...(Array.isArray(target.commitPaths) ? target.commitPaths : []).map((p) => realish(resolvePath(from, p))),
+  ];
+  for (const write of writes) {
+    const abs = realish(write);
+    if (!isAtOrUnder(abs, root) || abs === root) continue;
+    const rel = relative(root, abs).split(sep).join('/');
+    if (rel === '.git' || rel.startsWith('.git/')) continue;
+    let taken = named.some((n) => isAtOrUnder(abs, n));
+    if (!taken && (target.commitAll === true || target.includeUntracked === true)) {
+      const tracked = await isTracked(root, rel, { runner, timeoutMs: budget(GIT_BUDGET_MS) });
+      if (tracked) {
+        taken = true;
+      } else if (target.includeUntracked === true) {
+        const ignored = await runner('git', ['-C', root, 'check-ignore', '-q', '--', rel], {
+          timeoutMs: budget(GIT_BUDGET_MS),
+        });
+        // 0 is "ignored", 1 is "not ignored"; anything else is not an answer.
+        taken = !(ignored.spawned === true && ignored.timedOut !== true && ignored.code === 0);
+      }
+    }
+    if (taken) {
+      throw new ScanFailure(
+        `${JSON.stringify(shortPath(rel))} is written by this same command before the commit takes it`,
+        WRITE_THEN_COMMIT_REMEDY,
+      );
+    }
+  }
+}
+
 /**
  * Everything `target` would publish, as bytes, with a line map back to paths.
  *
@@ -2036,6 +2174,7 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
         wanted.push(...(await rawDiff(['-C', target.dir, 'diff', ...DIFF], 'reading unstaged modifications')));
       }
     }
+    await assertNoSameCommandWrites(target, { runner, budget });
     // Files named on a `git add <path>` earlier in the same command line. They
     // are not in the index yet and may not be modifications of a tracked file
     // at all, so neither diff above can see them. They are read where that
@@ -2044,6 +2183,41 @@ export async function buildPayload(target, extraFiles, { runner, budget }) {
     // commit published it unscanned.
     for (const path of target.includePaths ?? []) {
       const abs = resolvePath(target.dir, path);
+      // `dir` is git's own root (symlinks resolved) and `abs` is as the shell
+      // spelled it, so both are resolved before one is made relative to the
+      // other: `/var` and `/private/var` on macOS.
+      const rel = relative(realish(target.dir), realish(abs)).split(sep).join('/') || '.';
+      // `undefined` is "could not look", and `readFileBounded` below refuses
+      // that with the reason, as it did before.
+      let info;
+      try {
+        info = await stat(abs);
+      } catch (err) {
+        info = err.code === 'ENOENT' ? null : undefined;
+      }
+      if (info === null) {
+        // A tracked file that is gone: the add stages its deletion, which
+        // publishes nothing. Anything else does not exist yet, so the same
+        // line creates it (`cp`, a script) and there is nothing to read.
+        if (await isTracked(target.dir, rel, { runner, timeoutMs: budget(GIT_BUDGET_MS) })) continue;
+        throw new ScanFailure(
+          `${JSON.stringify(shortPath(repoLabel(target.dir, abs)))} does not exist yet, so it is written by this same command before \`git add\` names it`,
+          WRITE_THEN_COMMIT_REMEDY,
+        );
+      }
+      if (info !== undefined && info.isDirectory()) {
+        // `git add src/` adds every untracked file under it. Read as one file
+        // the directory was empty, and every new file under it was published
+        // unscanned. Tracked modifications under it are already folded in by
+        // `includeWorktree`.
+        const listed = await git(['-C', target.dir, 'ls-files', '-z', '--others', '--exclude-standard', '--', rel], {
+          runner, timeoutMs: budget(GIT_BUDGET_MS), what: 'listing untracked files under a directory `git add` names',
+        });
+        for (const p of String(listed).split('\0').filter((x) => x !== '')) {
+          add(repoLabel(target.dir, join(target.dir, p)), await readFileBounded(join(target.dir, p)));
+        }
+        continue;
+      }
       add(repoLabel(target.dir, abs), await readFileBounded(abs));
     }
     if (target.includeUntracked) {

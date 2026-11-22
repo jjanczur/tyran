@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.54 — 2026-11-22
+
+### A file the commit's own command line writes is refused, and a directory `git add` names is scanned
+
+Issue #105, point 2.
+
+**Same-command writes.** `cat k > f && git add f && git commit` reached the
+secrets gate while `f` did not exist yet. The read came back empty, and the
+commit published what the first segment wrote. The gate runs before the
+command, so that content cannot be known in advance, and the gate now refuses
+instead of scanning nothing. It records the files a line writes before its
+commit: redirection targets (`>`, `>>`, `>|`, `&>`, `<>`, with a descriptor
+duplication such as `2>&1` excluded) and `tee` arguments, resolved where the
+shell was when they ran. It refuses only a write the commit takes. That means
+a named path, a tracked file under `git commit -a`, or a file that is not
+ignored under `git add -A`. An untracked log beside `commit -a`, an ignored
+file beside `add -A`, a write after the commit and anything outside the
+repository still pass. A path `git add` names that does not exist yet is
+refused too, because some other program on the line creates it. The exception
+is a tracked file that is gone, which stages a deletion and publishes nothing.
+A target that needs expansion (`> "$LOG"`) is not resolved. This is a declared
+gap, the same as a writer the gate does not read.
+
+**`git add <dir>/`.** A directory named on a `git add` was read as one file.
+The read came back empty, and every new file under it was committed
+unscanned. Its untracked, non-ignored files are now listed and scanned one by
+one.
+
+The remedy in every refusal is to write in one command and commit in the next.
+
 ## 0.1.53 — 2026-11-21
 
 ### Path allowlists in a tracked gitleaks config apply, and a pathspec commit scans what it commits

@@ -345,6 +345,10 @@ hidden from the command-line scan when, and only when, it names an object in
 the repository being pushed, because gitleaks reads a full sha behind a ref
 like `api-fix` as a generic API key.
 
+`git add <dir>/` before a commit scans every untracked file under that
+directory. Before 0.1.54 the directory was read as one file, the read came back
+empty, and every new file under it was committed unscanned.
+
 ### What it refuses without scanning
 
 `--no-verify` **and any unambiguous abbreviation of it** (`--no-verif` skipped
@@ -352,6 +356,19 @@ a live pre-commit hook while an equality check saw nothing), `-n` on `commit`,
 a `core.hooksPath` override, `--force` on a push (`--force-with-lease` and
 `--force-if-includes` are fine, and the refusal explains why the difference is
 not stylistic), and `kill -9` in every spelling including `kill -n 9`.
+
+**A file the same command line writes before the commit takes it.** Since
+0.1.54, `cat k > f && git add f && git commit` is refused. The gate runs before
+the command, so `f` does not yet hold what the commit will take, and scanning
+it early would pass anything. Before, the read came back empty and the commit
+published what the first segment wrote. The writes recognised are redirection
+targets (`>`, `>>`, `>|`, `&>`) and `tee` arguments. A file another program
+creates (`cp`, a script) is refused where `git add` names it and it does not
+exist yet. Only a write the commit takes is refused: an untracked log beside
+`git commit -a`, an ignored file beside `git add -A`, and anything outside the
+repository pass. A target that needs expansion (`> "$LOG"`) is not resolved,
+the same declared gap as a writer the gate does not read. Write in one command
+and commit in the next.
 
 ### Suppression is honoured only when git tracks it
 
